@@ -1,0 +1,37 @@
+; Piks-l Multijoueur — configuration du projet Godot 4.5
+; Le hub à portails et ses mini-jeux. Tout le rendu est procédural :
+; aucun binaire à versionner, et le style suit la palette Piks-l.
+
+config_version=5
+
+[application]
+
+config/name="Piks-l Multijoueur"
+config/description="Hub à portails : chaque portail lance un jeu multijoueur de 2 à 4 joueurs."
+config/version="0.1.0"
+run/main_scene="res://scenes/racine.tscn"
+config/features=PackedStringArray("4.5", "GL Compatibility")
+config/icon="res://icone.svg"
+boot_splash/show_image=false
+boot_splash/bg_color=Color(0.051, 0.051, 0.051, 1)
+
+[autoload]
+
+Config="*res://autoload/config.gd"
+Session="*res://autoload/session.gd"
+Reseau="*res://autoload/reseau.gd"
+Scores="*res://autoload/scores.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.051, 0.051, 0.051, 1)
+anti_aliasing/quality/msaa_2d=1

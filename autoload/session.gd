@@ -1,0 +1,54 @@
+extends Node
+## Identité locale du joueur.
+##
+## Pas de compte, pas de mot de passe : un identifiant tiré au sort à la
+## première visite et gardé dans le stockage du navigateur. C'est assez pour
+## rattacher des scores à quelqu'un, et ça n'engage aucune donnée personnelle.
+
+const FICHIER := "user://identite.cfg"
+const PSEUDO_MAX := 16
+
+var id: String = ""
+var pseudo: String = ""
+
+func _ready() -> void:
+	var fichier := ConfigFile.new()
+	if fichier.load(FICHIER) == OK:
+		id = String(fichier.get_value("joueur", "id", ""))
+		pseudo = String(fichier.get_value("joueur", "pseudo", ""))
+	if id.length() < 8:
+		id = _tirer_identifiant()
+		_ecrire()
+
+func definir_pseudo(nouveau: String) -> void:
+	pseudo = nettoyer_pseudo(nouveau)
+	_ecrire()
+
+static func nettoyer_pseudo(brut: String) -> String:
+	var propre := ""
+	for c in brut.strip_edges():
+		# On garde lettres, chiffres, espace et tiret. Le reste ouvre la porte
+		# aux pseudos qui cassent l'affichage ou miment un autre joueur.
+		if c.is_valid_identifier() or c.is_valid_int() or c == " " or c == "-" or c == "_":
+			propre += c
+		elif c.to_upper() != c.to_lower():
+			propre += c
+	propre = propre.strip_edges()
+	if propre.length() > PSEUDO_MAX:
+		propre = propre.substr(0, PSEUDO_MAX)
+	return propre
+
+func _tirer_identifiant() -> String:
+	var alphabet := "abcdefghijklmnopqrstuvwxyz0123456789"
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var s := ""
+	for i in 16:
+		s += alphabet[rng.randi_range(0, alphabet.length() - 1)]
+	return s
+
+func _ecrire() -> void:
+	var fichier := ConfigFile.new()
+	fichier.set_value("joueur", "id", id)
+	fichier.set_value("joueur", "pseudo", pseudo)
+	fichier.save(FICHIER)

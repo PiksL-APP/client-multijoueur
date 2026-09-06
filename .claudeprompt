@@ -1,0 +1,61 @@
+# Instructions pour un agent qui travaille dans ce dépôt
+
+Ce dépôt n'est **pas** un site Nuxt. C'est un jeu Godot 4.5 exporté en
+WebAssembly. Le socle `piks-l-nuxt-template` ne s'applique pas ici.
+
+## Règles de la maison
+
+- **Français** : commentaires, libellés, messages, commits, documentation.
+  Les identifiants de code restent lisibles ; ce dépôt les écrit en français
+  parce que tout le vocabulaire du jeu l'est (`Reseau`, `Salon`, `Partie`).
+  Ne pas mélanger les deux au sein d'un même fichier.
+- **On explique pourquoi.** Un commentaire qui décrit ce que fait la ligne
+  n'apprend rien. Celui qui dit quel défaut a imposé ce choix fait gagner une
+  journée six mois plus tard.
+- **Aucun secret dans un fichier suivi.** `config.cfg` est hors dépôt ; toute
+  clé nouvelle s'ajoute vide à `config.exemple.cfg`.
+
+## Conventions techniques
+
+- Godot **4.5**, rendu `gl_compatibility` (exigé par l'export web).
+- **Tout est procédural** : pas de scène `.tscn` en dehors de
+  `scenes/racine.tscn`, pas d'image binaire. Un écran est une classe qui hérite
+  d'`Ecran` et se construit dans `demarrer()`. Ça garde le dépôt lisible en
+  diff et évitable à fusionner.
+- **Palette** : `commun/palette.gd`, et rien d'autre. La couleur ne porte
+  jamais seule le sens — toujours une pastille ET un libellé.
+- **Interface** : passer par `ui/fabrique.gd`. Un contrôle stylé à la main
+  dérive du reste au premier changement.
+- **Touches** : `Input.is_physical_key_pressed` pour Z Q S D (le code physique
+  donne ZQSD sur AZERTY et WASD sur QWERTY sans configuration), plus les
+  flèches en secours. Ne pas introduire de carte d'entrées dans
+  `project.godot` : elle ne survivrait pas au clavier français.
+
+## Réseau — à lire avant d'y toucher
+
+- Un seul socket pour tout le jeu (`autoload/reseau.gd`), plusieurs canaux.
+- La **présence** porte ce qui change rarement (pseudo, table). La **diffusion**
+  porte ce qui change vite (positions, états). Inverser les deux coûte cher.
+- Chaque message diffusé est signé par `Reseau.diffuser`, qui ajoute la clé de
+  l'émetteur : le serveur, lui, ne dit pas qui a parlé.
+- L'hôte d'une salle est le joueur dont la clé de présence est la plus petite.
+  Ne pas inventer un autre mécanisme d'élection : celui-ci donne le même
+  résultat chez tout le monde sans échanger un message.
+- Un nouveau jeu hérite de `jeux/partie.gd` et redéfinit `duree_manche`,
+  `preparer`, `simuler_local`, `simuler_hote`, `recevoir`, `dessiner_scene`.
+  Le socle s'occupe du canal, du décompte, du chrono, de la fin de manche et du
+  dépôt du score.
+
+## Base de données
+
+Ajouter un jeu impose de compléter la contrainte `check (jeu in (...))` sur
+`jeu_parties` **et** le plafond de vraisemblance dans `jeu_deposer_partie`.
+Un plafond oublié, c'est un classement à sept chiffres au premier curieux.
+
+## Avant de livrer
+
+1. `godot --headless --path . --import` — aucune erreur de script.
+2. `godot --headless --path . --banc` en deux instances — elles se voient.
+3. `./outils/exporter.sh` — et **ouvrir la page**, pas seulement constater que
+   l'export a réussi. Plusieurs pannes de ce projet passaient le build sans un
+   avertissement.

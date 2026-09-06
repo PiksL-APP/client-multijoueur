@@ -1,0 +1,13 @@
+# Clés d'exécution : jamais dans un commit (règle Piks-l).
+config.cfg
+
+# Godot
+.godot/
+*.translation
+
+# `sortie/` N'EST PAS ignoré : c'est l'export web que Vercel sert tel quel.
+# Le mettre hors dépôt obligerait à un Godot dans le build Vercel — 1,3 Go de
+# modèles d'export à télécharger à chaque déploiement.
+
+# Morceaux de transfert du wasm, jamais versionnés.
+sortie/index.wasm.part*
