@@ -118,7 +118,7 @@ func _batir_voiture(couleur: Color, pseudo: String) -> Node3D:
 	# boîte vue de haut ne montre pas.
 	for cote in [-1.0, 1.0]:
 		var phare := Decor.sphere(0.34, Palette.AVERTISSEMENT)
-		phare.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 2.4)
+		phare.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 1.2)
 		phare.position = Vector3(3.1, 1.5, cote * 1.0)
 		racine.add_child(phare)
 	if pseudo != "":

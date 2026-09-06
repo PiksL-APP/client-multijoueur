@@ -129,6 +129,12 @@ L'export atterrit dans `sortie/`, **qui est versionné** : c'est ce que Vercel
 sert tel quel. Le sortir du dépôt obligerait à installer Godot dans le build
 Vercel — 1,3 Go de modèles d'export à chaque déploiement.
 
+`index.wasm` et `index.pck` sont servis en `must-revalidate`, pas en
+`immutable` : leur nom ne change JAMAIS d'une version à l'autre. Mis en cache
+immuable, un navigateur qui a déjà vu le jeu ne verrait plus jamais une mise à
+jour — on l'a constaté en déployant une correction qui n'apparaissait pas.
+La revalidation coûte un aller-retour et répond 304.
+
 L'export est en variante *sans fils d'exécution* (`thread_support=false`) :
 avec les fils, le navigateur exige les en-têtes d'isolation `COOP`/`COEP`, qui
 cassent le chargement de ressources tierces. Pour de la 2D, on n'y perd rien.

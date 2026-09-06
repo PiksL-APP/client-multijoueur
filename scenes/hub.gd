@@ -115,7 +115,7 @@ func _mur(centre: Vector2, taille: Vector2) -> void:
 func _batir_portail(portail: Dictionary) -> void:
 	var couleur: Color = portail["couleur"]
 	var ouvert: bool = portail["ouvert"]
-	var force := 2.2 if ouvert else 0.25
+	var force := 1.15 if ouvert else 0.18
 
 	var support := Node3D.new()
 	support.position = Decor.vers3d(portail["position"])

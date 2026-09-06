@@ -63,7 +63,7 @@ func demarrer() -> void:
 func _decor() -> void:
 	poser_ambiance(false)
 	var cam := Decor.camera(28.0, 46.0, 46.0)
-	cam.position = Vector3(6.5, 12.0, 30.0)
+	cam.position = Vector3(4.0, 14.0, 44.0)
 	cam.rotation_degrees = Vector3(-16, 12, 0)
 	monde().add_child(cam)
 	cam.make_current()
@@ -77,15 +77,15 @@ func _decor() -> void:
 	var couleurs := [Palette.SERIE, Palette.SERIE.lightened(0.2), Palette.CRITIQUE]
 	for i in 3:
 		var support := Node3D.new()
-		support.position = Vector3(16.0, 1.0 + i * 0.6, -2.0)
-		var a := Decor.anneau(7.5 + i * 2.4, 0.28, couleurs[i], 2.2 - i * 0.5)
+		support.position = Vector3(21.0, 2.0 + i * 0.6, -10.0)
+		var a := Decor.anneau(7.5 + i * 2.4, 0.28, couleurs[i], 1.15 - i * 0.25)
 		support.add_child(a)
 		monde().add_child(support)
 		_anneaux.append(support)
 
 	var noyau := Decor.sphere(3.0, Palette.SERIE)
-	noyau.material_override = Decor.matiere_lumineuse(Palette.SERIE, 1.1, 0.75)
-	noyau.position = Vector3(16.0, 1.6, -2.0)
+	noyau.material_override = Decor.matiere_lumineuse(Palette.SERIE, 0.7, 0.8)
+	noyau.position = Vector3(21.0, 2.6, -10.0)
 	monde().add_child(noyau)
 
 func _process(delta: float) -> void:

@@ -26,7 +26,9 @@ static func matiere(couleur: Color, rugosite: float = 0.65, metal: float = 0.0) 
 ## Matière lumineuse : le portail, les dalles actives, les traînées. L'émission
 ## ne dépend pas de la lumière, donc ces éléments restent lisibles même dans
 ## l'ombre — c'est ce qui fait qu'un portail se repère de loin.
-static func matiere_lumineuse(couleur: Color, force: float = 1.6, opacite: float = 1.0) -> StandardMaterial3D:
+## `force` reste sous 1,3 : au-delà, l'émission sature vers le blanc et la
+## couleur du portail — donc son identité — disparaît.
+static func matiere_lumineuse(couleur: Color, force: float = 1.0, opacite: float = 1.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(couleur, opacite)
 	m.emission_enabled = true
@@ -68,7 +70,7 @@ static func sphere(rayon: float, couleur: Color, ombre: bool = true) -> MeshInst
 	maillage.rings = 8
 	return _instance(maillage, matiere(couleur), ombre)
 
-static func anneau(rayon: float, epaisseur: float, couleur: Color, force: float = 1.8) -> MeshInstance3D:
+static func anneau(rayon: float, epaisseur: float, couleur: Color, force: float = 1.0) -> MeshInstance3D:
 	var maillage := TorusMesh.new()
 	maillage.inner_radius = max(0.01, rayon - epaisseur)
 	maillage.outer_radius = rayon
@@ -125,8 +127,11 @@ static func ambiance(fond: Color = Palette.FOND, brouillard: bool = true) -> Wor
 	environnement.background_mode = Environment.BG_COLOR
 	environnement.background_color = fond
 	environnement.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environnement.ambient_light_color = Color("#2a3a4a")
-	environnement.ambient_light_energy = 0.55
+	# L'ambiante reste basse et à peine bleutée : montée trop haut, elle
+	# éclaircit le sol jusqu'à un gris bleu qui n'est plus le #0d0d0d de la
+	# palette, et toute la maison se reconnaît à ce noir-là.
+	environnement.ambient_light_color = Color("#1a212b")
+	environnement.ambient_light_energy = 0.22
 	if brouillard:
 		# Le brouillard sert la profondeur : sans lui, le fond du terrain a
 		# exactement le même contraste que le premier plan et la perspective
@@ -141,7 +146,7 @@ static func ambiance(fond: Color = Palette.FOND, brouillard: bool = true) -> Wor
 static func lumiere() -> DirectionalLight3D:
 	var soleil := DirectionalLight3D.new()
 	soleil.light_color = Color("#e8ecf5")
-	soleil.light_energy = 1.25
+	soleil.light_energy = 1.05
 	soleil.rotation_degrees = Vector3(-52, -38, 0)
 	soleil.shadow_enabled = true
 	soleil.directional_shadow_max_distance = 260.0
@@ -153,7 +158,7 @@ static func lumiere() -> DirectionalLight3D:
 static func contre_jour() -> DirectionalLight3D:
 	var lueur := DirectionalLight3D.new()
 	lueur.light_color = Palette.SERIE
-	lueur.light_energy = 0.35
+	lueur.light_energy = 0.22
 	lueur.rotation_degrees = Vector3(-24, 145, 0)
 	lueur.shadow_enabled = false
 	return lueur

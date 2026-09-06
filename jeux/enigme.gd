@@ -192,7 +192,7 @@ func _batir_chambre() -> void:
 		disque.position = Vector3(0, 0.18, 0)
 		disque.name = "Disque"
 		support.add_child(disque)
-		var cercle := Decor.anneau(PORTEE_DALLE * Decor.ECHELLE, 0.22, Palette.AVERTISSEMENT, 1.4)
+		var cercle := Decor.anneau(PORTEE_DALLE * Decor.ECHELLE, 0.22, Palette.AVERTISSEMENT, 0.9)
 		cercle.rotation_degrees = Vector3(90, 0, 0)
 		cercle.position = Vector3(0, 0.4, 0)
 		cercle.name = "Cercle"
@@ -209,7 +209,7 @@ func _batir_chambre() -> void:
 
 	var sortie := Decor.boite(
 		Vector3(SORTIE.size.x * Decor.ECHELLE, 0.2, SORTIE.size.y * Decor.ECHELLE), Palette.BON)
-	sortie.material_override = Decor.matiere_lumineuse(Palette.BON, 0.9, 0.35)
+	sortie.material_override = Decor.matiere_lumineuse(Palette.BON, 0.6, 0.4)
 	sortie.position = Decor.vers3d(SORTIE.get_center(), 0.12)
 	_decor_chambre.add_child(sortie)
 	var mention := Decor.etiquette("SORTIE — tous ensemble", Palette.BON, 30)
@@ -462,7 +462,7 @@ func rafraichir_scene(delta: float) -> void:
 				(Palette.BON if active else Palette.AVERTISSEMENT).darkened(0.45))
 		if cercle:
 			cercle.material_override = Decor.matiere_lumineuse(
-				Palette.BON if active else Palette.AVERTISSEMENT, 2.2 if active else 1.0)
+				Palette.BON if active else Palette.AVERTISSEMENT, 1.25 if active else 0.7)
 
 	if _noeud_porte:
 		var ouverte := false
