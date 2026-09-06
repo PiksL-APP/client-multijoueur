@@ -100,6 +100,13 @@ func _lancer() -> void:
 	_canal.envoyer("go", {"table": _table, "code": code})
 	_partir(code)
 
+## Point d'entrée du banc d'essai : lance si et seulement si on est hôte.
+func lancer_pour_banc() -> bool:
+	if not _je_suis_hote():
+		return false
+	_lancer()
+	return true
+
 func _partir(code: String) -> void:
 	if code == "":
 		return

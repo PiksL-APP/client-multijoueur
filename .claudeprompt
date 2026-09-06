@@ -62,10 +62,22 @@ Ajouter un jeu impose de compléter la contrainte `check (jeu in (...))` sur
 `jeu_parties` **et** le plafond de vraisemblance dans `jeu_deposer_partie`.
 Un plafond oublié, c'est un classement à sept chiffres au premier curieux.
 
+## Commandes
+
+Les touches se lisent **uniquement** par `commun/commandes.gd`. Un appel direct
+à `Input` dans un jeu rend la partie invérifiable par le banc, et le pilote
+automatique cesse alors de couvrir ce jeu.
+
 ## Avant de livrer
 
 1. `godot --headless --path . --import` — aucune erreur de script.
-2. `godot --headless --path . --banc` en deux instances — elles se voient.
+   ⚠ L'import ne compile pas tout : les erreurs d'inférence de type
+   n'apparaissent qu'à l'exécution. Les bancs ci-dessous les révèlent.
+2. Les deux bancs, en deux instances chacune, avec des `HOME` distincts :
+   `--banc` (présence et diffusion) puis `--banc-jeu=<jeu> --manche=30`
+   (manche complète jusqu'au dépôt du score).
 3. `./outils/exporter.sh` — et **ouvrir la page**, pas seulement constater que
-   l'export a réussi. Plusieurs pannes de ce projet passaient le build sans un
-   avertissement.
+   l'export a réussi. Trois défauts de ce projet ont passé le build sans un
+   avertissement : `config.cfg` absent du .pck, l'autoretour à la ligne qui
+   affichait les étiquettes à la verticale, et un cache immuable sur un nom de
+   fichier qui ne change jamais.

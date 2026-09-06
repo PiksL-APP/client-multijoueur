@@ -16,6 +16,10 @@ enum { ATTENTE, DECOMPTE, JEU, FIN }
 const DECOMPTE_S := 3.0
 const ATTENTE_MAX := 8.0
 
+## Raccourci de manche, réservé au banc d'essai (`--manche=<secondes>`).
+## Attendre deux minutes par vérification, personne ne le fait deux fois.
+static var duree_forcee := 0.0
+
 var jeu: String = ""
 var titre: String = ""
 var code: String = ""
@@ -101,6 +105,9 @@ func _exit_tree() -> void:
 	if canal:
 		canal.quitter()
 
+func duree_reelle() -> float:
+	return duree_forcee if duree_forcee > 0.0 else duree_manche()
+
 func est_hote() -> bool:
 	return canal != null and canal.je_suis_hote()
 
@@ -160,7 +167,7 @@ func _process(delta: float) -> void:
 			simuler_local(delta)
 			if est_hote():
 				simuler_hote(delta)
-				if temps >= duree_manche():
+				if temps >= duree_reelle():
 					terminer("Temps écoulé.")
 	_rafraichir_hud()
 	rafraichir_scene(delta)
@@ -181,7 +188,7 @@ func terminer(note: String) -> void:
 			"pseudo": ligne["pseudo"],
 			"score": ligne["score"],
 		})
-	Scores.deposer(jeu, code, int(min(temps, duree_manche())), resultats)
+	Scores.deposer(jeu, code, int(max(5.0, min(temps, duree_manche()))), resultats)
 	_afficher_resultats(lignes, note)
 
 func _afficher_resultats(lignes, note: String) -> void:
@@ -245,7 +252,7 @@ func _rafraichir_hud() -> void:
 	if _hud_chrono == null:
 		return
 	UI.rafraichir_etat_reseau(_hud_etat)
-	var restant := max(0.0, duree_manche() - temps)
+	var restant: float = max(0.0, duree_reelle() - temps)
 	_hud_chrono.text = "%d:%02d" % [int(restant) / 60, int(restant) % 60]
 	_hud_chrono.add_theme_color_override("font_color",
 		Palette.CRITIQUE if restant <= 15.0 and phase == JEU else Palette.ENCRE)

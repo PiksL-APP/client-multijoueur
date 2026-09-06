@@ -219,13 +219,9 @@ func _batir_chambre() -> void:
 # ------------------------------------------------------- simulation locale
 
 func simuler_local(delta: float) -> void:
-	var direction := Vector2.ZERO
-	if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): direction.y -= 1
-	if Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): direction.y += 1
-	if Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT): direction.x -= 1
-	if Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): direction.x += 1
+	var direction := Commandes.direction()
 	if direction != Vector2.ZERO:
-		_position += direction.normalized() * VITESSE * delta
+		_position += direction * VITESSE * delta
 		_degager()
 
 	for cle in _autres:
@@ -366,7 +362,7 @@ func _evaluer_sortie(positions: Array) -> void:
 		for cle in joueurs:
 			joueurs[cle]["score"] = _score_equipe
 			canal.envoyer("score", {"j": cle, "s": _score_equipe})
-		terminer("Les trois chambres, à %d secondes de la fin." % int(duree_manche() - temps))
+		terminer("Les trois chambres, à %d secondes de la fin." % int(duree_reelle() - temps))
 	else:
 		canal.envoyer("chambre", {"c": _chambre + 1})
 		_charger_chambre(_chambre + 1)
@@ -382,7 +378,7 @@ func _annoncer_progression() -> void:
 ## assez pour récompenser une équipe qui parle, pas assez pour transformer
 ## l'énigme en course.
 func _calculer_score() -> int:
-	return _chambres_faites * 300 + int(max(0.0, duree_manche() - temps) * 4.0)
+	return _chambres_faites * 300 + int(max(0.0, duree_reelle() - temps) * 4.0)
 
 # ------------------------------------------------------- réception
 

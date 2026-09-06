@@ -174,7 +174,7 @@ func _batir_avatar(couleur: Color, pseudo: String) -> Node3D:
 
 func _process(delta: float) -> void:
 	_t += delta
-	var direction := _lire_direction()
+	var direction := Commandes.direction()
 	if direction != Vector2.ZERO:
 		_position += direction * VITESSE * delta
 		_position.x = clamp(_position.x, MONDE.position.x + RAYON, MONDE.end.x - RAYON)
@@ -216,15 +216,6 @@ func _process(delta: float) -> void:
 func _placer_camera(delta: float) -> void:
 	var vise := Decor.viser(_camera, _position, INCLINAISON, DISTANCE)
 	_camera.position = _camera.position.lerp(vise, clamp(delta * 6.0, 0, 1))
-
-func _lire_direction() -> Vector2:
-	# Codes physiques : sur un clavier AZERTY, W A S D tombent sur Z Q S D.
-	var d := Vector2.ZERO
-	if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): d.y -= 1
-	if Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): d.y += 1
-	if Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT): d.x -= 1
-	if Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): d.x += 1
-	return d.normalized()
 
 func _unhandled_input(evenement: InputEvent) -> void:
 	if evenement is InputEventKey and evenement.pressed and not evenement.echo:

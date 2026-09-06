@@ -108,16 +108,33 @@ godot --editor --path .               # ou : godot --path .
 
 `config.cfg` est hors dépôt : aucun secret dans un commit.
 
-### Banc d'essai sans interface
+### Bancs d'essai sans interface
+
+Deux instances côte à côte, chacune avec son `HOME` (donc sa propre identité) :
 
 ```bash
-godot --headless --path . --banc
+# 1. la présence et la diffusion tiennent-elles ?
+HOME=/tmp/a godot --headless --path . --banc &
+HOME=/tmp/b godot --headless --path . --banc
+
+# 2. une manche complète, du salon au dépôt du score
+HOME=/tmp/a godot --headless --path . --banc-jeu=carnage --manche=30 &
+HOME=/tmp/b godot --headless --path . --banc-jeu=carnage --manche=30
 ```
 
-Le client rejoint le hub et écrit une ligne par seconde. Deux instances
-lancées côte à côte (avec deux `HOME` différents, pour deux identités) doivent
-se voir : c'est le contrôle qui dit si la présence et la diffusion tiennent,
-sans ouvrir deux navigateurs.
+Le second traverse TOUTE la chaîne : appariement dans le salon, élection de
+l'hôte, décompte, simulation, diffusion des scores, dépôt en base. Il joue au
+pilote automatique — dans Carnage, la voiture vise le monstre le plus proche,
+sans quoi une manche d'essai finirait à zéro et ne vérifierait ni la
+collision, ni le score, ni le dépôt.
+
+C'est ce que permet `commun/commandes.gd` : les touches ne sont jamais lues
+ailleurs. Sans ce passage obligé, la seule façon de vérifier une partie de
+bout en bout serait de la jouer à la main — et personne ne le fait avant
+chaque livraison.
+
+`--manche` raccourcit la manche : attendre deux minutes par vérification,
+personne ne le fait deux fois.
 
 ### Réexporter
 

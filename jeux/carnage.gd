@@ -148,6 +148,8 @@ func _batir_monstre(type: int) -> Node3D:
 # ------------------------------------------------------- simulation locale
 
 func simuler_local(delta: float) -> void:
+	if Commandes.pilote_automatique:
+		Commandes.direction_simulee = _viser_le_plus_proche()
 	_conduire(delta)
 	for cle in _autres:
 		var a: Dictionary = _autres[cle]
@@ -166,16 +168,33 @@ func simuler_local(delta: float) -> void:
 		for m in _monstres:
 			m["p"] = (m["p"] as Vector2).lerp(m["cible"], clamp(delta * 10.0, 0, 1))
 
+## Pilote automatique du banc d'essai : viser le monstre le plus proche.
+## Une manche d'essai qui tourne au hasard se termine à zéro — elle ne
+## vérifierait alors ni la collision, ni le score, ni le dépôt en base.
+func _viser_le_plus_proche() -> Vector2:
+	var cible := Vector2.INF
+	var distance := INF
+	for m in _monstres:
+		var d: float = _position.distance_squared_to(m["p"])
+		if d < distance:
+			distance = d
+			cible = m["p"]
+	if cible == Vector2.INF:
+		return Vector2(0.4, 1.0)
+	var ecart := wrapf((cible - _position).angle() - _angle, -PI, PI)
+	return Vector2(clamp(ecart * 2.0, -1.0, 1.0), 1.0)
+
 func _conduire(delta: float) -> void:
 	if _sonne > 0.0:
 		_sonne -= delta
 		_angle += delta * 7.0        # la voiture part en toupie : le choc se voit
 		_vitesse = move_toward(_vitesse, 0.0, FREIN * delta * 0.6)
 	else:
-		var avant := Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP)
-		var arriere := Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN)
-		var gauche := Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)
-		var droite := Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)
+		var commande := Commandes.conduite()
+		var avant := commande.y > 0.1
+		var arriere := commande.y < -0.1
+		var gauche := commande.x < -0.1
+		var droite := commande.x > 0.1
 
 		if avant:
 			_vitesse = min(_vitesse + ACCELERATION * delta, VITESSE_MAX)
@@ -185,7 +204,7 @@ func _conduire(delta: float) -> void:
 			_vitesse = move_toward(_vitesse, 0.0, FROTTEMENT * abs(_vitesse) * delta + 40.0 * delta)
 
 		# Le braquage suit la vitesse : à l'arrêt, on ne pivote pas sur place.
-		var prise := clamp(abs(_vitesse) / 260.0, 0.0, 1.0) * signf(_vitesse)
+		var prise: float = clamp(abs(_vitesse) / 260.0, 0.0, 1.0) * signf(_vitesse)
 		if gauche:
 			_angle -= BRAQUAGE * delta * prise
 		if droite:
@@ -328,7 +347,7 @@ func _compter_ecrasement(cle: String, monstre: Dictionary) -> void:
 	_effet_ecrasement(monstre["p"], points, facteur, cle)
 
 func _reculer_monstre(monstre: Dictionary, depuis: Vector2) -> void:
-	var direction := (monstre["p"] - depuis).normalized()
+	var direction: Vector2 = (monstre["p"] - depuis).normalized()
 	if direction == Vector2.ZERO:
 		direction = Vector2.RIGHT
 	monstre["p"] = monstre["p"] + direction * 70.0
