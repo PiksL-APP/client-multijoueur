@@ -19,12 +19,18 @@ static func titre(texte: String, taille: int = 34) -> Label:
 	etiquette.add_theme_color_override("font_color", Palette.ENCRE)
 	return etiquette
 
-static func texte(contenu: String, taille: int = 16, couleur: Color = Palette.ENCRE_DOUCE) -> Label:
+## `retour_ligne` est explicite et non pas par défaut : une étiquette qui
+## se replie a une largeur minimale d'un caractère, et dans une boîte
+## horizontale elle s'affiche alors verticalement, un caractère par ligne.
+## Le défaut s'est vu sur l'écran d'accueil, pas au build.
+static func texte(contenu: String, taille: int = 16, couleur: Color = Palette.ENCRE_DOUCE, retour_ligne: bool = false) -> Label:
 	var etiquette := Label.new()
 	etiquette.text = contenu
 	etiquette.add_theme_font_size_override("font_size", taille)
 	etiquette.add_theme_color_override("font_color", couleur)
-	etiquette.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if retour_ligne:
+		etiquette.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		etiquette.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return etiquette
 
 static func _boite(fond_couleur: Color, bordure: Color, rayon: int = 6) -> StyleBoxFlat:
@@ -82,8 +88,10 @@ static func panneau() -> PanelContainer:
 static func etat_reseau() -> HBoxContainer:
 	var boite := HBoxContainer.new()
 	boite.add_theme_constant_override("separation", 8)
+	boite.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var pastille := Panel.new()
 	pastille.custom_minimum_size = Vector2(10, 10)
+	pastille.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	pastille.name = "Pastille"
 	var style := StyleBoxFlat.new()
 	style.bg_color = Palette.ENCRE_FAIBLE

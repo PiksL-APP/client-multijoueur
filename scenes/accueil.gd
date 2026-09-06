@@ -27,7 +27,7 @@ func demarrer() -> void:
 	colonne.add_child(UI.texte(
 		"Un hub, des portails. Chaque portail lance un jeu de 2 à 4 joueurs. "
 		+ "Déplacement : Z Q S D ou les flèches. Entrer dans un portail : E.",
-		15))
+		15, Palette.ENCRE_DOUCE, true))
 
 	var separation := HSeparator.new()
 	separation.add_theme_constant_override("separation", 10)
@@ -42,7 +42,7 @@ func demarrer() -> void:
 	_bouton.pressed.connect(_entrer)
 	colonne.add_child(_bouton)
 
-	_avertissement = UI.texte("", 13, Palette.AVERTISSEMENT)
+	_avertissement = UI.texte("", 13, Palette.AVERTISSEMENT, true)
 	colonne.add_child(_avertissement)
 
 	var bas := HBoxContainer.new()

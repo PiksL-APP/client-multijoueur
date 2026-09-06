@@ -138,7 +138,7 @@ func _construire() -> void:
 	_etat = UI.etat_reseau()
 	ligne_titre.add_child(_etat)
 
-	_info = UI.texte("", 15)
+	_info = UI.texte("", 15, Palette.ENCRE_DOUCE, true)
 	colonne.add_child(_info)
 
 	var panneau := UI.panneau()
