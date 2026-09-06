@@ -21,10 +21,10 @@ var _etat: HBoxContainer
 func demarrer() -> void:
 	_jeu = String(donnees.get("jeu", "carnage"))
 	_titre = String(donnees.get("titre", _jeu.to_upper()))
-	UI.fond(self)
+	UI.fond(interface())
 	_construire()
 
-	_canal = Reseau.rejoindre("mj-file-" + _jeu, {"pseudo": Session.pseudo, "table": 0})
+	_canal = Reseau.rejoindre("mj-file-" + _jeu, {"pseudo": Session.pseudo, "id": Session.id, "table": 0})
 	_canal.presences_changees.connect(_sur_presences)
 	_canal.diffusion.connect(_sur_diffusion)
 	if _canal.est_rejoint:
@@ -67,7 +67,7 @@ func _table_libre(sauf: int = -1) -> int:
 
 func _rejoindre_table(t: int) -> void:
 	_table = t
-	_canal.suivre({"pseudo": Session.pseudo, "table": t})
+	_canal.suivre({"pseudo": Session.pseudo, "id": Session.id, "table": t})
 	_rafraichir()
 
 func _ma_table() -> Array:
@@ -76,7 +76,7 @@ func _ma_table() -> Array:
 
 func _je_suis_hote() -> bool:
 	var membres := _ma_table()
-	return not membres.is_empty() and String(membres[0].get("cle", "")) == Session.id
+	return not membres.is_empty() and String(membres[0].get("cle", "")) == Session.cle
 
 # ---------------------------------------------------------------- réseau
 
@@ -105,7 +105,11 @@ func _partir(code: String) -> void:
 		return
 	var equipe: Array = []
 	for meta in _ma_table():
-		equipe.append({"cle": String(meta.get("cle", "")), "pseudo": String(meta.get("pseudo", "?"))})
+		equipe.append({
+			"cle": String(meta.get("cle", "")),
+			"id": String(meta.get("id", "")),
+			"pseudo": String(meta.get("pseudo", "?")),
+		})
 	demande_ecran.emit(_jeu, {
 		"jeu": _jeu,
 		"titre": _titre,
@@ -122,7 +126,7 @@ func _construire() -> void:
 	marge.add_theme_constant_override("margin_right", 60)
 	marge.add_theme_constant_override("margin_top", 40)
 	marge.add_theme_constant_override("margin_bottom", 40)
-	add_child(marge)
+	interface().add_child(marge)
 
 	var colonne := VBoxContainer.new()
 	colonne.add_theme_constant_override("separation", 16)

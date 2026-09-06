@@ -5,6 +5,17 @@ un jeu de 2 à 4 joueurs avec son score. Le tout tourne dans le navigateur :
 Godot 4.5 exporté en WebAssembly, Supabase Realtime pour le réseau, Vercel pour
 l'hébergement.
 
+**2,5D.** La simulation se fait sur un plan — tout l'état réseau tient en
+`Vector2` — mais le rendu est en vraie 3D : caméra en perspective inclinée,
+lumière directionnelle avec ombres portées, contre-jour froid pour que les
+faces à l'ombre gardent leur volume, brouillard de profondeur. Les objets ont
+une hauteur (voitures à châssis et cabine, monstres qui sautillent, dalles qui
+s'enfoncent, portes qui descendent dans le sol) sans que la logique de jeu
+n'ait jamais à connaître un axe vertical. Toute la fabrique est dans
+`commun/decor.gd`, y compris le facteur d'échelle : les coordonnées de jeu sont
+en pixels, gardées telles quelles en unités 3D elles ruineraient la précision
+des ombres.
+
 En ligne : **https://multijoueur.piks-l.com**
 
 ## Ce qu'il y a dedans
@@ -125,6 +136,8 @@ cassent le chargement de ressources tierces. Pour de la 2D, on n'y perd rien.
 ## Ce qui n'est pas fait
 
 - Clavier et souris seulement : rien pour le tactile.
+- Rendu en mode compatibilité (exigé par le web) : ombres directionnelles
+  seulement, pas d'occlusion ambiante ni de reflets.
 - Pas de son.
 - Le classement affiché est un top brut ; pas de saison, pas de remise à zéro.
 - Chaque manche consomme des messages Realtime (≈ 50 par seconde à quatre

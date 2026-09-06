@@ -13,54 +13,42 @@ const VITESSE := 340.0
 const CADENCE_ENVOI := 1.0 / 8.0
 const RAPPEL := 1.5           ## on redit sa position même à l'arrêt
 const RAYON := 18.0
+const INCLINAISON := 54.0
+const DISTANCE := 112.0
 
 const PORTAILS := [
 	{
-		"jeu": "carnage",
-		"titre": "CARNAGE",
-		"sous_titre": "Voitures contre monstres",
+		"jeu": "carnage", "titre": "CARNAGE", "sous_titre": "Voitures contre monstres",
 		"detail": "2 à 4 joueurs · 2 minutes · écraser rapporte",
-		"position": Vector2(700, 500),
-		"couleur": Palette.CRITIQUE,
-		"ouvert": true,
+		"position": Vector2(700, 520), "couleur": Palette.CRITIQUE, "ouvert": true,
 	},
 	{
-		"jeu": "enigme",
-		"titre": "ÉNIGME",
-		"sous_titre": "Puzzle coopératif",
+		"jeu": "enigme", "titre": "ÉNIGME", "sous_titre": "Puzzle coopératif",
 		"detail": "2 à 4 joueurs · trois chambres · personne ne finit seul",
-		"position": Vector2(1900, 500),
-		"couleur": Palette.SERIE,
-		"ouvert": true,
+		"position": Vector2(1900, 520), "couleur": Palette.SERIE, "ouvert": true,
 	},
 	{
-		"jeu": "arene",
-		"titre": "ARÈNE",
-		"sous_titre": "À venir",
+		"jeu": "arene", "titre": "ARÈNE", "sous_titre": "À venir",
 		"detail": "Le portail est éteint.",
-		"position": Vector2(700, 1150),
-		"couleur": Palette.ENCRE_FAIBLE,
-		"ouvert": false,
+		"position": Vector2(700, 1120), "couleur": Palette.ENCRE_FAIBLE, "ouvert": false,
 	},
 	{
-		"jeu": "atelier",
-		"titre": "ATELIER",
-		"sous_titre": "À venir",
+		"jeu": "atelier", "titre": "ATELIER", "sous_titre": "À venir",
 		"detail": "Le portail est éteint.",
-		"position": Vector2(1900, 1150),
-		"couleur": Palette.ENCRE_FAIBLE,
-		"ouvert": false,
+		"position": Vector2(1900, 1120), "couleur": Palette.ENCRE_FAIBLE, "ouvert": false,
 	},
 ]
 
 var _canal: CanalTempsReel
-var _camera: Camera2D
-var _position := Vector2(1300, 820)
-var _autres: Dictionary = {}       # cle -> {cible, affichee, pseudo, place}
+var _camera: Camera3D
+var _position := Vector2(1300, 830)
+var _autres: Dictionary = {}       # cle -> {cible, affichee, pseudo, place, noeud}
+var _corps: Node3D
 var _depuis_envoi := 0.0
 var _depuis_rappel := 0.0
 var _t := 0.0
 var _portail_proche: int = -1
+var _anneaux: Array = []           # [{support, base}]
 
 var _hud_titre: Label
 var _hud_detail: Label
@@ -71,20 +59,14 @@ var _hud_classement: Label
 var _classements: Dictionary = {}
 
 func demarrer() -> void:
-	_camera = Camera2D.new()
-	_camera.zoom = Vector2(0.9, 0.9)
-	_camera.position_smoothing_enabled = true
-	_camera.position_smoothing_speed = 6.0
-	add_child(_camera)
-	_camera.make_current()
-
+	_batir_monde()
 	_construire_hud()
 
-	_canal = Reseau.rejoindre(CANAL, {"pseudo": Session.pseudo})
+	_canal = Reseau.rejoindre(CANAL, {"pseudo": Session.pseudo, "id": Session.id})
 	_canal.diffusion.connect(_sur_diffusion)
 	_canal.presences_changees.connect(_sur_presences)
 	if _canal.est_rejoint:
-		_canal.suivre({"pseudo": Session.pseudo})
+		_canal.suivre({"pseudo": Session.pseudo, "id": Session.id})
 
 	Scores.classement_recu.connect(_sur_classement)
 	Scores.demander_classement("carnage", 3)
@@ -93,6 +75,100 @@ func demarrer() -> void:
 func _exit_tree() -> void:
 	if _canal:
 		_canal.quitter()
+
+# ---------------------------------------------------------------- décor
+
+func _batir_monde() -> void:
+	poser_ambiance()
+
+	var sol := Decor.sol(MONDE.size, 100.0)
+	sol.position = Decor.vers3d(MONDE.get_center())
+	monde().add_child(sol)
+
+	# Murs d'enceinte : ils cadrent le terrain et, surtout, portent une ombre
+	# qui donne son épaisseur au sol.
+	var e := 20.0
+	var m := MONDE.size
+	_mur(Vector2(m.x * 0.5, -e * 0.5), Vector2(m.x + e * 2.0, e))
+	_mur(Vector2(m.x * 0.5, m.y + e * 0.5), Vector2(m.x + e * 2.0, e))
+	_mur(Vector2(-e * 0.5, m.y * 0.5), Vector2(e, m.y))
+	_mur(Vector2(m.x + e * 0.5, m.y * 0.5), Vector2(e, m.y))
+
+	for portail in PORTAILS:
+		_batir_portail(portail)
+
+	_corps = _batir_avatar(Palette.couleur_joueur(0), Session.pseudo)
+	monde().add_child(_corps)
+
+	_camera = Decor.camera(INCLINAISON, DISTANCE, 50.0)
+	monde().add_child(_camera)
+	_camera.make_current()
+
+func _mur(centre: Vector2, taille: Vector2) -> void:
+	var hauteur := 5.0
+	var boite := Decor.boite(
+		Vector3(taille.x * Decor.ECHELLE, hauteur, taille.y * Decor.ECHELLE),
+		Palette.SURFACE.lightened(0.06))
+	boite.position = Decor.vers3d(centre, hauteur * 0.5)
+	monde().add_child(boite)
+
+func _batir_portail(portail: Dictionary) -> void:
+	var couleur: Color = portail["couleur"]
+	var ouvert: bool = portail["ouvert"]
+	var force := 2.2 if ouvert else 0.25
+
+	var support := Node3D.new()
+	support.position = Decor.vers3d(portail["position"])
+	monde().add_child(support)
+
+	# Socle au sol : c'est lui qui dit où se placer pour entrer.
+	var socle := Decor.cylindre(11.5, 0.5, couleur.darkened(0.55), false)
+	socle.position = Vector3(0, 0.26, 0)
+	support.add_child(socle)
+	var liseré := Decor.anneau(11.5, 0.4, couleur, force * 0.6)
+	liseré.rotation_degrees = Vector3(90, 0, 0)
+	liseré.position = Vector3(0, 0.4, 0)
+	support.add_child(liseré)
+
+	# Les anneaux se redressent face à la caméra et tournent : un portail
+	## posé à plat se confondrait avec une simple marque au sol.
+	for i in 3:
+		var pivot := Node3D.new()
+		pivot.position = Vector3(0, 6.0 + i * 0.8, 0)
+		pivot.rotation_degrees = Vector3(90.0 - INCLINAISON, 0, 0)
+		var a := Decor.anneau(5.4 + i * 2.2, 0.32, couleur, force - i * 0.4)
+		pivot.add_child(a)
+		support.add_child(pivot)
+		_anneaux.append({"pivot": pivot, "rang": i, "ouvert": ouvert})
+
+	var noyau := Decor.sphere(3.4, couleur)
+	noyau.material_override = Decor.matiere_lumineuse(couleur, force * 0.5, 0.55)
+	noyau.position = Vector3(0, 6.4, 0)
+	support.add_child(noyau)
+
+	var titre := Decor.etiquette(String(portail["titre"]), Color(Palette.ENCRE, 1.0 if ouvert else 0.45), 64)
+	titre.position = Vector3(0, 14.5, 0)
+	support.add_child(titre)
+	var sous := Decor.etiquette(String(portail["sous_titre"]), Color(Palette.ENCRE_FAIBLE, 1.0 if ouvert else 0.45), 34)
+	sous.position = Vector3(0, 12.6, 0)
+	support.add_child(sous)
+
+func _batir_avatar(couleur: Color, pseudo: String) -> Node3D:
+	var racine := Node3D.new()
+	var jambes := Decor.cylindre(RAYON * Decor.ECHELLE, 1.6, couleur.darkened(0.35))
+	jambes.position = Vector3(0, 0.8, 0)
+	racine.add_child(jambes)
+	var buste := Decor.cylindre(RAYON * Decor.ECHELLE * 0.86, 1.8, couleur)
+	buste.position = Vector3(0, 2.5, 0)
+	racine.add_child(buste)
+	var tete := Decor.sphere(RAYON * Decor.ECHELLE * 0.72, couleur.lightened(0.25))
+	tete.position = Vector3(0, 4.2, 0)
+	racine.add_child(tete)
+	var nom := Decor.etiquette(pseudo, Palette.ENCRE_DOUCE, 34)
+	nom.position = Vector3(0, 6.2, 0)
+	nom.name = "Nom"
+	racine.add_child(nom)
+	return racine
 
 # ---------------------------------------------------------------- boucle
 
@@ -103,11 +179,30 @@ func _process(delta: float) -> void:
 		_position += direction * VITESSE * delta
 		_position.x = clamp(_position.x, MONDE.position.x + RAYON, MONDE.end.x - RAYON)
 		_position.y = clamp(_position.y, MONDE.position.y + RAYON, MONDE.end.y - RAYON)
-	_camera.position = _position
+
+	_corps.position = Decor.vers3d(_position)
+	# Un pas se voit : le corps se penche dans le sens de la marche et
+	# rebondit légèrement. Sans ça, un cylindre qui glisse ne marche pas.
+	if direction != Vector2.ZERO:
+		_corps.rotation.y = atan2(-direction.x, -direction.y)
+		_corps.position.y = abs(sin(_t * 11.0)) * 0.35
+		_corps.rotation.x = deg_to_rad(6.0)
+	else:
+		_corps.rotation.x = lerp(_corps.rotation.x, 0.0, delta * 8.0)
 
 	for cle in _autres:
 		var a: Dictionary = _autres[cle]
 		a["affichee"] = (a["affichee"] as Vector2).lerp(a["cible"], clamp(delta * 12.0, 0, 1))
+		var noeud: Node3D = a["noeud"]
+		var avant: Vector2 = a["affichee"]
+		noeud.position = Decor.vers3d(avant)
+
+	for anneau in _anneaux:
+		var pivot: Node3D = anneau["pivot"]
+		var vitesse: float = (0.5 + int(anneau["rang"]) * 0.35) * (1.0 if anneau["ouvert"] else 0.12)
+		pivot.rotation.z = _t * vitesse
+
+	_placer_camera(delta)
 
 	_depuis_envoi += delta
 	_depuis_rappel += delta
@@ -117,10 +212,13 @@ func _process(delta: float) -> void:
 		_canal.envoyer("p", {"x": int(_position.x), "y": int(_position.y)})
 
 	_chercher_portail()
-	queue_redraw()
+
+func _placer_camera(delta: float) -> void:
+	var vise := Decor.viser(_camera, _position, INCLINAISON, DISTANCE)
+	_camera.position = _camera.position.lerp(vise, clamp(delta * 6.0, 0, 1))
 
 func _lire_direction() -> Vector2:
-	# Codes physiques : sur un clavier AZERTY, W Q S D tombent sur Z Q S D.
+	# Codes physiques : sur un clavier AZERTY, W A S D tombent sur Z Q S D.
 	var d := Vector2.ZERO
 	if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): d.y -= 1
 	if Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): d.y += 1
@@ -136,12 +234,14 @@ func _unhandled_input(evenement: InputEvent) -> void:
 				demande_ecran.emit("salon", {"jeu": portail["jeu"], "titre": portail["titre"]})
 
 func _chercher_portail() -> void:
+	var avant := _portail_proche
 	_portail_proche = -1
 	for i in PORTAILS.size():
-		if _position.distance_to(PORTAILS[i]["position"]) < 130.0:
+		if _position.distance_to(PORTAILS[i]["position"]) < 140.0:
 			_portail_proche = i
 			break
-	_rafraichir_hud()
+	if avant != _portail_proche:
+		_rafraichir_hud()
 
 # ---------------------------------------------------------------- réseau
 
@@ -149,103 +249,48 @@ func _sur_diffusion(evenement: String, charge: Dictionary) -> void:
 	if evenement != "p":
 		return
 	var cle := String(charge.get("cle", ""))
-	if cle == "" or cle == Session.id:
+	if cle == "" or cle == Session.cle:
 		return
 	var cible := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
-	if _autres.has(cle):
-		_autres[cle]["cible"] = cible
-	else:
-		_autres[cle] = {"cible": cible, "affichee": cible, "pseudo": "…", "place": 0}
-		_sur_presences(_canal.presences)
+	if not _autres.has(cle):
+		_ajouter_joueur(cle, "…", cible)
+	_autres[cle]["cible"] = cible
+
+func _ajouter_joueur(cle: String, pseudo: String, position: Vector2) -> void:
+	var noeud := _batir_avatar(Palette.couleur_joueur(1), pseudo)
+	noeud.position = Decor.vers3d(position)
+	monde().add_child(noeud)
+	_autres[cle] = {"cible": position, "affichee": position, "pseudo": pseudo, "place": 1, "noeud": noeud}
 
 func _sur_presences(presences: Dictionary) -> void:
 	var cles := _canal.cles_triees()
 	for cle in _autres.keys():
 		if not presences.has(cle):
+			(_autres[cle]["noeud"] as Node3D).queue_free()
 			_autres.erase(cle)
 	for cle in presences:
-		if cle == Session.id:
+		if cle == Session.cle:
 			continue
 		var meta: Dictionary = presences[cle]
 		if not _autres.has(cle):
-			_autres[cle] = {"cible": _position, "affichee": _position, "pseudo": "", "place": 0}
-		_autres[cle]["pseudo"] = String(meta.get("pseudo", "?"))
-		_autres[cle]["place"] = cles.find(cle)
+			_ajouter_joueur(cle, String(meta.get("pseudo", "?")), _position)
+		var joueur: Dictionary = _autres[cle]
+		joueur["pseudo"] = String(meta.get("pseudo", "?"))
+		joueur["place"] = max(1, cles.find(cle))
+		var noeud: Node3D = joueur["noeud"]
+		var nom := noeud.get_node_or_null("Nom") as Label3D
+		if nom:
+			nom.text = joueur["pseudo"]
 	_rafraichir_hud()
 
 func _sur_classement(jeu: String, lignes: Array) -> void:
 	_classements[jeu] = lignes
 	_rafraichir_hud()
 
-# ---------------------------------------------------------------- rendu
-
-func _draw() -> void:
-	_dessiner_sol()
-	for i in PORTAILS.size():
-		_dessiner_portail(PORTAILS[i], i == _portail_proche)
-	for cle in _autres:
-		var a: Dictionary = _autres[cle]
-		_dessiner_avatar(a["affichee"], Palette.couleur_joueur(int(a["place"]) + 1), String(a["pseudo"]), false)
-	_dessiner_avatar(_position, Palette.couleur_joueur(0), Session.pseudo, true)
-
-func _dessiner_sol() -> void:
-	draw_rect(MONDE, Palette.FOND, true)
-	# Trame de points : le dotwork de la maison, et un repère de vitesse quand
-	# on se déplace — sans lui, un fond uni donne l'impression de ne pas avancer.
-	var pas := 64
-	var x := int(MONDE.position.x)
-	while x <= int(MONDE.end.x):
-		var y := int(MONDE.position.y)
-		while y <= int(MONDE.end.y):
-			draw_circle(Vector2(x, y), 1.5, Color(1, 1, 1, 0.055))
-			y += pas
-		x += pas
-	draw_rect(MONDE, Color(1, 1, 1, 0.10), false, 2.0)
-
-func _dessiner_portail(portail: Dictionary, proche: bool) -> void:
-	var centre: Vector2 = portail["position"]
-	var couleur: Color = portail["couleur"]
-	var ouvert: bool = portail["ouvert"]
-	var intensite := 1.0 if ouvert else 0.35
-
-	draw_circle(centre, 108.0, Color(couleur, 0.06 * intensite))
-	for i in 3:
-		var rayon := 58.0 + i * 20.0
-		var vitesse := (0.5 + i * 0.3) * (1.0 if ouvert else 0.15)
-		var debut := _t * vitesse + i * 1.7
-		draw_arc(centre, rayon, debut, debut + TAU * 0.66, 40,
-			Color(couleur, (0.75 - i * 0.16) * intensite), 3.0, true)
-	draw_circle(centre, 40.0, Color(couleur, 0.16 * intensite))
-
-	if proche and ouvert:
-		draw_arc(centre, 126.0, 0, TAU, 64, Color(Palette.ENCRE, 0.5), 2.0, true)
-
-	var police := Palette.police()
-	var titre: String = portail["titre"]
-	var largeur := police.get_string_size(titre, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
-	draw_string(police, centre + Vector2(-largeur * 0.5, 152), titre,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(Palette.ENCRE, intensite))
-	var sous: String = portail["sous_titre"]
-	var largeur2 := police.get_string_size(sous, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
-	draw_string(police, centre + Vector2(-largeur2 * 0.5, 174), sous,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(Palette.ENCRE_FAIBLE, intensite))
-
-func _dessiner_avatar(position: Vector2, couleur: Color, pseudo: String, moi: bool) -> void:
-	draw_circle(position + Vector2(0, 6), RAYON * 0.9, Color(0, 0, 0, 0.35))
-	draw_circle(position, RAYON, couleur)
-	draw_arc(position, RAYON + 3.0, 0, TAU, 32, Color(Palette.FOND, 0.9), 3.0, true)
-	if moi:
-		draw_arc(position, RAYON + 7.0, _t * 2.0, _t * 2.0 + TAU * 0.7, 24, Color(couleur, 0.6), 2.0, true)
-	var police := Palette.police()
-	var largeur := police.get_string_size(pseudo, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
-	draw_string(police, position + Vector2(-largeur * 0.5, -RAYON - 10), pseudo,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Palette.ENCRE_DOUCE)
-
 # ---------------------------------------------------------------- interface
 
 func _construire_hud() -> void:
-	var couche := CanvasLayer.new()
-	add_child(couche)
+	var couche := interface()
 
 	var haut := HBoxContainer.new()
 	haut.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -264,10 +309,11 @@ func _construire_hud() -> void:
 	haut.add_child(_hud_etat)
 
 	var bas := VBoxContainer.new()
-	bas.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	bas.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	bas.offset_left = 20
-	bas.offset_top = -140
-	bas.offset_bottom = -20
+	bas.offset_right = -20
+	bas.offset_top = -136
+	bas.offset_bottom = -18
 	bas.add_theme_constant_override("separation", 4)
 	couche.add_child(bas)
 	_hud_titre = UI.titre("", 22)
@@ -278,6 +324,7 @@ func _construire_hud() -> void:
 	bas.add_child(_hud_detail)
 	bas.add_child(_hud_classement)
 	bas.add_child(_hud_invite)
+	_rafraichir_hud()
 
 func _rafraichir_hud() -> void:
 	if _hud_etat == null:

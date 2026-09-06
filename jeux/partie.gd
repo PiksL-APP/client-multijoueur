@@ -53,7 +53,10 @@ func simuler_hote(_delta: float) -> void:
 func recevoir(_evenement: String, _charge: Dictionary) -> void:
 	pass
 
-func dessiner_scene() -> void:
+## Appelée chaque image : les écrans de jeu y replacent leurs objets 3D. Le
+## rendu est séparé de la simulation pour que l'interpolation d'affichage
+## n'aille jamais polluer l'état partagé.
+func rafraichir_scene(_delta: float) -> void:
 	pass
 
 func classement_final() -> Array:
@@ -61,7 +64,8 @@ func classement_final() -> Array:
 	for cle in joueurs:
 		var j: Dictionary = joueurs[cle]
 		lignes.append({
-			"joueur_id": cle,
+			# Le score se rattache à l'identité stable, pas à la clé d'onglet.
+			"joueur_id": String(j.get("id", cle)),
 			"pseudo": String(j.get("pseudo", "?")),
 			"score": int(j.get("score", 0)),
 			"place": int(j.get("place", 0)),
@@ -80,12 +84,16 @@ func demarrer() -> void:
 	for membre in equipe:
 		var cle := String(membre.get("cle", ""))
 		if cle != "":
-			joueurs[cle] = {"pseudo": String(membre.get("pseudo", "?")), "place": 0, "score": 0}
+			joueurs[cle] = {
+				"pseudo": String(membre.get("pseudo", "?")),
+				"id": String(membre.get("id", cle)),
+				"place": 0, "score": 0,
+			}
 
 	_construire_hud()
 	preparer()
 
-	canal = Reseau.rejoindre("mj-jeu-%s-%s" % [jeu, code], {"pseudo": Session.pseudo})
+	canal = Reseau.rejoindre("mj-jeu-%s-%s" % [jeu, code], {"pseudo": Session.pseudo, "id": Session.id})
 	canal.presences_changees.connect(_sur_presences)
 	canal.diffusion.connect(_sur_diffusion)
 
@@ -97,7 +105,7 @@ func est_hote() -> bool:
 	return canal != null and canal.je_suis_hote()
 
 func ma_place() -> int:
-	return int(joueurs.get(Session.id, {}).get("place", 0))
+	return int(joueurs.get(Session.cle, {}).get("place", 0))
 
 func _sur_presences(presences: Dictionary) -> void:
 	var cles := canal.cles_triees()
@@ -106,8 +114,9 @@ func _sur_presences(presences: Dictionary) -> void:
 	# dix secondes de la fin.
 	for cle in presences:
 		if not joueurs.has(cle):
-			joueurs[cle] = {"pseudo": "?", "place": 0, "score": 0}
+			joueurs[cle] = {"pseudo": "?", "id": cle, "place": 0, "score": 0}
 		joueurs[cle]["pseudo"] = String(presences[cle].get("pseudo", "?"))
+		joueurs[cle]["id"] = String(presences[cle].get("id", joueurs[cle].get("id", cle)))
 	for cle in joueurs:
 		var place := cles.find(cle)
 		if place >= 0:
@@ -154,7 +163,7 @@ func _process(delta: float) -> void:
 				if temps >= duree_manche():
 					terminer("Temps écoulé.")
 	_rafraichir_hud()
-	queue_redraw()
+	rafraichir_scene(delta)
 
 ## Fin de manche : seul l'hôte l'appelle. Il diffuse le classement ET le dépose,
 ## une fois. Quatre clients qui déposent, c'est quatre parties en base pour une
@@ -196,8 +205,7 @@ func ajouter_score(cle: String, points: int) -> void:
 # ------------------------------------------------------- interface
 
 func _construire_hud() -> void:
-	var couche := CanvasLayer.new()
-	add_child(couche)
+	var couche := interface()
 
 	var haut := HBoxContainer.new()
 	haut.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -247,7 +255,7 @@ func _rafraichir_hud() -> void:
 	cles.sort_custom(func(a, b): return int(joueurs[a]["place"]) < int(joueurs[b]["place"]))
 	for cle in cles:
 		var j: Dictionary = joueurs[cle]
-		var marque := "▸ " if cle == Session.id else ""
+		var marque := "▸ " if cle == Session.cle else ""
 		morceaux.append("%s%s %d" % [marque, String(j["pseudo"]), int(j["score"])])
 	_hud_scores.text = "     ".join(morceaux)
 
@@ -260,6 +268,3 @@ func _rafraichir_hud() -> void:
 			_hud_message.text = "Terminé"
 		_:
 			_hud_message.text = ""
-
-func _draw() -> void:
-	dessiner_scene()

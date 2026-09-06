@@ -19,6 +19,9 @@ const FROTTEMENT := 1.6
 const BRAQUAGE := 2.9
 const RAYON_VOITURE := 26.0
 
+const INCLINAISON := 52.0
+const DISTANCE := 118.0
+
 const SEUIL_ECRASEMENT := 210.0    ## en dessous, on pousse le monstre sans l'écraser
 const CADENCE_VOITURE := 1.0 / 12.0
 const CADENCE_MONSTRES := 1.0 / 9.0
@@ -37,10 +40,12 @@ var _depuis_envoi := 0.0
 var _depuis_snapshot := 0.0
 var _depuis_apparition := 0.0
 var _combos: Dictionary = {}       # cle -> {dernier, facteur}
-var _eclats: Array = []            # particules
-var _taches: Array = []            # traces au sol
-var _camera: Camera2D
+var _eclats: Array = []            # particules 3D
+var _taches: Array = []            # flaques au sol, en nombre borné
+var _camera: Camera3D
+var _corps: Node3D                 # notre voiture
 var _rng := RandomNumberGenerator.new()
+var _secousse := 0.0
 
 func duree_manche() -> float:
 	return DUREE
@@ -50,22 +55,95 @@ func aide() -> String:
 
 func preparer() -> void:
 	_rng.randomize()
-	_camera = Camera2D.new()
-	_camera.zoom = Vector2(0.85, 0.85)
-	_camera.position_smoothing_enabled = true
-	_camera.position_smoothing_speed = 8.0
-	add_child(_camera)
-	_camera.make_current()
+	_batir_arene()
+
 	# Départ réparti sur un cercle : quatre voitures au même endroit se
 	# poussent mutuellement hors de l'arène avant même le décompte.
 	var place := 0
-	for cle in donnees.get("equipe", []):
-		if String(cle.get("cle", "")) == Session.id:
+	for membre in donnees.get("equipe", []):
+		if String(membre.get("cle", "")) == Session.cle:
 			break
 		place += 1
 	var angle := TAU * float(place) / 4.0
 	_position = ARENE.get_center() + Vector2.RIGHT.rotated(angle) * 260.0
 	_angle = angle + PI
+
+	_corps = _batir_voiture(Palette.couleur_joueur(place), Session.pseudo)
+	monde().add_child(_corps)
+
+	_camera = Decor.camera(INCLINAISON, DISTANCE, 52.0)
+	monde().add_child(_camera)
+	_camera.make_current()
+
+func _batir_arene() -> void:
+	poser_ambiance()
+	var sol := Decor.sol(ARENE.size, 100.0, Color("#141312"))
+	sol.position = Decor.vers3d(ARENE.get_center())
+	monde().add_child(sol)
+
+	# Un muret bas tout autour : il borne le terrain à l'œil et son ombre
+	# rasante donne au sol une épaisseur qu'un plan nu n'a pas.
+	var e := 24.0
+	var t := ARENE.size
+	for mur in [
+		[Vector2(t.x * 0.5, -e * 0.5), Vector2(t.x + e * 2.0, e)],
+		[Vector2(t.x * 0.5, t.y + e * 0.5), Vector2(t.x + e * 2.0, e)],
+		[Vector2(-e * 0.5, t.y * 0.5), Vector2(e, t.y)],
+		[Vector2(t.x + e * 0.5, t.y * 0.5), Vector2(e, t.y)],
+	]:
+		var boite := Decor.boite(
+			Vector3(mur[1].x * Decor.ECHELLE, 4.2, mur[1].y * Decor.ECHELLE),
+			Palette.CRITIQUE.darkened(0.6))
+		boite.position = Decor.vers3d(mur[0], 2.1)
+		monde().add_child(boite)
+
+func _batir_voiture(couleur: Color, pseudo: String) -> Node3D:
+	var racine := Node3D.new()
+	var chassis := Decor.boite(Vector3(5.6, 1.5, 3.2), couleur)
+	chassis.position = Vector3(0, 1.05, 0)
+	racine.add_child(chassis)
+	var cabine := Decor.boite(Vector3(2.4, 1.2, 2.6), couleur.darkened(0.35))
+	cabine.position = Vector3(-0.3, 2.3, 0)
+	racine.add_child(cabine)
+	var pare_buffle := Decor.boite(Vector3(0.7, 1.5, 3.6), Palette.ENCRE_DOUCE)
+	pare_buffle.position = Vector3(3.0, 1.2, 0)
+	racine.add_child(pare_buffle)
+	for cote in [-1.0, 1.0]:
+		for avant in [-1.0, 1.0]:
+			var roue := Decor.cylindre(0.75, 0.5, Color("#0a0a0a"))
+			roue.rotation_degrees = Vector3(90, 0, 0)
+			roue.position = Vector3(avant * 1.9, 0.75, cote * 1.7)
+			racine.add_child(roue)
+	# Deux phares : ils disent dans quel sens la voiture regarde, ce qu'une
+	# boîte vue de haut ne montre pas.
+	for cote in [-1.0, 1.0]:
+		var phare := Decor.sphere(0.34, Palette.AVERTISSEMENT)
+		phare.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 2.4)
+		phare.position = Vector3(3.1, 1.5, cote * 1.0)
+		racine.add_child(phare)
+	if pseudo != "":
+		var nom := Decor.etiquette(pseudo, Palette.ENCRE_DOUCE, 32)
+		nom.name = "Nom"
+		nom.position = Vector3(0, 5.2, 0)
+		racine.add_child(nom)
+	return racine
+
+func _batir_monstre(type: int) -> Node3D:
+	var racine := Node3D.new()
+	var rayon: float = 2.0 if type == 0 else (3.2 if type == 1 else 1.6)
+	var couleur := Palette.BON if type == 0 else (Palette.SERIEUX if type == 1 else Palette.AVERTISSEMENT)
+	var corps := Decor.sphere(rayon, couleur.darkened(0.25))
+	corps.position = Vector3(0, rayon * 0.85, 0)
+	corps.name = "Corps"
+	racine.add_child(corps)
+	for cote in [-1.0, 1.0]:
+		var oeil := Decor.sphere(rayon * 0.22, Palette.FOND, false)
+		oeil.position = Vector3(rayon * 0.62, rayon * 1.15, cote * rayon * 0.42)
+		racine.add_child(oeil)
+	var crete := Decor.boite(Vector3(rayon * 0.4, rayon * 0.9, rayon * 0.3), couleur.lightened(0.3))
+	crete.position = Vector3(-rayon * 0.4, rayon * 1.5, 0)
+	racine.add_child(crete)
+	return racine
 
 # ------------------------------------------------------- simulation locale
 
@@ -87,8 +165,6 @@ func simuler_local(delta: float) -> void:
 	if not est_hote():
 		for m in _monstres:
 			m["p"] = (m["p"] as Vector2).lerp(m["cible"], clamp(delta * 10.0, 0, 1))
-
-	_animer_effets(delta)
 
 func _conduire(delta: float) -> void:
 	if _sonne > 0.0:
@@ -154,7 +230,7 @@ func simuler_hote(delta: float) -> void:
 		canal.envoyer("m", {"l": liste, "v": vague})
 
 func _voitures_connues() -> Dictionary:
-	var v := {Session.id: {"p": _position, "s": abs(_vitesse)}}
+	var v := {Session.cle: {"p": _position, "s": abs(_vitesse)}}
 	for cle in _autres:
 		v[cle] = {"p": _autres[cle]["p"], "s": abs(float(_autres[cle]["v"]))}
 	return v
@@ -211,12 +287,20 @@ func _arbitrer_collisions(voitures: Dictionary) -> void:
 			else:
 				# Trop lent : c'est le monstre qui gagne l'échange.
 				canal.envoyer("choc", {"j": cle, "x": int(m["p"].x), "y": int(m["p"].y)})
-				if cle == Session.id:
+				if cle == Session.cle:
 					_encaisser()
 				_reculer_monstre(m, voiture["p"])
 			break
 	for m in a_retirer:
+		_liberer(m)
 		_monstres.erase(m)
+
+## Un monstre disparaît de la simulation ET de la scène. Oublier le maillage
+## laisse un fantôme immobile que plus rien ne référence.
+func _liberer(m: Dictionary) -> void:
+	var noeud = m.get("noeud")
+	if noeud != null:
+		(noeud as Node3D).queue_free()
 
 func _compter_ecrasement(cle: String, monstre: Dictionary) -> void:
 	var base := 10
@@ -255,11 +339,16 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 	match evenement:
 		"v":
 			var cle := String(charge.get("cle", ""))
-			if cle == "" or cle == Session.id:
+			if cle == "" or cle == Session.cle:
 				return
 			var cible := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
 			if not _autres.has(cle):
-				_autres[cle] = {"p": cible, "a": 0.0, "v": 0.0, "cible": cible, "angle_cible": 0.0}
+				var noeud := _batir_voiture(
+					Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 1))),
+					String(joueurs.get(cle, {}).get("pseudo", "")))
+				noeud.position = Decor.vers3d(cible)
+				monde().add_child(noeud)
+				_autres[cle] = {"p": cible, "a": 0.0, "v": 0.0, "cible": cible, "angle_cible": 0.0, "noeud": noeud}
 			_autres[cle]["cible"] = cible
 			_autres[cle]["angle_cible"] = float(charge.get("a", 0.0))
 			_autres[cle]["v"] = float(charge.get("s", 0))
@@ -274,7 +363,7 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 			_effet_ecrasement(Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
 				int(charge.get("p", 0)), int(charge.get("f", 1)), cle_k)
 		"choc":
-			if String(charge.get("j", "")) == Session.id:
+			if String(charge.get("j", "")) == Session.cle:
 				_encaisser()
 
 func _appliquer_snapshot(liste) -> void:
@@ -301,6 +390,8 @@ func _appliquer_snapshot(liste) -> void:
 	for m in _monstres:
 		if vus.has(int(m["id"])):
 			restants.append(m)
+		else:
+			_liberer(m)
 	_monstres = restants
 
 func _encaisser() -> void:
@@ -308,101 +399,102 @@ func _encaisser() -> void:
 		return
 	_sonne = 0.7
 	_vitesse *= 0.2
-	_camera.offset = Vector2(_rng.randf_range(-14, 14), _rng.randf_range(-14, 14))
-	var tween := create_tween()
-	tween.tween_property(_camera, "offset", Vector2.ZERO, 0.35)
+	_secousse = 0.5
 
 # ------------------------------------------------------- effets
 
 func _effet_ecrasement(position: Vector2, points: int, facteur: int, cle: String) -> void:
 	var couleur := Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 0)))
-	for i in 14:
-		var angle := _rng.randf() * TAU
-		_eclats.append({
-			"p": position, "v": Vector2.RIGHT.rotated(angle) * _rng.randf_range(80, 320),
-			"t": _rng.randf_range(0.35, 0.8), "t0": 0.8, "c": Palette.BON.darkened(0.15),
-		})
-	_taches.append({"p": position, "r": _rng.randf_range(14, 26), "a": _rng.randf() * TAU})
-	if _taches.size() > 140:
-		_taches.pop_front()
-	_eclats.append({
-		"p": position, "v": Vector2(0, -60), "t": 1.0, "t0": 1.0, "c": couleur,
-		"texte": "+%d%s" % [points, ("  x%d" % facteur) if facteur > 1 else ""],
-	})
+
+	# Une flaque au sol : la trace de ce qui vient d'être écrasé. Le nombre en
+	# est borné — sans plafond, une manche pleine finit par empiler des
+	# centaines de maillages et le rendu s'effondre en fin de partie.
+	var flaque := Decor.cylindre(_rng.randf_range(1.6, 2.8), 0.08, Palette.BON.darkened(0.55), false)
+	flaque.position = Decor.vers3d(position, 0.05)
+	flaque.rotation.y = _rng.randf() * TAU
+	monde().add_child(flaque)
+	_taches.append(flaque)
+	if _taches.size() > 90:
+		(_taches.pop_front() as Node3D).queue_free()
+
+	for i in 12:
+		var eclat := Decor.sphere(_rng.randf_range(0.18, 0.42), Palette.BON, false)
+		eclat.position = Decor.vers3d(position, 1.0)
+		monde().add_child(eclat)
+		var direction := Vector3(_rng.randf_range(-1, 1), _rng.randf_range(1.4, 3.2), _rng.randf_range(-1, 1))
+		_eclats.append({"noeud": eclat, "v": direction * _rng.randf_range(6, 14), "t": 1.0, "t0": 1.0})
+
+	var mention := Decor.etiquette("+%d%s" % [points, ("  x%d" % facteur) if facteur > 1 else ""], couleur, 44)
+	mention.position = Decor.vers3d(position, 3.0)
+	monde().add_child(mention)
+	_eclats.append({"noeud": mention, "v": Vector3(0, 7.0, 0), "t": 1.1, "t0": 1.1, "texte": true})
 
 func _animer_effets(delta: float) -> void:
 	var restants: Array = []
 	for e in _eclats:
 		e["t"] = float(e["t"]) - delta
+		var noeud: Node3D = e["noeud"]
 		if float(e["t"]) <= 0.0:
+			noeud.queue_free()
 			continue
-		e["p"] = (e["p"] as Vector2) + (e["v"] as Vector2) * delta
-		e["v"] = (e["v"] as Vector2) * (1.0 - 3.0 * delta)
+		var v: Vector3 = e["v"]
+		noeud.position += v * delta
+		if not e.has("texte"):
+			v.y -= 26.0 * delta          # les éclats retombent
+			e["v"] = v
+			if noeud.position.y < 0.12:
+				noeud.position.y = 0.12
+				e["v"] = Vector3(v.x * 0.4, -v.y * 0.35, v.z * 0.4)
+		var reste: float = clamp(float(e["t"]) / float(e["t0"]), 0.0, 1.0)
+		if noeud is Label3D:
+			(noeud as Label3D).modulate.a = reste
+		else:
+			noeud.scale = Vector3.ONE * max(0.05, reste)
 		restants.append(e)
 	_eclats = restants
 
 # ------------------------------------------------------- rendu
 
-func dessiner_scene() -> void:
-	draw_rect(ARENE, Color("#111110"), true)
-	var pas := 100
-	var x := int(ARENE.position.x)
-	while x <= int(ARENE.end.x):
-		draw_line(Vector2(x, ARENE.position.y), Vector2(x, ARENE.end.y), Color(1, 1, 1, 0.035), 1.0)
-		x += pas
-	var y := int(ARENE.position.y)
-	while y <= int(ARENE.end.y):
-		draw_line(Vector2(ARENE.position.x, y), Vector2(ARENE.end.x, y), Color(1, 1, 1, 0.035), 1.0)
-		y += pas
-	draw_rect(ARENE, Palette.CRITIQUE.darkened(0.3), false, 4.0)
-
-	for t in _taches:
-		draw_circle(t["p"], float(t["r"]), Color(Palette.BON.darkened(0.55), 0.5))
-
-	for m in _monstres:
-		_dessiner_monstre(m)
+func rafraichir_scene(delta: float) -> void:
+	_corps.position = Decor.vers3d(_position, 0.0)
+	_corps.rotation.y = -_angle
+	# Assiette : la voiture pique du nez au freinage et se cabre à
+	# l'accélération. Trois degrés suffisent à faire sentir la masse.
+	var assiette: float = clamp(_vitesse / VITESSE_MAX, -1.0, 1.0)
+	_corps.rotation.z = lerp(_corps.rotation.z, deg_to_rad(-assiette * 3.0), clamp(delta * 6.0, 0, 1))
+	if _sonne > 0.0:
+		_corps.rotation.z = sin(_sonne * 40.0) * 0.25
 
 	for cle in _autres:
 		var a: Dictionary = _autres[cle]
-		_dessiner_voiture(a["p"], float(a["a"]),
-			Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 1))),
-			String(joueurs.get(cle, {}).get("pseudo", "")))
-	_dessiner_voiture(_position, _angle, Palette.couleur_joueur(ma_place()), Session.pseudo)
+		var noeud: Node3D = a["noeud"]
+		noeud.position = Decor.vers3d(a["p"])
+		noeud.rotation.y = -float(a["a"])
 
-	for e in _eclats:
-		var opacite: float = clamp(float(e["t"]) / float(e["t0"]), 0.0, 1.0)
-		if e.has("texte"):
-			draw_string(Palette.police(), e["p"] + Vector2(-20, 0), String(e["texte"]),
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(e["c"], opacite))
-		else:
-			draw_circle(e["p"], 4.0 * opacite + 1.0, Color(e["c"], opacite))
+	for m in _monstres:
+		var noeud: Node3D = m.get("noeud")
+		if noeud == null:
+			noeud = _batir_monstre(int(m["type"]))
+			monde().add_child(noeud)
+			m["noeud"] = noeud
+		noeud.position = Decor.vers3d(m["p"])
+		# Ils sautillent, et se tournent vers là où ils vont : un monstre qui
+		# glisse sans bouger ne fait pas peur.
+		var corps := noeud.get_node_or_null("Corps") as Node3D
+		if corps:
+			corps.position.y = abs(sin(temps * 7.0 + float(int(m["id"])) * 1.3)) * 0.7 + 1.4
+		var vers: Vector2 = (m["cible"] as Vector2) - (m["p"] as Vector2) if m.has("cible") else Vector2.ZERO
+		if vers.length() > 1.0:
+			noeud.rotation.y = atan2(-vers.x, -vers.y) - PI * 0.5
 
-func _dessiner_monstre(m: Dictionary) -> void:
-	var type := int(m["type"])
-	var rayon: float = 20.0 if type == 0 else (32.0 if type == 1 else 16.0)
-	var couleur := Palette.BON if type == 0 else (Palette.SERIEUX if type == 1 else Palette.AVERTISSEMENT)
-	var p: Vector2 = m["p"]
-	draw_circle(p + Vector2(0, 5), rayon * 0.9, Color(0, 0, 0, 0.35))
-	draw_circle(p, rayon, couleur.darkened(0.35))
-	draw_arc(p, rayon, 0, TAU, 24, couleur, 2.0, true)
-	draw_circle(p + Vector2(-rayon * 0.32, -rayon * 0.2), rayon * 0.16, Palette.FOND)
-	draw_circle(p + Vector2(rayon * 0.32, -rayon * 0.2), rayon * 0.16, Palette.FOND)
+	_animer_effets(delta)
+	_placer_camera(delta)
 
-func _dessiner_voiture(position: Vector2, angle: float, couleur: Color, pseudo: String) -> void:
-	draw_set_transform(position, angle, Vector2.ONE)
-	draw_rect(Rect2(-30, -18, 60, 36), Color(0, 0, 0, 0.35), true)
-	draw_rect(Rect2(-28, -16, 56, 32), couleur, true)
-	draw_rect(Rect2(-28, -16, 56, 32), Palette.FOND, false, 2.0)
-	draw_rect(Rect2(2, -12, 16, 24), Palette.FOND.lightened(0.12), true)   # pare-brise
-	draw_rect(Rect2(26, -14, 8, 28), Palette.ENCRE_DOUCE, true)            # pare-buffle
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	if pseudo != "":
-		var police := Palette.police()
-		var largeur := police.get_string_size(pseudo, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-		draw_string(police, position + Vector2(-largeur * 0.5, -34), pseudo,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Palette.ENCRE_DOUCE)
-
-func _process(delta: float) -> void:
-	super._process(delta)
-	if _camera and phase != FIN:
-		_camera.position = _position
+func _placer_camera(delta: float) -> void:
+	if _camera == null:
+		return
+	var vise := Decor.viser(_camera, _position, INCLINAISON, DISTANCE)
+	if _secousse > 0.0:
+		_secousse = max(0.0, _secousse - delta * 2.0)
+		vise += Vector3(_rng.randf_range(-1, 1), _rng.randf_range(-1, 1), 0) * _secousse * 2.5
+	_camera.position = _camera.position.lerp(vise, clamp(delta * 7.0, 0, 1))

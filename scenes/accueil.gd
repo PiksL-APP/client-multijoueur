@@ -1,26 +1,31 @@
 extends Ecran
 ## Écran d'entrée : on choisit un pseudo, on regarde l'état de la connexion,
-## on entre dans le hub. Rien d'autre — le reste se découvre en jouant.
+## on entre dans le hub. Derrière le panneau, un portail tourne — le même objet
+## que dans le hub, pour que l'écran annonce ce qu'on va y trouver.
 
 var _champ: LineEdit
 var _bouton: Button
 var _etat: HBoxContainer
 var _avertissement: Label
+var _anneaux: Array[Node3D] = []
+var _t := 0.0
 
 func demarrer() -> void:
-	UI.fond(self)
-	_dessiner_decor()
+	_decor()
+	UI.fond(interface())
+	# Le fond 3D doit rester visible : le panneau se pose dessus, pas devant.
+	interface().get_child(0).color = Color(Palette.FOND, 0.0)
 
 	var centre := CenterContainer.new()
 	centre.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(centre)
+	interface().add_child(centre)
 
 	var panneau := UI.panneau()
 	centre.add_child(panneau)
 
 	var colonne := VBoxContainer.new()
 	colonne.add_theme_constant_override("separation", 14)
-	colonne.custom_minimum_size = Vector2(420, 0)
+	colonne.custom_minimum_size = Vector2(440, 0)
 	panneau.add_child(colonne)
 
 	colonne.add_child(UI.titre("Piks-l Multijoueur"))
@@ -30,7 +35,6 @@ func demarrer() -> void:
 		15, Palette.ENCRE_DOUCE, true))
 
 	var separation := HSeparator.new()
-	separation.add_theme_constant_override("separation", 10)
 	colonne.add_child(separation)
 
 	_champ = UI.champ("Votre pseudo", Session.pseudo)
@@ -56,12 +60,40 @@ func demarrer() -> void:
 	_champ.grab_focus()
 	_rafraichir()
 
-func _dessiner_decor() -> void:
-	# Un fond qui bouge à peine : le portail du hub, en veilleuse.
-	var anneau := Node2D.new()
-	anneau.position = Vector2(1060, 560)
-	anneau.set_script(preload("res://scenes/anneau.gd"))
-	add_child(anneau)
+func _decor() -> void:
+	poser_ambiance(false)
+	var cam := Decor.camera(28.0, 46.0, 46.0)
+	cam.position = Vector3(6.5, 12.0, 30.0)
+	cam.rotation_degrees = Vector3(-16, 12, 0)
+	monde().add_child(cam)
+	cam.make_current()
+
+	var socle := Decor.sol(Vector2(3000, 3000), 100.0)
+	socle.position = Vector3(0, -6, 0)
+	monde().add_child(socle)
+
+	# Trois anneaux concentriques posés à plat puis redressés : c'est la
+	# signature visuelle du portail, reprise telle quelle dans le hub.
+	var couleurs := [Palette.SERIE, Palette.SERIE.lightened(0.2), Palette.CRITIQUE]
+	for i in 3:
+		var support := Node3D.new()
+		support.position = Vector3(16.0, 1.0 + i * 0.6, -2.0)
+		var a := Decor.anneau(7.5 + i * 2.4, 0.28, couleurs[i], 2.2 - i * 0.5)
+		support.add_child(a)
+		monde().add_child(support)
+		_anneaux.append(support)
+
+	var noyau := Decor.sphere(3.0, Palette.SERIE)
+	noyau.material_override = Decor.matiere_lumineuse(Palette.SERIE, 1.1, 0.75)
+	noyau.position = Vector3(16.0, 1.6, -2.0)
+	monde().add_child(noyau)
+
+func _process(delta: float) -> void:
+	_t += delta
+	for i in _anneaux.size():
+		var n := _anneaux[i]
+		n.rotation.y = _t * (0.35 + i * 0.22)
+		n.rotation.x = deg_to_rad(78.0) + sin(_t * 0.5 + i) * 0.12
 
 func _rafraichir() -> void:
 	UI.rafraichir_etat_reseau(_etat)

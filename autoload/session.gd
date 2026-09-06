@@ -8,7 +8,8 @@ extends Node
 const FICHIER := "user://identite.cfg"
 const PSEUDO_MAX := 16
 
-var id: String = ""
+var id: String = ""      ## stable, gardé d'une visite à l'autre : sert aux scores
+var cle: String = ""     ## propre à cet onglet : sert au réseau
 var pseudo: String = ""
 
 func _ready() -> void:
@@ -19,6 +20,11 @@ func _ready() -> void:
 	if id.length() < 8:
 		id = _tirer_identifiant()
 		_ecrire()
+	# Deux onglets du même navigateur partagent `user://` — donc le même
+	# identifiant. Sans suffixe propre à l'onglet, le second écraserait la
+	# présence du premier et on ne pourrait pas se tester à deux sur une seule
+	# machine. Le score, lui, reste rattaché à `id`.
+	cle = id + "-" + _tirer_identifiant().substr(0, 4)
 
 func definir_pseudo(nouveau: String) -> void:
 	pseudo = nettoyer_pseudo(nouveau)
