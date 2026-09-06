@@ -13,8 +13,8 @@ const VITESSE := 340.0
 const CADENCE_ENVOI := 1.0 / 8.0
 const RAPPEL := 1.5           ## on redit sa position même à l'arrêt
 const RAYON := 18.0
-const INCLINAISON := 54.0
-const DISTANCE := 112.0
+const INCLINAISON := 50.0
+const DISTANCE := 66.0
 
 const PORTAILS := [
 	{
@@ -146,26 +146,26 @@ func _batir_portail(portail: Dictionary) -> void:
 	noyau.position = Vector3(0, 6.4, 0)
 	support.add_child(noyau)
 
-	var titre := Decor.etiquette(String(portail["titre"]), Color(Palette.ENCRE, 1.0 if ouvert else 0.45), 64)
-	titre.position = Vector3(0, 14.5, 0)
+	var titre := Decor.etiquette(String(portail["titre"]), Color(Palette.ENCRE, 1.0 if ouvert else 0.4), 72)
+	titre.position = Vector3(0, 17.0, 0)
 	support.add_child(titre)
 	var sous := Decor.etiquette(String(portail["sous_titre"]), Color(Palette.ENCRE_FAIBLE, 1.0 if ouvert else 0.45), 34)
-	sous.position = Vector3(0, 12.6, 0)
+	sous.position = Vector3(0, 14.2, 0)
 	support.add_child(sous)
 
 func _batir_avatar(couleur: Color, pseudo: String) -> Node3D:
 	var racine := Node3D.new()
-	var jambes := Decor.cylindre(RAYON * Decor.ECHELLE, 1.6, couleur.darkened(0.35))
-	jambes.position = Vector3(0, 0.8, 0)
+	var jambes := Decor.cylindre(RAYON * Decor.ECHELLE * 1.5, 2.4, couleur.darkened(0.35))
+	jambes.position = Vector3(0, 1.2, 0)
 	racine.add_child(jambes)
-	var buste := Decor.cylindre(RAYON * Decor.ECHELLE * 0.86, 1.8, couleur)
-	buste.position = Vector3(0, 2.5, 0)
+	var buste := Decor.cylindre(RAYON * Decor.ECHELLE * 1.3, 2.7, couleur)
+	buste.position = Vector3(0, 3.8, 0)
 	racine.add_child(buste)
-	var tete := Decor.sphere(RAYON * Decor.ECHELLE * 0.72, couleur.lightened(0.25))
-	tete.position = Vector3(0, 4.2, 0)
+	var tete := Decor.sphere(RAYON * Decor.ECHELLE * 1.1, couleur.lightened(0.25))
+	tete.position = Vector3(0, 6.2, 0)
 	racine.add_child(tete)
 	var nom := Decor.etiquette(pseudo, Palette.ENCRE_DOUCE, 34)
-	nom.position = Vector3(0, 6.2, 0)
+	nom.position = Vector3(0, 8.6, 0)
 	nom.name = "Nom"
 	racine.add_child(nom)
 	return racine
@@ -185,7 +185,7 @@ func _process(delta: float) -> void:
 	# rebondit légèrement. Sans ça, un cylindre qui glisse ne marche pas.
 	if direction != Vector2.ZERO:
 		_corps.rotation.y = atan2(-direction.x, -direction.y)
-		_corps.position.y = abs(sin(_t * 11.0)) * 0.35
+		_corps.position.y = abs(sin(_t * 11.0)) * 0.5
 		_corps.rotation.x = deg_to_rad(6.0)
 	else:
 		_corps.rotation.x = lerp(_corps.rotation.x, 0.0, delta * 8.0)

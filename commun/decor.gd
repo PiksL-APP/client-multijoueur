@@ -26,15 +26,21 @@ static func matiere(couleur: Color, rugosite: float = 0.65, metal: float = 0.0) 
 ## Matière lumineuse : le portail, les dalles actives, les traînées. L'émission
 ## ne dépend pas de la lumière, donc ces éléments restent lisibles même dans
 ## l'ombre — c'est ce qui fait qu'un portail se repère de loin.
-## `force` reste sous 1,3 : au-delà, l'émission sature vers le blanc et la
-## couleur du portail — donc son identité — disparaît.
+## Une matière qui ignore l'éclairage et rend EXACTEMENT sa couleur.
+##
+## L'émission d'une matière ordinaire s'ajoute à l'albédo : un anneau
+## #3987e5 émettant #3987e5 ressort en cyan pâle, et le portail perd la
+## couleur qui l'identifie. Sans éclairage à calculer, la teinte de la palette
+## arrive intacte à l'écran — c'est aussi moins cher.
 static func matiere_lumineuse(couleur: Color, force: float = 1.0, opacite: float = 1.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(couleur, opacite)
-	m.emission_enabled = true
-	m.emission = couleur
-	m.emission_energy_multiplier = force
-	m.roughness = 0.4
+	var teinte := couleur
+	if force < 1.0:
+		teinte = couleur.darkened(1.0 - force)
+	elif force > 1.0:
+		teinte = couleur.lightened(min(0.35, (force - 1.0) * 0.3))
+	m.albedo_color = Color(teinte, opacite)
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	if opacite < 1.0:
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	return m
@@ -188,6 +194,6 @@ static func etiquette(texte: String, couleur: Color = Palette.ENCRE_DOUCE, taill
 	e.outline_modulate = Color(0, 0, 0, 0.85)
 	e.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	e.no_depth_test = true
-	e.pixel_size = 0.012
+	e.pixel_size = 0.022
 	e.fixed_size = false
 	return e

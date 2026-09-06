@@ -20,7 +20,7 @@ const BRAQUAGE := 2.9
 const RAYON_VOITURE := 26.0
 
 const INCLINAISON := 52.0
-const DISTANCE := 118.0
+const DISTANCE := 88.0
 
 const SEUIL_ECRASEMENT := 210.0    ## en dessous, on pousse le monstre sans l'écraser
 const CADENCE_VOITURE := 1.0 / 12.0
