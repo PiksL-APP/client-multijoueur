@@ -448,6 +448,21 @@ for y in range(HAUTEUR):
                 bord = alpha_min(bord, autre)
             sol.alpha_composite(bord, (x * T, y * T))
 
+# La falaise du nord : le village est adossé à un plateau. Le kit de parois
+# du pack donne le dessus du plateau, la paroi, et son pied dans l'herbe ;
+# sept rangées de cases, tout en haut de la carte.
+parois = ouvrir("Environment/Tilesets/Wall_Tiles.png")
+FALAISE = 7                        # rangées occupées par le plateau et sa paroi
+for y in range(FALAISE):
+    for x in range(LARGEUR):
+        if y < 2:
+            gy = 1 + (y + x) % 3          # le dessus, uni
+        elif y < 5:
+            gy = 5 + (y - 2)              # la paroi
+        else:
+            gy = 8 + (y - 5)              # le pied, puis son fondu dans l'herbe
+        sol.alpha_composite(case(parois, (1 + x % 4) * T, gy * T, T, T), (x * T, y * T))
+
 # ------------------------------------------------------------------ les objets
 # Chaque objet : son image, la case de son coin haut-gauche, et son emprise
 # au sol (les cases qu'il bloque, relatives à son coin). L'image est posée
@@ -602,7 +617,9 @@ hasard = random.Random(20260907)
 
 def libre(image, cx, cy):
     l, h = TAILLES[image]
-    if cx < 0 or cy < 0 or cx + l > LARGEUR or cy + h > HAUTEUR:
+    # Un arbre peut dépasser du haut de la carte : la caméra ne monte
+    # jamais au-dessus de zéro, sa cime n'y est jamais vue.
+    if cx < 0 or cy + h < 2 or cy < -4 or cx + l > LARGEUR or cy + h > HAUTEUR:
         return False
     return all((cx + x, cy + y) not in occupe for (x, y) in emprise_visuelle(image))
 
@@ -617,14 +634,25 @@ while plantes < 420 and essais < 60000:
     essais += 1
     image = arbre()
     l, h = TAILLES[image]
-    cx, cy = hasard.randrange(LARGEUR - l + 1), hasard.randrange(HAUTEUR - h + 1)
+    cx, cy = hasard.randrange(LARGEUR - l + 1), hasard.randrange(-4, HAUTEUR - h + 1)
     pied = (cx + 1, cy + h - 1)
-    if dans_la_clairiere(*pied):
+    if pied[1] < 0 or dans_la_clairiere(*pied) or 2 <= pied[1] < FALAISE + 1:
         continue
     if not libre(image, cx, cy):
         continue
     poser(image, cx, cy)
     plantes += 1
+# Sur le plateau : des rochers et des buissons bas, entre les arbres.
+essais = 0
+haut = 0
+while haut < 16 and essais < 3000:
+    essais += 1
+    image = hasard.choice(["rocher_moyen_0.png", "rocher_moyen_1.png", "buisson_petit_0.png", "buisson_petit_2.png", "rocher_petit_0.png"])
+    cx = hasard.randrange(LARGEUR - 2)
+    cy = 0 if TAILLES[image][1] == 2 else hasard.randrange(0, 2)
+    if libre(image, cx, cy):
+        poser(image, cx, cy)
+        haut += 1
 # Des bosquets dans les coins de la clairière, et des buissons épars.
 for image, x, y in (("arbre_0.png", 6, 9), ("pin_1.png", 9, 10), ("arbre_2.png", 55, 9),
                     ("pin_0.png", 52, 10), ("arbre_1.png", 6, 43), ("pin_2.png", 54, 42),
@@ -646,7 +674,7 @@ plantes_sol = [case(vegetation, x * T, y * T, T, T) for (x, y) in ((4, 9), (0, 9
 fleurs = [case(vegetation, x * T, y * T, T, T) for y in (23, 24, 25) for x in (3, 4, 6, 7)]
 for _ in range(260):
     x, y = hasard.randrange(LARGEUR), hasard.randrange(HAUTEUR)
-    if (x, y) in trou or (x, y) in occupe or not dans_la_clairiere(x, y):
+    if (x, y) in trou or (x, y) in occupe or not dans_la_clairiere(x, y) or y < FALAISE:
         continue
     sol.alpha_composite(hasard.choice(plantes_sol) if hasard.random() < 0.6 else hasard.choice(fleurs), (x * T, y * T))
 # Les ombres au sol, cuites dans l'image : le pack les dessine comme des
