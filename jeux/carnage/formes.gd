@@ -14,6 +14,8 @@ const MODELES_ARMES := {
 	"mitraillette": "res://modeles/creatures/blaster-repeater.glb",
 	"roquette": "res://modeles/creatures/blaster.glb",
 	"eperon": "res://modeles/personnages/coin.glb",
+	"vie": "res://modeles/personnages/coin.glb",
+	"argent": "res://modeles/personnages/coin.glb",
 }
 const MUR_BAS := "res://modeles/creatures/wall-low.glb"
 const MUR_HAUT := "res://modeles/creatures/wall-high.glb"
@@ -361,6 +363,52 @@ static func barrage() -> Node3D:
 	gyro.position = Vector3(0, 2.4, 0)
 	gyro.name = "Gyro"
 	racine.add_child(gyro)
+	return racine
+
+## L'hélicoptère de la police : une cellule, une queue, un rotor qui tourne et un
+## projecteur au sol. Le projecteur est ce qui compte : c'est lui qu'on voit
+## arriver de loin sur la chaussée, avant même d'entendre les pales.
+static func helico() -> Node3D:
+	var racine := Node3D.new()
+	var corps := Node3D.new()
+	corps.name = "Cellule"
+	corps.position = Vector3(0, 26.0, 0)
+	var cellule := Decor.boite(Vector3(3.6, 1.6, 1.8), Palette.SERIE.darkened(0.55))
+	cellule.position = Vector3(0, 0, 0)
+	corps.add_child(cellule)
+	var queue := Decor.boite(Vector3(3.4, 0.5, 0.5), Palette.SERIE.darkened(0.55))
+	queue.position = Vector3(-3.2, 0.3, 0)
+	corps.add_child(queue)
+	var rotor := Node3D.new()
+	rotor.name = "Rotor"
+	rotor.position = Vector3(0, 1.1, 0)
+	for i in 2:
+		var pale := Decor.boite(Vector3(7.0, 0.08, 0.4), Palette.ENCRE_FAIBLE, false)
+		pale.rotation.y = PI * 0.5 * float(i)
+		rotor.add_child(pale)
+	corps.add_child(rotor)
+	var feu := Decor.sphere(0.35, Palette.SERIE, false)
+	feu.material_override = Decor.matiere_lumineuse(Palette.SERIE, 1.6)
+	feu.position = Vector3(0, -0.9, 0)
+	feu.name = "Feu"
+	corps.add_child(feu)
+	racine.add_child(corps)
+
+	# Le faisceau : un cône de voile du ciel au sol, et une flaque de lumière.
+	var faisceau := MeshInstance3D.new()
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.6
+	cone.bottom_radius = 7.0
+	cone.height = 26.0
+	faisceau.mesh = cone
+	faisceau.material_override = Decor.matiere_voile(Palette.ENCRE, 0.09)
+	faisceau.position = Vector3(0, 13.0, 0)
+	faisceau.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	racine.add_child(faisceau)
+	var flaque := Decor.cylindre(7.0, 0.06, Palette.ENCRE, false)
+	flaque.material_override = Decor.matiere_lumineuse(Palette.ENCRE, 0.5, 0.35)
+	flaque.position = Vector3(0, 0.08, 0)
+	racine.add_child(flaque)
 	return racine
 
 ## Une caisse d'arme : un socle lumineux au sol, l'objet qui flotte au-dessus.

@@ -96,6 +96,30 @@ const ARMES := {
 }
 const DUREE_EPERON := 16.0
 
+## Toutes les voitures ne se conduisent pas pareil : la sportive file, le
+## camion pèse et encaisse, la police pousse. Sans ça, voler une voiture ne
+## change que la peinture — et on ne vole plus rien.
+## v : vitesse de pointe, a : accélération, t : solidité de la tôle.
+const CARACTERES := {
+	-1: {"v": 1.0, "a": 1.0, "t": 1.0},     # la Volvo
+	0: {"v": 1.0, "a": 1.0, "t": 1.0},      # berline
+	1: {"v": 1.2, "a": 1.18, "t": 0.75},    # berline sport
+	2: {"v": 1.14, "a": 1.22, "t": 0.7},    # compacte sport
+	3: {"v": 0.96, "a": 0.95, "t": 1.25},   # 4x4
+	4: {"v": 1.05, "a": 1.0, "t": 1.15},    # 4x4 de luxe
+	5: {"v": 1.0, "a": 1.05, "t": 0.9},     # taxi
+	6: {"v": 0.9, "a": 0.85, "t": 1.3},     # fourgon
+	7: {"v": 0.82, "a": 0.72, "t": 1.6},    # camion de livraison
+	8: {"v": 0.78, "a": 0.68, "t": 1.8},    # camion
+	9: {"v": 1.12, "a": 1.1, "t": 1.0},     # police
+}
+
+## Le butin qui n'est pas une arme : une trousse rend cinquante points de vie,
+## un billet vaut quarante dollars — comptés par l'hôte, comme tout le reste.
+const COULEURS_BUTIN := {"vie": Palette.BON, "argent": Palette.AVERTISSEMENT}
+const SOIN_TROUSSE := 50.0
+const KLAXON_DELAI := 0.9
+
 ## Identifiant de la voiture de départ. Elle n'appartient à personne dans la
 ## liste de l'hôte tant qu'on ne l'a pas quittée : le premier `sortir` la lui
 ## fait découvrir. Le nombre est haut pour ne jamais croiser un identifiant
@@ -129,6 +153,9 @@ var _garage_en_cours := -1
 var _cabine_en_cours := -1
 var _contrat: Dictionary = {}
 var _depuis_sirene := 0.0
+var _depuis_klaxon := 0.0
+var _depuis_battement := 0.0
+var _cible_contrat: Dictionary = {}
 var _hud_contrat: Label
 var _radar: Control
 var _hud_banniere: Label
@@ -158,7 +185,7 @@ func duree_manche() -> float:
 	return DUREE
 
 func aide() -> String:
-	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · caisse = arme · garage bleu = étoiles effacées · cabine jaune = contrat · cercle rouge = tir ami"
+	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · H : klaxon · caisse = arme, trousse ou billet · garage bleu = étoiles effacées · cabine jaune = contrat · cercle rouge = tir ami"
 
 # ------------------------------------------------------- mise en place
 
@@ -229,6 +256,17 @@ func preparer() -> void:
 	monde().add_child(_camera)
 	_camera.make_current()
 	Tactile.mode = Tactile.CONDUITE
+
+	# `--banc-etoiles=N` : partir déjà recherché. Attendre qu'un pilote au hasard
+	# gagne cinq étoiles pour voir l'hélicoptère, c'est attendre une manche sur
+	# quatre — la police et l'hélicoptère se vérifient en trente secondes avec ça.
+	if Commandes.pilote_automatique:
+		for argument in OS.get_cmdline_args():
+			if String(argument).begins_with("--banc-etoiles="):
+				var niveau := int(String(argument).substr(15))
+				if niveau > 0:
+					ville.chaleur[Session.cle] = float(VilleVivante.PALIERS[min(niveau, 5) - 1]) + 40.0
+					ville._depuis_crime[Session.cle] = 0.0
 
 ## La carrosserie qu'on conduit : la Volvo au départ, puis ce qu'on a volé. On
 ## reconstruit le nœud plutôt que d'en garder dix cachés — une voiture volée
@@ -315,6 +353,7 @@ func simuler_local(delta: float) -> void:
 		_marcher(delta)
 	else:
 		_conduire(delta)
+		_klaxonner(delta)
 	_tirer(delta)
 	_surveiller_les_lieux(delta)
 
@@ -380,6 +419,7 @@ func _piloter_pour_le_banc() -> void:
 
 	Commandes.direction_simulee = _viser(_but_du_banc())
 	Commandes.tir_simule = true
+	Commandes.klaxon_simule = fmod(temps, 9.0) < 0.3
 
 ## Ce que vise le pilote du banc. Tant qu'il n'a pas de contrat, il va
 ## décrocher : sans ce détour, une cabine sur vingt-six par vingt tuiles n'est
@@ -517,8 +557,9 @@ func _conduire(delta: float) -> void:
 		_vitesse = move_toward(_vitesse, 0.0, FREIN * delta * 0.5)
 	else:
 		var commande := Commandes.conduite()
+		var fiche: Dictionary = CARACTERES.get(_modele_vehicule, CARACTERES[-1])
 		if commande.y > 0.1:
-			_vitesse = min(_vitesse + ACCELERATION * delta, VITESSE_MAX)
+			_vitesse = min(_vitesse + ACCELERATION * float(fiche["a"]) * delta, VITESSE_MAX * float(fiche["v"]))
 		elif commande.y < -0.1:
 			_vitesse = max(_vitesse - FREIN * delta, VITESSE_ARRIERE)
 		else:
@@ -536,6 +577,19 @@ func _conduire(delta: float) -> void:
 	_heurter_les_murs()
 	_surveiller_la_friche(delta)
 	Sons.regime(clamp(abs(_vitesse) / VITESSE_MAX, 0.0, 1.0))
+
+## Le klaxon fait fuir les passants — c'est son seul effet, et c'est déjà
+## beaucoup : c'est le moyen de traverser une foule sans l'écraser, ou de la
+## rabattre vers un coéquipier.
+func _klaxonner(delta: float) -> void:
+	_depuis_klaxon -= delta
+	if _hors_service > 0.0 or not Commandes.klaxon() or _depuis_klaxon > 0.0:
+		return
+	_depuis_klaxon = KLAXON_DELAI
+	Sons.jouer("klaxon", _rng.randf_range(0.96, 1.04), -9.0)
+	canal.envoyer("klx", {"x": int(_position.x), "y": int(_position.y)})
+	if est_hote():
+		ville.paniquer(_position, 280.0, 1.8)
 
 ## Un mur ne stoppe pas : il fait GLISSER. On ne perd que la part de vitesse
 ## qu'on a mise dedans, et la voiture se réaligne sur la façade quand on la
@@ -559,7 +613,7 @@ func _heurter_les_murs() -> void:
 		_secousse = max(_secousse, 0.28)
 		# La tôle s'abîme : une voiture qu'on maltraite finit par exploser,
 		# et c'est ce qui donne un sens au garage.
-		_pv_vehicule = max(0.0, _pv_vehicule - abs(_vitesse) * 0.012)
+		_pv_vehicule = max(0.0, _pv_vehicule - abs(_vitesse) * 0.012 / _solidite())
 		if _pv_vehicule <= 0.0:
 			_vehicule_detruit()
 	_vitesse *= lerp(0.95, 0.28, frontal)
@@ -568,6 +622,9 @@ func _heurter_les_murs() -> void:
 	if tangente.dot(direction) < 0.0:
 		tangente = -tangente
 	_angle = lerp_angle(_angle, tangente.angle(), (1.0 - frontal) * 0.4)
+
+func _solidite() -> float:
+	return float(CARACTERES.get(_modele_vehicule, CARACTERES[-1])["t"])
 
 func _regenerer(delta: float) -> void:
 	_depuis_coup += delta
@@ -639,6 +696,7 @@ func _tirer(delta: float) -> void:
 	# Tirer en ville, ça s'entend. La police n'a pas besoin de voir le corps.
 	if est_hote():
 		ville.crime(Session.cle, "coup_de_feu")
+		ville.paniquer(_position, 320.0, 2.2)
 		_vider_les_evenements()
 	if _munitions == 0:
 		_reprendre_le_pistolet()
@@ -727,9 +785,10 @@ func _ramasser_caisses() -> void:
 			continue
 		canal.envoyer("ramasse", {"id": int(caisse["id"])})
 		if est_hote():
-			var arme := ville.retirer_caisse(int(caisse["id"]))
+			var arme := ville.retirer_caisse(int(caisse["id"]), Session.cle)
 			if arme != "":
 				_accorder(Session.cle, arme)
+			_vider_les_evenements()
 		return
 
 func _accorder(cle: String, arme: String) -> void:
@@ -740,6 +799,10 @@ func _accorder(cle: String, arme: String) -> void:
 func _equiper(arme: String) -> void:
 	if arme == "eperon":
 		_eperon = DUREE_EPERON
+	elif arme == "vie":
+		_vie = min(VIE_MAX, _vie + SOIN_TROUSSE)
+	elif arme == "argent":
+		pass    # compté par l'hôte, arrive par « k »
 	else:
 		_arme = arme
 		_munitions = int(ARMES[arme]["munitions"])
@@ -813,6 +876,7 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 				return
 			if est_hote():
 				ville.crime(String(charge.get("cle", "")), "coup_de_feu")
+				ville.paniquer(Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))), 320.0, 2.2)
 				_vider_les_evenements()
 			_creer_projectile(
 				Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
@@ -841,9 +905,10 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 				_vider_les_evenements()
 		"ramasse":
 			if est_hote():
-				var arme := ville.retirer_caisse(int(charge.get("id", -1)))
+				var arme := ville.retirer_caisse(int(charge.get("id", -1)), String(charge.get("cle", "")))
 				if arme != "":
 					_accorder(String(charge.get("cle", "")), arme)
+				_vider_les_evenements()
 		_:
 			_appliquer(evenement, charge)
 
@@ -892,15 +957,31 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 				print("[banc] contrat %s : %s" % [etat, String(charge.get("t", ""))])
 			if etat == "gagne":
 				_contrat = {}
+				_cible_contrat = {}
 				Sons.jouer("fin", 1.15, -5.0)
 			elif etat == "perdu":
 				_contrat = {}
+				_cible_contrat = {}
 				Sons.jouer("choc", 0.55, -12.0)
 			else:
 				_contrat = {"t": String(charge.get("t", "")), "n": int(charge.get("n", 0)),
 					"a": int(charge.get("a", 0)), "r": float(charge.get("r", 0))}
+				_cible_contrat = {"k": String(charge.get("k", "")), "g": int(charge.get("g", -1))}
 				if etat == "pris":
 					Sons.jouer("portail", 1.3, -9.0)
+		"klx":
+			var ou := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
+			var loin: float = ou.distance_to(_position)
+			if loin < 1300.0:
+				Sons.jouer("klaxon", _rng.randf_range(0.9, 1.1), -12.0 - loin * 0.012)
+			if est_hote():
+				ville.paniquer(ou, 260.0, 1.6)
+		"helico":
+			if Commandes.pilote_automatique:
+				print("[banc] hélicoptère lancé sur %s" % String(charge.get("j", "")))
+			if String(charge.get("j", "")) == Session.cle:
+				_annoncer("HÉLICOPTÈRE — filez au garage", Palette.CRITIQUE, 4.0)
+				Sons.jouer("sirene", 0.7, -6.0)
 		"peint":
 			if String(charge.get("j", "")) == Session.cle:
 				Sons.jouer("fin", 1.2, -10.0)
@@ -974,7 +1055,7 @@ func _encaisser(degats: float, cause: String, par: String) -> void:
 	_vie -= max(1.0, degats) * (FRAGILITE_A_PIED if _pied else 1.0)
 	if not _pied:
 		_vitesse *= 0.35
-		_pv_vehicule = max(0.0, _pv_vehicule - degats * 0.6)
+		_pv_vehicule = max(0.0, _pv_vehicule - degats * 0.6 / _solidite())
 	_secousse = max(_secousse, 0.5)
 	if _vie <= 0.0:
 		_tomber()
@@ -1040,7 +1121,12 @@ func _relever() -> void:
 
 func _effet_gain(position: Vector2, points: int, facteur: int, cle: String, quoi: String) -> void:
 	var couleur := Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 0)))
-	Sons.jouer("ecrasement", _rng.randf_range(0.85, 1.2), -8.0)
+	if quoi == "argent" or quoi == "contrat":
+		Sons.jouer("depart", 1.4, -10.0)
+	else:
+		Sons.jouer("ecrasement", _rng.randf_range(0.85, 1.2), -8.0)
+	if quoi == "pieton":
+		Sons.jouer("cri", _rng.randf_range(0.8, 1.25), -11.0)
 
 	if quoi == "pieton" or quoi == "gang" or quoi == "flic":
 		# Une flaque au sol, bien plus sombre que la foule : à la même teinte,
@@ -1125,6 +1211,7 @@ func rafraichir_scene(delta: float) -> void:
 	_placer_la_foule()
 	_placer_les_autos()
 	_placer_les_objets()
+	_placer_les_helicos(delta)
 	_animer_effets(delta)
 	_placer_camera(delta)
 	_animer_les_cabines()
@@ -1135,6 +1222,13 @@ func rafraichir_scene(delta: float) -> void:
 
 ## Le nom du quartier quand on en change. Trois secondes, puis plus rien : une
 ## bannière permanente serait un panneau de plus dans un écran déjà chargé.
+func _annoncer(texte: String, couleur: Color, duree: float) -> void:
+	if _hud_banniere == null:
+		return
+	_hud_banniere.text = texte
+	_hud_banniere.add_theme_color_override("font_color", couleur)
+	_banniere_reste = duree
+
 func _rafraichir_banniere(delta: float) -> void:
 	if _hud_banniere == null:
 		return
@@ -1143,14 +1237,15 @@ func _rafraichir_banniere(delta: float) -> void:
 	if territoire != _territoire_vu or quartier != _quartier_vu:
 		_territoire_vu = territoire
 		_quartier_vu = quartier
-		var texte := carte.nom_du_quartier(_position).capitalize()
-		var couleur := Palette.ENCRE_DOUCE
-		if territoire >= 0:
-			texte += " — chez %s" % carte.nom_du_gang(territoire)
-			couleur = carte.couleur_du_gang(territoire)
-		_hud_banniere.text = texte
-		_hud_banniere.add_theme_color_override("font_color", couleur)
-		_banniere_reste = 3.2
+		# Une annonce plus pressante (l'hélicoptère) ne se fait pas couvrir par
+		# le nom d'un quartier.
+		if _banniere_reste < 1.0:
+			var texte := carte.nom_du_quartier(_position).capitalize()
+			var couleur := Palette.ENCRE_DOUCE
+			if territoire >= 0:
+				texte += " — chez %s" % carte.nom_du_gang(territoire)
+				couleur = carte.couleur_du_gang(territoire)
+			_annoncer(texte, couleur, 3.2)
 	_banniere_reste -= delta
 	_hud_banniere.modulate.a = clamp(_banniere_reste / 0.8, 0.0, 1.0)
 
@@ -1175,6 +1270,7 @@ func _rafraichir_radar() -> void:
 		if int(auto["genre"]) == VilleVivante.PATROUILLE:
 			bleus.append(auto["p"])
 	_radar.patrouilles = bleus
+	_radar.cible = _cible_contrat
 	_radar.queue_redraw()
 
 ## Le halo d'une cabine clignote tant qu'on n'a pas de contrat en main. Une
@@ -1349,7 +1445,8 @@ func _placer_les_objets() -> void:
 		var noeud = caisse.get("noeud")
 		if noeud == null:
 			var arme := String(caisse["arme"])
-			noeud = FormesCarnage.caisse(arme, ARMES.get(arme, ARMES["pistolet"])["couleur"])
+			noeud = FormesCarnage.caisse(arme, COULEURS_BUTIN[arme] if COULEURS_BUTIN.has(arme)
+				else ARMES.get(arme, ARMES["pistolet"])["couleur"])
 			monde().add_child(noeud)
 			caisse["noeud"] = noeud
 		(noeud as Node3D).position = Decor.vers3d(caisse["p"])
@@ -1379,6 +1476,38 @@ func _demarche(porteur: Node3D, nom: String) -> void:
 		return
 	_demarches[porteur.get_instance_id()] = nom
 	Decor.demarche(porteur, nom)
+
+## L'hélicoptère : il glisse vers sa dernière position connue, son rotor tourne,
+## et on entend ses pales quand il est proche — c'est ce qui dit qu'il est là
+## avant qu'on lève les yeux, ce que la caméra ne permet pas.
+func _placer_les_helicos(delta: float) -> void:
+	var proche_de_moi := false
+	for h in ville.helicos:
+		var noeud = h.get("noeud")
+		if noeud == null:
+			noeud = FormesCarnage.helico()
+			monde().add_child(noeud)
+			h["noeud"] = noeud
+		if not est_hote():
+			h["p"] = (h["p"] as Vector2).lerp(h.get("cible", h["p"]) if h.get("cible", "") is Vector2 else h["p"], clamp(delta * 8.0, 0, 1))
+		var corps: Node3D = noeud
+		corps.position = Decor.vers3d(h["p"])
+		var cellule := corps.get_node_or_null("Cellule") as Node3D
+		if cellule:
+			cellule.rotation.y = -float(h.get("cap", 0.0))
+			var rotor := cellule.get_node_or_null("Rotor") as Node3D
+			if rotor:
+				rotor.rotation.y += delta * 28.0
+			var feu := cellule.get_node_or_null("Feu") as Node3D
+			if feu:
+				feu.visible = fmod(temps, 0.5) > 0.25
+		if (h["p"] as Vector2).distance_to(_position) < 900.0:
+			proche_de_moi = true
+	if proche_de_moi:
+		_depuis_battement -= delta
+		if _depuis_battement <= 0.0:
+			_depuis_battement = 0.36
+			Sons.jouer("battement", 1.0, -14.0)
 
 ## La jauge est fille de son porteur : sans compenser la rotation, elle
 ## tournerait avec lui et deviendrait illisible dès le premier virage.

@@ -22,6 +22,7 @@ var ma_couleur := Palette.ENCRE
 var autres: Array = []        ## {p: Vector2, couleur: Color}
 var patrouilles: Array = []   ## Vector2
 var etoiles := 0
+var cible: Dictionary = {}    ## {k: genre du contrat, g: gang visé} — ce qu'il faut aller chercher
 
 func _draw() -> void:
 	if carte == null:
@@ -67,6 +68,19 @@ func _draw() -> void:
 		_pastille(_vers_plan(centre_garage, etendue), 4.0, Palette.SERIE)
 	for centre_cabine: Vector2 in carte.cabines():
 		_pastille(_vers_plan(centre_cabine, etendue), 3.0, Palette.AVERTISSEMENT)
+
+	# La cible du contrat clignote : les repaires du gang à nettoyer, ou les
+	# garages où livrer. Un contrat sans cible sur le plan, c'est un chrono qui
+	# tourne pendant qu'on cherche.
+	if not cible.is_empty() and fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.5:
+		var genre := String(cible.get("k", ""))
+		if genre == "nettoyage":
+			for r in carte.repaires:
+				if int(r["gang"]) == int(cible.get("g", -1)):
+					draw_arc(_vers_plan(r["p"], etendue), 8.0, 0, TAU, 16, Palette.AVERTISSEMENT, 2.0)
+		elif genre == "livraison":
+			for g: Vector2 in carte.garages():
+				draw_arc(_vers_plan(g, etendue), 8.0, 0, TAU, 16, Palette.AVERTISSEMENT, 2.0)
 
 	for p: Vector2 in patrouilles:
 		_pastille(_vers_plan(p, etendue), 2.5, Palette.SERIE.lightened(0.3))

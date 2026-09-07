@@ -56,6 +56,15 @@ static func action_declenchee() -> bool:
 	_action_avant = maintenant
 	return front
 
+## Le klaxon : H, ou le bouton d'action tenu au volant plus d'un instant.
+## Tenu, pas déclenché : un klaxon se module.
+static var klaxon_simule := false
+
+static func klaxon() -> bool:
+	if pilote_automatique:
+		return klaxon_simule
+	return Input.is_physical_key_pressed(KEY_H)
+
 ## Pour la conduite : x = braquage (-1 à gauche), y = accélération (-1 en
 ## marche arrière). Non normalisé — accélérer en tournant ne doit pas coûter
 ## de la vitesse.

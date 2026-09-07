@@ -727,7 +727,13 @@ func _animer_les_helicos(delta: float, joueurs: Dictionary) -> void:
 	var restants: Array = []
 	for h in helicos:
 		var cle := String(h["cible"])
-		if not joueurs.has(cle) or etoiles(cle) < 5:
+		if not joueurs.has(cle) and etoiles(cle) >= 5:
+			# Le joueur est à terre : l'hélicoptère fait du surplace et attend
+			# qu'il se relève. Repartir puis revenir, c'était trois annonces
+			# « hélicoptère » en trente secondes.
+			restants.append(h)
+			continue
+		if etoiles(cle) < 5:
 			# Plus recherché à ce point : il rentre à la base. On le laisse
 			# filer plutôt que de le faire disparaître d'un coup.
 			h["p"] = Vector2(h["p"]) + Vector2.RIGHT.rotated(float(h.get("cap", 0.0))) * VITESSE_HELICO * delta
@@ -984,6 +990,7 @@ func _diffuser_contrat(cle: String, etat: String) -> void:
 		"j": cle, "e": etat,
 		"t": String(c.get("texte", "")), "n": int(c.get("objectif", 0)),
 		"a": int(c.get("fait", 0.0)), "r": int(ceil(float(c.get("reste", 0.0)))),
+		"k": String(c.get("genre", "")), "g": int(c.get("rival", -1)),
 	})
 
 func _avancer_contrats(delta: float, joueurs: Dictionary) -> void:

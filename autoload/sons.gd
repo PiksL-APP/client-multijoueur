@@ -101,6 +101,12 @@ func _fabriquer_banque() -> void:
 	var sirene := _glissando(720.0, 1180.0, 0.30, 0.30)
 	sirene.append_array(_glissando(1180.0, 720.0, 0.30, 0.30))
 	_banque["sirene"] = _rendre(sirene, 0.60)
+	# Le klaxon : deux notes tenues, une tierce — un seul son carré se prend pour
+	# une alarme. Le cri : un glissando qui tombe. Le battement : la pale de
+	# l'hélicoptère, un coup sourd qu'on répète.
+	_banque["klaxon"] = _rendre(_accord([349.0, 440.0], 0.28, 0.42), 0.28)
+	_banque["cri"] = _rendre(_glissando(980.0, 420.0, 0.34, 0.30), 0.34)
+	_banque["battement"] = _rendre(_impact(62.0, 0.12, 0.75), 0.12)
 	_banque["moteur"] = _rendre_boucle(_moteur_echantillon(), 0.5)
 
 func _enveloppe(i: int, total: int, attaque: float, extinction: float) -> float:
