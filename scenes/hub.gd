@@ -14,12 +14,12 @@ const CADENCE_ENVOI := 1.0 / 8.0
 const RAPPEL := 1.5           ## on redit sa position même à l'arrêt
 const RAYON := 18.0
 const INCLINAISON := 50.0
-const DISTANCE := 66.0
+const DISTANCE := 52.0
 
 const PORTAILS := [
 	{
-		"jeu": "carnage", "titre": "CARNAGE", "sous_titre": "Voitures contre monstres",
-		"detail": "2 à 4 joueurs · 2 minutes · écraser rapporte",
+		"jeu": "carnage", "titre": "CARNAGE", "sous_titre": "Ville ouverte, voitures et armes",
+		"detail": "2 à 4 joueurs · 2 min 30 · écraser, tirer, ramasser des caisses",
 		"position": Vector2(700, 520), "couleur": Palette.CRITIQUE, "ouvert": true,
 	},
 	{
@@ -68,11 +68,16 @@ func demarrer() -> void:
 	if _canal.est_rejoint:
 		_canal.suivre({"pseudo": Session.pseudo, "id": Session.id})
 
+	Tactile.mode = Tactile.MARCHE
+	Tactile.action.connect(_franchir)
+
 	Scores.classement_recu.connect(_sur_classement)
 	Scores.demander_classement("carnage", 3)
 	Scores.demander_classement("enigme", 3)
 
 func _exit_tree() -> void:
+	if Tactile.action.is_connected(_franchir):
+		Tactile.action.disconnect(_franchir)
 	if _canal:
 		_canal.quitter()
 
@@ -219,10 +224,16 @@ func _placer_camera(delta: float) -> void:
 
 func _unhandled_input(evenement: InputEvent) -> void:
 	if evenement is InputEventKey and evenement.pressed and not evenement.echo:
-		if evenement.keycode == KEY_E and _portail_proche >= 0:
-			var portail: Dictionary = PORTAILS[_portail_proche]
-			if portail["ouvert"]:
-				demande_ecran.emit("salon", {"jeu": portail["jeu"], "titre": portail["titre"]})
+		if evenement.keycode == KEY_E:
+			_franchir()
+
+func _franchir() -> void:
+	if _portail_proche < 0 or not is_inside_tree():
+		return
+	var portail: Dictionary = PORTAILS[_portail_proche]
+	if portail["ouvert"]:
+		Sons.jouer("portail", 1.0, -8.0)
+		demande_ecran.emit("salon", {"jeu": portail["jeu"], "titre": portail["titre"]})
 
 func _chercher_portail() -> void:
 	var avant := _portail_proche
@@ -336,7 +347,7 @@ func _rafraichir_hud() -> void:
 	var portail: Dictionary = PORTAILS[_portail_proche]
 	_hud_titre.text = String(portail["titre"]) + " — " + String(portail["sous_titre"])
 	_hud_detail.text = String(portail["detail"])
-	_hud_invite.text = "E — franchir le portail" if portail["ouvert"] else "Portail éteint"
+	_hud_invite.text = ("ENTRER — franchir le portail" if Tactile.actif() else "E — franchir le portail") if portail["ouvert"] else "Portail éteint"
 	_hud_classement.text = _resumer_classement(String(portail["jeu"]))
 
 ## Utilisé par le banc d'essai : combien de joueurs ce client voit-il ?

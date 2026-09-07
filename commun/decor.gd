@@ -91,6 +91,45 @@ static func _instance(maillage: Mesh, matiere_appliquee: Material, ombre: bool) 
 	noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if ombre else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return noeud
 
+# ------------------------------------------------------------ carrosserie
+
+## Le seul maillage importé du projet : une Volvo 242, fournie en STL de
+## modélisme, décimée de 44 000 à 5 900 triangles et réorientée (le STL est
+## en Y-longueur/Z-hauteur, le jeu en X-avant/Y-haut). Quatre voitures et
+## soixante-dix monstres dans un moteur en mode compatibilité ne supportent
+## pas la densité d'origine.
+##
+## Le maillage est mis en cache : instancier la scène glTF à chaque voiture
+## coûterait un chargement complet par joueur et par manche.
+const CARROSSERIE := "res://modeles/volvo-242.glb"
+static var _maillage: Mesh = null
+
+static func carrosserie(couleur: Color) -> MeshInstance3D:
+	if _maillage == null:
+		var scene: PackedScene = load(CARROSSERIE)
+		var racine := scene.instantiate()
+		_maillage = _premier_maillage(racine)
+		racine.queue_free()
+	var noeud := MeshInstance3D.new()
+	noeud.mesh = _maillage
+	# `material_override` écrase la couleur par sommet du glTF : c'est ce qui
+	# permet de teindre la même carrosserie aux quatre couleurs de joueur.
+	# Métallicité à zéro : en mode compatibilité il n'y a ni ciel ni sonde de
+	# réflexion, alors une carrosserie métallique n'a rien à réfléchir et
+	# vire au noir. On l'a vue noire sur fond de rue avant de comprendre.
+	noeud.material_override = matiere(couleur, 0.45, 0.0)
+	noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	return noeud
+
+static func _premier_maillage(noeud: Node) -> Mesh:
+	if noeud is MeshInstance3D:
+		return (noeud as MeshInstance3D).mesh
+	for enfant in noeud.get_children():
+		var trouve := _premier_maillage(enfant)
+		if trouve != null:
+			return trouve
+	return null
+
 # ------------------------------------------------------------ le sol
 
 ## Sol quadrillé. La trame est une texture générée, pas des milliers de traits :
@@ -155,8 +194,11 @@ static func ambiance(fond: Color = Palette.FOND, brouillard: bool = true) -> Wor
 static func lumiere() -> DirectionalLight3D:
 	var soleil := DirectionalLight3D.new()
 	soleil.light_color = Color("#e8ecf5")
-	soleil.light_energy = 1.30
-	soleil.rotation_degrees = Vector3(-52, -38, 0)
+	soleil.light_energy = 1.12
+	# Soleil haut : en ville, un éclairage rasant projette des ombres longues
+	# dans lesquelles la voiture du joueur disparaît complètement. On perd un
+	# peu de relief, on gagne de pouvoir se voir.
+	soleil.rotation_degrees = Vector3(-66, -38, 0)
 	soleil.shadow_enabled = true
 	soleil.directional_shadow_max_distance = 260.0
 	soleil.shadow_bias = 0.04

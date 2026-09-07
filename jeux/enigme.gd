@@ -38,10 +38,12 @@ var _decor_chambre: Node3D
 var _noeuds_dalles: Dictionary = {}
 var _noeuds_caisses: Dictionary = {}
 var _noeud_porte: Node3D
-var _consigne: Label
 
 func duree_manche() -> float:
 	return DUREE
+
+func etat_joueur() -> String:
+	return _message
 
 func aide() -> String:
 	return "Z Q S D ou les flèches · marcher dans une caisse la pousse · une dalle ne compte que si quelque chose pèse dessus · la sortie n'accepte l'équipe qu'au complet."
@@ -50,6 +52,7 @@ const INCLINAISON := 55.0
 const DISTANCE := 124.0
 
 func preparer() -> void:
+	Tactile.mode = Tactile.MARCHE
 	poser_ambiance()
 	_camera = Decor.camera(INCLINAISON, DISTANCE, 50.0)
 	_camera.position = Decor.viser(_camera, MONDE.get_center() + Vector2(0, 40), INCLINAISON, DISTANCE)
@@ -58,14 +61,6 @@ func preparer() -> void:
 
 	_corps = _batir_marcheur(Palette.couleur_joueur(ma_place()), Session.pseudo)
 	monde().add_child(_corps)
-
-	_consigne = UI.texte("", 16, Palette.ENCRE_DOUCE, true)
-	_consigne.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_consigne.offset_left = 20
-	_consigne.offset_right = -20
-	_consigne.offset_top = -104
-	_consigne.offset_bottom = -74
-	interface().add_child(_consigne)
 
 	_charger_chambre(0)
 
@@ -145,8 +140,6 @@ func _charger_chambre(indice: int) -> void:
 		_portes.append({"id": int(p["id"]), "dalles": p["dalles"], "verrou": bool(p["verrou"]), "ouverte": false})
 	_pressees = {}
 	_message = "Chambre %d — %s   ·   %s" % [indice + 1, String(plan["nom"]), String(plan["consigne"])]
-	if _consigne:
-		_consigne.text = _message
 	_batir_chambre()
 	# Les joueurs repartent en colonne à gauche : personne ne se réveille de
 	# l'autre côté d'une porte qu'il n'a pas ouverte.

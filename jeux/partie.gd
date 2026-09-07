@@ -35,7 +35,9 @@ var _hud_chrono: Label
 var _hud_scores: Label
 var _hud_message: Label
 var _hud_aide: Label
+var _hud_etat_joueur: Label
 var _hud_etat: HBoxContainer
+var _dernier_bip := 99
 
 # ------------------------------------------------------- à redéfinir
 
@@ -43,6 +45,11 @@ func duree_manche() -> float:
 	return 120.0
 
 func aide() -> String:
+	return ""
+
+## Une ligne d'état propre au jeu : arme en main, chambre en cours… Affichée
+## au-dessus de l'aide, elle change souvent alors que l'aide ne change jamais.
+func etat_joueur() -> String:
 	return ""
 
 func preparer() -> void:
@@ -159,9 +166,15 @@ func _process(delta: float) -> void:
 				_decompte = DECOMPTE_S
 		DECOMPTE:
 			_decompte -= delta
+			var seconde := int(ceil(_decompte))
+			if seconde != _dernier_bip:
+				_dernier_bip = seconde
+				Sons.jouer("bip", 1.0, -10.0)
 			if _decompte <= 0.0:
 				phase = JEU
 				temps = 0.0
+				Sons.jouer("depart", 1.0, -6.0)
+				Sons.demarrer_moteur()
 		JEU:
 			temps += delta
 			simuler_local(delta)
@@ -192,6 +205,8 @@ func terminer(note: String) -> void:
 	_afficher_resultats(lignes, note)
 
 func _afficher_resultats(lignes, note: String) -> void:
+	Sons.arreter_moteur()
+	Sons.jouer("fin", 1.0, -6.0)
 	await get_tree().create_timer(1.2).timeout
 	if not is_inside_tree():
 		return
@@ -211,6 +226,11 @@ func ajouter_score(cle: String, points: int) -> void:
 
 # ------------------------------------------------------- interface
 
+func _unhandled_input(evenement: InputEvent) -> void:
+	if evenement is InputEventKey and evenement.pressed and not evenement.echo and evenement.keycode == KEY_M:
+		Sons.basculer()
+		_rafraichir_hud()
+
 func _construire_hud() -> void:
 	var couche := interface()
 
@@ -229,6 +249,9 @@ func _construire_hud() -> void:
 	haut.add_child(_hud_scores)
 	_hud_etat = UI.etat_reseau()
 	haut.add_child(_hud_etat)
+	var son := UI.texte("", 13, Palette.ENCRE_FAIBLE)
+	son.name = "Son"
+	haut.add_child(son)
 
 	var bas := VBoxContainer.new()
 	bas.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
@@ -237,6 +260,8 @@ func _construire_hud() -> void:
 	bas.offset_top = -70
 	bas.offset_bottom = -18
 	couche.add_child(bas)
+	_hud_etat_joueur = UI.texte("", 16, Palette.ENCRE)
+	bas.add_child(_hud_etat_joueur)
 	_hud_aide = UI.texte(aide(), 14, Palette.ENCRE_FAIBLE)
 	bas.add_child(_hud_aide)
 
@@ -252,6 +277,9 @@ func _rafraichir_hud() -> void:
 	if _hud_chrono == null:
 		return
 	UI.rafraichir_etat_reseau(_hud_etat)
+	var son := _hud_etat.get_parent().get_node_or_null("Son") as Label
+	if son:
+		son.text = "M : son " + ("actif" if Sons.actif else "coupé")
 	var restant: float = max(0.0, duree_reelle() - temps)
 	_hud_chrono.text = "%d:%02d" % [int(restant) / 60, int(restant) % 60]
 	_hud_chrono.add_theme_color_override("font_color",
@@ -265,6 +293,8 @@ func _rafraichir_hud() -> void:
 		var marque := "▸ " if cle == Session.cle else ""
 		morceaux.append("%s%s %d" % [marque, String(j["pseudo"]), int(j["score"])])
 	_hud_scores.text = "     ".join(morceaux)
+
+	_hud_etat_joueur.text = etat_joueur()
 
 	match phase:
 		ATTENTE:

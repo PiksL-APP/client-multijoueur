@@ -12,10 +12,13 @@ extends RefCounted
 
 static var pilote_automatique := false
 static var direction_simulee := Vector2.ZERO
+static var tir_simule := false
 
 static func direction() -> Vector2:
 	if pilote_automatique:
 		return direction_simulee
+	if Tactile.actif() and Tactile.direction != Vector2.ZERO:
+		return Tactile.direction_de_marche()
 	var d := Vector2.ZERO
 	if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): d.y -= 1
 	if Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): d.y += 1
@@ -23,12 +26,22 @@ static func direction() -> Vector2:
 	if Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): d.x += 1
 	return d.normalized()
 
+## Tir maintenu : espace, ou le bouton tactile.
+static func tir() -> bool:
+	if pilote_automatique:
+		return tir_simule
+	if Tactile.actif() and Tactile.bouton_tenu:
+		return true
+	return Input.is_physical_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_CTRL)
+
 ## Pour la conduite : x = braquage (-1 à gauche), y = accélération (-1 en
 ## marche arrière). Non normalisé — accélérer en tournant ne doit pas coûter
 ## de la vitesse.
 static func conduite() -> Vector2:
 	if pilote_automatique:
 		return direction_simulee
+	if Tactile.actif() and Tactile.direction != Vector2.ZERO:
+		return Tactile.direction_de_conduite()
 	var braquage := 0.0
 	var poussee := 0.0
 	if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): poussee += 1.0

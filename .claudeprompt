@@ -62,9 +62,25 @@ Ajouter un jeu impose de compléter la contrainte `check (jeu in (...))` sur
 `jeu_parties` **et** le plafond de vraisemblance dans `jeu_deposer_partie`.
 Un plafond oublié, c'est un classement à sept chiffres au premier curieux.
 
+## Presque rien de binaire au dépôt
+
+Ni image, ni son : les volumes se fabriquent par `commun/decor.gd`, les
+échantillons audio par `autoload/sons.gd` — quelques dizaines de kilo-octets
+rendus en une trentaine de millisecondes au démarrage. Un son se règle en
+changeant un chiffre, pas en rouvrant un éditeur audio.
+
+**Une seule exception**, et elle est délibérée : `modeles/volvo-242.glb`, la
+carrosserie du jeu Carnage. Un vrai modèle apporte ce qu'aucune boîte ne
+donnera. Il est arrivé en STL de modélisme (44 000 triangles, orienté
+Y-longueur/Z-hauteur) et a été décimé à 5 900 triangles puis réorienté avant
+d'entrer. Tout maillage ajouté suit la même règle : décimé, réorienté,
+documenté — et teint par `material_override`, jamais par une matière
+embarquée, sinon les quatre couleurs de joueur sont impossibles.
+
 ## Commandes
 
-Les touches se lisent **uniquement** par `commun/commandes.gd`. Un appel direct
+Les touches se lisent **uniquement** par `commun/commandes.gd`, qui réunit
+clavier, pavé tactile et pilote automatique. Un appel direct
 à `Input` dans un jeu rend la partie invérifiable par le banc, et le pilote
 automatique cesse alors de couvrir ce jeu.
 

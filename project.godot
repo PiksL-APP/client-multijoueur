@@ -21,6 +21,8 @@ Config="*res://autoload/config.gd"
 Session="*res://autoload/session.gd"
 Reseau="*res://autoload/reseau.gd"
 Scores="*res://autoload/scores.gd"
+Sons="*res://autoload/sons.gd"
+Tactile="*res://autoload/tactile.gd"
 
 [display]
 

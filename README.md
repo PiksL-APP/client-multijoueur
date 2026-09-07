@@ -5,6 +5,10 @@ un jeu de 2 à 4 joueurs avec son score. Le tout tourne dans le navigateur :
 Godot 4.5 exporté en WebAssembly, Supabase Realtime pour le réseau, Vercel pour
 l'hébergement.
 
+**La ville se déduit du code de la manche**, jamais du réseau : même code, même
+plan, chez tout le monde et à tout instant. Diffuser le plan aurait coûté
+plusieurs kilo-octets par partie et un cas de plus pour qui rejoint en retard.
+
 **2,5D.** La simulation se fait sur un plan — tout l'état réseau tient en
 `Vector2` — mais le rendu est en vraie 3D : caméra en perspective inclinée,
 lumière directionnelle avec ombres portées, contre-jour froid pour que les
@@ -23,7 +27,7 @@ En ligne : **https://multijoueur.piks-l.com**
 | | |
 | --- | --- |
 | **Hub** | Monde partagé. On s'y croise, on lit les meilleurs scores affichés au pied de chaque portail, on entre par `E`. |
-| **CARNAGE** | Vue de dessus, conduite arcade. Écraser un monstre rapporte, mais seulement lancé : sous 210 px/s c'est le monstre qui gagne l'échange. Les enchaînements en moins de 2,5 s multiplient jusqu'à ×5. Manche de 2 minutes. |
+| **CARNAGE** | Une ville ouverte — sept par cinq pâtés de maisons, des rues, pas de mur : on est ramené vers le centre si on part dans la friche. Écraser un monstre rapporte, mais seulement lancé : sous 210 px/s c'est le monstre qui gagne l'échange. Les enchaînements en moins de 2,5 s multiplient jusqu'à ×5. Trois armes se ramassent au sol — mitraillette, roquettes, éperon (qui fait écraser presque à l'arrêt). Manche de 2 min 30. |
 | **ÉNIGME** | Coopératif, trois chambres. Une dalle ne reste enfoncée que si quelqu'un — ou une caisse — pèse dessus, et la sortie d'une chambre n'accepte l'équipe qu'au complet. 3 minutes. |
 
 Les deux portails restants sont éteints : ils marquent la place des jeux
@@ -171,10 +175,16 @@ cassent le chargement de ressources tierces. Pour de la 2D, on n'y perd rien.
 
 ## Ce qui n'est pas fait
 
-- Clavier et souris seulement : rien pour le tactile.
 - Rendu en mode compatibilité (exigé par le web) : ombres directionnelles
   seulement, pas d'occlusion ambiante ni de reflets.
-- Pas de son.
+- Sur téléphone, un manche virtuel et un bouton apparaissent — et n'apparaissent
+  que là : un pavé tactile affiché à quelqu'un qui a un clavier passe pour un
+  défaut. `--tactile` les force, pour pouvoir les vérifier au banc.
+- Une seule ressource binaire au dépôt : `modeles/volvo-242.glb`, décimée de
+  44 000 à 5 900 triangles depuis un STL de modélisme. Tout le reste du décor
+  est fabriqué en code.
+- Le son est entièrement synthétisé au démarrage (`autoload/sons.gd`) : aucun
+  fichier binaire au dépôt. **M** le coupe, et le choix survit à la session.
 - Le classement affiché est un top brut ; pas de saison, pas de remise à zéro.
 - Chaque manche consomme des messages Realtime (≈ 50 par seconde à quatre
   joueurs). C'est confortable à l'échelle d'une démonstration, à surveiller si

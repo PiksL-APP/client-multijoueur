@@ -1,131 +1,309 @@
 extends Partie
-## CARNAGE — quatre voitures, une arène, des monstres à écraser.
+## CARNAGE — une ville, des monstres, et de quoi les traiter.
 ##
-## Répartition du travail : chaque client conduit SA voiture et annonce sa
-## position ; l'hôte fait vivre les monstres, tranche les collisions et tient
-## le score. Faire trancher la collision par celui qui écrase serait plus
-## nerveux, mais deux joueurs revendiqueraient le même monstre à 100 ms près.
+## Répartition du travail : chaque client conduit SA voiture, tire ses propres
+## projectiles et annonce le tout ; l'hôte fait vivre les monstres, distribue
+## les armes, tranche les impacts et tient le score. Laisser le tireur déclarer
+## ses victimes serait plus nerveux, mais deux joueurs revendiqueraient le même
+## monstre à cent millisecondes près — et rien n'empêcherait un client modifié
+## d'annoncer trente victimes par seconde.
+##
+## La ville est engendrée à partir du CODE de la manche, identique chez tout le
+## monde : aucun plan n'a besoin de circuler sur le réseau, et un joueur qui
+## rejoint en retard reconstruit exactement la même ville.
 
-const ARENE := Rect2(0, 0, 2200, 1400)
-const DUREE := 120.0
+const DUREE := 150.0
+
+# Une ville, pas une arène : pas de mur, pas de cage. Les bords se perdent
+# dans le brouillard, et on est simplement ramené vers le centre si on
+# s'éloigne trop loin dans la friche.
+const COLONNES := 7
+const LIGNES := 5
+const PATE := 520.0                ## côté d'un pâté de maisons
+const RUE := 210.0                 ## largeur d'une rue
+const BANLIEUE := 900.0            ## friche autour de la ville
+const RETOUR := 260.0              ## au-delà, la voiture est ramenée
 
 # Conduite : des valeurs d'arcade, pas de simulation. On veut qu'une voiture
 # reparte vite après un choc, sinon le jeu punit la maladresse trop longtemps.
-const ACCELERATION := 900.0
-const FREIN := 1500.0
-const VITESSE_MAX := 720.0
-const VITESSE_ARRIERE := -260.0
+const ACCELERATION := 940.0
+const FREIN := 1550.0
+const VITESSE_MAX := 760.0
+const VITESSE_ARRIERE := -270.0
 const FROTTEMENT := 1.6
-const BRAQUAGE := 2.9
+const BRAQUAGE := 3.0
 const RAYON_VOITURE := 26.0
 
-const INCLINAISON := 52.0
-const DISTANCE := 46.0
-
 const SEUIL_ECRASEMENT := 210.0    ## en dessous, on pousse le monstre sans l'écraser
+const SEUIL_EPERON := 90.0         ## l'éperon écrase presque à l'arrêt
 const CADENCE_VOITURE := 1.0 / 12.0
 const CADENCE_MONSTRES := 1.0 / 9.0
-const MONSTRES_MAX := 60
+const MONSTRES_MAX := 70
 const COMBO_FENETRE := 2.5
+
+const INCLINAISON := 56.0
+const DISTANCE := 62.0
+
+## Les armes. `points` est volontairement plus bas que l'écrasement : l'arme
+## sert à se sortir d'une mêlée, pas à remplacer la conduite — sinon plus
+## personne ne roule.
+const ARMES := {
+	"mitraillette": {
+		"nom": "Mitraillette", "munitions": 45, "cadence": 0.11, "portee": 950.0,
+		"vitesse": 1500.0, "souffle": 0.0, "points": 6, "couleur": Palette.AVERTISSEMENT,
+	},
+	"roquette": {
+		"nom": "Roquettes", "munitions": 5, "cadence": 0.9, "portee": 1200.0,
+		"vitesse": 900.0, "souffle": 150.0, "points": 12, "couleur": Palette.SERIEUX,
+	},
+	"eperon": {
+		"nom": "Éperon", "munitions": 0, "cadence": 0.0, "portee": 0.0,
+		"vitesse": 0.0, "souffle": 0.0, "points": 0, "couleur": Palette.SERIE,
+	},
+}
+const DUREE_EPERON := 14.0
+const CAISSES_MAX := 7
 
 var _position := Vector2.ZERO
 var _angle := 0.0
 var _vitesse := 0.0
 var _sonne := 0.0                  ## secondes de perte de contrôle après un choc
 
-var _autres: Dictionary = {}       # cle -> {p, a, v, cible, angle_cible}
-var _monstres: Array = []          # hôte : dicts ; client : copie interpolée
+var _autres: Dictionary = {}       # cle -> {p, a, v, cible, angle_cible, noeud}
+var _monstres: Array = []
+var _batiments: Array[Rect2] = []  # emprise au sol des immeubles
+var _caisses: Array = []           # {id, p, arme, noeud}
+var _projectiles: Array = []       # {p, v, restant, par, arme, noeud}
+var _arme := ""
+var _munitions := 0
+var _eperon := 0.0
+var _recharge := 0.0
 var _prochain_id := 1
+var _prochaine_caisse := 1
 var _depuis_envoi := 0.0
 var _depuis_snapshot := 0.0
 var _depuis_apparition := 0.0
-var _combos: Dictionary = {}       # cle -> {dernier, facteur}
-var _eclats: Array = []            # particules 3D
-var _taches: Array = []            # flaques au sol, en nombre borné
-var _camera: Camera3D
-var _corps: Node3D                 # notre voiture
-var _rng := RandomNumberGenerator.new()
-var _secousse := 0.0
+var _depuis_caisse := 0.0
 var _amorce := false
+var _combos: Dictionary = {}       # cle -> {dernier, facteur}
+var _eclats: Array = []
+var _taches: Array = []
+var _camera: Camera3D
+var _corps: Node3D
+var _secousse := 0.0
+var _rng := RandomNumberGenerator.new()
+var _hors_ville := 0.0
 
 func duree_manche() -> float:
 	return DUREE
 
 func aide() -> String:
-	return "Z/S ou ↑/↓ : accélérer et freiner · Q/D ou ←/→ : tourner · écraser un monstre lancé rapporte, les enchaînements multiplient."
+	return "Z/S : accélérer et freiner · Q/D : tourner · ESPACE : tirer · ramassez les caisses · écraser lancé rapporte le plus, les enchaînements multiplient."
+
+# ------------------------------------------------------- la ville
+
+func centre_ville() -> Vector2:
+	return Vector2(COLONNES * (PATE + RUE), LIGNES * (PATE + RUE)) * 0.5
+
+func etendue() -> Vector2:
+	return Vector2(COLONNES * (PATE + RUE), LIGNES * (PATE + RUE))
+
+## Le plan se déduit du code de la manche : même code, même ville, chez tout le
+## monde et à tout moment. Diffuser le plan aurait coûté un message de plusieurs
+## kilo-octets et un cas de plus pour qui rejoint en retard.
+func _batir_ville() -> void:
+	var graine := RandomNumberGenerator.new()
+	graine.seed = hash(code)
+	_batiments.clear()
+
+	for colonne in COLONNES:
+		for ligne in LIGNES:
+			var coin := Vector2(colonne * (PATE + RUE) + RUE * 0.5, ligne * (PATE + RUE) + RUE * 0.5)
+			# Une place vide de temps en temps : une grille parfaitement
+			# remplie se conduit comme un labyrinthe, et on n'y voit jamais
+			# un monstre arriver.
+			if graine.randf() < 0.16:
+				continue
+			var decoupe := graine.randi_range(1, 4)
+			for i in decoupe:
+				var largeur := graine.randf_range(PATE * 0.35, PATE * 0.92)
+				var hauteur := graine.randf_range(PATE * 0.35, PATE * 0.92)
+				var decalage := Vector2(
+					graine.randf_range(0.0, PATE - largeur),
+					graine.randf_range(0.0, PATE - hauteur))
+				var rect := Rect2(coin + decalage, Vector2(largeur, hauteur))
+				var chevauche := false
+				for autre in _batiments:
+					if autre.grow(24.0).intersects(rect):
+						chevauche = true
+						break
+				if not chevauche:
+					_batiments.append(rect)
+
+func _dans_un_batiment(point: Vector2, marge: float = 0.0) -> bool:
+	for rect: Rect2 in _batiments:
+		if rect.grow(marge).has_point(point):
+			return true
+	return false
+
+## Repousse un point hors des immeubles par le plus petit chevauchement.
+## Renvoie le point corrigé et si une correction a eu lieu.
+func _degager(point: Vector2, rayon: float) -> Array:
+	for rect: Rect2 in _batiments:
+		var etendu := rect.grow(rayon)
+		if not etendu.has_point(point):
+			continue
+		var gauche := point.x - etendu.position.x
+		var droite := etendu.end.x - point.x
+		var haut := point.y - etendu.position.y
+		var bas := etendu.end.y - point.y
+		var minimum: float = min(min(gauche, droite), min(haut, bas))
+		var corrige := point
+		if minimum == gauche: corrige.x = etendu.position.x
+		elif minimum == droite: corrige.x = etendu.end.x
+		elif minimum == haut: corrige.y = etendu.position.y
+		else: corrige.y = etendu.end.y
+		return [corrige, true]
+	return [point, false]
+
+func _point_de_rue(autour: Vector2, rayon_min: float, rayon_max: float) -> Vector2:
+	for essai in 12:
+		var p: Vector2 = autour + Vector2.RIGHT.rotated(_rng.randf() * TAU) * _rng.randf_range(rayon_min, rayon_max)
+		p.x = clamp(p.x, -BANLIEUE * 0.5, etendue().x + BANLIEUE * 0.5)
+		p.y = clamp(p.y, -BANLIEUE * 0.5, etendue().y + BANLIEUE * 0.5)
+		if not _dans_un_batiment(p, 40.0):
+			return p
+	return autour + Vector2.RIGHT.rotated(_rng.randf() * TAU) * rayon_min
+
+# ------------------------------------------------------- mise en place
 
 func preparer() -> void:
+	Tactile.mode = Tactile.CONDUITE
 	_rng.randomize()
-	_batir_arene()
+	_batir_ville()
+	_planter_decor()
 
-	# Départ réparti sur un cercle : quatre voitures au même endroit se
-	# poussent mutuellement hors de l'arène avant même le décompte.
+	# Départ réparti sur un cercle, dans la rue : quatre voitures au même
+	# endroit se poussent mutuellement dans un mur avant même le décompte.
 	var place := 0
 	for membre in donnees.get("equipe", []):
 		if String(membre.get("cle", "")) == Session.cle:
 			break
 		place += 1
 	var angle := TAU * float(place) / 4.0
-	_position = ARENE.get_center() + Vector2.RIGHT.rotated(angle) * 260.0
+	_position = _point_de_rue(centre_ville() + Vector2.RIGHT.rotated(angle) * 320.0, 0.0, 200.0)
 	_angle = angle + PI
 
 	_corps = _batir_voiture(Palette.couleur_joueur(place), Session.pseudo)
 	monde().add_child(_corps)
 
-	_camera = Decor.camera(INCLINAISON, DISTANCE, 52.0)
+	_camera = Decor.camera(INCLINAISON, DISTANCE, 54.0)
 	monde().add_child(_camera)
 	_camera.make_current()
 
-func _batir_arene() -> void:
+func _planter_decor() -> void:
 	poser_ambiance()
-	var sol := Decor.sol(ARENE.size, 100.0, Color("#141312"))
-	sol.position = Decor.vers3d(ARENE.get_center())
+	var taille := etendue() + Vector2(BANLIEUE, BANLIEUE) * 2.0
+	var sol := Decor.sol(taille, 105.0, Color("#141312"), 2600.0)
+	sol.position = Decor.vers3d(centre_ville())
 	monde().add_child(sol)
 
-	# Un muret bas tout autour : il borne le terrain à l'œil et son ombre
-	# rasante donne au sol une épaisseur qu'un plan nu n'a pas.
-	var e := 24.0
-	var t := ARENE.size
-	for mur in [
-		[Vector2(t.x * 0.5, -e * 0.5), Vector2(t.x + e * 2.0, e)],
-		[Vector2(t.x * 0.5, t.y + e * 0.5), Vector2(t.x + e * 2.0, e)],
-		[Vector2(-e * 0.5, t.y * 0.5), Vector2(e, t.y)],
-		[Vector2(t.x + e * 0.5, t.y * 0.5), Vector2(e, t.y)],
-	]:
-		var boite := Decor.boite(
-			Vector3(mur[1].x * Decor.ECHELLE, 4.2, mur[1].y * Decor.ECHELLE),
-			Palette.CRITIQUE.darkened(0.6))
-		boite.position = Decor.vers3d(mur[0], 2.1)
-		monde().add_child(boite)
+	for rect: Rect2 in _batiments:
+		_batir_immeuble(rect)
+
+func _batir_immeuble(rect: Rect2) -> void:
+	var graine := RandomNumberGenerator.new()
+	graine.seed = hash(rect.position)
+	var etages := graine.randi_range(2, 6)
+	var hauteur := 3.0 + etages * 2.2
+	var teinte := Palette.SURFACE.lightened(graine.randf_range(0.0, 0.07))
+
+	var corps := Decor.boite(
+		Vector3(rect.size.x * Decor.ECHELLE, hauteur, rect.size.y * Decor.ECHELLE), teinte)
+	corps.position = Decor.vers3d(rect.get_center(), hauteur * 0.5)
+	monde().add_child(corps)
+
+	# Un bandeau de toit : sans lui, un immeuble vu d'en haut n'est qu'un
+	# rectangle, et la ville se lit comme un damier plat.
+	var toit := Decor.boite(
+		Vector3(rect.size.x * Decor.ECHELLE + 0.6, 0.5, rect.size.y * Decor.ECHELLE + 0.6),
+		teinte.darkened(0.5))
+	toit.position = Decor.vers3d(rect.get_center(), hauteur + 0.25)
+	monde().add_child(toit)
+
+	# Quelques fenêtres allumées, sur une seule face : la ville doit avoir
+	# l'air habitée sans coûter quatre maillages par immeuble.
+	var nombre := graine.randi_range(1, 3)
+	for i in nombre:
+		var chaude := Palette.AVERTISSEMENT if graine.randf() < 0.7 else Palette.SERIE
+		var largeur_vitre: float = min(rect.size.x * Decor.ECHELLE * 0.42, 12.0)
+		var vitre := Decor.boite(Vector3(largeur_vitre, 0.7, 0.3), chaude)
+		vitre.material_override = Decor.matiere_lumineuse(chaude, 0.85)
+		vitre.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		vitre.position = Decor.vers3d(
+			rect.get_center() + Vector2(graine.randf_range(-1.0, 1.0) * rect.size.x * 0.2, rect.size.y * 0.5),
+			hauteur * graine.randf_range(0.25, 0.85))
+		monde().add_child(vitre)
 
 func _batir_voiture(couleur: Color, pseudo: String) -> Node3D:
 	var racine := Node3D.new()
-	var chassis := Decor.boite(Vector3(5.6, 1.5, 3.2), couleur)
-	chassis.position = Vector3(0, 1.05, 0)
-	racine.add_child(chassis)
-	var cabine := Decor.boite(Vector3(2.4, 1.2, 2.6), couleur.darkened(0.35))
-	cabine.position = Vector3(-0.3, 2.3, 0)
-	racine.add_child(cabine)
-	var pare_buffle := Decor.boite(Vector3(0.7, 1.5, 3.6), Palette.ENCRE_DOUCE)
-	pare_buffle.position = Vector3(3.0, 1.2, 0)
-	racine.add_child(pare_buffle)
+
+	# Un halo au sol, à la couleur du joueur, insensible à l'éclairage : dans
+	# l'ombre d'un immeuble la carrosserie devient noire et on ne se retrouve
+	# plus. Il sert aussi à distinguer les quatre voitures d'un coup d'œil.
+	var halo := Decor.anneau(2.7, 0.22, couleur, 0.95)
+	halo.rotation_degrees = Vector3(90, 0, 0)
+	halo.position = Vector3(0, 0.04, 0)
+	racine.add_child(halo)
+
+	var carrosserie := Decor.carrosserie(couleur)
+	# La coque de modélisme n'a pas de garde au sol : on la soulève de la
+	# hauteur des roues, sinon la voiture rase le bitume et les roues
+	# dépassent par-dessus les ailes.
+	carrosserie.position = Vector3(0, 0.42, 0)
+	racine.add_child(carrosserie)
+
+	# La coque de modélisme est creuse et ses vitres sont ouvertes : vu de
+	# dessus, on voyait la route à travers l'habitacle. Un bloc sombre glissé
+	# dedans referme la voiture sans coûter de géométrie.
+	var habitacle := Decor.boite(Vector3(4.2, 0.55, 1.7), Palette.FOND.lightened(0.06))
+	habitacle.position = Vector3(-0.15, 0.78, 0)
+	habitacle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	racine.add_child(habitacle)
+
 	for cote in [-1.0, 1.0]:
 		for avant in [-1.0, 1.0]:
-			var roue := Decor.cylindre(0.75, 0.5, Color("#0a0a0a"))
+			var roue := Decor.cylindre(0.62, 0.42, Color("#0b0b0b"))
 			roue.rotation_degrees = Vector3(90, 0, 0)
-			roue.position = Vector3(avant * 1.9, 0.75, cote * 1.7)
+			roue.position = Vector3(avant * 1.95, 0.62, cote * 1.02)
 			racine.add_child(roue)
+			var jante := Decor.cylindre(0.34, 0.46, Palette.ENCRE_FAIBLE)
+			jante.rotation_degrees = Vector3(90, 0, 0)
+			jante.position = Vector3(avant * 1.95, 0.62, cote * 1.02)
+			racine.add_child(jante)
+
 	# Deux phares : ils disent dans quel sens la voiture regarde, ce qu'une
-	# boîte vue de haut ne montre pas.
+	# silhouette vue de haut ne montre pas.
 	for cote in [-1.0, 1.0]:
-		var phare := Decor.sphere(0.34, Palette.AVERTISSEMENT)
+		var phare := Decor.sphere(0.22, Palette.AVERTISSEMENT)
 		phare.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 1.2)
-		phare.position = Vector3(3.1, 1.5, cote * 1.0)
+		phare.position = Vector3(2.85, 1.0, cote * 0.72)
 		racine.add_child(phare)
+
+	# Le pare-buffle n'apparaît qu'avec l'éperon : il devient ainsi le signe
+	# visible du bonus, au lieu d'un accessoire permanent qui alourdit la
+	# silhouette d'une berline.
+	var pare_buffle := Decor.boite(Vector3(0.3, 0.85, 2.2), Palette.SERIE)
+	pare_buffle.material_override = Decor.matiere_lumineuse(Palette.SERIE, 1.1)
+	pare_buffle.position = Vector3(3.05, 0.75, 0)
+	pare_buffle.name = "Buffle"
+	pare_buffle.visible = false
+	racine.add_child(pare_buffle)
+
 	if pseudo != "":
 		var nom := Decor.etiquette(pseudo, Palette.ENCRE_DOUCE, 32)
 		nom.name = "Nom"
-		nom.position = Vector3(0, 5.2, 0)
+		nom.position = Vector3(0, 3.6, 0)
 		racine.add_child(nom)
 	return racine
 
@@ -146,12 +324,31 @@ func _batir_monstre(type: int) -> Node3D:
 	racine.add_child(crete)
 	return racine
 
+func _batir_caisse(arme: String) -> Node3D:
+	var couleur: Color = ARMES[arme]["couleur"]
+	var racine := Node3D.new()
+	var boite := Decor.boite(Vector3(2.6, 2.6, 2.6), couleur.lightened(0.15))
+	boite.position = Vector3(0, 1.4, 0)
+	boite.name = "Boite"
+	racine.add_child(boite)
+	var liseret := Decor.anneau(2.4, 0.24, couleur, 1.1)
+	liseret.rotation_degrees = Vector3(90, 0, 0)
+	liseret.position = Vector3(0, 0.25, 0)
+	racine.add_child(liseret)
+	return racine
+
 # ------------------------------------------------------- simulation locale
 
 func simuler_local(delta: float) -> void:
 	if Commandes.pilote_automatique:
 		Commandes.direction_simulee = _viser_le_plus_proche()
+		Commandes.tir_simule = _arme != "" and _munitions > 0
 	_conduire(delta)
+	_tirer(delta)
+
+	if _eperon > 0.0:
+		_eperon -= delta
+
 	for cle in _autres:
 		var a: Dictionary = _autres[cle]
 		a["p"] = (a["p"] as Vector2).lerp(a["cible"], clamp(delta * 14.0, 0, 1))
@@ -169,6 +366,9 @@ func simuler_local(delta: float) -> void:
 		for m in _monstres:
 			m["p"] = (m["p"] as Vector2).lerp(m["cible"], clamp(delta * 10.0, 0, 1))
 
+	_avancer_projectiles(delta)
+	_ramasser_caisses()
+
 ## Pilote automatique du banc d'essai : viser le monstre le plus proche.
 ## Une manche d'essai qui tourne au hasard se termine à zéro — elle ne
 ## vérifierait alors ni la collision, ni le score, ni le dépôt en base.
@@ -181,7 +381,7 @@ func _viser_le_plus_proche() -> Vector2:
 			distance = d
 			cible = m["p"]
 	if cible == Vector2.INF:
-		return Vector2(0.4, 1.0)
+		cible = centre_ville()
 	var ecart := wrapf((cible - _position).angle() - _angle, -PI, PI)
 	return Vector2(clamp(ecart * 2.0, -1.0, 1.0), 1.0)
 
@@ -192,49 +392,169 @@ func _conduire(delta: float) -> void:
 		_vitesse = move_toward(_vitesse, 0.0, FREIN * delta * 0.6)
 	else:
 		var commande := Commandes.conduite()
-		var avant := commande.y > 0.1
-		var arriere := commande.y < -0.1
-		var gauche := commande.x < -0.1
-		var droite := commande.x > 0.1
-
-		if avant:
+		if commande.y > 0.1:
 			_vitesse = min(_vitesse + ACCELERATION * delta, VITESSE_MAX)
-		elif arriere:
+		elif commande.y < -0.1:
 			_vitesse = max(_vitesse - FREIN * delta, VITESSE_ARRIERE)
 		else:
 			_vitesse = move_toward(_vitesse, 0.0, FROTTEMENT * abs(_vitesse) * delta + 40.0 * delta)
 
 		# Le braquage suit la vitesse : à l'arrêt, on ne pivote pas sur place.
 		var prise: float = clamp(abs(_vitesse) / 260.0, 0.0, 1.0) * signf(_vitesse)
-		if gauche:
-			_angle -= BRAQUAGE * delta * prise
-		if droite:
-			_angle += BRAQUAGE * delta * prise
+		_angle += commande.x * BRAQUAGE * delta * prise
 
 	_position += Vector2.RIGHT.rotated(_angle) * _vitesse * delta
 
-	# Les murs rendent la vitesse : ils ne tuent pas, ils coûtent l'élan.
-	var avant_choc := _position
-	_position.x = clamp(_position.x, ARENE.position.x + RAYON_VOITURE, ARENE.end.x - RAYON_VOITURE)
-	_position.y = clamp(_position.y, ARENE.position.y + RAYON_VOITURE, ARENE.end.y - RAYON_VOITURE)
-	if _position != avant_choc:
-		_vitesse *= 0.35
+	var resultat := _degager(_position, RAYON_VOITURE)
+	if resultat[1]:
+		_position = resultat[0]
+		if abs(_vitesse) > 260.0:
+			Sons.jouer("choc", 0.8, -10.0)
+			_secousse = max(_secousse, 0.25)
+		_vitesse *= 0.32
+
+	_surveiller_la_friche(delta)
+	Sons.regime(clamp(abs(_vitesse) / VITESSE_MAX, 0.0, 1.0))
+
+## Il n'y a pas de mur : au-delà de la friche on est ramené, doucement d'abord.
+## Un mur invisible qui arrête net donne l'impression d'un défaut ; une
+## inertie qui ramène se comprend sans explication.
+func _surveiller_la_friche(delta: float) -> void:
+	var limite := Rect2(-BANLIEUE, -BANLIEUE, etendue().x + BANLIEUE * 2.0, etendue().y + BANLIEUE * 2.0)
+	if limite.has_point(_position):
+		_hors_ville = max(0.0, _hors_ville - delta * 2.0)
+		return
+	_hors_ville += delta
+	var vers_centre := (centre_ville() - _position).normalized()
+	_position += vers_centre * RETOUR * delta * min(_hors_ville, 3.0)
+
+# ------------------------------------------------------- armes
+
+func _tirer(delta: float) -> void:
+	_recharge = max(0.0, _recharge - delta)
+	if _arme == "" or _arme == "eperon" or _munitions <= 0 or _recharge > 0.0:
+		return
+	if not Commandes.tir():
+		return
+	var fiche: Dictionary = ARMES[_arme]
+	_recharge = float(fiche["cadence"])
+	_munitions -= 1
+	var depart := _position + Vector2.RIGHT.rotated(_angle) * 40.0
+	canal.envoyer("tir", {"x": int(depart.x), "y": int(depart.y), "a": snapped(_angle, 0.01), "arme": _arme})
+	_creer_projectile(depart, _angle, _arme, Session.cle)
+	Sons.jouer("clic" if _arme == "mitraillette" else "choc", 1.6 if _arme == "mitraillette" else 0.7, -12.0)
+	if _munitions == 0:
+		_arme = ""
+
+func _creer_projectile(depart: Vector2, angle: float, arme: String, par: String) -> void:
+	var fiche: Dictionary = ARMES[arme]
+	var couleur: Color = fiche["couleur"]
+	var noeud := Decor.sphere(0.5 if arme == "mitraillette" else 0.9, couleur, false)
+	noeud.material_override = Decor.matiere_lumineuse(couleur, 1.25)
+	noeud.position = Decor.vers3d(depart, 1.6)
+	monde().add_child(noeud)
+	_projectiles.append({
+		"p": depart,
+		"v": Vector2.RIGHT.rotated(angle) * float(fiche["vitesse"]),
+		"restant": float(fiche["portee"]),
+		"par": par, "arme": arme, "noeud": noeud,
+	})
+
+func _avancer_projectiles(delta: float) -> void:
+	var restants: Array = []
+	for tir in _projectiles:
+		var pas: Vector2 = (tir["v"] as Vector2) * delta
+		tir["p"] = (tir["p"] as Vector2) + pas
+		tir["restant"] = float(tir["restant"]) - pas.length()
+		var mort: bool = float(tir["restant"]) <= 0.0 or _dans_un_batiment(tir["p"])
+		if est_hote() and not mort:
+			mort = _resoudre_impact(tir)
+		if mort:
+			if String(tir["arme"]) == "roquette":
+				_effet_explosion(tir["p"])
+			(tir["noeud"] as Node3D).queue_free()
+			continue
+		(tir["noeud"] as Node3D).position = Decor.vers3d(tir["p"], 1.6)
+		restants.append(tir)
+	_projectiles = restants
+
+## Seul l'hôte tranche : il seul voit tous les monstres à la même date.
+func _resoudre_impact(tir: Dictionary) -> bool:
+	var souffle := float(ARMES[tir["arme"]]["souffle"])
+	var touches: Array = []
+	for m in _monstres:
+		var rayon: float = _rayon_monstre(int(m["type"]))
+		if (m["p"] as Vector2).distance_to(tir["p"]) <= rayon + 14.0:
+			touches.append(m)
+			break
+	if touches.is_empty():
+		return false
+	if souffle > 0.0:
+		var centre: Vector2 = touches[0]["p"]
+		touches.clear()
+		for m in _monstres:
+			if (m["p"] as Vector2).distance_to(centre) <= souffle:
+				touches.append(m)
+	for m in touches:
+		m["pv"] = int(m["pv"]) - (2 if souffle > 0.0 else 1)
+		if int(m["pv"]) > 0:
+			continue
+		_compter_victime(String(tir["par"]), m, int(ARMES[tir["arme"]]["points"]), false)
+		_liberer(m)
+		_monstres.erase(m)
+	return true
+
+func _ramasser_caisses() -> void:
+	for caisse in _caisses:
+		if (caisse["p"] as Vector2).distance_to(_position) > 46.0:
+			continue
+		canal.envoyer("ramasse", {"id": int(caisse["id"])})
+		if est_hote():
+			_accorder(Session.cle, String(caisse["arme"]))
+			_retirer_caisse(int(caisse["id"]))
+		return
+
+func _accorder(cle: String, arme: String) -> void:
+	canal.envoyer("arme", {"j": cle, "arme": arme})
+	if cle == Session.cle:
+		_equiper(arme)
+
+func _equiper(arme: String) -> void:
+	if arme == "eperon":
+		_eperon = DUREE_EPERON
+	else:
+		_arme = arme
+		_munitions = int(ARMES[arme]["munitions"])
+	Sons.jouer("depart", 1.0, -8.0)
+
+func seuil_ecrasement() -> float:
+	return SEUIL_EPERON if _eperon > 0.0 else SEUIL_ECRASEMENT
 
 # ------------------------------------------------------- simulation hôte
 
 func simuler_hote(delta: float) -> void:
+	_reprendre_la_main()
+
 	var vague := int(temps / 20.0) + 1
 	# Une bouffée au coup d'envoi : sans elle, les vingt premières secondes se
 	# passent à chercher un monstre à l'écran, et la manche commence mollement.
 	if not _amorce:
 		_amorce = true
-		for i in 10:
+		for i in 8:
 			_faire_apparaitre(vague)
+		for i in 4:
+			_poser_caisse()
+
 	_depuis_apparition += delta
 	var intervalle: float = max(0.14, 0.62 - vague * 0.07)
 	if _depuis_apparition >= intervalle and _monstres.size() < MONSTRES_MAX:
 		_depuis_apparition = 0.0
 		_faire_apparaitre(vague)
+
+	_depuis_caisse += delta
+	if _depuis_caisse >= 6.0 and _caisses.size() < CAISSES_MAX:
+		_depuis_caisse = 0.0
+		_poser_caisse()
 
 	var voitures := _voitures_connues()
 	for m in _monstres:
@@ -242,8 +562,8 @@ func simuler_hote(delta: float) -> void:
 		if cible != Vector2.INF:
 			var direction: Vector2 = (cible - m["p"]).normalized()
 			m["p"] = (m["p"] as Vector2) + direction * float(m["vitesse"]) * delta
-		m["p"].x = clamp(m["p"].x, ARENE.position.x, ARENE.end.x)
-		m["p"].y = clamp(m["p"].y, ARENE.position.y, ARENE.end.y)
+		var degage := _degager(m["p"], _rayon_monstre(int(m["type"])))
+		m["p"] = degage[0]
 
 	_arbitrer_collisions(voitures)
 
@@ -253,12 +573,33 @@ func simuler_hote(delta: float) -> void:
 		var liste: Array = []
 		for m in _monstres:
 			liste.append([int(m["id"]), int(m["p"].x), int(m["p"].y), int(m["type"])])
-		canal.envoyer("m", {"l": liste, "v": vague})
+		var caisses: Array = []
+		for c in _caisses:
+			caisses.append([int(c["id"]), int(c["p"].x), int(c["p"].y), String(c["arme"])])
+		canal.envoyer("m", {"l": liste, "v": vague, "c": caisses})
+
+## Si l'hôte précédent est parti, celui qui reprend hérite de monstres reçus
+## par instantané : ils ont une position et un type, pas de vitesse ni de
+## points de vie. Sans cette remise en état ils resteraient figés et
+## invulnérables — un troupeau de statues au milieu de la ville.
+func _reprendre_la_main() -> void:
+	for m in _monstres:
+		if not m.has("vitesse") or float(m["vitesse"]) <= 0.0:
+			var type := int(m["type"])
+			m["vitesse"] = _vitesse_monstre(type, int(temps / 20.0) + 1)
+			m["pv"] = 2 if type == 1 else 1
+		_prochain_id = max(_prochain_id, int(m["id"]) + 1)
+	for c in _caisses:
+		_prochaine_caisse = max(_prochaine_caisse, int(c["id"]) + 1)
 
 func _voitures_connues() -> Dictionary:
-	var v := {Session.cle: {"p": _position, "s": abs(_vitesse)}}
+	var v := {Session.cle: {"p": _position, "s": abs(_vitesse), "seuil": seuil_ecrasement()}}
 	for cle in _autres:
-		v[cle] = {"p": _autres[cle]["p"], "s": abs(float(_autres[cle]["v"]))}
+		v[cle] = {
+			"p": _autres[cle]["p"],
+			"s": abs(float(_autres[cle]["v"])),
+			"seuil": float(_autres[cle].get("seuil", SEUIL_ECRASEMENT)),
+		}
 	return v
 
 func _plus_proche(depuis: Vector2, voitures: Dictionary) -> Vector2:
@@ -271,6 +612,17 @@ func _plus_proche(depuis: Vector2, voitures: Dictionary) -> Vector2:
 			meilleure = voitures[cle]["p"]
 	return meilleure
 
+func _rayon_monstre(type: int) -> float:
+	return 26.0 if type == 0 else (42.0 if type == 1 else 20.0)
+
+func _vitesse_monstre(type: int, vague: int) -> float:
+	var base := 78.0 + vague * 5.0
+	if type == 1:
+		return base * 0.62
+	if type == 2:
+		return base * 1.75
+	return base
+
 func _faire_apparaitre(vague: int) -> void:
 	var type := 0
 	var tirage := _rng.randf()
@@ -278,42 +630,50 @@ func _faire_apparaitre(vague: int) -> void:
 		type = 1                      # gros : lent, encaisse, rapporte
 	elif vague >= 2 and tirage < 0.42:
 		type = 2                      # rapide : nerveux, fragile
-	# Ils surgissent en couronne autour d'une voiture, hors de vue mais à
-	# portée de marche. Les faire naître aux bords de l'arène — ce qu'on
-	# faisait d'abord — les obligeait à traverser douze cents pixels avant
-	# d'être menaçants : le joueur ne croisait presque personne.
+	# Ils surgissent dans une rue autour d'une voiture, hors de vue mais à
+	# portée de marche. Les faire naître aux confins de la ville les
+	# obligerait à traverser des milliers de pixels avant d'être menaçants.
 	var autour := _position
 	if not _autres.is_empty() and _rng.randf() < 0.5:
 		var cles := _autres.keys()
 		autour = _autres[cles[_rng.randi_range(0, cles.size() - 1)]]["p"]
-	var p: Vector2 = autour + Vector2.RIGHT.rotated(_rng.randf() * TAU) * _rng.randf_range(520.0, 820.0)
-	p.x = clamp(p.x, ARENE.position.x + 30.0, ARENE.end.x - 30.0)
-	p.y = clamp(p.y, ARENE.position.y + 30.0, ARENE.end.y - 30.0)
-	var vitesse := 78.0 + vague * 5.0
-	if type == 1:
-		vitesse *= 0.62
-	elif type == 2:
-		vitesse *= 1.75
+	var p := _point_de_rue(autour, 520.0, 860.0)
 	_monstres.append({
 		"id": _prochain_id, "p": p, "cible": p, "type": type,
-		"vitesse": vitesse, "pv": 2 if type == 1 else 1,
+		"vitesse": _vitesse_monstre(type, vague), "pv": 2 if type == 1 else 1,
 	})
 	_prochain_id += 1
+
+func _poser_caisse() -> void:
+	var noms := ARMES.keys()
+	var arme := String(noms[_rng.randi_range(0, noms.size() - 1)])
+	var p := _point_de_rue(centre_ville(), 200.0, max(etendue().x, etendue().y) * 0.5)
+	_caisses.append({"id": _prochaine_caisse, "p": p, "arme": arme})
+	_prochaine_caisse += 1
+
+func _retirer_caisse(id: int) -> void:
+	for c in _caisses:
+		if int(c["id"]) == id:
+			var noeud = c.get("noeud")
+			if noeud != null:
+				(noeud as Node3D).queue_free()
+			_caisses.erase(c)
+			return
 
 func _arbitrer_collisions(voitures: Dictionary) -> void:
 	var a_retirer: Array = []
 	for m in _monstres:
-		var rayon: float = 20.0 if m["type"] == 0 else (32.0 if m["type"] == 1 else 16.0)
+		var rayon: float = _rayon_monstre(int(m["type"]))
 		for cle in voitures:
 			var voiture: Dictionary = voitures[cle]
 			if (m["p"] as Vector2).distance_to(voiture["p"]) > rayon + RAYON_VOITURE:
 				continue
-			if float(voiture["s"]) >= SEUIL_ECRASEMENT:
+			if float(voiture["s"]) >= float(voiture["seuil"]):
 				m["pv"] = int(m["pv"]) - 1
 				if int(m["pv"]) > 0:
 					continue
 				a_retirer.append(m)
-				_compter_ecrasement(cle, m)
+				_compter_victime(cle, m, _points_ecrasement(int(m["type"])), true)
 			else:
 				# Trop lent : c'est le monstre qui gagne l'échange.
 				canal.envoyer("choc", {"j": cle, "x": int(m["p"].x), "y": int(m["p"].y)})
@@ -325,6 +685,13 @@ func _arbitrer_collisions(voitures: Dictionary) -> void:
 		_liberer(m)
 		_monstres.erase(m)
 
+func _points_ecrasement(type: int) -> int:
+	if type == 1:
+		return 30
+	if type == 2:
+		return 18
+	return 10
+
 ## Un monstre disparaît de la simulation ET de la scène. Oublier le maillage
 ## laisse un fantôme immobile que plus rien ne référence.
 func _liberer(m: Dictionary) -> void:
@@ -332,22 +699,18 @@ func _liberer(m: Dictionary) -> void:
 	if noeud != null:
 		(noeud as Node3D).queue_free()
 
-func _compter_ecrasement(cle: String, monstre: Dictionary) -> void:
-	var base := 10
-	if monstre["type"] == 1:
-		base = 30
-	elif monstre["type"] == 2:
-		base = 18
+func _compter_victime(cle: String, monstre: Dictionary, base: int, avec_combo: bool) -> void:
+	var facteur := 1
+	if avec_combo:
+		var combo: Dictionary = _combos.get(cle, {"dernier": -99.0, "facteur": 0})
+		if temps - float(combo["dernier"]) <= COMBO_FENETRE:
+			combo["facteur"] = min(int(combo["facteur"]) + 1, 4)
+		else:
+			combo["facteur"] = 0
+		combo["dernier"] = temps
+		_combos[cle] = combo
+		facteur = int(combo["facteur"]) + 1
 
-	var combo: Dictionary = _combos.get(cle, {"dernier": -99.0, "facteur": 0})
-	if temps - float(combo["dernier"]) <= COMBO_FENETRE:
-		combo["facteur"] = min(int(combo["facteur"]) + 1, 4)
-	else:
-		combo["facteur"] = 0
-	combo["dernier"] = temps
-	_combos[cle] = combo
-
-	var facteur := int(combo["facteur"]) + 1
 	var points := base * facteur
 	if joueurs.has(cle):
 		joueurs[cle]["score"] = int(joueurs[cle]["score"]) + points
@@ -385,7 +748,29 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 		"m":
 			if est_hote():
 				return
-			_appliquer_snapshot(charge.get("l", []))
+			_appliquer_snapshot(charge.get("l", []), charge.get("c", []))
+		"tir":
+			if String(charge.get("cle", "")) == Session.cle:
+				return
+			_creer_projectile(
+				Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
+				float(charge.get("a", 0.0)), String(charge.get("arme", "mitraillette")),
+				String(charge.get("cle", "")))
+		"ramasse":
+			if not est_hote():
+				return
+			var qui := String(charge.get("cle", ""))
+			for c in _caisses:
+				if int(c["id"]) == int(charge.get("id", -1)):
+					_accorder(qui, String(c["arme"]))
+					_retirer_caisse(int(c["id"]))
+					return
+		"arme":
+			if String(charge.get("j", "")) == Session.cle:
+				_equiper(String(charge.get("arme", "")))
+			elif _autres.has(String(charge.get("j", ""))):
+				_autres[String(charge.get("j", ""))]["seuil"] = \
+					SEUIL_EPERON if String(charge.get("arme", "")) == "eperon" else SEUIL_ECRASEMENT
 		"k":
 			var cle_k := String(charge.get("j", ""))
 			if joueurs.has(cle_k):
@@ -396,51 +781,77 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 			if String(charge.get("j", "")) == Session.cle:
 				_encaisser()
 
-func _appliquer_snapshot(liste) -> void:
-	if typeof(liste) != TYPE_ARRAY:
-		return
-	var vus := {}
-	for entree in liste:
-		if typeof(entree) != TYPE_ARRAY or (entree as Array).size() < 4:
-			continue
-		var id := int(entree[0])
-		vus[id] = true
-		var p := Vector2(float(entree[1]), float(entree[2]))
-		var trouve := false
+func _appliquer_snapshot(liste, caisses) -> void:
+	if typeof(liste) == TYPE_ARRAY:
+		var vus := {}
+		for entree in liste:
+			if typeof(entree) != TYPE_ARRAY or (entree as Array).size() < 4:
+				continue
+			var id := int(entree[0])
+			vus[id] = true
+			var p := Vector2(float(entree[1]), float(entree[2]))
+			var trouve := false
+			for m in _monstres:
+				if int(m["id"]) == id:
+					m["cible"] = p
+					trouve = true
+					break
+			if not trouve:
+				_monstres.append({"id": id, "p": p, "cible": p, "type": int(entree[3]), "vitesse": 0.0, "pv": 1})
+		# Un monstre absent du dernier état a été tué (ou l'hôte a changé) :
+		# on ne le garde pas à l'écran, sinon il devient un fantôme intouchable.
+		var restants: Array = []
 		for m in _monstres:
-			if int(m["id"]) == id:
-				m["cible"] = p
-				trouve = true
-				break
-		if not trouve:
-			_monstres.append({"id": id, "p": p, "cible": p, "type": int(entree[3]), "vitesse": 0.0, "pv": 1})
-	# Un monstre absent du dernier état a été écrasé (ou l'hôte a changé) :
-	# on ne le garde pas à l'écran, sinon il devient un fantôme intouchable.
-	var restants: Array = []
-	for m in _monstres:
-		if vus.has(int(m["id"])):
-			restants.append(m)
-		else:
-			_liberer(m)
-	_monstres = restants
+			if vus.has(int(m["id"])):
+				restants.append(m)
+			else:
+				_liberer(m)
+		_monstres = restants
+
+	if typeof(caisses) == TYPE_ARRAY:
+		var vues := {}
+		for entree in caisses:
+			if typeof(entree) != TYPE_ARRAY or (entree as Array).size() < 4:
+				continue
+			var id := int(entree[0])
+			vues[id] = true
+			var connue := false
+			for c in _caisses:
+				if int(c["id"]) == id:
+					connue = true
+					break
+			if not connue:
+				_caisses.append({
+					"id": id, "arme": String(entree[3]),
+					"p": Vector2(float(entree[1]), float(entree[2])),
+				})
+		var gardees: Array = []
+		for c in _caisses:
+			if vues.has(int(c["id"])):
+				gardees.append(c)
+			else:
+				var noeud = c.get("noeud")
+				if noeud != null:
+					(noeud as Node3D).queue_free()
+		_caisses = gardees
 
 func _encaisser() -> void:
 	if _sonne > 0.0:
 		return
 	_sonne = 0.7
 	_vitesse *= 0.2
-	_secousse = 0.5
+	_secousse = 0.6
+	Sons.jouer("choc", 1.0, -6.0)
 
 # ------------------------------------------------------- effets
 
 func _effet_ecrasement(position: Vector2, points: int, facteur: int, cle: String) -> void:
 	var couleur := Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 0)))
+	Sons.jouer("ecrasement", _rng.randf_range(0.85, 1.2), -8.0)
 
-	# Une flaque au sol : la trace de ce qui vient d'être écrasé. Le nombre en
-	# est borné — sans plafond, une manche pleine finit par empiler des
-	# centaines de maillages et le rendu s'effondre en fin de partie.
-	# Bien plus sombres que les monstres : à la même teinte, une flaque au sol
-	# se lit comme une cible et on fonce dessus pour rien.
+	# Une flaque au sol, bien plus sombre que les monstres : à la même teinte,
+	# elle se lit comme une cible et on fonce dessus pour rien. Leur nombre est
+	# borné — sans plafond, une manche pleine empile des centaines de maillages.
 	var flaque := Decor.cylindre(_rng.randf_range(1.1, 1.9), 0.08, Palette.BON.darkened(0.78), false)
 	flaque.position = Decor.vers3d(position, 0.05)
 	flaque.rotation.y = _rng.randf() * TAU
@@ -460,6 +871,17 @@ func _effet_ecrasement(position: Vector2, points: int, facteur: int, cle: String
 	mention.position = Decor.vers3d(position, 3.0)
 	monde().add_child(mention)
 	_eclats.append({"noeud": mention, "v": Vector3(0, 7.0, 0), "t": 1.1, "t0": 1.1, "texte": true})
+
+func _effet_explosion(position: Vector2) -> void:
+	Sons.jouer("ecrasement", 0.6, -4.0)
+	_secousse = max(_secousse, 0.35)
+	for i in 18:
+		var eclat := Decor.sphere(_rng.randf_range(0.3, 0.7), Palette.SERIEUX, false)
+		eclat.material_override = Decor.matiere_lumineuse(Palette.SERIEUX, 1.2)
+		eclat.position = Decor.vers3d(position, 1.2)
+		monde().add_child(eclat)
+		var direction := Vector3(_rng.randf_range(-1, 1), _rng.randf_range(0.6, 2.4), _rng.randf_range(-1, 1))
+		_eclats.append({"noeud": eclat, "v": direction * _rng.randf_range(14, 26), "t": 0.7, "t0": 0.7})
 
 func _animer_effets(delta: float) -> void:
 	var restants: Array = []
@@ -496,6 +918,9 @@ func rafraichir_scene(delta: float) -> void:
 	_corps.rotation.z = lerp(_corps.rotation.z, deg_to_rad(-assiette * 3.0), clamp(delta * 6.0, 0, 1))
 	if _sonne > 0.0:
 		_corps.rotation.z = sin(_sonne * 40.0) * 0.25
+	var buffle := _corps.get_node_or_null("Buffle") as MeshInstance3D
+	if buffle:
+		buffle.visible = _eperon > 0.0
 
 	for cle in _autres:
 		var a: Dictionary = _autres[cle]
@@ -504,20 +929,24 @@ func rafraichir_scene(delta: float) -> void:
 		noeud.rotation.y = -float(a["a"])
 
 	for m in _monstres:
-		var noeud: Node3D = m.get("noeud")
-		if noeud == null:
-			noeud = _batir_monstre(int(m["type"]))
-			monde().add_child(noeud)
-			m["noeud"] = noeud
-		noeud.position = Decor.vers3d(m["p"])
-		# Ils sautillent, et se tournent vers là où ils vont : un monstre qui
-		# glisse sans bouger ne fait pas peur.
-		var corps := noeud.get_node_or_null("Corps") as Node3D
+		var noeud_m = m.get("noeud")
+		if noeud_m == null:
+			noeud_m = _batir_monstre(int(m["type"]))
+			monde().add_child(noeud_m)
+			m["noeud"] = noeud_m
+		(noeud_m as Node3D).position = Decor.vers3d(m["p"])
+		var corps := (noeud_m as Node3D).get_node_or_null("Corps") as Node3D
 		if corps:
 			corps.position.y = abs(sin(temps * 7.0 + float(int(m["id"])) * 1.3)) * 0.7 + 1.4
-		var vers: Vector2 = (m["cible"] as Vector2) - (m["p"] as Vector2) if m.has("cible") else Vector2.ZERO
-		if vers.length() > 1.0:
-			noeud.rotation.y = atan2(-vers.x, -vers.y) - PI * 0.5
+
+	for c in _caisses:
+		var noeud_c = c.get("noeud")
+		if noeud_c == null:
+			noeud_c = _batir_caisse(String(c["arme"]))
+			monde().add_child(noeud_c)
+			c["noeud"] = noeud_c
+		(noeud_c as Node3D).position = Decor.vers3d(c["p"], sin(temps * 2.0 + float(int(c["id"]))) * 0.3)
+		(noeud_c as Node3D).rotation.y = temps * 0.9
 
 	_animer_effets(delta)
 	_placer_camera(delta)
@@ -530,3 +959,17 @@ func _placer_camera(delta: float) -> void:
 		_secousse = max(0.0, _secousse - delta * 2.0)
 		vise += Vector3(_rng.randf_range(-1, 1), _rng.randf_range(-1, 1), 0) * _secousse * 2.5
 	_camera.position = _camera.position.lerp(vise, clamp(delta * 7.0, 0, 1))
+
+## Ce que le socle affiche en bas de l'écran : l'arme en main, ses munitions,
+## et l'avertissement quand on quitte la ville.
+func etat_joueur() -> String:
+	var morceaux: Array = []
+	if _eperon > 0.0:
+		morceaux.append("Éperon %ds" % int(ceil(_eperon)))
+	if _arme != "":
+		morceaux.append("%s %d" % [String(ARMES[_arme]["nom"]), _munitions])
+	if morceaux.is_empty():
+		morceaux.append("À mains nues — ramassez une caisse")
+	if _hors_ville > 0.2:
+		morceaux.append("VOUS QUITTEZ LA VILLE")
+	return "   ·   ".join(morceaux)
