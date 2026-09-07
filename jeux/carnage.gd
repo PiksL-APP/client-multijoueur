@@ -60,6 +60,17 @@ const DISTANCE_PIED := 36.0
 
 const RETOUR := 260.0              ## rappel vers le centre au-delà de la friche
 
+## Ce qu'on DESSINE est plus étroit que ce que l'hôte diffuse : l'écran couvre
+## treize cents pixels de large, et chaque voiture garée vaut cinq appels de
+## dessin, chaque passant sept. À seize cents pixels, on en dessinait trois
+## cents pour en voir quarante — et un navigateur en mode compatibilité tombe
+## à dix images par seconde.
+const PORTEE_RENDU := 1050.0
+## Et on ne bâtit pas plus de quelques maillages par image : soixante voitures
+## instanciées d'un coup à l'entrée d'un quartier font une saccade d'une
+## demi-seconde qu'on prend pour un plantage.
+const BATISSES_PAR_IMAGE := 6
+
 ## Les armes. Le pistolet ne s'épuise jamais : sans lui, un joueur à pied et à
 ## court de munitions n'a plus qu'à attendre la fin de la manche.
 const ARMES := {
@@ -1102,7 +1113,10 @@ func _animer_effets(delta: float) -> void:
 
 # ------------------------------------------------------- rendu
 
+var _batisses := 0
+
 func rafraichir_scene(delta: float) -> void:
+	_batisses = 0
 	_placer_le_joueur(delta)
 	_placer_les_autres()
 	_placer_la_foule()
@@ -1254,8 +1268,9 @@ func _placer_la_foule() -> void:
 	for personne in ville.gens:
 		var noeud = personne.get("noeud")
 		if noeud == null:
-			if (personne["p"] as Vector2).distance_to(_position) > VilleVivante.PORTEE_VUE:
+			if (personne["p"] as Vector2).distance_to(_position) > PORTEE_RENDU or _batisses >= BATISSES_PAR_IMAGE:
 				continue
+			_batisses += 1
 			noeud = FormesCarnage.pieton(_couleur_de(personne), int(personne["genre"]) == VilleVivante.GANG)
 			monde().add_child(noeud)
 			personne["noeud"] = noeud
@@ -1264,7 +1279,7 @@ func _placer_la_foule() -> void:
 			# quarante-six parcours d'arbre par trame pour ne rien changer.
 			Decor.demarche(noeud, "walk")
 		var corps: Node3D = noeud
-		corps.visible = (personne["p"] as Vector2).distance_to(_position) <= VilleVivante.PORTEE_VUE
+		corps.visible = (personne["p"] as Vector2).distance_to(_position) <= PORTEE_RENDU
 		if not corps.visible:
 			continue
 		corps.position = Decor.vers3d(personne["p"])
@@ -1299,10 +1314,11 @@ func _placer_les_autos() -> void:
 		# Ce qui est à plus d'un écran et demi n'est pas dessiné : l'hôte a
 		# trois cents voitures dans sa liste, et un navigateur en mode
 		# compatibilité n'en dessine pas trois cents.
-		var proche: bool = (auto["p"] as Vector2).distance_to(_position) <= VilleVivante.PORTEE_VUE
+		var proche: bool = (auto["p"] as Vector2).distance_to(_position) <= PORTEE_RENDU
 		if noeud == null:
-			if not proche:
+			if not proche or _batisses >= BATISSES_PAR_IMAGE:
 				continue
+			_batisses += 1
 			if genre == VilleVivante.EPAVE:
 				noeud = FormesCarnage.epave()
 			else:
