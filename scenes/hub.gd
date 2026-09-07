@@ -1,43 +1,42 @@
 extends Ecran
-## Le hub : un village en pixel art, vu de dessus, où l'on entre dans les
+## Le hub : un village en voxels, vu de trois quarts, où l'on entre dans les
 ## maisons.
 ##
-## Pourquoi le hub est en deux dimensions alors que les jeux sont en 3D : le
-## pack de décor est dessiné en vue de dessus, murs et toits compris. Dressé
-## en panneaux dans une scène en perspective, il se tordrait. Le contraste
-## assumé — un village pixel, des jeux en volume — vaut mieux qu'un mélange
-## qui trahirait les deux.
+## Tout ce qu'on voit sort de `outils/voxel.py` : le terrain, les maisons,
+## les arbres, le mobilier, les habitants et les héros sont bâtis cube par
+## cube, à une seule palette, et écrits en glTF dans `modeles/voxel/`. Le
+## même script écrit `plan.json` : ce qui arrête le joueur et ce qu'il voit
+## ont la même source.
 ##
-## Une seule échelle : celle du pack. Une case de sol fait 16 pixels, un
-## personnage 30, une porte 41 ; aucun sprite n'est agrandi ni réduit, et la
-## caméra zoome d'un facteur ENTIER. C'est la condition pour que rien ne
-## bave et que tout paraisse de la même taille.
+## La simulation, elle, n'a pas changé : un plan de cases de 16 pixels, des
+## positions en pixels, les mêmes messages réseau qu'avant. Une case fait UNE
+## unité dans le monde ; un personnage en fait deux de haut.
 ##
 ## Choix de synchronisation : l'identité et le LIEU passent par la présence
 ## (rares, fiables) ; la position par la diffusion (fréquente, jetable). On ne
 ## dessine que les joueurs qui sont dans la même pièce que soi.
 
 const CANAL := "mj-hub"
-const VITESSE := 96.0
+const VITESSE := 96.0              ## pixels par seconde
 const RAYON := 6.0                 ## demi-largeur des pieds, pour les collisions
-const ZOOM := 3                    ## entier, sinon les pixels ne tombent pas juste
 const CADENCE_ENVOI := 1.0 / 8.0
 const RAPPEL := 1.5
-const IMAGES := "res://modeles/village/"
-## Toutes les planches de personnages sont au même gabarit (cases de 64,
-## pieds sur le bord bas) : le pivot est au centre, les pieds 32 plus bas.
-const PIEDS := Vector2(0, -32)
+const MODELES := "res://modeles/voxel/"
+const UNITE := 16.0                ## pixels par unité du monde (une case)
 ## Les émotes : touches 1 à 4, une bulle au-dessus de la tête, visible de tous.
 const EMOTES := ["!", "?", "<3", "zZ"]
 ## Le cycle du jour, calé sur l'heure universelle pour que tous les joueurs
 ## vivent la même heure : quinze minutes, dont quatre de nuit.
 const CYCLE := 900.0
+## La caméra : inclinée, de face, assez haute pour lire la place entière.
+const INCLINAISON := 44.0
+const DISTANCE := 27.0
+const DISTANCE_PIECE := 18.0
 
 ## Les lieux du hub. Le village est dehors ; les trois autres sont des pièces
-## entières de la maquette du pack, chacune avec sa zone de marche, ses
-## meubles, sa sortie, son habitant, et — pour deux d'entre elles — le
-## classement au mur et le portail qui lance le jeu. Toutes les coordonnées
-## sont en pixels de l'image du lieu.
+## bâties par le même outil, chacune avec sa zone de marche, ses meubles, sa
+## sortie, son habitant, et — pour deux d'entre elles — le classement au mur
+## et le portail qui lance le jeu. Les positions sont en pixels du lieu.
 const LIEUX := {
 	"village": {
 		"nom": "Village",
@@ -50,41 +49,37 @@ const LIEUX := {
 	},
 	"taverne": {
 		"nom": "Taverne",
-		"lueur": {"centre": Vector2(182, 112), "taille": Vector2(34, 44)},
-		"tableau": Rect2(280, 6, 152, 54),
 		"rangs": 5,
 		"jeu": "carnage",
 		"titre": "CARNAGE",
-		"pnj": [{"nom": "serveuse", "position": Vector2(56, 328), "phrases": [
+		"pnj": [{"nom": "serveuse", "position": Vector2(48, 112), "phrases": [
 			"Une chope ? Non ? Alors pousse-toi, j'ai des tables.",
 			"Le patron dit que les vainqueurs boivent gratis. Il ment.",
-		]}, {"nom": "taverniere", "position": Vector2(56, 256), "phrases": [
+		]}, {"nom": "taverniere", "position": Vector2(72, 40), "phrases": [
 			"Dehors, la ville est à prendre. Vole une voiture, et ne freine pas.",
 			"Trois bandes tiennent les rues. Saigne-en une et sa rivale t'ouvrira sa porte.",
 			"Cinq étoiles au compteur ? Le garage bleu te repeint, et la police t'oublie.",
 			"Décroche à une cabine : ils paient pour ce qu'ils n'osent pas faire eux-mêmes.",
 			"Descends de voiture quand il le faut — mais à pied, tout te fait mal deux fois.",
 			"Les deux esplanades cerclées de rouge, c'est là qu'on règle ses comptes entre nous.",
-			"Le portail, c'est la porte du fond. On y va à deux, à trois, à quatre.",
+			"Le portail, c'est l'arche du fond, à droite. On y va à deux, à trois, à quatre.",
 		]}],
 	},
 	"armurerie": {
 		"nom": "Armurerie",
-		"lueur": {"centre": Vector2(288, 160), "taille": Vector2(30, 30)},
-		"tableau": Rect2(160, 6, 112, 42),
-		"rangs": 3,
+		"rangs": 5,
 		"jeu": "enigme",
 		"titre": "ÉNIGME",
-		"pnj": [{"nom": "squelette", "position": Vector2(232, 104), "phrases": [
+		"pnj": [{"nom": "squelette", "position": Vector2(72, 88), "phrases": [
 			"Trois chambres. Aucune ne s'ouvre à un seul.",
 			"Une dalle ne reste enfoncée que si quelque chose pèse dessus — quelqu'un, ou une caisse.",
 			"Et la sortie n'accepte l'équipe qu'au complet. Personne ne finit seul.",
-			"Le portail est là, dans le coin, à droite.",
+			"Le portail est là, au fond, à droite.",
 		]}],
 	},
 	"auberge": {
 		"nom": "Auberge",
-		"pnj": [{"nom": "aubergiste", "position": Vector2(200, 120), "phrases": [
+		"pnj": [{"nom": "aubergiste", "position": Vector2(168, 72), "phrases": [
 			"Chut, il y a des gens qui dorment. Ici on se repose entre deux parties.",
 			"Le troisième jeu se prépare. Repasse.",
 		]}],
@@ -93,15 +88,11 @@ const LIEUX := {
 	"grange": {"nom": "Grange", "ferme": "La grange donne sur la ferme. Elle ouvre bientôt : ça sent déjà le foin et les radis."},
 }
 
-## Le plan du village et des pièces — sol, objets, cases bloquées, portes,
-## sorties et portails — est écrit par `outils/village.py` dans
-## `plan.json`. Ce qu'on voit et ce qui arrête le joueur sortent du même
-## fichier : c'est ce qui garantit qu'on ne traverse ni mur ni meuble.
 static var _carte: Dictionary = {}
 
 static func carte() -> Dictionary:
 	if _carte.is_empty():
-		var texte := FileAccess.get_file_as_string(IMAGES + "plan.json")
+		var texte := FileAccess.get_file_as_string(MODELES + "plan.json")
 		_carte = JSON.parse_string(texte) as Dictionary
 	return _carte
 
@@ -111,13 +102,69 @@ static func rect_de(valeur) -> Rect2:
 	var v: Array = valeur
 	return Rect2(float(v[0]), float(v[1]), float(v[2]), float(v[3]))
 
+## Un point du plan (pixels) → le monde (unités), au sol.
+static func au_sol(plan_px: Vector2, hauteur: float = 0.0) -> Vector3:
+	return Vector3(plan_px.x / UNITE, hauteur, plan_px.y / UNITE)
+
+# ---------------------------------------------------------------- le pantin
+## Un personnage voxel : les six parties du glTF, qu'on balance en marchant.
+## Le visage regarde vers +z au repos ; on tourne le tout vers la direction
+## du dernier pas.
+class Pantin extends Node3D:
+	var parties: Dictionary = {}
+	var phase := 0.0
+	var marche := false
+	var cap := 0.0                     # l'orientation visée, en radians
+	var _corps_y := 0.0
+
+	static func depuis(chemin: String) -> Pantin:
+		var p := Pantin.new()
+		var modele := (load(chemin) as PackedScene).instantiate() as Node3D
+		p.add_child(modele)
+		for n in modele.find_children("*", "MeshInstance3D", true, false):
+			p.parties[n.name] = n
+		return p
+
+	func regarder(direction: Vector2) -> void:
+		if direction.length() > 0.01:
+			cap = atan2(direction.x, direction.y)
+
+	func _process(delta: float) -> void:
+		rotation.y = lerp_angle(rotation.y, cap, clampf(delta * 14.0, 0.0, 1.0))
+		var cible := 0.0
+		if marche:
+			phase += delta * 11.0
+			cible = sin(phase) * 0.7
+		else:
+			phase = 0.0
+		var lisse: float = clamp(delta * 12.0, 0.0, 1.0)
+		for nom in parties:
+			var partie: Node3D = parties[nom]
+			match nom:
+				"jambe_g", "bras_d":
+					partie.rotation.x = lerp(partie.rotation.x, cible, lisse)
+				"jambe_d", "bras_g":
+					partie.rotation.x = lerp(partie.rotation.x, -cible, lisse)
+		# Le buste et la tête sautillent d'un voxel en marchant.
+		var saut := (absf(sin(phase)) * 0.06) if marche else 0.0
+		for nom in ["corps", "tete", "bras_g", "bras_d"]:
+			if parties.has(nom):
+				var partie: Node3D = parties[nom]
+				partie.position.y = _base_y(nom) + saut
+
+	func _base_y(nom: String) -> float:
+		match nom:
+			"tete": return 1.5
+			"bras_g", "bras_d": return 1.4375
+			_: return 0.75
+
 var _canal: CanalTempsReel
-var _camera: Camera2D
+var _camera: Camera3D
 var _lieu := "village"
 var _position := Vector2.ZERO
 var _marche := false
 var _autres: Dictionary = {}       # cle -> {cible, affichee, pseudo, noeud}
-var _corps: AnimatedSprite2D
+var _corps: Pantin
 var _bloque: PackedStringArray = []   # une ligne par rangée de cases, `#` = bloqué
 var _bloque_aussi: Dictionary = {}    # cases prises à l'exécution (les PNJ)
 var _case := 16
@@ -127,16 +174,25 @@ var _sortie := Rect2()
 var _portail := Rect2()
 var _jeu_du_lieu := ""
 var _titre_du_lieu := ""
-var _pnj: Array = []               # {position, phrases}
+var _pnj: Array = []               # {position, phrases, noeud}
 var _pnj_proche := -1
 var _phrase := -1
 var _depuis_envoi := 0.0
 var _depuis_rappel := 0.0
 var _invite := ""
+var _depuis_pas := 0.0
 
-var _modulation: CanvasModulate
-var _lumieres: Array[PointLight2D] = []
-var _lucioles: CPUParticles2D
+var _soleil: DirectionalLight3D
+var _contre_jour: DirectionalLight3D
+var _environnement: Environment
+var _ciel: ProceduralSkyMaterial
+var _lumieres: Array[OmniLight3D] = []
+var _vitres: Array[MeshInstance3D] = []
+var _lucioles: CPUParticles3D
+var _eau: MeshInstance3D
+var _portail_lueur: MeshInstance3D
+var _feu_lumiere: OmniLight3D
+
 var _voile: ColorRect
 var _panneau_carnet: PanelContainer
 var _hud_carnet: Label
@@ -147,18 +203,17 @@ var _hud_titre: Label
 var _hud_invite: Label
 var _hud_dialogue: Label
 var _panneau_dialogue: PanelContainer
-var _tableau: Label
-var _affichage: Label
+var _tableau: Label3D
+var _affichage: Label3D
 var _journal: Array = []
 var _classements: Dictionary = {}
-var _depuis_pas := 0.0
 
 func demarrer() -> void:
-	_camera = Camera2D.new()
-	_camera.zoom = Vector2(ZOOM, ZOOM)
-	_camera.position_smoothing_enabled = true
-	_camera.position_smoothing_speed = 9.0
-	add_child(_camera)
+	_camera = Camera3D.new()
+	_camera.fov = 40.0
+	_camera.near = 0.5
+	_camera.far = 400.0
+	monde().add_child(_camera)
 	_camera.make_current()
 
 	_construire_hud()
@@ -216,18 +271,16 @@ func _entrer_dans(lieu: String, arrivee: Vector2) -> void:
 	_case = int(carte()["case"])
 	_taille = Vector2(float(geometrie["taille"][0]), float(geometrie["taille"][1]))
 
-	for enfant in plan().get_children():
-		enfant.queue_free()
+	for enfant in monde().get_children():
+		if enfant != _camera:
+			enfant.queue_free()
 	_autres.clear()
-
-	var fond := Pixels.image(IMAGES + ("sol_village.png" if lieu == "village" else "interieur_%s.png" % lieu), false)
-	fond.z_index = -100
-	fond.y_sort_enabled = false
-	plan().add_child(fond)
-
-	_modulation = null
 	_lumieres.clear()
+	_vitres.clear()
 	_lucioles = null
+	_eau = null
+	_portail_lueur = null
+	_feu_lumiere = null
 	_bloque = PackedStringArray(geometrie["bloque"])
 	_bloque_aussi.clear()
 	_portes.clear()
@@ -239,10 +292,11 @@ func _entrer_dans(lieu: String, arrivee: Vector2) -> void:
 	_tableau = null
 	_affichage = null
 
+	_eclairer(lieu == "village")
 	if lieu == "village":
 		_batir_village(geometrie)
 	else:
-		_batir_interieur(fiche)
+		_batir_piece(lieu, geometrie)
 	for pnj in fiche.get("pnj", []):
 		_poser_pnj(pnj)
 
@@ -253,18 +307,14 @@ func _entrer_dans(lieu: String, arrivee: Vector2) -> void:
 		# Dans une pièce, on arrive sur la sortie.
 		depart = _sortie.get_center() + Vector2(0, 2)
 	_position = arrivee if arrivee != Vector2.ZERO else depart
-	_corps = _sprite_de_heros(Session.heros_affiche())
-	plan().add_child(_corps)
+	_corps = Pantin.depuis(MODELES + "heros_%s.glb" % _heros_connu(Session.heros_affiche()))
+	_corps.position = au_sol(_position)
+	_corps.cap = PI if lieu == "village" else PI   # on entre en regardant vers le nord
+	_corps.rotation.y = _corps.cap
+	monde().add_child(_corps)
 
-	# Une pièce plus petite que l'écran se centre ; une plus grande fait
-	# glisser la caméra sans jamais montrer au-delà de ses murs.
-	var visible := _vue()
-	_camera.limit_left = 0 if _taille.x > visible.x else -100000
-	_camera.limit_right = int(_taille.x) if _taille.x > visible.x else 100000
-	_camera.limit_top = 0 if _taille.y > visible.y else -100000
-	_camera.limit_bottom = int(_taille.y) if _taille.y > visible.y else 100000
-	_camera.position = _position_camera()
-	_camera.reset_smoothing()
+	_camera.position = _position_camera(true)
+	_camera.rotation_degrees = Vector3(-INCLINAISON, 0, 0)
 
 	if _canal and _canal.est_rejoint:
 		_canal.suivre({"pseudo": Session.pseudo, "id": Session.id, "lieu": _lieu, "heros": Session.heros_affiche()})
@@ -274,79 +324,365 @@ func _entrer_dans(lieu: String, arrivee: Vector2) -> void:
 	Sons.ambiance("foret" if lieu == "village" else "")
 	_rafraichir_hud()
 
-func _vue() -> Vector2:
-	return get_viewport().get_visible_rect().size / float(ZOOM)
+static func _heros_connu(nom: String) -> String:
+	return nom if nom in ["knight", "rogue", "wizzard"] else "knight"
 
-func _position_camera() -> Vector2:
-	var visible := _vue()
-	return Vector2(
-		_position.x if _taille.x > visible.x else _taille.x * 0.5,
-		_position.y if _taille.y > visible.y else _taille.y * 0.5)
+## Où la caméra doit être : au-dessus et devant le joueur, inclinée, sans
+## jamais montrer au-delà du village ; une pièce se cadre en entier.
+func _position_camera(immediat: bool = false) -> Vector3:
+	var cible: Vector3
+	var distance := DISTANCE
+	if _lieu == "village":
+		var marge := Vector2(13.0, 9.0)
+		var p := _position / UNITE
+		p.x = clamp(p.x, marge.x, _taille.x / UNITE - marge.x)
+		p.y = clamp(p.y, marge.y + 2.0, _taille.y / UNITE - marge.y + 4.0)
+		cible = Vector3(p.x, 0.0, p.y - 2.5)
+	else:
+		cible = Vector3(_taille.x / UNITE * 0.5, 0.0, _taille.y / UNITE * 0.5 + 0.6)
+		distance = DISTANCE_PIECE
+	var incl := deg_to_rad(INCLINAISON)
+	return cible + Vector3(0, sin(incl) * distance, cos(incl) * distance)
 
-func _sprite_de_heros(nom: String) -> AnimatedSprite2D:
-	var s := AnimatedSprite2D.new()
-	s.sprite_frames = Pixels.heros(nom if nom in Pixels.HEROS else "knight")
-	s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	s.offset = PIEDS
-	s.play("repos")
-	_ombrer(s)
-	return s
+# ---------------------------------------------------------------- le décor
 
-## L'ombre au sol d'un personnage : l'ellipse du pack, sous les pieds, derrière.
-func _ombrer(porteur: Node2D) -> void:
-	var ombre := Pixels.image(IMAGES + "ombre_personnage.png", false)
-	ombre.centered = true
-	ombre.offset = Vector2.ZERO
-	ombre.position = Vector2(0, -3)
-	ombre.show_behind_parent = true
-	porteur.add_child(ombre)
+## Ciel, soleil, contre-jour : le village a un vrai jour ; les pièces, une
+## lumière constante et chaude.
+func _eclairer(dehors: bool) -> void:
+	_environnement = Environment.new()
+	_ciel = ProceduralSkyMaterial.new()
+	_ciel.sky_top_color = Color("#3d7fd6")
+	_ciel.sky_horizon_color = Color("#bcd8f2")
+	_ciel.ground_bottom_color = Color("#3a5a2e")
+	_ciel.ground_horizon_color = Color("#8fb37a")
+	_ciel.sun_angle_max = 20.0
+	var voute := Sky.new()
+	voute.sky_material = _ciel
+	_environnement.background_mode = Environment.BG_SKY
+	_environnement.sky = voute
+	_environnement.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	_environnement.ambient_light_sky_contribution = 1.0
+	_environnement.ambient_light_energy = 0.55
+	_environnement.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	_environnement.tonemap_white = 4.0
+	_environnement.tonemap_exposure = 1.05
+	if dehors:
+		_environnement.fog_enabled = true
+		_environnement.fog_light_color = Color("#c9dcee")
+		_environnement.fog_density = 0.0012
+	_environnement.glow_enabled = true
+	_environnement.glow_intensity = 0.35
+	_environnement.glow_bloom = 0.05
+	_environnement.glow_hdr_threshold = 1.1
+	var noeud := WorldEnvironment.new()
+	noeud.environment = _environnement
+	monde().add_child(noeud)
+
+	_soleil = DirectionalLight3D.new()
+	_soleil.light_color = Color("#fff3df")
+	_soleil.light_energy = 1.5
+	_soleil.rotation_degrees = Vector3(-58, -34, 0)
+	_soleil.shadow_enabled = true
+	_soleil.directional_shadow_max_distance = 60.0
+	_soleil.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	_soleil.directional_shadow_split_1 = 0.35
+	_soleil.shadow_bias = 0.06
+	_soleil.shadow_normal_bias = 2.5
+	monde().add_child(_soleil)
+	_contre_jour = DirectionalLight3D.new()
+	_contre_jour.light_color = Color("#9fb8e0")
+	_contre_jour.light_energy = 0.35
+	_contre_jour.rotation_degrees = Vector3(-30, 140, 0)
+	monde().add_child(_contre_jour)
+
+## Un modèle du dépôt, mis en cache par `Decor.maillage`.
+static func _modele(nom: String) -> Mesh:
+	return Decor.maillage(MODELES + nom + ".glb")
 
 func _batir_village(geometrie: Dictionary) -> void:
-	# Chaque objet du plan est une image entière, posée à sa case ; le
-	# moteur les trie par le bas de leur image, donc par leur pied.
+	var terrain := MeshInstance3D.new()
+	terrain.mesh = _modele("terrain_village")
+	monde().add_child(terrain)
+	# Les objets du plan, regroupés par modèle : une nappe d'instances par
+	# modèle (trois cents arbres, quatre appels de dessin).
+	var par_modele: Dictionary = {}
 	for objet in geometrie["objets"]:
-		var sprite := Pixels.image(IMAGES + String(objet["image"]))
-		var largeur := float(sprite.texture.get_width())
-		var hauteur := float(sprite.texture.get_height())
-		Pixels.poser(sprite, Vector2(float(objet["x"]) + largeur * 0.5, float(objet["y"]) + hauteur))
-		plan().add_child(sprite)
+		var nom := String(objet["modele"])
+		if not par_modele.has(nom):
+			par_modele[nom] = []
+		var t := Transform3D(Basis(Vector3.UP, deg_to_rad(float(objet.get("rot", 0)))),
+			Vector3(float(objet["x"]) / UNITE, float(objet.get("h", 0.0)), float(objet["y"]) / UNITE))
+		par_modele[nom].append(t)
+	for nom in par_modele:
+		var transformations: Array = par_modele[nom]
+		var nappe := Decor.nappe(MODELES + nom + ".glb", transformations, not nom.begins_with("fleur") and nom != "touffe")
+		monde().add_child(nappe)
+	# Les portes : une enseigne au-dessus de chacune.
 	for porte in geometrie["portes"]:
 		var rect := Rect2(float(porte["x"]), float(porte["y"]), float(porte["l"]), float(porte["h"]))
 		_portes.append({"rect": rect, "lieu": String(porte["lieu"]), "nom": String(porte["nom"])})
-		var enseigne := _ecriteau(String(porte["nom"]), 8)
-		enseigne.position = rect.get_center() + Vector2(-64, -8 * _case - 14)
-		enseigne.size = Vector2(128, 10)
-		plan().add_child(enseigne)
-	# La flamme du feu de camp, animée, posée dans le foyer du plan.
-	var feu := AnimatedSprite2D.new()
-	feu.sprite_frames = Pixels.animation("feu", IMAGES + "feu.png", 10.0, 32)
-	feu.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	# Le contenu de la flamme descend jusqu'à la ligne 33 de sa case de 48 :
-	# ce pivot la pose au milieu du foyer et la dessine juste après lui.
-	feu.offset = Vector2(2, -14)
-	Pixels.poser(feu, Vector2(float(geometrie["feu"][0]), float(geometrie["feu"][1]) + 1))
-	feu.play("feu")
-	plan().add_child(feu)
-	# Les ateliers animés du plan : rôtissoire, scierie.
-	for anime in geometrie.get("animes", []):
-		var atelier := AnimatedSprite2D.new()
-		var cote := int(anime["cote"])
-		atelier.sprite_frames = Pixels.animation("marche", IMAGES + String(anime["image"]), float(anime["vitesse"]), cote)
-		atelier.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		atelier.offset = Vector2(0, -32)
-		Pixels.poser(atelier, Vector2(float(anime["x"]) + cote * 0.5, float(anime["y"]) + 64.0))
-		atelier.play("marche")
-		plan().add_child(atelier)
+		var enseigne := _ecriteau(String(porte["nom"]), 0.3)
+		enseigne.position = au_sol(rect.get_center() + Vector2(0, -rect.size.y * 0.5), 3.3) + Vector3(0, 0, 0.15)
+		monde().add_child(enseigne)
+	# Le feu de camp : des flammes qui montent, une lumière qui vacille.
+	var feu := au_sol(Vector2(float(geometrie["feu"][0]), float(geometrie["feu"][1])), 0.25)
+	monde().add_child(_flammes(feu, 0.6))
+	_feu_lumiere = _lampe(feu + Vector3(0, 1.2, 0), Color(1.0, 0.7, 0.4), 9.0, 2.0)
+	# La mare : une nappe d'eau translucide, un peu sous la rive.
+	_eau = _nappe_d_eau(geometrie["mare"])
+	monde().add_child(_eau)
+	# Les fenêtres et les cheminées des maisons.
+	for vitre in geometrie.get("fenetres", []):
+		var v := Vector3(float(vitre[0]), float(vitre[1]), float(vitre[2]))
+		_vitres.append(_lueur_de_fenetre(v))
+		_lumieres.append(_lampe(v + Vector3(0, 0, 0.6), Color(1.0, 0.8, 0.5), 4.0, 0.0))
+	for cheminee in geometrie.get("fumees", []):
+		monde().add_child(_fumee(Vector3(float(cheminee[0]), float(cheminee[1]), float(cheminee[2]))))
+	for porte in geometrie["portes"]:
+		var p := au_sol(Vector2(float(porte["x"]) + float(porte["l"]) * 0.5, float(porte["y"])), 1.6)
+		_lumieres.append(_lampe(p, Color(1.0, 0.85, 0.6), 4.5, 0.0))
+	_semer_les_lucioles()
 	_semer_les_feuilles()
-	_eclairer_le_village(geometrie)
 	# Le tableau d'affichage de la place : les dernières parties jouées.
-	# Le panneau de bois est un objet du plan ; ici, seule l'inscription.
-	_affichage = _tableau_mural(rect_de(geometrie["tableau"]))
-	_affichage.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_affichage.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
-	_affichage.z_index = 1
-	plan().add_child(_affichage)
+	var cadre: Array = geometrie["tableau"]
+	_affichage = _inscription(Vector3(float(cadre[0]) - float(cadre[3]) * 0.5 + 0.4, float(cadre[1]), float(cadre[2])), 0.33, HORIZONTAL_ALIGNMENT_LEFT)
+	monde().add_child(_affichage)
 	_rafraichir_affichage()
+
+func _batir_piece(lieu: String, geometrie: Dictionary) -> void:
+	var piece := MeshInstance3D.new()
+	piece.mesh = _modele("piece_" + lieu)
+	monde().add_child(piece)
+	# Une lumière chaude au plafond ; les fenêtres éclairent un peu.
+	var centre := Vector3(_taille.x / UNITE * 0.5, 3.4, _taille.y / UNITE * 0.5)
+	_lampe(centre, Color(1.0, 0.92, 0.8), 16.0, 1.1)
+	for vitre in geometrie.get("fenetres", []):
+		_lampe(Vector3(float(vitre[0]), float(vitre[1]), float(vitre[2]) + 0.8), Color(0.8, 0.9, 1.0), 4.0, 0.5)
+	if _portail != Rect2():
+		# Le vide de l'arche s'emplit d'une lueur qui palpite.
+		var lueur := MeshInstance3D.new()
+		var q := QuadMesh.new()
+		q.size = Vector2(1.5, 2.5)
+		lueur.mesh = q
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Palette.SERIE.lightened(0.2)
+		m.emission_enabled = true
+		m.emission = Palette.SERIE
+		m.emission_energy_multiplier = 2.2
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		lueur.material_override = m
+		lueur.position = Vector3(_portail.get_center().x / UNITE, 1.3, -0.05)
+		monde().add_child(lueur)
+		_portail_lueur = lueur
+		_lampe(lueur.position + Vector3(0, 0, 1.0), Palette.SERIE, 6.0, 1.4)
+	if geometrie.has("tableau"):
+		var cadre: Array = geometrie["tableau"]
+		_tableau = _inscription(Vector3(float(cadre[0]), float(cadre[1]), float(cadre[2])), 0.3, HORIZONTAL_ALIGNMENT_CENTER)
+		monde().add_child(_tableau)
+		_rafraichir_tableau()
+
+## Une lampe ponctuelle ; `energie` 0 = éteinte (allumée à la nuit).
+func _lampe(position: Vector3, couleur: Color, portee: float, energie: float) -> OmniLight3D:
+	var l := OmniLight3D.new()
+	l.light_color = couleur
+	l.light_energy = energie
+	l.omni_range = portee
+	l.omni_attenuation = 1.4
+	l.shadow_enabled = false
+	l.position = position
+	l.visible = energie > 0.0
+	monde().add_child(l)
+	return l
+
+## La vitre allumée : un petit pavé émissif devant la fenêtre, éteint le jour.
+func _lueur_de_fenetre(position: Vector3) -> MeshInstance3D:
+	var v := Decor.boite(Vector3(0.62, 0.62, 0.06), Color(1.0, 0.82, 0.45), false)
+	v.material_override = Decor.matiere_lumineuse(Color(1.0, 0.82, 0.45), 1.4)
+	v.position = position + Vector3(0, 0, 0.02)
+	v.visible = false
+	monde().add_child(v)
+	return v
+
+func _flammes(position: Vector3, taille: float) -> CPUParticles3D:
+	var f := CPUParticles3D.new()
+	f.amount = 28
+	f.lifetime = 0.9
+	f.preprocess = 1.0
+	f.position = position
+	f.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	f.emission_sphere_radius = taille * 0.4
+	f.direction = Vector3.UP
+	f.spread = 12.0
+	f.gravity = Vector3(0, 2.5, 0)
+	f.initial_velocity_min = 0.8
+	f.initial_velocity_max = 1.6
+	f.scale_amount_min = taille * 0.5
+	f.scale_amount_max = taille
+	f.scale_amount_curve = _courbe([[0.0, 1.0], [1.0, 0.1]])
+	var teinte := Gradient.new()
+	teinte.set_color(0, Color(1.0, 0.9, 0.4, 1.0))
+	teinte.add_point(0.4, Color(1.0, 0.5, 0.1, 1.0))
+	teinte.set_color(1, Color(0.6, 0.1, 0.05, 0.0))
+	f.color_ramp = teinte
+	var cube := BoxMesh.new()
+	cube.size = Vector3(0.25, 0.25, 0.25)
+	f.mesh = cube
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.emission_enabled = true
+	m.emission = Color(1.0, 0.5, 0.1)
+	m.emission_energy_multiplier = 1.5
+	cube.material = m
+	return f
+
+func _fumee(position: Vector3) -> CPUParticles3D:
+	var f := CPUParticles3D.new()
+	f.amount = 12
+	f.lifetime = 5.0
+	f.preprocess = 5.0
+	f.position = position
+	f.direction = Vector3(0.3, 1.0, 0.0)
+	f.spread = 10.0
+	f.gravity = Vector3(0.35, 0.25, 0.0)
+	f.initial_velocity_min = 0.3
+	f.initial_velocity_max = 0.6
+	f.scale_amount_min = 0.5
+	f.scale_amount_max = 0.8
+	f.scale_amount_curve = _courbe([[0.0, 0.4], [0.5, 1.0], [1.0, 1.7]])
+	var teinte := Gradient.new()
+	teinte.set_color(0, Color(0.9, 0.9, 0.92, 0.0))
+	teinte.add_point(0.2, Color(0.9, 0.9, 0.92, 0.55))
+	teinte.set_color(1, Color(0.9, 0.9, 0.92, 0.0))
+	f.color_ramp = teinte
+	var cube := BoxMesh.new()
+	cube.size = Vector3(0.4, 0.4, 0.4)
+	f.mesh = cube
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.roughness = 1.0
+	cube.material = m
+	return f
+
+## L'eau de la mare : un carreau par case d'eau, un peu sous la rive,
+## translucide et brillant ; il ondule doucement.
+func _nappe_d_eau(mare: Dictionary) -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var y := float(mare.get("niveau", -0.35))
+	for c in mare["cases"]:
+		var x0 := float(c[0])
+		var z0 := float(c[1])
+		var coins := [Vector3(x0, y, z0), Vector3(x0 + 1, y, z0), Vector3(x0 + 1, y, z0 + 1), Vector3(x0, y, z0 + 1)]
+		st.set_normal(Vector3.UP)
+		for i in [0, 2, 1, 0, 3, 2]:
+			st.add_vertex(coins[i])
+	var eau := MeshInstance3D.new()
+	eau.mesh = st.commit()
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.29, 0.57, 0.84, 0.72)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.roughness = 0.15
+	m.metallic = 0.2
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	eau.material_override = m
+	eau.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return eau
+
+func _semer_les_lucioles() -> void:
+	_lucioles = CPUParticles3D.new()
+	_lucioles.amount = 60
+	_lucioles.lifetime = 4.0
+	_lucioles.preprocess = 4.0
+	_lucioles.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	_lucioles.emission_box_extents = Vector3(_taille.x / UNITE * 0.5, 0.5, _taille.y / UNITE * 0.5)
+	_lucioles.position = Vector3(_taille.x / UNITE * 0.5, 1.2, _taille.y / UNITE * 0.5)
+	_lucioles.gravity = Vector3.ZERO
+	_lucioles.initial_velocity_min = 0.2
+	_lucioles.initial_velocity_max = 0.5
+	_lucioles.spread = 180.0
+	var lueur := Gradient.new()
+	lueur.set_color(0, Color(1.0, 0.95, 0.5, 0.0))
+	lueur.add_point(0.5, Color(1.0, 0.95, 0.5, 1.0))
+	lueur.set_color(1, Color(1.0, 0.95, 0.5, 0.0))
+	_lucioles.color_ramp = lueur
+	var cube := BoxMesh.new()
+	cube.size = Vector3(0.08, 0.08, 0.08)
+	cube.material = Decor.matiere_lumineuse(Color(1.0, 0.95, 0.5), 1.6, 0.9)
+	(cube.material as StandardMaterial3D).vertex_color_use_as_albedo = true
+	_lucioles.mesh = cube
+	_lucioles.emitting = false
+	monde().add_child(_lucioles)
+
+## Des feuilles qui tombent de la lisière : assez pour que le village
+## respire, pas assez pour qu'on les remarque une à une.
+func _semer_les_feuilles() -> void:
+	var f := CPUParticles3D.new()
+	f.amount = 40
+	f.lifetime = 8.0
+	f.preprocess = 8.0
+	f.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	f.emission_box_extents = Vector3(_taille.x / UNITE * 0.5, 0.2, _taille.y / UNITE * 0.5)
+	f.position = Vector3(_taille.x / UNITE * 0.5, 5.0, _taille.y / UNITE * 0.5)
+	f.direction = Vector3(1, -1, 0.3)
+	f.spread = 20.0
+	f.gravity = Vector3(0.4, -0.6, 0.2)
+	f.initial_velocity_min = 0.3
+	f.initial_velocity_max = 0.8
+	f.angular_velocity_min = -90.0
+	f.angular_velocity_max = 90.0
+	var teintes := Gradient.new()
+	teintes.set_color(0, Color(0.45, 0.62, 0.20))
+	teintes.set_color(1, Color(0.70, 0.48, 0.16))
+	f.color_ramp = teintes
+	var cube := BoxMesh.new()
+	cube.size = Vector3(0.12, 0.03, 0.12)
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	cube.material = m
+	f.mesh = cube
+	monde().add_child(f)
+
+static func _courbe(points: Array) -> Curve:
+	var courbe := Curve.new()
+	for p in points:
+		courbe.add_point(Vector2(float(p[0]), float(p[1])))
+	return courbe
+
+# ---------------------------------------------------------------- inscriptions
+
+## Un texte posé dans le monde, en police pixel, face au sud.
+func _inscription(position: Vector3, taille: float, alignement: HorizontalAlignment) -> Label3D:
+	var e := Label3D.new()
+	e.font = UI.TITRE_POLICE
+	e.font_size = 32
+	e.pixel_size = taille / 32.0
+	e.modulate = Color(0.93, 0.88, 0.74)
+	e.horizontal_alignment = alignement
+	e.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	e.position = position
+	e.no_depth_test = false
+	e.shaded = false
+	e.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	e.alpha_cut = Label3D.ALPHA_CUT_DISCARD
+	return e
+
+## Une enseigne ou un nom au-dessus d'une tête : blanc cerné de noir.
+func _ecriteau(texte: String, taille: float) -> Label3D:
+	var e := _inscription(Vector3.ZERO, taille, HORIZONTAL_ALIGNMENT_CENTER)
+	e.text = texte
+	e.modulate = Palette.ENCRE
+	e.outline_modulate = Color(0, 0, 0, 0.9)
+	e.outline_size = 8
+	return e
+
+func _etiquette_flottante(texte: String, taille: float) -> Label3D:
+	var e := _ecriteau(texte, taille)
+	e.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	e.no_depth_test = true
+	return e
 
 func _sur_journal(lignes: Array) -> void:
 	_journal = lignes
@@ -355,7 +691,6 @@ func _sur_journal(lignes: Array) -> void:
 func _rafraichir_affichage() -> void:
 	if _affichage == null or not is_instance_valid(_affichage):
 		return
-	# Dix-neuf caractères de large, six lignes : la place du panneau.
 	var texte := " DERNIERES PARTIES\n"
 	if _journal.is_empty():
 		texte += "\n  PERSONNE N'A JOUE"
@@ -392,130 +727,6 @@ func _champion(jeu: String) -> String:
 		return "personne encore"
 	return String(lignes[0].get("pseudo", "?"))
 
-## Des feuilles qui tombent de la lisière, en points de deux pixels : assez
-## pour que le village respire, pas assez pour qu'on les remarque une à une.
-func _semer_les_feuilles() -> void:
-	var feuilles := CPUParticles2D.new()
-	feuilles.amount = 36
-	feuilles.lifetime = 7.0
-	feuilles.preprocess = 7.0
-	feuilles.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
-	feuilles.emission_rect_extents = _taille * 0.5
-	feuilles.position = _taille * 0.5
-	feuilles.direction = Vector2(1, 1)
-	feuilles.spread = 25.0
-	feuilles.gravity = Vector2(6, 10)
-	feuilles.initial_velocity_min = 6.0
-	feuilles.initial_velocity_max = 14.0
-	feuilles.scale_amount_min = 1.0
-	feuilles.scale_amount_max = 2.0
-	var teintes := Gradient.new()
-	teintes.set_color(0, Color(0.45, 0.62, 0.20))
-	teintes.set_color(1, Color(0.70, 0.48, 0.16))
-	feuilles.color_ramp = teintes
-	feuilles.z_index = 90
-	plan().add_child(feuilles)
-
-func _batir_interieur(fiche: Dictionary) -> void:
-	if fiche.has("lueur"):
-		var lueur := Node2D.new()
-		lueur.set_script(preload("res://scenes/lueur_portail.gd"))
-		lueur.position = fiche["lueur"]["centre"]
-		lueur.set("taille", fiche["lueur"]["taille"])
-		lueur.z_index = 5
-		plan().add_child(lueur)
-
-	if fiche.has("tableau"):
-		_tableau = _tableau_mural(fiche["tableau"])
-		plan().add_child(_tableau)
-		_rafraichir_tableau()
-
-func _poser_pnj(pnj: Dictionary) -> void:
-	var nom := String(pnj["nom"])
-	var sprite := AnimatedSprite2D.new()
-	sprite.sprite_frames = Pixels.personnage_non_joueur(nom)
-	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	sprite.offset = PIEDS
-	Pixels.poser(sprite, pnj["position"])
-	sprite.play("repos")
-	_ombrer(sprite)
-	plan().add_child(sprite)
-	var fiche := {"position": (pnj["position"] as Vector2).round(), "phrases": pnj["phrases"], "noeud": sprite}
-	# Un habitant qui a une ronde dans le plan marche d'un point à l'autre ;
-	# il s'arrête pour parler quand on s'approche. Il ne bloque rien : il
-	# bouge. Les autres prennent la case sous leurs pieds.
-	var rondes: Dictionary = carte()[_lieu].get("rondes", {})
-	if rondes.has(nom):
-		var chemin: Array[Vector2] = []
-		for point in rondes[nom]:
-			chemin.append(Vector2(float(point[0]), float(point[1])))
-		fiche["chemin"] = chemin
-		fiche["etape"] = 1 % chemin.size()
-		fiche["pause"] = 0.0
-	else:
-		var pieds: Vector2 = (pnj["position"] as Vector2).round() + Vector2(0, -4)
-		_bloque_aussi[Vector2i(int(pieds.x) / _case, int(pieds.y) / _case)] = true
-	_pnj.append(fiche)
-
-const PAS_DE_RONDE := 34.0
-
-func _faire_les_rondes(delta: float) -> void:
-	for i in _pnj.size():
-		var pnj: Dictionary = _pnj[i]
-		if not pnj.has("chemin"):
-			continue
-		var noeud: AnimatedSprite2D = pnj["noeud"]
-		var position: Vector2 = pnj["position"]
-		# Face au joueur qui vient parler, on ne bouge plus.
-		if _position.distance_to(position) < 34.0:
-			if noeud.animation != "repos":
-				noeud.play("repos")
-			noeud.flip_h = _position.x < position.x
-			continue
-		if float(pnj["pause"]) > 0.0:
-			pnj["pause"] = float(pnj["pause"]) - delta
-			if noeud.animation != "repos":
-				noeud.play("repos")
-			continue
-		var chemin: Array = pnj["chemin"]
-		var cible: Vector2 = chemin[int(pnj["etape"])]
-		var vers := cible - position
-		var pas := PAS_DE_RONDE * delta
-		if vers.length() <= pas:
-			position = cible
-			pnj["etape"] = (int(pnj["etape"]) + 1) % chemin.size()
-			pnj["pause"] = 1.5
-		else:
-			position += vers.normalized() * pas
-			if absf(vers.x) > 0.5:
-				noeud.flip_h = vers.x < 0.0
-			if noeud.animation != "marche" and noeud.sprite_frames.has_animation("marche"):
-				noeud.play("marche")
-		pnj["position"] = position
-		Pixels.poser(noeud, position)
-
-## Le classement affiché SUR le mur de la pièce, comme une ardoise de
-## taverne : un cadre sombre à la taille de la niche, et le texte dedans.
-func _tableau_mural(cadre: Rect2) -> Label:
-	var ardoise := Label.new()
-	ardoise.position = cadre.position
-	ardoise.size = cadre.size
-	ardoise.z_index = 4
-	ardoise.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ardoise.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	# La police des inscriptions du décor : 8 pixels, sa grille native.
-	ardoise.add_theme_font_override("font", UI.TITRE_POLICE)
-	ardoise.add_theme_font_size_override("font_size", 8)
-	ardoise.add_theme_constant_override("line_spacing", 0)
-	ardoise.add_theme_color_override("font_color", Color(0.93, 0.88, 0.74))
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.19, 0.12, 0.07)
-	style.border_color = Color(0.45, 0.30, 0.16)
-	style.set_border_width_all(1)
-	style.set_content_margin_all(3)
-	ardoise.add_theme_stylebox_override("normal", style)
-	return ardoise
-
 func _rafraichir_tableau() -> void:
 	if _tableau == null or _jeu_du_lieu == "":
 		return
@@ -541,24 +752,69 @@ static func _article(lieu: String) -> String:
 	var nom := String(LIEUX[lieu]["nom"]).to_lower()
 	return ("l'" if nom[0] in "aeiouy" else "la ") + nom
 
-func _ecriteau(texte: String, taille_police: int) -> Label:
-	var e := Label.new()
-	e.text = texte
-	e.add_theme_font_override("font", UI.TITRE_POLICE)
-	e.add_theme_font_size_override("font_size", UI.taille_titre(taille_police))
-	e.add_theme_color_override("font_color", Palette.ENCRE)
-	e.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	e.add_theme_constant_override("outline_size", 3)
-	e.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	e.z_index = 50
-	return e
+# ---------------------------------------------------------------- habitants
+
+func _poser_pnj(pnj: Dictionary) -> void:
+	var nom := String(pnj["nom"])
+	var pantin := Pantin.depuis(MODELES + "pnj_%s.glb" % nom)
+	var position: Vector2 = (pnj["position"] as Vector2).round()
+	pantin.position = au_sol(position)
+	monde().add_child(pantin)
+	var fiche := {"position": position, "phrases": pnj["phrases"], "noeud": pantin}
+	# Un habitant qui a une ronde dans le plan marche d'un point à l'autre ;
+	# il s'arrête pour parler quand on s'approche. Il ne bloque rien : il
+	# bouge. Les autres prennent la case sous leurs pieds.
+	var rondes: Dictionary = carte()[_lieu].get("rondes", {})
+	if rondes.has(nom):
+		var chemin: Array[Vector2] = []
+		for point in rondes[nom]:
+			chemin.append(Vector2(float(point[0]), float(point[1])))
+		fiche["chemin"] = chemin
+		fiche["etape"] = 1 % chemin.size()
+		fiche["pause"] = 0.0
+	else:
+		_bloque_aussi[Vector2i(int(position.x) / _case, int(position.y) / _case)] = true
+	_pnj.append(fiche)
+
+const PAS_DE_RONDE := 34.0
+
+func _faire_les_rondes(delta: float) -> void:
+	for i in _pnj.size():
+		var pnj: Dictionary = _pnj[i]
+		var noeud: Pantin = pnj["noeud"]
+		var position: Vector2 = pnj["position"]
+		# Face au joueur qui vient parler, on ne bouge plus.
+		if _position.distance_to(position) < 34.0:
+			noeud.marche = false
+			noeud.regarder(_position - position)
+			continue
+		if not pnj.has("chemin"):
+			continue
+		if float(pnj["pause"]) > 0.0:
+			pnj["pause"] = float(pnj["pause"]) - delta
+			noeud.marche = false
+			continue
+		var chemin: Array = pnj["chemin"]
+		var cible: Vector2 = chemin[int(pnj["etape"])]
+		var vers := cible - position
+		var pas := PAS_DE_RONDE * delta
+		if vers.length() <= pas:
+			position = cible
+			pnj["etape"] = (int(pnj["etape"]) + 1) % chemin.size()
+			pnj["pause"] = 1.5
+			noeud.marche = false
+		else:
+			position += vers.normalized() * pas
+			noeud.regarder(vers)
+			noeud.marche = true
+		pnj["position"] = position
+		noeud.position = au_sol(position)
 
 # ---------------------------------------------------------------- boucle
 
 func _process(delta: float) -> void:
 	_faire_les_rondes(delta)
-	if _lieu == "village":
-		_tomber_la_nuit()
+	_tomber_la_nuit(delta)
 	var direction := Commandes.direction()
 	if direction != Vector2.ZERO:
 		var avant := _position
@@ -568,10 +824,7 @@ func _process(delta: float) -> void:
 		_position.y += direction.y * VITESSE * delta
 		_degager(avant)
 		_borner()
-		# Les héros sont dessinés de profil : on ne retourne le sprite que
-		# sur un pas horizontal, et il garde son côté quand on monte ou descend.
-		if direction.x != 0.0:
-			_corps.flip_h = direction.x < 0.0
+		_corps.regarder(direction)
 		_marche = true
 	else:
 		_marche = false
@@ -584,25 +837,25 @@ func _process(delta: float) -> void:
 			Sons.jouer("pas", 1.0 if _lieu == "village" else 1.5, -22.0)
 	else:
 		_depuis_pas = 0.3
-	var animation := "marche" if _marche else "repos"
-	if _corps.animation != animation:
-		_corps.play(animation)
-	Pixels.poser(_corps, _position)
+	_corps.marche = _marche
+	_corps.position = au_sol(_position)
 
 	for cle in _autres:
 		var a: Dictionary = _autres[cle]
 		var vers: Vector2 = (a["cible"] as Vector2) - (a["affichee"] as Vector2)
-		a["affichee"] = (a["affichee"] as Vector2).lerp(a["cible"], clamp(delta * 12.0, 0, 1))
-		var noeud: AnimatedSprite2D = a["noeud"]
-		Pixels.poser(noeud, a["affichee"])
+		a["affichee"] = (a["affichee"] as Vector2).lerp(a["cible"], clampf(delta * 12.0, 0.0, 1.0))
+		var noeud: Pantin = a["noeud"]
+		noeud.position = au_sol(a["affichee"])
 		var bouge := vers.length() > 2.0
-		var anim := "marche" if bouge else "repos"
-		if noeud.animation != anim:
-			noeud.play(anim)
-		if bouge and absf(vers.x) > 0.5:
-			noeud.flip_h = vers.x < 0.0
+		noeud.marche = bouge
+		if bouge:
+			noeud.regarder(vers)
 
-	_camera.position = _position_camera()
+	_camera.position = _camera.position.lerp(_position_camera(), clampf(delta * 6.0, 0.0, 1.0))
+	if _portail_lueur:
+		var battement := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.0024)
+		_portail_lueur.scale = Vector3(1.0, 0.94 + 0.06 * battement, 1.0)
+		(_portail_lueur.material_override as StandardMaterial3D).emission_energy_multiplier = 1.6 + 1.4 * battement
 	_chercher_quoi_faire()
 
 	_depuis_envoi += delta
@@ -729,7 +982,7 @@ func _sur_presences(presences: Dictionary) -> void:
 	for cle in _autres.keys():
 		var toujours_la: bool = presences.has(cle) and String(presences[cle].get("lieu", "village")) == _lieu
 		if not toujours_la:
-			(_autres[cle]["noeud"] as Node2D).queue_free()
+			(_autres[cle]["noeud"] as Node3D).queue_free()
 			_autres.erase(cle)
 	for cle in presences:
 		if cle == Session.cle:
@@ -741,16 +994,15 @@ func _sur_presences(presences: Dictionary) -> void:
 			var heros := String(meta.get("heros", ""))
 			if heros == "":
 				heros = Pixels.heros_de(String(meta.get("id", cle)))
-			var sprite := _sprite_de_heros(heros)
-			Pixels.poser(sprite, _position)
-			plan().add_child(sprite)
-			var nom := _ecriteau(_titre(String(meta.get("pseudo", "?"))), 8)
-			nom.position = Vector2(-48, -46)
-			nom.size = Vector2(96, 10)
+			var pantin := Pantin.depuis(MODELES + "heros_%s.glb" % _heros_connu(heros))
+			pantin.position = au_sol(_position)
+			monde().add_child(pantin)
+			var nom := _etiquette_flottante(_titre(String(meta.get("pseudo", "?"))), 0.22)
+			nom.position = Vector3(0, 2.75, 0)
 			nom.name = "nom"
-			sprite.add_child(nom)
+			pantin.add_child(nom)
 			_autres[cle] = {"cible": _position, "affichee": _position,
-				"pseudo": String(meta.get("pseudo", "?")), "noeud": sprite}
+				"pseudo": String(meta.get("pseudo", "?")), "noeud": pantin}
 	_rafraichir_hud()
 
 ## Le premier d'un classement porte une étoile devant son nom : le village
@@ -772,30 +1024,21 @@ func _emote(indice: int) -> void:
 	if _canal:
 		_canal.envoyer("emo", {"e": indice})
 
-func _afficher_emote(porteur: Node2D, texte: String) -> void:
+func _afficher_emote(porteur: Node3D, texte: String) -> void:
 	if porteur == null or not is_instance_valid(porteur):
 		return
 	var ancienne := porteur.get_node_or_null("emote")
 	if ancienne:
 		ancienne.queue_free()
-	var bulle := Label.new()
+	var bulle := _etiquette_flottante(texte, 0.4)
 	bulle.name = "emote"
-	bulle.text = texte
-	bulle.add_theme_font_override("font", UI.TITRE_POLICE)
-	bulle.add_theme_font_size_override("font_size", 8)
-	bulle.add_theme_color_override("font_color", Palette.FOND)
-	bulle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	bulle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	var style := StyleBoxFlat.new()
-	style.bg_color = Palette.ENCRE
-	style.set_corner_radius_all(3)
-	style.set_content_margin_all(3)
-	bulle.add_theme_stylebox_override("normal", style)
-	bulle.position = Vector2(6, -62)
-	bulle.z_index = 60
+	bulle.modulate = Palette.ENCRE
+	bulle.outline_modulate = Palette.SERIE
+	bulle.position = Vector3(0.4, 3.3, 0)
 	porteur.add_child(bulle)
 	var tween := create_tween()
-	tween.tween_interval(2.0)
+	tween.tween_property(bulle, "position:y", 3.7, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.tween_interval(1.6)
 	tween.tween_property(bulle, "modulate:a", 0.0, 0.5)
 	tween.tween_callback(bulle.queue_free)
 
@@ -816,82 +1059,37 @@ func _nuit() -> float:
 		return 1.0
 	return 1.0 - (t - 840.0) / 60.0
 
-func _eclairer_le_village(geometrie: Dictionary) -> void:
-	_modulation = CanvasModulate.new()
-	plan().add_child(_modulation)
-	_lumieres.clear()
-	# Le feu de camp, le fourneau, et la porte de chaque maison : les seules
-	# sources de lumière du village une fois la nuit tombée.
-	var feu := Vector2(float(geometrie["feu"][0]), float(geometrie["feu"][1]) - 8.0)
-	_lumieres.append(_lumiere(feu, Color(1.0, 0.72, 0.42), 1.4, 1.1))
-	for porte in geometrie["portes"]:
-		var p := Vector2(float(porte["x"]) + float(porte["l"]) * 0.5, float(porte["y"]) - 20.0)
-		_lumieres.append(_lumiere(p, Color(1.0, 0.85, 0.55), 0.8, 0.55))
-	for objet in geometrie["objets"]:
-		if String(objet["image"]) == "fourneau.png":
-			_lumieres.append(_lumiere(Vector2(float(objet["x"]) + 32.0, float(objet["y"]) + 52.0), Color(1.0, 0.6, 0.3), 0.7, 0.9))
-	# Des lucioles au-dessus de l'herbe, la nuit seulement.
-	_lucioles = CPUParticles2D.new()
-	_lucioles.amount = 40
-	_lucioles.lifetime = 4.0
-	_lucioles.preprocess = 4.0
-	_lucioles.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
-	_lucioles.emission_rect_extents = _taille * 0.5
-	_lucioles.position = _taille * 0.5
-	_lucioles.gravity = Vector2.ZERO
-	_lucioles.initial_velocity_min = 3.0
-	_lucioles.initial_velocity_max = 8.0
-	_lucioles.spread = 180.0
-	_lucioles.scale_amount_min = 1.0
-	_lucioles.scale_amount_max = 1.0
-	var lueur := Gradient.new()
-	lueur.set_color(0, Color(1.0, 0.95, 0.5, 0.0))
-	lueur.add_point(0.5, Color(1.0, 0.95, 0.5, 1.0))
-	lueur.set_color(1, Color(1.0, 0.95, 0.5, 0.0))
-	_lucioles.color_ramp = lueur
-	_lucioles.z_index = 80
-	_lucioles.emitting = false
-	plan().add_child(_lucioles)
-
-func _lumiere(position: Vector2, couleur: Color, portee: float, energie: float) -> PointLight2D:
-	var l := PointLight2D.new()
-	var texture := GradientTexture2D.new()
-	texture.fill = GradientTexture2D.FILL_RADIAL
-	texture.fill_from = Vector2(0.5, 0.5)
-	texture.fill_to = Vector2(0.5, 0.0)
-	var degrade := Gradient.new()
-	degrade.set_color(0, Color(1, 1, 1, 1))
-	degrade.set_color(1, Color(1, 1, 1, 0))
-	texture.gradient = degrade
-	texture.width = 128
-	texture.height = 128
-	l.texture = texture
-	l.texture_scale = portee
-	l.color = couleur
-	l.energy = energie
-	l.position = position
-	l.blend_mode = Light2D.BLEND_MODE_ADD
-	plan().add_child(l)
-	return l
-
-func _tomber_la_nuit() -> void:
-	if _modulation == null or not is_instance_valid(_modulation):
+func _tomber_la_nuit(_delta: float) -> void:
+	if _soleil == null or not is_instance_valid(_soleil):
 		return
-	var nuit := _nuit()
+	var nuit := _nuit() if _lieu == "village" else 0.0
 	# Le jour est blanc ; le soir vire à l'ambre, la nuit au bleu profond.
-	var soir := Color(1.0, 0.78, 0.6)
-	var noir := Color(0.36, 0.42, 0.70)
+	var soir := Color(1.0, 0.72, 0.5)
+	var noir := Color(0.30, 0.38, 0.65)
 	var teinte := Color.WHITE
 	if nuit < 0.5:
 		teinte = Color.WHITE.lerp(soir, nuit * 2.0)
 	else:
 		teinte = soir.lerp(noir, (nuit - 0.5) * 2.0)
-	_modulation.color = teinte
-	var vacillement := 0.9 + 0.1 * sin(Time.get_ticks_msec() * 0.011)
-	for i in _lumieres.size():
-		var l := _lumieres[i]
-		l.enabled = nuit > 0.05
-		l.energy = (1.1 if i == 0 else 0.7) * nuit * (vacillement if i == 0 else 1.0)
+	_soleil.light_color = Color("#fff3df") * teinte
+	_soleil.light_energy = lerp(1.5, 0.18, nuit)
+	_contre_jour.light_energy = lerp(0.35, 0.15, nuit)
+	_environnement.ambient_light_energy = lerp(0.55, 0.4, nuit)
+	if _ciel:
+		_ciel.sky_top_color = Color("#3d7fd6").lerp(Color("#0a1230"), nuit)
+		_ciel.sky_horizon_color = Color("#bcd8f2").lerp(Color("#2a3a5a"), nuit)
+		_ciel.ground_horizon_color = Color("#8fb37a").lerp(Color("#1a2a1e"), nuit)
+		_ciel.ground_bottom_color = Color("#3a5a2e").lerp(Color("#0a120c"), nuit)
+	_environnement.fog_light_color = Color("#c9dcee").lerp(Color("#1a2438"), nuit)
+	var vacillement := 0.85 + 0.15 * sin(Time.get_ticks_msec() * 0.011) + 0.05 * sin(Time.get_ticks_msec() * 0.037)
+	if _feu_lumiere:
+		_feu_lumiere.light_energy = (0.9 + 2.4 * nuit) * vacillement
+	var allume := nuit > 0.25
+	for l in _lumieres:
+		l.visible = allume
+		l.light_energy = clampf((nuit - 0.25) * 1.6, 0.0, 1.0) * 1.1
+	for v in _vitres:
+		v.visible = allume
 	if _lucioles:
 		_lucioles.emitting = nuit > 0.6
 
@@ -904,8 +1102,8 @@ func _sur_carnet(lignes: Array) -> void:
 func _rafraichir_carnet() -> void:
 	if _hud_carnet == null:
 		return
-	var meilleurs := {"carnage": 0, "enigme": 0}
 	var parties := {"carnage": 0, "enigme": 0}
+	var meilleurs := {"carnage": 0, "enigme": 0}
 	for ligne in _carnet:
 		var jeu := String(ligne.get("jeu", ""))
 		if not meilleurs.has(jeu):
@@ -952,7 +1150,7 @@ func _sur_classement(jeu: String, lignes: Array) -> void:
 	_rafraichir_tableau()
 	_rafraichir_carnet()
 	for cle in _autres:
-		var nom: Label = (_autres[cle]["noeud"] as Node).get_node_or_null("nom")
+		var nom: Label3D = (_autres[cle]["noeud"] as Node).get_node_or_null("nom")
 		if nom:
 			nom.text = _titre(String(_autres[cle]["pseudo"]))
 

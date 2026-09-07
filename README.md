@@ -15,30 +15,25 @@ cent quarante pixels.
 plan, chez tout le monde et à tout instant. Diffuser le plan aurait coûté
 plusieurs kilo-octets par partie et un cas de plus pour qui rejoint en retard.
 
-**Pourquoi le hub est en 2D alors que les jeux sont en 3D.** Le décor du
-village vient du pack *Pixel Crawler* d'Anokolisa, dessiné en vue de dessus —
-murs et toits compris. Dressé en panneaux dans une scène en perspective, il se
-tordrait : ces sprites n'ont pas de face. Le contraste assumé — un village
-pixel, des jeux en volume — vaut mieux qu'un mélange qui trahirait les deux.
-Le socle (`scenes/ecran.gd`) sait porter l'un ou l'autre : `plan()` pour la 2D,
-`monde()` pour la 3D, jamais les deux dans le même écran.
-
-Le village et ses intérieurs sont **préparés hors moteur** par
-`outils/village.py`, qui lit le pack et écrit `modeles/village/*.png`. Règle
-du script : on ne découpe jamais un dessin. Chaque image est un sprite entier
-pris dans sa case de grille (un arbre = sa case de 48 × 96), une pièce entière
-de la maquette de taverne (murs compris, ramenée à l'échelle native — la
-maquette est livrée doublée), ou une planche d'animation recopiée telle quelle.
-Les maisons sont assemblées (un toit entier, un pan de mur entier, une porte
-entière), jamais rognées. Le même script dessine le **plan** du village sur
-une grille de cases de 16 — sol, objets, portes, cases bloquées — et la zone
-de marche de chaque pièce, et écrit le tout dans `modeles/village/plan.json` :
-ce qu'on voit et ce qui arrête le joueur sortent de la même source, donc ne
-divergent jamais (les calques de vérification sortent dans `/tmp/apercu`).
-Une seule échelle partout : la case fait 16 pixels,
-un personnage 30, et la caméra zoome d'un facteur entier ; les planches de
-personnages sont remises au même gabarit (cases de 64, pieds sur le bord bas)
-pour qu'un seul point d'ancrage serve à tous, sans agrandir personne.
+**Le hub est en voxels.** Le village, ses maisons, ses arbres, ses habitants
+et les héros sont bâtis cube par cube par `outils/voxel.py`, à une seule
+palette, et écrits en glTF dans `modeles/voxel/` (couleurs par sommet, faces
+plates, maillage glouton). Rien n'y est découpé dans un dessin d'autrui : le
+script est la seule source du décor, et pour changer le village on change le
+script et on le relance. Une case du plan fait 16 pixels dans la simulation
+et UNE unité dans le monde ; un modèle fin est bâti en voxels de 1/8 d'unité
+(un personnage fait seize voxels de haut), les arbres et le terrain en voxels
+plus gros. Les personnages sont des glTF à six nœuds (jambes, corps, bras,
+tête), balancés par le moteur en marchant. Le même script dessine le **plan**
+du village sur une grille de cases — terrain, objets, portes, cases bloquées —
+et bâtit chaque pièce (sol, trois murs, meubles fondus dans un seul maillage,
+le sud ouvert comme une maison de poupée), puis écrit `modeles/voxel/plan.json`
+: ce qu'on voit et ce qui arrête le joueur sortent de la même source, donc ne
+divergent jamais. `outils/voir.sh nom1,nom2` pose des modèles en ligne et les
+photographie, pour les juger sans lancer le jeu. Le socle (`scenes/ecran.gd`)
+porte `plan()` pour la 2D et `monde()` pour la 3D ; le hub, comme les jeux,
+vit dans `monde()`. Le pack *Pixel Crawler* (`modeles/village/`, écrit par
+`outils/village.py`) ne sert plus qu'aux portraits de l'écran d'accueil.
 
 **2,5D.** La simulation se fait sur un plan — tout l'état réseau tient en
 `Vector2` — mais le rendu est en vraie 3D : caméra en perspective inclinée,
@@ -57,7 +52,7 @@ En ligne : **https://multijoueur.piks-l.com**
 
 | | |
 | --- | --- |
-| **Hub** | Un village en **pixel art vu de dessus** : on s'y croise, et on ENTRE dans les maisons. Une esplanade pavée adossée à une falaise, cinq maisons, un potager, une mare, la forêt autour, le jour qui tombe toutes les quinze minutes (même heure pour tous) et les feux qui s'allument. On choisit son héros à l'entrée (chevalier, voleur, mage), on se fait des signes (émotes 1-4), on ouvre son carnet (K : records, place au mur). La taverne, l'armurerie et l'auberge se visitent, avec leurs habitants qui parlent — et, pour les deux premières, le classement au mur et le portail qui lance la partie. Le champion d'un jeu porte une étoile devant son nom. |
+| **Hub** | Un village en **voxels**, vu de trois quarts : on s'y croise, et on ENTRE dans les maisons. Une esplanade pavée adossée à une falaise, cinq maisons, un potager, une mare, la forêt autour, le jour qui tombe toutes les quinze minutes (même heure pour tous) et les feux qui s'allument. On choisit son héros à l'entrée (chevalier, voleur, mage), on se fait des signes (émotes 1-4), on ouvre son carnet (K : records, place au mur). La taverne, l'armurerie et l'auberge se visitent, avec leurs habitants qui parlent — et, pour les deux premières, le classement au mur et le portail qui lance la partie. Le champion d'un jeu porte une étoile devant son nom. |
 | **CARNAGE** | Un GTA 2 à l'heure bleue. Une ville PROCÉDURALE de six cent quatre-vingts par cinq cent vingt tuiles — cent fois la précédente — tirée du code de la manche et générée À LA DEMANDE, morceau par morceau, autour de chaque joueur : un centre d'affaires neutre et ses tours, des quartiers de bureaux, des rues commerçantes à néons, la vieille ville, les cités, la banlieue pavillonnaire, la zone industrielle, le port, des parcs et des lacs. Trois gangs se partagent tout ça par secteurs aux frontières irrégulières. Les immeubles sont des boîtes dont un shader dessine les étages et allume les fenêtres ; le sol, les trottoirs, les passages piétons et l'eau sont un autre shader. Des dizaines de milliers de voitures dorment le long des rues et se volent toutes ; les taxis roulent au centre, les fourgons dans la zone. On conduit, on **descend** (E), on court, on tire. Les passants rapportent, les gangs plus, les flics encore plus — et tout cela fait monter les **étoiles de recherche**. Chaque secteur a son **garage** qui efface le casier, sa **cabine** qui donne des contrats, ses **repaires** tagués au sol, une **arène** une fois sur deux — le seul endroit où les joueurs peuvent se blesser. Manche de 4 minutes, radar centré sur soi en haut à droite. |
 | **ÉNIGME** | Coopératif, trois chambres. Une dalle ne reste enfoncée que si quelqu'un — ou une caisse — pèse dessus, et la sortie d'une chambre n'accepte l'équipe qu'au complet. 3 minutes. |
 
