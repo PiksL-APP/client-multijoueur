@@ -15,6 +15,20 @@ cent quarante pixels.
 plan, chez tout le monde et à tout instant. Diffuser le plan aurait coûté
 plusieurs kilo-octets par partie et un cas de plus pour qui rejoint en retard.
 
+**Pourquoi le hub est en 2D alors que les jeux sont en 3D.** Le décor du
+village vient du pack *Pixel Crawler* d'Anokolisa, dessiné en vue de dessus —
+murs et toits compris. Dressé en panneaux dans une scène en perspective, il se
+tordrait : ces sprites n'ont pas de face. Le contraste assumé — un village
+pixel, des jeux en volume — vaut mieux qu'un mélange qui trahirait les deux.
+Le socle (`scenes/ecran.gd`) sait porter l'un ou l'autre : `plan()` pour la 2D,
+`monde()` pour la 3D, jamais les deux dans le même écran.
+
+Le village et ses intérieurs sont **cuits hors moteur** : les découpes,
+l'assemblage des maisons (toit + mur + porte) et le sol du village sont
+produits par un script Python et entrent au dépôt en PNG. Assembler des
+tuiles de seize pixels à l'aveugle dans le moteur, image après image, aurait
+coûté dix fois le temps pour un résultat moins sûr.
+
 **2,5D.** La simulation se fait sur un plan — tout l'état réseau tient en
 `Vector2` — mais le rendu est en vraie 3D : caméra en perspective inclinée,
 lumière directionnelle avec ombres portées, contre-jour froid pour que les
@@ -32,7 +46,7 @@ En ligne : **https://multijoueur.piks-l.com**
 
 | | |
 | --- | --- |
-| **Hub** | Monde partagé. On s'y croise, on lit les meilleurs scores affichés au pied de chaque portail, on entre par `E`. |
+| **Hub** | Un village en **pixel art vu de dessus** : on s'y croise, et on ENTRE dans les maisons. La taverne, l'armurerie et l'atelier ont chacune leur intérieur, son classement au mur, son habitant qui explique le jeu, et — pour deux d'entre elles — le portail au fond de la pièce. |
 | **CARNAGE** | Une ville ouverte — vingt-deux par seize tuiles, une rue tous les quatre pas, une ceinture de verdure, pas de mur : on est ramené vers le centre si on part dans la friche. Écraser un monstre rapporte, mais seulement lancé : sous 210 px/s c'est le monstre qui gagne l'échange. Les enchaînements en moins de 2,5 s multiplient jusqu'à ×5. Trois armes se ramassent au sol — mitraillette, roquettes, éperon (qui fait écraser presque à l'arrêt). Cent points de vie, un monstre en coûte vingt-deux, ça repart tout seul après cinq secondes sans coup ; à zéro on est hors service trois secondes et demie. Manche de 2 min 30. |
 | **ÉNIGME** | Coopératif, trois chambres. Une dalle ne reste enfoncée que si quelqu'un — ou une caisse — pèse dessus, et la sortie d'une chambre n'accepte l'équipe qu'au complet. 3 minutes. |
 

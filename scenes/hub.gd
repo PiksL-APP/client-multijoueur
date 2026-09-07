@@ -1,308 +1,406 @@
 extends Ecran
-## Le hub : un monde partagé où l'on se croise, et des portails qui lancent
-## chacun un jeu.
+## Le hub : un village en pixel art, vu de dessus, où l'on entre dans les
+## maisons.
 ##
-## Choix de synchronisation : l'identité passe par la présence (rare, fiable),
-## la position par la diffusion (fréquente, jetable). Faire passer la position
-## par la présence marcherait aussi, mais chaque pas coûterait un message à
-## tout le monde ET une écriture d'état côté serveur.
+## Pourquoi le hub est en deux dimensions alors que les jeux sont en 3D : le
+## pack de décor est dessiné en vue de dessus, murs et toits compris. Dressé
+## en panneaux dans une scène en perspective, il se tordrait. Le contraste
+## assumé — un village pixel, des jeux en volume — vaut mieux qu'un mélange
+## qui trahirait les deux.
+##
+## Choix de synchronisation : l'identité et le LIEU passent par la présence
+## (rares, fiables) ; la position par la diffusion (fréquente, jetable). On ne
+## dessine que les joueurs qui sont dans la même pièce que soi.
 
 const CANAL := "mj-hub"
-const TUILE := 7.0                           ## côté d'une tuile, en unités 3D
-const PAS := TUILE / Decor.ECHELLE           ## le même, en pixels de jeu
-const VILLE := "res://modeles/ville/"
-const TEINTE_DALLAGE := Color(0.50, 0.54, 0.64)
-const MONDE := Rect2(0, 0, 2600, 1600)
-const VITESSE := 340.0
+const VITESSE := 108.0
+const RAYON := 7.0                 ## demi-largeur des pieds, pour les collisions
+const ZOOM := 2.0
 const CADENCE_ENVOI := 1.0 / 8.0
-const RAPPEL := 1.5           ## on redit sa position même à l'arrêt
-const RAYON := 18.0
-const INCLINAISON := 50.0
-const DISTANCE := 52.0
+const RAPPEL := 1.5
+const IMAGES := "res://modeles/village/"
 
-const PORTAILS := [
-	{
-		"jeu": "carnage", "titre": "CARNAGE", "sous_titre": "Ville ouverte, voitures et armes",
-		"detail": "2 à 4 joueurs · 2 min 30 · écraser, tirer, ramasser des caisses",
-		"position": Vector2(700, 520), "couleur": Palette.CRITIQUE, "ouvert": true,
+## Les lieux du hub. Le village est dehors ; les trois autres sont des
+## intérieurs, chacun avec sa porte de sortie, son classement au mur, son
+## habitant et — pour deux d'entre eux — le portail qui lance le jeu.
+const LIEUX := {
+	"village": {
+		"nom": "Village", "fond": "sol_village.png",
+		"taille": Vector2(1600, 1120),
+		"depart": Vector2(800, 530),
 	},
-	{
-		"jeu": "enigme", "titre": "ÉNIGME", "sous_titre": "Puzzle coopératif",
-		"detail": "2 à 4 joueurs · trois chambres · personne ne finit seul",
-		"position": Vector2(1900, 520), "couleur": Palette.SERIE, "ouvert": true,
+	"taverne": {
+		"nom": "Taverne", "fond": "interieur_taverne.png",
+		"taille": Vector2(768, 406),
+		"marche": Rect2(40, 150, 690, 236),
+		"depart": Vector2(390, 372),
+		"sortie": Rect2(340, 368, 100, 26),
+		"portail": Rect2(620, 168, 84, 60),
+		"jeu": "carnage",
+		"titre": "CARNAGE",
+		"pnj": {"nom": "knight", "position": Vector2(180, 300), "phrases": [
+			"Tu tombes bien. Dehors, la ville grouille de ces choses vertes.",
+			"Prends une voiture et écrase-les — mais lancé : au pas, c'est toi qui prends.",
+			"Les caisses au sol donnent une arme. L'éperon fait écraser presque à l'arrêt.",
+			"Le portail est au fond. On y va à deux, à trois, à quatre.",
+		]},
 	},
-	{
-		"jeu": "arene", "titre": "ARÈNE", "sous_titre": "À venir",
-		"detail": "Le portail est éteint.",
-		"position": Vector2(700, 1120), "couleur": Palette.ENCRE_FAIBLE, "ouvert": false,
+	"armurerie": {
+		"nom": "Armurerie", "fond": "interieur_armurerie.png",
+		"taille": Vector2(680, 188),
+		"marche": Rect2(30, 124, 620, 54),
+		"depart": Vector2(330, 168),
+		"sortie": Rect2(290, 166, 90, 20),
+		"portail": Rect2(560, 128, 76, 46),
+		"jeu": "enigme",
+		"titre": "ÉNIGME",
+		"pnj": {"nom": "wizzard", "position": Vector2(120, 156), "phrases": [
+			"Trois chambres. Aucune ne s'ouvre à un seul.",
+			"Une dalle ne reste enfoncée que si quelque chose pèse dessus — quelqu'un, ou une caisse.",
+			"Et la sortie n'accepte l'équipe qu'au complet. Personne ne finit seul.",
+		]},
 	},
-	{
-		"jeu": "atelier", "titre": "ATELIER", "sous_titre": "À venir",
-		"detail": "Le portail est éteint.",
-		"position": Vector2(1900, 1120), "couleur": Palette.ENCRE_FAIBLE, "ouvert": false,
+	"atelier": {
+		"nom": "Atelier", "fond": "interieur_atelier.png",
+		"taille": Vector2(304, 400),
+		"marche": Rect2(40, 150, 220, 220),
+		"depart": Vector2(150, 356),
+		"sortie": Rect2(110, 352, 80, 24),
+		"pnj": {"nom": "rogue", "position": Vector2(200, 220), "phrases": [
+			"L'atelier ? Rien à visiter pour l'instant.",
+			"Le troisième jeu se prépare. Repasse.",
+		]},
 	},
+}
+
+## Les maisons du village : leur image, leur place, et la porte devant
+## laquelle il faut se tenir pour entrer.
+const MAISONS := [
+	{"lieu": "taverne", "image": "maison_taverne.png", "position": Vector2(360, 430), "nom": "TAVERNE"},
+	{"lieu": "armurerie", "image": "maison_armurerie.png", "position": Vector2(800, 410), "nom": "ARMURERIE"},
+	{"lieu": "atelier", "image": "maison_atelier.png", "position": Vector2(1240, 430), "nom": "ATELIER"},
 ]
 
 var _canal: CanalTempsReel
-var _camera: Camera3D
-var _position := Vector2(1300, 830)
-var _autres: Dictionary = {}       # cle -> {cible, affichee, pseudo, place, noeud}
-var _corps: Node3D
+var _camera: Camera2D
+var _lieu := "village"
+var _position := Vector2.ZERO
+var _regard := "down"
+var _marche := false
+var _autres: Dictionary = {}       # cle -> {cible, affichee, pseudo, lieu, noeud}
+var _corps: AnimatedSprite2D
+var _obstacles: Array[Rect2] = []
+var _portes: Array = []            # {rect, lieu, nom}
+var _sortie := Rect2()
+var _portail := Rect2()
+var _jeu_du_lieu := ""
+var _titre_du_lieu := ""
+var _pnj_position := Vector2.ZERO
+var _pnj_phrases: Array = []
+var _phrase := -1
 var _depuis_envoi := 0.0
 var _depuis_rappel := 0.0
-var _t := 0.0
-var _portail_proche: int = -1
-var _anneaux: Array = []           # [{support, base}]
+var _invite := ""
 
-var _hud_titre: Label
-var _hud_detail: Label
-var _hud_invite: Label
 var _hud_presents: Label
 var _hud_etat: HBoxContainer
+var _hud_titre: Label
+var _hud_invite: Label
 var _hud_classement: Label
+var _hud_dialogue: Label
+var _panneau_dialogue: PanelContainer
 var _classements: Dictionary = {}
 
 func demarrer() -> void:
-	_batir_monde()
-	_construire_hud()
+	_camera = Camera2D.new()
+	_camera.zoom = Vector2(ZOOM, ZOOM)
+	_camera.position_smoothing_enabled = true
+	_camera.position_smoothing_speed = 9.0
+	add_child(_camera)
+	_camera.make_current()
 
-	_canal = Reseau.rejoindre(CANAL, {"pseudo": Session.pseudo, "id": Session.id})
-	_canal.diffusion.connect(_sur_diffusion)
-	_canal.presences_changees.connect(_sur_presences)
-	if _canal.est_rejoint:
-		_canal.suivre({"pseudo": Session.pseudo, "id": Session.id})
+	_construire_hud()
+	# `--lieu=taverne` ouvre directement une pièce : c'est ce qui permet de
+	# photographier un intérieur au banc, sans avoir à y marcher.
+	var demande := ""
+	for a in OS.get_cmdline_args():
+		if a.begins_with("--lieu="):
+			demande = a.substr(7)
+	_entrer_dans(demande if LIEUX.has(demande) else "village", Vector2.ZERO)
 
 	Tactile.mode = Tactile.MARCHE
-	Tactile.action.connect(_franchir)
+	Tactile.action.connect(_agir)
+
+	_canal = Reseau.rejoindre(CANAL, {"pseudo": Session.pseudo, "id": Session.id, "lieu": _lieu})
+	_canal.diffusion.connect(_sur_diffusion)
+	_canal.presences_changees.connect(_sur_presences)
 
 	Scores.classement_recu.connect(_sur_classement)
-	Scores.demander_classement("carnage", 3)
-	Scores.demander_classement("enigme", 3)
+	Scores.demander_classement("carnage", 5)
+	Scores.demander_classement("enigme", 5)
 
 func _exit_tree() -> void:
-	if Tactile.action.is_connected(_franchir):
-		Tactile.action.disconnect(_franchir)
+	if Tactile.action.is_connected(_agir):
+		Tactile.action.disconnect(_agir)
 	if _canal:
 		_canal.quitter()
 
-# ---------------------------------------------------------------- décor
+# ---------------------------------------------------------------- les lieux
 
-func _batir_monde() -> void:
-	poser_ambiance(true, 0.85)
+func _entrer_dans(lieu: String, arrivee: Vector2) -> void:
+	_lieu = lieu
+	_phrase = -1
+	var fiche: Dictionary = LIEUX[lieu]
+	var taille: Vector2 = fiche["taille"]
 
-	_paver()
+	for enfant in plan().get_children():
+		enfant.queue_free()
+	_autres.clear()
 
-	# Murs d'enceinte : ils cadrent le terrain et, surtout, portent une ombre
-	# qui donne son épaisseur au sol.
-	var e := 20.0
-	var m := MONDE.size
-	_mur(Vector2(m.x * 0.5, -e * 0.5), Vector2(m.x + e * 2.0, e))
-	_mur(Vector2(m.x * 0.5, m.y + e * 0.5), Vector2(m.x + e * 2.0, e))
-	_mur(Vector2(-e * 0.5, m.y * 0.5), Vector2(e, m.y))
-	_mur(Vector2(m.x + e * 0.5, m.y * 0.5), Vector2(e, m.y))
+	var fond := Pixels.image(IMAGES + String(fiche["fond"]), false)
+	fond.z_index = -100
+	fond.y_sort_enabled = false
+	plan().add_child(fond)
 
-	for portail in PORTAILS:
-		_batir_portail(portail)
+	_obstacles.clear()
+	_portes.clear()
+	_sortie = Rect2()
+	_portail = Rect2()
+	_jeu_du_lieu = ""
+	_pnj_phrases = []
 
-	_corps = _batir_avatar(Palette.couleur_joueur(0), Session.pseudo)
-	monde().add_child(_corps)
+	if lieu == "village":
+		_batir_village()
+	else:
+		_batir_interieur(fiche)
 
-	_camera = Decor.camera(INCLINAISON, DISTANCE, 50.0)
-	monde().add_child(_camera)
-	_camera.make_current()
+	_position = arrivee if arrivee != Vector2.ZERO else (fiche["depart"] as Vector2)
+	_corps = AnimatedSprite2D.new()
+	_corps.sprite_frames = Pixels.heros()
+	_corps.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	# Le pivot du sprite est au centre de sa case ; les pieds sont vingt
+	# pixels plus bas. Sans ce décalage, le personnage flotte au-dessus du
+	# sol et le tri par profondeur se trompe d'une demi-case.
+	_corps.offset = Vector2(0, -20)
+	_corps.play("repos_down")
+	plan().add_child(_corps)
 
-## Le hub est une esplanade dallée, pas un plan quadrillé : on y reconnaît le
-## même vocabulaire que dans Carnage, et surtout on VOIT qu'on avance. Un
-## damier de points ne donne ni échelle ni matière.
-func _paver() -> void:
+	_camera.limit_left = 0
+	_camera.limit_top = 0
+	_camera.limit_right = int(taille.x)
+	_camera.limit_bottom = int(taille.y)
+	_camera.position = _position
+	_camera.reset_smoothing()
+
+	if _canal and _canal.est_rejoint:
+		_canal.suivre({"pseudo": Session.pseudo, "id": Session.id, "lieu": _lieu})
+	_rafraichir_hud()
+
+func _batir_village() -> void:
 	var graine := RandomNumberGenerator.new()
-	graine.seed = 20260907          # fixe : le hub est le même pour tout le monde
-	var nappes: Dictionary = {}
-	var colonnes := int(ceil(MONDE.size.x / PAS))
-	var rangees := int(ceil(MONDE.size.y / PAS))
+	graine.seed = 20260907
+	var taille: Vector2 = LIEUX["village"]["taille"]
 
-	# Un parc traversé d'allées, pas une esplanade uniforme : à quatorze
-	# unités la tuile de trottoir devient un papier peint, et rien ne dit où
-	# aller. Les allées mènent aux portails, l'herbe fait le reste.
-	var centre_monde := MONDE.get_center()
-	for c in range(-2, colonnes + 2):
-		for r in range(-2, rangees + 2):
-			var centre := Vector2(c + 0.5, r + 0.5) * PAS
-			var sur_allee := absf(centre.x - centre_monde.x) < 110.0 or absf(centre.y - centre_monde.y) < 110.0
-			var tuile := "grass"
-			if _sous_un_portail(centre) or sur_allee:
-				tuile = "pavement"
-			else:
-				var t := graine.randf()
-				if t < 0.015:
-					tuile = "pavement-fountain"
-				elif t < 0.20:
-					tuile = "grass-trees"
-				elif t < 0.27:
-					tuile = "grass-trees-tall"
-			if not nappes.has(tuile):
-				nappes[tuile] = []
-			nappes[tuile].append(Transform3D(Basis().scaled(Vector3.ONE * TUILE), Decor.vers3d(centre)))
+	for maison in MAISONS:
+		var sprite := Pixels.image(IMAGES + String(maison["image"]))
+		Pixels.poser(sprite, maison["position"])
+		plan().add_child(sprite)
+		var largeur := float(sprite.texture.get_width())
+		var hauteur := float(sprite.texture.get_height())
+		var coin: Vector2 = (maison["position"] as Vector2) - Vector2(largeur * 0.5, hauteur)
+		# On ne bloque que le bas du bâtiment : le haut du toit se chevauche
+		# volontiers avec un joueur qui passe derrière.
+		_obstacles.append(Rect2(coin + Vector2(6, hauteur - 42), Vector2(largeur - 12, 40)))
+		_portes.append({
+			"rect": Rect2((maison["position"] as Vector2) + Vector2(-22, 0), Vector2(44, 26)),
+			"lieu": String(maison["lieu"]),
+			"nom": String(maison["nom"]),
+		})
+		# L'enseigne au-dessus de la porte : sans elle, trois maisons se
+		# ressemblent et on entre au hasard.
+		var enseigne := Label.new()
+		enseigne.text = String(maison["nom"])
+		enseigne.add_theme_font_size_override("font_size", 11)
+		enseigne.add_theme_color_override("font_color", Palette.ENCRE)
+		enseigne.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.95))
+		enseigne.add_theme_constant_override("outline_size", 5)
+		enseigne.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		enseigne.size = Vector2(120, 14)
+		enseigne.position = (maison["position"] as Vector2) + Vector2(-60, 12)
+		enseigne.z_index = 50
+		plan().add_child(enseigne)
 
-	for tuile in nappes:
-		var plat := String(tuile) in ["pavement", "grass"]
-		monde().add_child(Decor.nappe(VILLE + String(tuile) + ".glb", nappes[tuile], not plat, TEINTE_DALLAGE))
+	# Une lisière d'arbres et quelques bosquets : ils ferment le village sans
+	# qu'on ait à poser un mur, et donnent l'échelle du personnage.
+	for i in 90:
+		var bord := graine.randi_range(0, 3)
+		var p := Vector2.ZERO
+		match bord:
+			0: p = Vector2(graine.randf_range(0, taille.x), graine.randf_range(0, 120))
+			1: p = Vector2(graine.randf_range(0, taille.x), graine.randf_range(taille.y - 150, taille.y))
+			2: p = Vector2(graine.randf_range(0, 150), graine.randf_range(0, taille.y))
+			_: p = Vector2(graine.randf_range(taille.x - 150, taille.x), graine.randf_range(0, taille.y))
+		_planter(IMAGES + "arbre_%d.png" % graine.randi_range(0, 3), p, 18.0)
+	for i in 30:
+		var p2 := Vector2(graine.randf_range(180, taille.x - 180), graine.randf_range(180, taille.y - 180))
+		if p2.distance_to(Vector2(800, 560)) < 300.0:
+			continue
+		if graine.randf() < 0.45:
+			_planter(IMAGES + "arbre_%d.png" % graine.randi_range(0, 3), p2, 18.0)
+		else:
+			_planter(IMAGES + "buisson_%d.png" % graine.randi_range(0, 3), p2, 0.0)
+	for i in 18:
+		var p3 := Vector2(graine.randf_range(150, taille.x - 150), graine.randf_range(150, taille.y - 150))
+		_planter(IMAGES + "rocher_%d.png" % graine.randi_range(0, 2), p3, 10.0)
 
-## Rien ne pousse au pied d'un portail : il faut pouvoir s'en approcher sans
-## se cogner à un arbre, et le socle doit rester lisible.
-func _sous_un_portail(point: Vector2) -> bool:
-	for portail in PORTAILS:
-		if point.distance_to(portail["position"]) < 200.0:
-			return true
-	return false
+func _planter(chemin: String, position: Vector2, blocage: float) -> void:
+	var sprite := Pixels.image(chemin)
+	Pixels.poser(sprite, position)
+	plan().add_child(sprite)
+	if blocage > 0.0:
+		_obstacles.append(Rect2(position - Vector2(blocage, blocage * 0.5), Vector2(blocage * 2.0, blocage)))
 
-func _mur(centre: Vector2, taille: Vector2) -> void:
-	var hauteur := 5.0
-	var boite := Decor.boite(
-		Vector3(taille.x * Decor.ECHELLE, hauteur, taille.y * Decor.ECHELLE),
-		Palette.SURFACE.lightened(0.06))
-	boite.position = Decor.vers3d(centre, hauteur * 0.5)
-	monde().add_child(boite)
+func _batir_interieur(fiche: Dictionary) -> void:
+	var marche: Rect2 = fiche["marche"]
+	# On ne modélise pas les murs : on borne la zone où l'on marche. Une
+	# pièce dessinée n'a pas de géométrie, et lister ses murs à la main
+	# reviendrait à la redessiner une seconde fois, en moins fiable.
+	_obstacles.append(Rect2(marche.position - Vector2(400, 400), Vector2(400, 1200)))
+	_obstacles.append(Rect2(Vector2(marche.end.x, marche.position.y - 400), Vector2(400, 1200)))
+	_obstacles.append(Rect2(marche.position - Vector2(400, 400), Vector2(1600, 400)))
+	_obstacles.append(Rect2(Vector2(marche.position.x - 400, marche.end.y), Vector2(1600, 400)))
 
-func _batir_portail(portail: Dictionary) -> void:
-	var couleur: Color = portail["couleur"]
-	var ouvert: bool = portail["ouvert"]
-	var force := 1.15 if ouvert else 0.18
+	_sortie = fiche.get("sortie", Rect2())
+	_portail = fiche.get("portail", Rect2())
+	_jeu_du_lieu = String(fiche.get("jeu", ""))
+	_titre_du_lieu = String(fiche.get("titre", ""))
 
-	var support := Node3D.new()
-	support.position = Decor.vers3d(portail["position"])
-	monde().add_child(support)
+	if _portail != Rect2():
+		var lueur := Node2D.new()
+		lueur.set_script(preload("res://scenes/lueur_portail.gd"))
+		lueur.position = _portail.get_center()
+		lueur.set("taille", _portail.size)
+		plan().add_child(lueur)
 
-	# Socle au sol : c'est lui qui dit où se placer pour entrer.
-	var socle := Decor.cylindre(11.5, 0.5, couleur.darkened(0.55), false)
-	socle.position = Vector3(0, 0.26, 0)
-	support.add_child(socle)
-	var liseré := Decor.anneau(11.5, 0.4, couleur, force * 0.6)
-	liseré.rotation_degrees = Vector3(90, 0, 0)
-	liseré.position = Vector3(0, 0.4, 0)
-	support.add_child(liseré)
-
-	# Les anneaux se redressent face à la caméra et tournent : un portail
-	## posé à plat se confondrait avec une simple marque au sol.
-	for i in 3:
-		var pivot := Node3D.new()
-		pivot.position = Vector3(0, 6.0 + i * 0.8, 0)
-		pivot.rotation_degrees = Vector3(90.0 - INCLINAISON, 0, 0)
-		var a := Decor.anneau(5.4 + i * 2.2, 0.32, couleur, force - i * 0.4)
-		pivot.add_child(a)
-		support.add_child(pivot)
-		_anneaux.append({"pivot": pivot, "rang": i, "ouvert": ouvert})
-
-	var noyau := Decor.sphere(3.4, couleur)
-	noyau.material_override = Decor.matiere_lumineuse(couleur, force * 0.5, 0.55)
-	noyau.position = Vector3(0, 6.4, 0)
-	support.add_child(noyau)
-
-	var titre := Decor.etiquette(String(portail["titre"]), Color(Palette.ENCRE, 1.0 if ouvert else 0.4), 72)
-	titre.position = Vector3(0, 17.0, 0)
-	support.add_child(titre)
-	var sous := Decor.etiquette(String(portail["sous_titre"]), Color(Palette.ENCRE_FAIBLE, 1.0 if ouvert else 0.45), 34)
-	sous.position = Vector3(0, 14.2, 0)
-	support.add_child(sous)
-
-func _batir_avatar(couleur: Color, pseudo: String) -> Node3D:
-	var racine := Node3D.new()
-
-	# Un anneau au sol à la couleur du joueur : c'est lui qui distingue quatre
-	# personnages du même modèle, et il reste lisible quand le corps passe
-	# dans l'ombre d'un portail.
-	var halo := Decor.anneau(2.2, 0.2, couleur, 0.95)
-	halo.rotation_degrees = Vector3(90, 0, 0)
-	halo.position = Vector3(0, 0.05, 0)
-	racine.add_child(halo)
-
-	var corps := Decor.personnage(couleur, 3.4)
-	corps.name = "Silhouette"
-	racine.add_child(corps)
-
-	var nom := Decor.etiquette(pseudo, Palette.ENCRE_DOUCE, 34)
-	nom.position = Vector3(0, 5.6, 0)
-	nom.name = "Nom"
-	racine.add_child(nom)
-	return racine
+	var pnj: Dictionary = fiche.get("pnj", {})
+	if not pnj.is_empty():
+		_pnj_position = pnj["position"]
+		_pnj_phrases = pnj["phrases"]
+		var sprite := AnimatedSprite2D.new()
+		sprite.sprite_frames = Pixels.personnage_non_joueur(String(pnj["nom"]))
+		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		sprite.offset = Vector2(0, -10)
+		sprite.scale = Vector2(2, 2)
+		Pixels.poser(sprite, _pnj_position)
+		sprite.play("repos")
+		plan().add_child(sprite)
 
 # ---------------------------------------------------------------- boucle
 
 func _process(delta: float) -> void:
-	_t += delta
 	var direction := Commandes.direction()
 	if direction != Vector2.ZERO:
-		_position += direction * VITESSE * delta
-		_position.x = clamp(_position.x, MONDE.position.x + RAYON, MONDE.end.x - RAYON)
-		_position.y = clamp(_position.y, MONDE.position.y + RAYON, MONDE.end.y - RAYON)
+		var avant := _position
+		_position.x += direction.x * VITESSE * delta
+		_degager(Vector2(1, 0), avant)
+		avant = _position
+		_position.y += direction.y * VITESSE * delta
+		_degager(Vector2(0, 1), avant)
+		_borner()
+		_regard = ("side" if absf(direction.x) > absf(direction.y) else ("down" if direction.y > 0 else "up"))
+		_corps.flip_h = direction.x < 0.0 and _regard == "side"
+		_marche = true
+	else:
+		_marche = false
 
-	_corps.position = Decor.vers3d(_position)
-	_animer(_corps, direction, delta)
+	var animation := ("marche_" if _marche else "repos_") + _regard
+	if _corps.animation != animation:
+		_corps.play(animation)
+	Pixels.poser(_corps, _position)
+	_corps.z_index = 0
 
 	for cle in _autres:
 		var a: Dictionary = _autres[cle]
+		var vers: Vector2 = (a["cible"] as Vector2) - (a["affichee"] as Vector2)
 		a["affichee"] = (a["affichee"] as Vector2).lerp(a["cible"], clamp(delta * 12.0, 0, 1))
-		var noeud: Node3D = a["noeud"]
-		var avant: Vector2 = a["affichee"]
-		var pas: Vector2 = (a["cible"] as Vector2) - avant
-		noeud.position = Decor.vers3d(avant)
-		_animer(noeud, pas.normalized() if pas.length() > 3.0 else Vector2.ZERO, delta)
+		var noeud: AnimatedSprite2D = a["noeud"]
+		Pixels.poser(noeud, a["affichee"])
+		var bouge := vers.length() > 2.0
+		var sens := "side" if absf(vers.x) > absf(vers.y) else ("down" if vers.y > 0 else "up")
+		var anim := ("marche_" if bouge else "repos_") + sens
+		if noeud.animation != anim:
+			noeud.play(anim)
+		if bouge and sens == "side":
+			noeud.flip_h = vers.x < 0.0
 
-	for anneau in _anneaux:
-		var pivot: Node3D = anneau["pivot"]
-		var vitesse: float = (0.5 + int(anneau["rang"]) * 0.35) * (1.0 if anneau["ouvert"] else 0.12)
-		pivot.rotation.z = _t * vitesse
-
-	_placer_camera(delta)
+	_camera.position = _position
+	_chercher_quoi_faire()
 
 	_depuis_envoi += delta
 	_depuis_rappel += delta
-	if _depuis_envoi >= CADENCE_ENVOI and (direction != Vector2.ZERO or _depuis_rappel >= RAPPEL):
+	if _depuis_envoi >= CADENCE_ENVOI and (_marche or _depuis_rappel >= RAPPEL):
 		_depuis_envoi = 0.0
 		_depuis_rappel = 0.0
 		_canal.envoyer("p", {"x": int(_position.x), "y": int(_position.y)})
 
-	_chercher_portail()
+## Repousse le personnage hors d'un obstacle sur UN seul axe à la fois. En
+## corrigeant les deux ensemble, on reste accroché aux angles : le joueur
+## glisse le long d'un mur au lieu de s'y coller.
+func _degager(axe: Vector2, avant: Vector2) -> void:
+	var pieds := Rect2(_position - Vector2(RAYON, 6), Vector2(RAYON * 2.0, 10))
+	for obstacle in _obstacles:
+		if obstacle.intersects(pieds):
+			_position = avant
+			return
 
-## Un pas se voit : la silhouette se tourne vers sa marche, rebondit et se
-## penche un peu. Sans ça, un personnage qui glisse ne marche pas — il flotte.
-## Seule la silhouette tourne, pas l'anneau ni le pseudo.
-func _animer(porteur: Node3D, direction: Vector2, delta: float) -> void:
-	var silhouette := porteur.get_node_or_null("Silhouette") as Node3D
-	if silhouette == null:
-		return
-	if direction != Vector2.ZERO:
-		silhouette.rotation.y = lerp_angle(silhouette.rotation.y,
-			atan2(direction.x, direction.y), clamp(delta * 12.0, 0, 1))
-		Decor.demarche(silhouette, "walk")
+func _borner() -> void:
+	var taille: Vector2 = LIEUX[_lieu]["taille"]
+	_position.x = clamp(_position.x, 12.0, taille.x - 12.0)
+	_position.y = clamp(_position.y, 24.0, taille.y - 8.0)
+
+func _chercher_quoi_faire() -> void:
+	var avant := _invite
+	_invite = ""
+	if _lieu == "village":
+		for porte in _portes:
+			if (porte["rect"] as Rect2).has_point(_position):
+				_invite = "entrer:" + String(porte["lieu"])
+				break
 	else:
-		Decor.demarche(silhouette, "idle")
-
-func _placer_camera(delta: float) -> void:
-	var vise := Decor.viser(_camera, _position, INCLINAISON, DISTANCE)
-	_camera.position = _camera.position.lerp(vise, clamp(delta * 6.0, 0, 1))
+		if _portail != Rect2() and _portail.grow(14.0).has_point(_position):
+			_invite = "portail"
+		elif _sortie.grow(8.0).has_point(_position):
+			_invite = "sortir"
+		elif not _pnj_phrases.is_empty() and _position.distance_to(_pnj_position) < 44.0:
+			_invite = "parler"
+	if avant != _invite:
+		if not _invite.begins_with("parler"):
+			_phrase = -1
+		_rafraichir_hud()
 
 func _unhandled_input(evenement: InputEvent) -> void:
-	if evenement is InputEventKey and evenement.pressed and not evenement.echo:
-		if evenement.keycode == KEY_E:
-			_franchir()
+	if evenement is InputEventKey and evenement.pressed and not evenement.echo and evenement.keycode == KEY_E:
+		_agir()
 
-func _franchir() -> void:
-	if _portail_proche < 0 or not is_inside_tree():
+func _agir() -> void:
+	if not is_inside_tree():
 		return
-	var portail: Dictionary = PORTAILS[_portail_proche]
-	if portail["ouvert"]:
+	if _invite.begins_with("entrer:"):
+		Sons.jouer("porte", 1.0, -10.0)
+		_entrer_dans(_invite.substr(7), Vector2.ZERO)
+	elif _invite == "sortir":
+		Sons.jouer("porte", 0.8, -10.0)
+		var retour := Vector2(800, 560)
+		for maison in MAISONS:
+			if String(maison["lieu"]) == _lieu:
+				retour = (maison["position"] as Vector2) + Vector2(0, 34)
+		_entrer_dans("village", retour)
+	elif _invite == "portail" and _jeu_du_lieu != "":
 		Sons.jouer("portail", 1.0, -8.0)
-		demande_ecran.emit("salon", {"jeu": portail["jeu"], "titre": portail["titre"]})
-
-func _chercher_portail() -> void:
-	var avant := _portail_proche
-	_portail_proche = -1
-	for i in PORTAILS.size():
-		if _position.distance_to(PORTAILS[i]["position"]) < 140.0:
-			_portail_proche = i
-			break
-	if avant != _portail_proche:
+		demande_ecran.emit("salon", {"jeu": _jeu_du_lieu, "titre": _titre_du_lieu})
+	elif _invite == "parler":
+		_phrase = (_phrase + 1) % (_pnj_phrases.size() + 1)
+		Sons.jouer("clic", 1.2, -16.0)
 		_rafraichir_hud()
 
 # ---------------------------------------------------------------- réseau
@@ -311,43 +409,55 @@ func _sur_diffusion(evenement: String, charge: Dictionary) -> void:
 	if evenement != "p":
 		return
 	var cle := String(charge.get("cle", ""))
-	if cle == "" or cle == Session.cle:
+	if cle == "" or cle == Session.cle or not _autres.has(cle):
 		return
-	var cible := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
-	if not _autres.has(cle):
-		_ajouter_joueur(cle, "…", cible)
-	_autres[cle]["cible"] = cible
-
-func _ajouter_joueur(cle: String, pseudo: String, position: Vector2) -> void:
-	var noeud := _batir_avatar(Palette.couleur_joueur(1), pseudo)
-	noeud.position = Decor.vers3d(position)
-	monde().add_child(noeud)
-	_autres[cle] = {"cible": position, "affichee": position, "pseudo": pseudo, "place": 1, "noeud": noeud}
+	_autres[cle]["cible"] = Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
 
 func _sur_presences(presences: Dictionary) -> void:
-	var cles := _canal.cles_triees()
 	for cle in _autres.keys():
-		if not presences.has(cle):
-			(_autres[cle]["noeud"] as Node3D).queue_free()
+		var toujours_la: bool = presences.has(cle) and String(presences[cle].get("lieu", "village")) == _lieu
+		if not toujours_la:
+			(_autres[cle]["noeud"] as Node2D).queue_free()
 			_autres.erase(cle)
 	for cle in presences:
 		if cle == Session.cle:
 			continue
 		var meta: Dictionary = presences[cle]
+		if String(meta.get("lieu", "village")) != _lieu:
+			continue
 		if not _autres.has(cle):
-			_ajouter_joueur(cle, String(meta.get("pseudo", "?")), _position)
-		var joueur: Dictionary = _autres[cle]
-		joueur["pseudo"] = String(meta.get("pseudo", "?"))
-		joueur["place"] = max(1, cles.find(cle))
-		var noeud: Node3D = joueur["noeud"]
-		var nom := noeud.get_node_or_null("Nom") as Label3D
-		if nom:
-			nom.text = joueur["pseudo"]
+			var sprite := AnimatedSprite2D.new()
+			sprite.sprite_frames = Pixels.heros()
+			sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			sprite.offset = Vector2(0, -20)
+			sprite.modulate = Palette.couleur_joueur(1).lerp(Color.WHITE, 0.55)
+			sprite.play("repos_down")
+			Pixels.poser(sprite, _position)
+			plan().add_child(sprite)
+			var nom := Label.new()
+			nom.text = String(meta.get("pseudo", "?"))
+			nom.add_theme_font_size_override("font_size", 9)
+			nom.add_theme_color_override("font_color", Palette.ENCRE)
+			nom.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+			nom.add_theme_constant_override("outline_size", 4)
+			nom.position = Vector2(-30, -46)
+			nom.size = Vector2(60, 12)
+			nom.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			sprite.add_child(nom)
+			_autres[cle] = {"cible": _position, "affichee": _position,
+				"pseudo": String(meta.get("pseudo", "?")), "noeud": sprite}
 	_rafraichir_hud()
 
 func _sur_classement(jeu: String, lignes: Array) -> void:
 	_classements[jeu] = lignes
 	_rafraichir_hud()
+
+## Utilisé par le banc d'essai : combien de joueurs ce client voit-il ?
+func nombre_de_joueurs() -> int:
+	return _autres.size() + 1
+
+func presences_vues() -> Array:
+	return _canal.presences.keys() if _canal else []
 
 # ---------------------------------------------------------------- interface
 
@@ -361,7 +471,6 @@ func _construire_hud() -> void:
 	haut.offset_top = 16
 	haut.add_theme_constant_override("separation", 18)
 	couche.add_child(haut)
-
 	_hud_presents = UI.texte("", 14, Palette.ENCRE_DOUCE)
 	haut.add_child(_hud_presents)
 	var pousse := Control.new()
@@ -374,19 +483,29 @@ func _construire_hud() -> void:
 	bas.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	bas.offset_left = 20
 	bas.offset_right = -20
-	bas.offset_top = -136
+	bas.offset_top = -128
 	bas.offset_bottom = -18
 	bas.add_theme_constant_override("separation", 4)
 	couche.add_child(bas)
 	_hud_titre = UI.titre("", 22)
-	_hud_detail = UI.texte("", 14, Palette.ENCRE_FAIBLE)
 	_hud_classement = UI.texte("", 13, Palette.ENCRE_FAIBLE)
 	_hud_invite = UI.texte("", 15, Palette.SERIE)
 	bas.add_child(_hud_titre)
-	bas.add_child(_hud_detail)
 	bas.add_child(_hud_classement)
 	bas.add_child(_hud_invite)
-	_rafraichir_hud()
+
+	var centre := CenterContainer.new()
+	centre.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	centre.offset_top = -230
+	centre.offset_bottom = -150
+	centre.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	couche.add_child(centre)
+	_panneau_dialogue = UI.panneau()
+	_panneau_dialogue.visible = false
+	centre.add_child(_panneau_dialogue)
+	_hud_dialogue = UI.texte("", 16, Palette.ENCRE, true)
+	_hud_dialogue.custom_minimum_size = Vector2(620, 0)
+	_panneau_dialogue.add_child(_hud_dialogue)
 
 func _rafraichir_hud() -> void:
 	if _hud_etat == null:
@@ -395,34 +514,35 @@ func _rafraichir_hud() -> void:
 	var noms: Array = [Session.pseudo]
 	for cle in _autres:
 		noms.append(String(_autres[cle]["pseudo"]))
-	_hud_presents.text = "Dans le hub (%d) : %s" % [noms.size(), ", ".join(noms)]
+	var ou := String(LIEUX[_lieu].get("nom", _lieu.capitalize()))
+	_hud_presents.text = "%s (%d) : %s" % [ou, noms.size(), ", ".join(noms)]
 
-	if _portail_proche < 0:
-		_hud_titre.text = "Hub"
-		_hud_detail.text = "Z Q S D ou les flèches pour marcher. Approchez un portail."
-		_hud_classement.text = ""
-		_hud_invite.text = ""
-		return
+	_hud_titre.text = "Village de Piks-l" if _lieu == "village" else String(LIEUX[_lieu].get("nom", _lieu))
+	_hud_classement.text = ""
+	if _lieu != "village" and _jeu_du_lieu != "":
+		_hud_classement.text = _resumer_classement(_jeu_du_lieu)
 
-	var portail: Dictionary = PORTAILS[_portail_proche]
-	_hud_titre.text = String(portail["titre"]) + " — " + String(portail["sous_titre"])
-	_hud_detail.text = String(portail["detail"])
-	_hud_invite.text = ("ENTRER — franchir le portail" if Tactile.actif() else "E — franchir le portail") if portail["ouvert"] else "Portail éteint"
-	_hud_classement.text = _resumer_classement(String(portail["jeu"]))
+	match _invite.split(":")[0]:
+		"entrer": _hud_invite.text = "E — entrer"
+		"sortir": _hud_invite.text = "E — ressortir"
+		"portail": _hud_invite.text = "E — franchir le portail"
+		"parler": _hud_invite.text = "E — parler"
+		_: _hud_invite.text = "Z Q S D ou les flèches pour marcher."
 
-## Utilisé par le banc d'essai : combien de joueurs ce client voit-il ?
-func nombre_de_joueurs() -> int:
-	return _autres.size() + 1
+	var parle := _invite == "parler" and _phrase >= 0 and _phrase < _pnj_phrases.size()
+	_panneau_dialogue.visible = parle
+	if parle:
+		_hud_dialogue.text = String(_pnj_phrases[_phrase])
 
 func _resumer_classement(jeu: String) -> String:
 	var lignes = _classements.get(jeu, null)
 	if lignes == null:
 		return ""
 	if (lignes as Array).is_empty():
-		return "Aucun score déposé pour l'instant."
+		return "Au mur : aucun score déposé pour l'instant."
 	var morceaux: Array = []
 	var rang := 1
 	for ligne in lignes:
 		morceaux.append("%d. %s %d" % [rang, String(ligne.get("pseudo", "?")), int(ligne.get("score", 0))])
 		rang += 1
-	return "Meilleurs scores — " + "   ".join(morceaux)
+	return "Au mur — " + "   ".join(morceaux)

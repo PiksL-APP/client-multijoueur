@@ -69,6 +69,12 @@ Ni image, ni son : les volumes se fabriquent par `commun/decor.gd`, les
 rendus en une trentaine de millisecondes au démarrage. Un son se règle en
 changeant un chiffre, pas en rouvrant un éditeur audio.
 
+Le **hub** fait exception à la 2,5D : il est en pixel art 2D (pack *Pixel
+Crawler*, dessiné en vue de dessus). Un écran choisit `plan()` ou `monde()`,
+jamais les deux. Les sprites se posent sur un pixel entier (`Pixels.poser`) et
+se filtrent au plus proche voisin — interpolés, ils bavent ; à mi-pixel, ils
+scintillent dès qu'on bouge.
+
 **Une seule exception**, et elle est délibérée : `modeles/volvo-242.glb`, la
 carrosserie du jeu Carnage. Un vrai modèle apporte ce qu'aucune boîte ne
 donnera. Il est arrivé en STL de modélisme (44 000 triangles, orienté
