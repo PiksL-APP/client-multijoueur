@@ -390,7 +390,18 @@ func simuler_local(delta: float) -> void:
 ## Pilote automatique du banc d'essai. Il ne joue pas bien, il joue TOUT :
 ## sans une sortie de véhicule programmée, la moitié du jeu — la marche, le
 ## vol de voiture, le tir à pied — ne serait jamais exercée avant livraison.
+var _depuis_rapport := 0.0
+
 func _piloter_pour_le_banc() -> void:
+	# Toutes les cinq secondes, le pilote dit à quelle cadence il tourne et ce
+	# qu'il voit : dans le navigateur, c'est la seule mesure de performance
+	# qu'on ait — et c'est celle qui compte.
+	_depuis_rapport += get_process_delta_time()
+	if _depuis_rapport >= 5.0:
+		_depuis_rapport = 0.0
+		print("[banc] t=%ds fps=%d gens=%d autos=%d noeuds=%d %s" % [int(temps),
+			Engine.get_frames_per_second(), ville.gens.size(), ville.autos.size(),
+			get_tree().get_node_count(), "hôte" if est_hote() else "client"])
 	# ⚠ L'action se PULSE. Maintenue, elle ne produit qu'un seul front : le
 	# pilote descendait de voiture et ne remontait jamais, et la moitié du jeu
 	# passait le banc sans être exercée.

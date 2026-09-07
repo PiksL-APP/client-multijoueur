@@ -18,6 +18,13 @@ func _ready() -> void:
 	get_window().min_size = Vector2i(960, 600)
 	Reseau.connecter()
 	var arguments := OS.get_cmdline_args()
+	# Dans le navigateur, la ligne de commande est l'URL : `?pilote=carnage&manche=60`
+	# ouvre une manche au pilote automatique, dans la file d'essai (jamais à la
+	# table d'un vrai joueur). C'est le seul moyen de REGARDER le jeu tourner sur
+	# un vrai GPU depuis une session à distance : les touches synthétiques
+	# n'atteignent pas Godot, et le banc sous xvfb tourne au quart du temps réel.
+	if OS.has_feature("web"):
+		arguments = _arguments_depuis_url(arguments)
 	# Les photos démarrent AVANT le choix du banc : sinon `--banc --photo`
 	# repart en haut de la fonction et on ne photographie jamais le hub.
 	var dossier_photos := _argument(arguments, "--photo")
@@ -39,6 +46,22 @@ func _ready() -> void:
 		_banc_partie(jeu, float(_argument(arguments, "--manche", "25")))
 		return
 	aller_a("accueil", {})
+
+## `?pilote=carnage&manche=60&etoiles=5` → `--banc-jeu=carnage --manche=60 --banc-etoiles=5`.
+static func _arguments_depuis_url(arguments: PackedStringArray) -> PackedStringArray:
+	var recherche = JavaScriptBridge.eval("window.location.search", true)
+	if typeof(recherche) != TYPE_STRING or String(recherche).length() < 2:
+		return arguments
+	var copie := PackedStringArray(arguments)
+	for morceau in String(recherche).substr(1).split("&"):
+		var paire := String(morceau).split("=")
+		if paire.size() != 2:
+			continue
+		match String(paire[0]):
+			"pilote": copie.append("--banc-jeu=" + String(paire[1]))
+			"manche": copie.append("--manche=" + String(paire[1]))
+			"etoiles": copie.append("--banc-etoiles=" + String(paire[1]))
+	return copie
 
 static func _argument(arguments: PackedStringArray, nom: String, defaut: String = "") -> String:
 	for a in arguments:
