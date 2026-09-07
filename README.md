@@ -23,11 +23,17 @@ pixel, des jeux en volume — vaut mieux qu'un mélange qui trahirait les deux.
 Le socle (`scenes/ecran.gd`) sait porter l'un ou l'autre : `plan()` pour la 2D,
 `monde()` pour la 3D, jamais les deux dans le même écran.
 
-Le village et ses intérieurs sont **cuits hors moteur** : les découpes,
-l'assemblage des maisons (toit + mur + porte) et le sol du village sont
-produits par un script Python et entrent au dépôt en PNG. Assembler des
-tuiles de seize pixels à l'aveugle dans le moteur, image après image, aurait
-coûté dix fois le temps pour un résultat moins sûr.
+Le village et ses intérieurs sont **préparés hors moteur** par
+`outils/village.py`, qui lit le pack et écrit `modeles/village/*.png`. Règle
+du script : on ne découpe jamais un dessin. Chaque image est un sprite entier
+pris dans sa case de grille (un arbre = sa case de 48 × 96), une pièce entière
+de la maquette de taverne (murs compris, ramenée à l'échelle native — la
+maquette est livrée doublée), ou une planche d'animation recopiée telle quelle.
+Les maisons sont assemblées (un toit entier, un pan de mur entier, une porte
+entière), jamais rognées. Une seule échelle partout : la case fait 16 pixels,
+un personnage 30, et la caméra zoome d'un facteur entier ; les planches de
+personnages sont remises au même gabarit (cases de 64, pieds sur le bord bas)
+pour qu'un seul point d'ancrage serve à tous, sans agrandir personne.
 
 **2,5D.** La simulation se fait sur un plan — tout l'état réseau tient en
 `Vector2` — mais le rendu est en vraie 3D : caméra en perspective inclinée,
@@ -46,7 +52,7 @@ En ligne : **https://multijoueur.piks-l.com**
 
 | | |
 | --- | --- |
-| **Hub** | Un village en **pixel art vu de dessus** : on s'y croise, et on ENTRE dans les maisons. La taverne, l'armurerie et l'atelier ont chacune leur intérieur, son classement au mur, son habitant qui explique le jeu, et — pour deux d'entre elles — le portail au fond de la pièce. |
+| **Hub** | Un village en **pixel art vu de dessus** : on s'y croise, et on ENTRE dans les maisons. La taverne, l'armurerie et l'auberge ont chacune leur intérieur (une pièce entière de la maquette du pack), son habitant qui explique le jeu et — pour les deux premières — le classement affiché au mur et le portail qui lance la partie. |
 | **CARNAGE** | Une ville ouverte — vingt-deux par seize tuiles, une rue tous les quatre pas, une ceinture de verdure, pas de mur : on est ramené vers le centre si on part dans la friche. Écraser un monstre rapporte, mais seulement lancé : sous 210 px/s c'est le monstre qui gagne l'échange. Les enchaînements en moins de 2,5 s multiplient jusqu'à ×5. Trois armes se ramassent au sol — mitraillette, roquettes, éperon (qui fait écraser presque à l'arrêt). Cent points de vie, un monstre en coûte vingt-deux, ça repart tout seul après cinq secondes sans coup ; à zéro on est hors service trois secondes et demie. Manche de 2 min 30. |
 | **ÉNIGME** | Coopératif, trois chambres. Une dalle ne reste enfoncée que si quelqu'un — ou une caisse — pèse dessus, et la sortie d'une chambre n'accepte l'équipe qu'au complet. 3 minutes. |
 

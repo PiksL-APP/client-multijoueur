@@ -30,22 +30,32 @@ static func ajouter(poses: SpriteFrames, nom: String, chemin: String,
 		morceau.region = Rect2(i * largeur_case, 0, largeur_case, hauteur)
 		poses.add_frame(nom, morceau)
 
-## Le héros : marche et repos dans les trois orientations dessinées. La gauche
-## n'existe pas dans le pack — c'est la droite retournée, ce qui est la
-## convention de tous ces kits et divise le nombre d'images par deux.
-static func heros() -> SpriteFrames:
+## Un héros jouable : repos et course, vus de côté. La gauche n'existe pas
+## dans le pack — c'est la droite retournée, ce qui est la convention de tous
+## ces kits. Les trois héros existent en `knight`, `rogue` et `wizzard`.
+const HEROS := ["knight", "rogue", "wizzard"]
+
+static func heros(nom: String) -> SpriteFrames:
 	var poses := SpriteFrames.new()
 	poses.remove_animation("default")
-	var base := "res://modeles/village/"
-	for sens in ["down", "side", "up"]:
-		ajouter(poses, "marche_" + sens, base + "heros_marche_%s.png" % sens, 10.0)
-		ajouter(poses, "repos_" + sens, base + "heros_repos_%s.png" % sens, 6.0)
+	var base := "res://modeles/village/heros_%s_" % nom
+	ajouter(poses, "repos", base + "repos.png", 5.0)
+	ajouter(poses, "marche", base + "marche.png", 10.0)
 	return poses
 
+## Le héros d'un joueur découle de son identité : tous les clients font le
+## même calcul, donc tous voient le même personnage pour la même personne.
+static func heros_de(id: String) -> String:
+	return HEROS[absi(id.hash()) % HEROS.size()]
+
 static func personnage_non_joueur(nom: String) -> SpriteFrames:
+	return animation("repos", "res://modeles/village/pnj_%s.png" % nom, 5.0)
+
+## Une seule animation tirée d'une planche : le feu de camp, par exemple.
+static func animation(nom: String, chemin: String, vitesse: float = 8.0, cote: int = 0) -> SpriteFrames:
 	var poses := SpriteFrames.new()
 	poses.remove_animation("default")
-	ajouter(poses, "repos", "res://modeles/village/pnj_%s.png" % nom, 5.0)
+	ajouter(poses, nom, chemin, vitesse, true, cote)
 	return poses
 
 ## Un sprite de pixel art doit être filtré au plus proche voisin et posé sur
