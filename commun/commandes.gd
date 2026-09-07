@@ -65,6 +65,15 @@ static func klaxon() -> bool:
 		return klaxon_simule
 	return Input.is_physical_key_pressed(KEY_H)
 
+## La carte de la ville : TAB tenu. Tenue, pas déclenchée — on la consulte
+## d'un coup d'œil et on la lâche, comme dans GTA 2.
+static var carte_simulee := false
+
+static func carte() -> bool:
+	if pilote_automatique:
+		return carte_simulee
+	return Input.is_physical_key_pressed(KEY_TAB)
+
 ## Pour la conduite : x = braquage (-1 à gauche), y = accélération (-1 en
 ## marche arrière). Non normalisé — accélérer en tournant ne doit pas coûter
 ## de la vitesse.

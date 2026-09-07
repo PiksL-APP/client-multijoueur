@@ -51,7 +51,7 @@ func _draw() -> void:
 			var quartier := carte.quartier_du_pate(pate)
 			var gang := carte.territoire_du_pate(pate)
 			var couleur := Color(Palette.ENCRE, 0.10)
-			if quartier == PlanVille.EAU:
+			if quartier == PlanVille.EAU or carte.eau(coin.x + 1, coin.y + 1):
 				couleur = Color(Palette.SERIE, 0.22)
 			elif quartier == PlanVille.PARC:
 				couleur = Color(Palette.BON, 0.16)
@@ -59,20 +59,35 @@ func _draw() -> void:
 				couleur = Color(carte.couleur_du_gang(gang), 0.24)
 			draw_rect(visible, couleur, true)
 
-	# Les rues : deux tuiles de large, en sombre, sur les axes de la grille.
+	# Les rues : deux tuiles de large, en sombre, segment par segment — une rue
+	# fermée ou noyée ne se dessine pas, c'est ce qui fait lire les îlots et
+	# la rivière sur le radar. Les avenues sont un peu plus claires.
 	var largeur_rue := 2.0 * pas * ECHELLE
-	var premier_x := int(floor((moi.x - rayon_vue) / pas / PlanVille.PERIODE)) * PlanVille.PERIODE
-	for colonne in range(premier_x, int(ceil((moi.x + rayon_vue) / pas)) + PlanVille.PERIODE, PlanVille.PERIODE):
-		var x := _vers_radar(Vector2(float(colonne + 1) * pas, 0.0), centre).x
+	var bitume := Color(0.05, 0.05, 0.06, 0.9)
+	var avenue := Color(0.12, 0.12, 0.1, 0.95)
+	var periode := PlanVille.PERIODE
+	for k in range(p0.x, p1.x + 2):
+		var x := _vers_radar(Vector2(float(k * periode + 1) * pas, 0.0), centre).x
 		if x + largeur_rue * 0.5 < cadre.position.x or x - largeur_rue * 0.5 > cadre.end.x:
 			continue
-		draw_line(Vector2(x, cadre.position.y), Vector2(x, cadre.end.y), Color(0.05, 0.05, 0.06, 0.9), largeur_rue)
-	var premier_y := int(floor((moi.y - rayon_vue) / pas / PlanVille.PERIODE)) * PlanVille.PERIODE
-	for ligne in range(premier_y, int(ceil((moi.y + rayon_vue) / pas)) + PlanVille.PERIODE, PlanVille.PERIODE):
-		var y := _vers_radar(Vector2(0.0, float(ligne + 1) * pas), centre).y
+		for py in range(p0.y, p1.y + 1):
+			if carte.rue_fermee_v(k, py) or carte.eau(k * periode, py * periode + 3):
+				continue
+			var y0 := _vers_radar(Vector2(0.0, float(py * periode) * pas), centre).y
+			var y1 := _vers_radar(Vector2(0.0, float(py * periode + periode) * pas), centre).y
+			draw_line(Vector2(x, clamp(y0, cadre.position.y, cadre.end.y)), Vector2(x, clamp(y1, cadre.position.y, cadre.end.y)),
+				avenue if posmod(k, PlanVille.AVENUE) == 0 else bitume, largeur_rue)
+	for kl in range(p0.y, p1.y + 2):
+		var y := _vers_radar(Vector2(0.0, float(kl * periode + 1) * pas), centre).y
 		if y + largeur_rue * 0.5 < cadre.position.y or y - largeur_rue * 0.5 > cadre.end.y:
 			continue
-		draw_line(Vector2(cadre.position.x, y), Vector2(cadre.end.x, y), Color(0.05, 0.05, 0.06, 0.9), largeur_rue)
+		for px in range(p0.x, p1.x + 1):
+			if carte.rue_fermee_h(kl, px) or carte.eau(px * periode + 3, kl * periode):
+				continue
+			var x0 := _vers_radar(Vector2(float(px * periode) * pas, 0.0), centre).x
+			var x1 := _vers_radar(Vector2(float(px * periode + periode) * pas, 0.0), centre).x
+			draw_line(Vector2(clamp(x0, cadre.position.x, cadre.end.x), y), Vector2(clamp(x1, cadre.position.x, cadre.end.x), y),
+				avenue if posmod(kl, PlanVille.AVENUE) == 0 else bitume, largeur_rue)
 
 	# Les lieux à portée : repaires, arènes, garages, cabines.
 	var lieux := carte.lieux_autour(moi, rayon_vue * 1.5)

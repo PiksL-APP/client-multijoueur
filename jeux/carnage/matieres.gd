@@ -37,6 +37,8 @@ varying float sol;
 varying float graine;
 varying vec3 teinte;
 varying vec3 posm;
+// La voie ferrée : ax + bz = c en unités monde (PlanVille.rail()).
+uniform vec3 rail = vec3(0.0, 1.0, -100000.0);
 
 void vertex() {
 	uvl = UV;
@@ -93,8 +95,12 @@ void fragment() {
 			col = asphalte;
 			rug = 0.55;
 			spec = 0.35;
-			// L'axe : une bande jaune pointillée, une moitié sur chaque tuile.
-			if (uvl.x > 0.975 && fract(uvl.y * 2.0 + 0.25) < 0.55) col = jaune;
+			// L'axe : une bande jaune pointillée, une moitié sur chaque tuile ;
+			// sur une avenue (graine ≥ 0,5), une double ligne continue.
+			if (graine >= 0.5) {
+				if (uvl.x > 0.985 || (uvl.x > 0.955 && uvl.x < 0.97)) col = jaune;
+				col *= 1.06;
+			} else if (uvl.x > 0.975 && fract(uvl.y * 2.0 + 0.25) < 0.55) col = jaune;
 			// Le passage piéton, au bout qui touche le carrefour.
 			bool zebra = (k == 1 && uvl.y > 0.05 && uvl.y < 0.21) || (k == 2 && uvl.y > 0.79 && uvl.y < 0.95);
 			if (zebra && fract((uvl.x - T) * 7.0) < 0.5) col = mix(col, blanc, 0.55);
@@ -156,6 +162,14 @@ void fragment() {
 		rug = 0.12;
 		spec = 0.7;
 		grain = 0.0;
+	} else if (k == 14) {
+		// RAIL : du ballast, des traverses en travers de la ligne, deux rails.
+		col = mix(vec3(0.24, 0.22, 0.20), vec3(0.32, 0.30, 0.27), bruit(posm.xz * 6.0));
+		rug = 0.95;
+		float d = rail.x * posm.x + rail.y * posm.z - rail.z;       // distance signée à l'axe
+		float le_long = -rail.y * posm.x + rail.x * posm.z;         // abscisse le long de la voie
+		if (abs(d) < 1.5 && fract(le_long / 1.1) < 0.35) col = vec3(0.30, 0.22, 0.16);   // traverses
+		if (abs(abs(d) - 0.75) < 0.07) { col = vec3(0.55, 0.55, 0.58); rug = 0.3; spec = 0.6; }
 	} else {
 		// TERRE
 		col = mix(vec3(0.30, 0.24, 0.17), vec3(0.38, 0.31, 0.22), bruit(posm.xz * 2.0));
@@ -238,6 +252,9 @@ void fragment() {
 			float r = length(loc * taille);
 			if (abs(r - 4.2) < 0.35 || (r < 3.0 && (abs(loc.x * taille.x) < 0.35 || abs(loc.y * taille.y) < 0.35))) toit = vec3(0.75, 0.75, 0.7);
 		}
+		// Un volume PLEIN (toit de maison, auvent, grue) montre sa teinte telle
+		// quelle : c'est elle qui fait la tuile d'une maison.
+		if (style == 6) toit = teinte * (0.9 + 0.2 * hache(floor(posm.xz * 3.0)));
 		ALBEDO = toit;
 		ROUGHNESS = 0.95;
 		SPECULAR = 0.1;
@@ -319,7 +336,10 @@ void fragment() {
 ## le mode compatibilité n'en supporte que huit par objet.
 const FLAQUE := """
 shader_type spatial;
-render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled;
+// ⚠ `fog_disabled` : le brouillard se MÉLANGE au fragment après le shader ;
+// sur un quadrilatère additif, il peignait un carré violet là où la flaque
+// devait être transparente. On l'a vu sur l'eau avant de comprendre.
+render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;
 
 varying vec4 c;
 varying vec2 uvl;
@@ -407,8 +427,8 @@ static func crepuscule() -> Array:
 	environnement.ambient_light_color = Color("#3c4a7a")
 	environnement.ambient_light_energy = 1.05
 	environnement.fog_enabled = true
-	environnement.fog_light_color = Color("#2a2340")
-	environnement.fog_density = 0.0028
+	environnement.fog_light_color = Color("#1c2036")
+	environnement.fog_density = 0.0022
 	environnement.fog_sky_affect = 0.35
 	environnement.glow_enabled = true
 	environnement.glow_intensity = 0.9

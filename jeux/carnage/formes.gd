@@ -53,9 +53,16 @@ static var _matieres_teintees: Dictionary = {}
 
 static func maillage_voiture(indice: int) -> Mesh:
 	var nom := String(MODELES_VOITURES[clamp(indice, 0, MODELES_VOITURES.size() - 1)])
-	if _fusionnees.has(nom):
-		return _fusionnees[nom]
-	var scene := (load(VOITURES + nom + ".glb") as PackedScene).instantiate()
+	return maillage_fusionne(VOITURES + nom + ".glb")
+
+## Un glTF entier CUIT en un seul maillage, transformations de nœuds comprises.
+## ⚠ `Decor.maillage` ne prend que le premier maillage et ignore l'échelle de
+## son nœud : le conteneur du kit industriel est modélisé trois fois trop grand
+## et ramené par son nœud à 0,27 — pris brut, il faisait vingt-cinq mètres.
+static func maillage_fusionne(chemin: String) -> Mesh:
+	if _fusionnees.has(chemin):
+		return _fusionnees[chemin]
+	var scene := (load(chemin) as PackedScene).instantiate()
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var matiere: Material = null
@@ -78,7 +85,7 @@ static func maillage_voiture(indice: int) -> Mesh:
 	if matiere != null and fusion.get_surface_count() > 0:
 		fusion.surface_set_material(0, matiere)
 	scene.free()
-	_fusionnees[nom] = fusion
+	_fusionnees[chemin] = fusion
 	return fusion
 
 ## La matière du kit, qui accepte la couleur d'instance : c'est elle qui fait

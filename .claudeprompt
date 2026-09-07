@@ -62,9 +62,25 @@ WebAssembly. Le socle `piks-l-nuxt-template` ne s'applique pas ici.
 rendu et l'interface ; le reste est à côté :
 
 - `jeux/carnage/plan.gd` (`PlanVille`) — le plan de ville, déduit du CODE de la
-  manche. Murs indexés PAR TUILE : ne jamais revenir à un balayage de la liste
-  des rectangles, il coûtait vingt mille tests par image une fois la ville
-  peuplée.
+  manche, généré À LA DEMANDE : tout est une fonction pure des coordonnées et
+  du code (`_bruit`), calculée pâté par pâté et mise en cache. Ne jamais
+  ajouter un parcours de TOUTE la ville : elle fait trois cent cinquante mille
+  tuiles, et le navigateur perd son socket au-delà d'une seconde de blocage.
+  Murs indexés PAR TUILE (une fiche, un rectangle) : ne jamais revenir à un
+  balayage d'une liste de rectangles.
+- `jeux/carnage/morceau.gd` (`MorceauVille`) — un morceau rendu de vingt tuiles
+  : sol en un maillage, immeubles en une nappe de boîtes, mobilier et voitures
+  dormantes en nappes par modèle, enseignes et flaques de lumière. Bâti quand
+  son bord passe à portée du joueur, un par image, libéré au loin.
+- `jeux/carnage/matieres.gd` (`MatieresCarnage`) — les shaders (sol, façades,
+  flaques additives, lumineux) et l'ambiance de l'heure bleue. ⚠ Une matière
+  additive coupe le brouillard (`fog_disabled`), sinon il peint un carré. ⚠ Pas
+  de `return` dans `fragment()` : le compilateur de shaders le refuse.
+- Les voitures GARÉES n'existent pas chez l'hôte : ce sont des fiches du plan
+  (`id_dormante` se déduit de la tuile et du côté). L'hôte les RÉVEILLE quand
+  on les vole, les percute ou les tire (`VilleVivante.reveiller`), et chaque
+  client les efface de leur nappe en apprenant l'identifiant (`pris`,
+  instantané, ou le véhicule d'un joueur reçu par `j`).
 - `jeux/carnage/vivant.gd` (`VilleVivante`) — tout ce que l'HÔTE simule :
   passants, gangs, trafic, police, contrats, respect, étoiles. Ce module ne
   connaît ni la scène ni le réseau : il produit une liste d'événements que
@@ -89,13 +105,16 @@ Un plafond oublié, c'est un classement à sept chiffres au premier curieux.
 
 ## Les kits, et leurs échelles
 
-Carnage pose quatre kits Kenney (CC0), un dossier par kit sous `modeles/`, avec
-sa licence et son `Textures/colormap.png`. ⚠ Les kits n'ont PAS la même unité :
-le kit de ville fait une tuile par unité, les immeubles de commerce ~1,3 de
-côté, les pavillons jusqu'à 1,8, les voitures 2,55 de long contre 4,5 pour la
-Volvo. Les échelles vivent dans `PlanVille.KITS` et
-`FormesCarnage.ECHELLE_VOITURE` ; un modèle ajouté se mesure d'abord (les
-accesseurs `min`/`max` du JSON du glb) avant d'être posé. ⚠ Le kit de voitures
+Carnage pose des kits Kenney et KayKit (CC0), un dossier par kit sous
+`modeles/`, avec sa licence et sa texture. Les immeubles, eux, sont
+procéduraux (des boîtes + le shader de façades) : les kits ne servent plus
+qu'au mobilier, aux détails industriels, aux arbres et aux voitures. ⚠ Les kits
+n'ont PAS la même unité : les échelles vivent dans `MorceauVille.MODELES` et
+`FormesCarnage.ECHELLE_VOITURE` ; un modèle ajouté se mesure d'abord. ⚠ Certains
+glb portent leur échelle sur le NŒUD, pas dans le maillage (le conteneur du
+kit industriel est modélisé trois fois trop grand et ramené à 0,27) : passer
+par `FormesCarnage.maillage_fusionne`, qui cuit les transformations, jamais par
+`Decor.maillage` pour une nappe. ⚠ Le kit de voitures
 regarde vers +Z, le jeu roule vers +X : la correction est sur un pivot
 intermédiaire (`ROTATION_KIT`), jamais sur la racine.
 

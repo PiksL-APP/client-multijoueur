@@ -58,7 +58,7 @@ En ligne : **https://multijoueur.piks-l.com**
 | | |
 | --- | --- |
 | **Hub** | Un village en **pixel art vu de dessus** : on s'y croise, et on ENTRE dans les maisons. Une esplanade pavée, cinq maisons, un potager, une mare, la forêt autour. La taverne, l'armurerie et l'auberge se visitent (une pièce entière de la maquette du pack chacune), avec leurs habitants qui parlent — et, pour les deux premières, le classement au mur et le portail qui lance la partie. |
-| **CARNAGE** | Un GTA 2. Une ville PROCÉDURALE de quarante-huit par trente-six tuiles, tirée du code de la manche : un centre d'affaires neutre et ses tours, et autour trois territoires qui ne se ressemblent pas — la zone industrielle des Braises, les rues commerçantes de La Fonte, la banlieue pavillonnaire du Lierre — plus des parcs. Quatre kits Kenney (CC0) : trois cents voitures dorment le long des rues et se volent toutes, les taxis roulent au centre, les fourgons dans la zone. On conduit, on **descend** (E), on court, on tire. Les passants rapportent, les gangs plus, les flics encore plus — et tout cela fait monter les **étoiles de recherche**. Chaque gang a ses **repaires** tagués au sol, un **garage** qui efface le casier, une **cabine** qui donne des contrats ; deux **arènes** sur les frontières sont les seuls endroits où les joueurs peuvent se blesser. Manche de 4 minutes, plan de la ville en haut à droite. |
+| **CARNAGE** | Un GTA 2 à l'heure bleue. Une ville PROCÉDURALE de six cent quatre-vingts par cinq cent vingt tuiles — cent fois la précédente — tirée du code de la manche et générée À LA DEMANDE, morceau par morceau, autour de chaque joueur : un centre d'affaires neutre et ses tours, des quartiers de bureaux, des rues commerçantes à néons, la vieille ville, les cités, la banlieue pavillonnaire, la zone industrielle, le port, des parcs et des lacs. Trois gangs se partagent tout ça par secteurs aux frontières irrégulières. Les immeubles sont des boîtes dont un shader dessine les étages et allume les fenêtres ; le sol, les trottoirs, les passages piétons et l'eau sont un autre shader. Des dizaines de milliers de voitures dorment le long des rues et se volent toutes ; les taxis roulent au centre, les fourgons dans la zone. On conduit, on **descend** (E), on court, on tire. Les passants rapportent, les gangs plus, les flics encore plus — et tout cela fait monter les **étoiles de recherche**. Chaque secteur a son **garage** qui efface le casier, sa **cabine** qui donne des contrats, ses **repaires** tagués au sol, une **arène** une fois sur deux — le seul endroit où les joueurs peuvent se blesser. Manche de 4 minutes, radar centré sur soi en haut à droite. |
 | **ÉNIGME** | Coopératif, trois chambres. Une dalle ne reste enfoncée que si quelqu'un — ou une caisse — pèse dessus, et la sortie d'une chambre n'accepte l'équipe qu'au complet. 3 minutes. |
 
 ### CARNAGE, dans le détail
@@ -102,25 +102,78 @@ coup part de l'arène ET y arrive : un tireur posté dehors nettoierait
 l'esplanade sans jamais y entrer. Partout ailleurs, les joueurs ne peuvent pas
 se blesser et jouent la ville ensemble.
 
-**La ville se génère par quartiers.** Le plan divise la ville en pâtés de
-trois par trois ; chaque pâté reçoit un territoire (le fief de gang le plus
-proche, avec du bruit pour que la frontière ne soit pas une droite) et un type
-de quartier — celui du gang, sauf le premier anneau autour du centre qui reste
-commerçant, et un pâté sur onze qui devient un parc. Chaque type pioche dans
-son kit : tours et immeubles de commerce, entrepôts, citernes et conteneurs,
-pavillons et arbres. Le sol prend une pointe de la couleur du territoire (une
-couleur PAR INSTANCE dans les nappes, pas une teinte par nappe), et une
-bannière nomme le quartier quand on en change.
+**La ville ne se génère JAMAIS d'un bloc.** Six cent quatre-vingts par cinq
+cent vingt tuiles, c'est trois cent cinquante mille tuiles : les bâtir au coup
+d'envoi bloquerait le navigateur dix secondes et ferait tomber le socket, pour
+un décor dont personne ne visitera les neuf dixièmes. Tout est une FONCTION
+PURE des coordonnées et du code (`PlanVille._bruit`) : n'importe quel pâté se
+calcule à n'importe quel moment, chez n'importe quel joueur, et donne la même
+chose. Le zonage est un Voronoï à graines jetées sur une grille de huit pâtés ;
+chaque graine porte un type de quartier (tiré selon la distance au centre) et
+un gang (tiré selon l'angle, bruité). Les lieux — garage, cabine, un ou deux
+repaires, une arène une fois sur deux — se tirent par secteur de huit pâtés
+sur huit, d'un générateur semé par le secteur et le code.
 
-**Trois cents voitures dorment le long des rues.** Le plan les place (une tuile
-de pâté qui borde une rue a une chance sur trois d'en avoir une, selon le
-quartier) ; l'hôte leur donne un identifiant et un point de vie au coup
-d'envoi. Elles ne sont ni simulées ni diffusées tant que personne n'est à
-portée — et on ne les DESSINE qu'à mille pixels : à seize cents, un navigateur
-en mode compatibilité tombait à dix images par seconde.
+**La carte est celle de GTA 2, pas un quadrillage.** La ville est une ÎLE à la
+côte irrégulière ; une RIVIÈRE serpente d'ouest en est et ne se franchit que
+par les avenues (une rue sur quatre, arborée, à double ligne, jamais coupée) ;
+une VOIE FERRÉE traverse en diagonale, seul trait qui ne suive pas la grille ;
+et des ÎLOTS de deux pâtés sur deux se fondent — souvent dans la zone
+industrielle, les parcs et les cités, presque jamais dans la vieille ville —
+leurs rues intérieures devenant une cour en croix qu'on traverse. Les pâtés
+que l'eau ou la voie touchent deviennent des quais. `TAB` affiche la carte
+entière (un pixel par tuile, peinte par lots pendant les deux premières
+secondes de la manche) avec sa légende et la position de chacun.
+
+**Le rendu se fait par morceaux de vingt tuiles.** Un morceau se bâtit en
+quelques dizaines de millisecondes quand son bord passe à quinze cents pixels
+du joueur — un par image, du plus proche au plus loin — et se libère au-delà de
+trente-quatre cents. Un morceau tient en une douzaine d'appels de dessin : UN
+maillage de sol, UNE nappe d'immeubles, une nappe par modèle de mobilier et de
+voiture dormante, un maillage d'enseignes, un de flaques de lumière. L'ancienne
+ville dessinait chaque voiture garée en cinq appels ; celle-ci en dessine cent
+cinquante par morceau en dix.
+
+**Les immeubles sont des boîtes, le shader fait le reste.** Une boîte unitaire
+par volume, mise à l'échelle ; la couleur d'instance porte la teinte du mur et,
+dans son alpha, le style de façade (bureaux, logements, commerce, vieille
+ville, hangar, maison, plein, tour). Le shader pose les étages et les
+fenêtres en espace monde, allume les fenêtres d'après un hachage (part variable
+selon le style, chaudes ou froides), dessine les vitrines et leurs stores au
+rez-de-chaussée, et sur les toits — ce qu'on voit le plus, la caméra est
+presque à la verticale — une margelle, des blocs de climatisation, des bouches
+d'aération et une croix d'hélistation sur les grandes tours. Le sol est un
+shader aussi : bitume, trottoirs à dalles, bande jaune pointillée sur l'axe,
+passages piétons au bout des rues, pavés, herbe, allées, béton taché, places
+de parking, eau qui ondule. Pas un octet de texture, et net à toute distance.
+
+**Les rues font deux tuiles de large.** Trottoir, file de stationnement, voie
+de circulation, de chaque côté d'un axe. Une rue d'une tuile ne laissait pas la
+place aux voitures garées ET au trafic : celui-ci freinait derrière les garées
+et klaxonnait sans fin, et on cabossait sa voiture en longeant un trottoir.
+
+**Les voitures dorment dans le plan, pas chez l'hôte.** Une place de
+stationnement est une fiche de tuile ; son identifiant se déduit de la tuile et
+du côté (`PlanVille.id_dormante`). Le morceau les peint en nappes ; l'hôte ne
+prend une voiture en charge que quand elle se RÉVEILLE — volée, percutée,
+tirée — et la retire alors de sa nappe chez tout le monde (`pris`, instantané,
+ou la position du conducteur pour qui arrive en retard). Une ville de cent
+mille voitures garées ne peut pas vivre dans une liste qu'on parcourt à chaque
+image.
+
+**L'heure bleue.** Un ciel du bleu profond à l'orange, un soleil bas et chaud
+qui allonge les ombres sans noyer la rue (quarante-deux degrés : à vingt, le
+joueur disparaissait dans l'ombre d'une tour), une ambiante bleue, le halo qui
+fait rayonner fenêtres, enseignes et lampadaires. Les lampadaires posent une
+flaque de lumière au sol ; les voitures conduites ont des phares et des feux ;
+les enseignes des boutiques empruntent les couleurs de la palette. Il n'y a
+pas une seule vraie lumière dans la ville : le mode compatibilité n'en
+supporte que huit par objet, et une flaque additive au sol fait le même effet
+pour rien. ⚠ Une matière additive doit couper le brouillard (`fog_disabled`) :
+sinon il peint un carré violet là où la flaque devait être transparente.
 
 **La circulation roule à droite, freine et klaxonne.** Chaque voiture tient sa
-file (trente-deux pixels à droite de l'axe), s'arrête derrière ce qu'elle a
+file (vingt-cinq pixels à droite de l'axe), s'arrête derrière ce qu'elle a
 devant — joueur, voiture, passant — et klaxonne au bout de sept dixièmes de
 seconde à l'arrêt. Le klaxon (le vôtre aussi, `H`) fait décamper les passants,
 comme un coup de feu. Ils préfèrent le trottoir et crient quand on les fauche.
@@ -138,10 +191,13 @@ pousse. C'est ce qui fait qu'on vole une voiture pour autre chose que sa couleur
 rafales, et ne se sème pas : il fait du surplace quand on est à terre, et ne
 rentre à la base que quand la jauge redescend. La seule sortie est le garage.
 
-**Le plan, en haut à droite.** La ville fait vingt-six par vingt tuiles et la
-caméra n'en montre que trois. Sans plan, on ne retrouve ni le garage quand on
-a cinq étoiles, ni la cabine, ni l'arène — et un joueur qui ne sait pas où
-aller tourne en rond puis s'en va.
+**Le radar, en haut à droite.** Centré sur soi, le nord en haut : la ville
+fait six cent quatre-vingts tuiles, un plan entier n'y montrerait plus rien.
+Les pâtés y sont teintés du gang qui les tient (vert les parcs, bleu l'eau), les
+rues en sombre, les lieux à portée en pastilles nommées. La cible d'un contrat
+clignote ; hors du cadre, une flèche au bord dit où aller et à combien de
+tuiles. On réapparaît aussi près de là où l'on est tombé, jamais au centre —
+dans une ville de soixante-huit mille pixels, ce serait repartir de zéro.
 
 Les deux portails restants sont éteints : ils marquent la place des jeux
 suivants sans faire croire qu'ils existent.
@@ -177,11 +233,13 @@ sans toucher aux jeux : il suffira de remplacer l'élection d'hôte.
 ### Ce qui vit où
 
 ```
-jeux/carnage.gd          l'écran : commandes, réseau, rendu, interface
-jeux/carnage/plan.gd     le plan de ville, déduit du code de la manche
+jeux/carnage.gd          l'écran : commandes, réseau, rendu, interface, morceaux à portée
+jeux/carnage/plan.gd     le plan de ville, déduit du code : zonage, pâtés, lieux, dormantes
+jeux/carnage/morceau.gd  un morceau rendu : sol, nappes d'immeubles, mobilier, voitures, lumières
+jeux/carnage/matieres.gd les shaders (sol, façades, flaques, lumineux) et l'ambiance
 jeux/carnage/vivant.gd   ce que l'HÔTE simule : foule, gangs, trafic, police, contrats
 jeux/carnage/formes.gd   la fabrique de volumes (voitures, piétons, cabines, barrages)
-ui/radar.gd              le plan de la ville en petit, dans un coin
+ui/radar.gd              le radar centré sur soi, dans un coin
 ```
 
 ⚠ Les collisions de la ville ne balayent PAS une liste de rectangles. Elle en
@@ -289,7 +347,11 @@ l'arène et mettaient douze cents pixels à devenir menaçants — à l'écran, 
 n'en croisait aucun.
 
 `--manche` raccourcit la manche : attendre deux minutes par vérification,
-personne ne le fait deux fois.
+personne ne le fait deux fois. `--banc-etoiles=3` fait partir déjà recherché,
+`--banc-position=colonne,ligne` (en tuiles) fait partir ailleurs qu'au centre —
+sans ça, le banc ne photographie jamais le port ni la banlieue. Dans le
+navigateur, les mêmes réglages passent par l'adresse :
+`?pilote=carnage&manche=60&etoiles=3&position=120,110`.
 
 ### Réexporter
 

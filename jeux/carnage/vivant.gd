@@ -37,6 +37,12 @@ const NAISSANCE_MAX := 980.0
 
 const RAYON_PIETON := 22.0
 const RAYON_AUTO := 26.0
+## Distance de CHOC entre deux voitures. Pas deux rayons : une voiture fait
+## seize pixels de demi-largeur, et les voies sont à cinquante pixels l'une de
+## l'autre. À cinquante-deux, deux voitures qui se croisent en sens inverse se
+## percutaient sans se toucher, et on cabossait la sienne en longeant les
+## voitures garées.
+const CHOC_AUTO := 38.0
 
 const VITESSE_MARCHE := 62.0
 const VITESSE_FUITE := 132.0
@@ -806,7 +812,7 @@ func _arbitrer_les_autos(joueurs: Dictionary) -> void:
 		var j: Dictionary = joueurs[cle]
 		if bool(j.get("pied", true)) or abs(float(j.get("v", 0.0))) < 40.0:
 			continue
-		for d in dormantes_endormies(j["p"], RAYON_AUTO * 2.0):
+		for d in dormantes_endormies(j["p"], CHOC_AUTO):
 			reveiller(int(d["id"]))
 	for auto in autos:
 		if int(auto["genre"]) == EPAVE or String(auto["pilote"]) != "":
@@ -816,7 +822,7 @@ func _arbitrer_les_autos(joueurs: Dictionary) -> void:
 			if bool(j.get("pied", true)) or float(j.get("vie", 100.0)) <= 0.0:
 				continue
 			var ecart: float = Vector2(auto["p"]).distance_to(j["p"])
-			if ecart > RAYON_AUTO * 2.0:
+			if ecart > CHOC_AUTO:
 				continue
 			var choc: float = abs(float(j.get("v", 0.0)))
 			auto["pv"] = float(auto["pv"]) - choc * 0.06

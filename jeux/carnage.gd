@@ -136,7 +136,8 @@ const ID_VOITURE_DEPART := 10000
 
 var carte: PlanVille
 var ville: VilleVivante
-var _morceaux: Dictionary = {}       ## Vector2i -> MorceauVille, les morceaux bâtis
+var _morceaux: Dictionary = {}       ## Vector2i -> MorceauVille, les morceaux bâtis ou en chantier
+var _chantier: MorceauVille = null   ## le morceau en cours de construction, une étape par image
 var _cachees: Dictionary = {}        ## id dormante -> vrai : déjà effacée de sa nappe
 
 # ------------------------------------------------------- le joueur local
@@ -168,6 +169,11 @@ var _depuis_battement := 0.0
 var _cible_contrat: Dictionary = {}
 var _hud_contrat: Label
 var _radar: Control
+var _plan_image: Image                ## la carte entière, un pixel par tuile, peinte par lots
+var _plan_texture: ImageTexture
+var _plan_pate := 0                   ## prochain pâté à peindre
+var _plan_secteur := 0                ## prochain secteur dont peindre les lieux
+var _plan_vue: Control                ## l'incrustation, TAB tenu
 var _hud_banniere: Label
 var _banniere_reste := 0.0
 var _territoire_vu := -99
@@ -194,7 +200,7 @@ func duree_manche() -> float:
 	return DUREE
 
 func aide() -> String:
-	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · H : klaxon · caisse = arme, trousse ou billet · garage bleu = étoiles effacées · cabine jaune = contrat · cercle rouge = tir ami"
+	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · H : klaxon · TAB : carte · caisse = arme, trousse ou billet · garage bleu = étoiles effacées · cabine jaune = contrat · cercle rouge = tir ami"
 
 # ------------------------------------------------------- mise en place
 
@@ -278,9 +284,24 @@ func preparer() -> void:
 	_camera.make_current()
 	Tactile.mode = Tactile.CONDUITE
 
-	# Les neuf morceaux autour du départ, tout de suite : le décompte dure trois
-	# secondes, on ne montre pas un joueur posé dans le vide.
-	_diffuser_la_ville(9)
+	# La carte de la ville (TAB) : une image d'un pixel par tuile, peinte par
+	# lots pendant la manche, incrustée au milieu de l'écran tant qu'on tient la
+	# touche. C'est la carte de GTA 2 : l'île, la rivière, la voie ferrée, les
+	# quartiers, et où l'on est.
+	_plan_image = Image.create(PlanVille.COLONNES, PlanVille.LIGNES, false, Image.FORMAT_RGB8)
+	_plan_image.fill(PlanVille.CARTE_EAU)
+	_plan_texture = ImageTexture.create_from_image(_plan_image)
+	_plan_vue = Control.new()
+	_plan_vue.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_plan_vue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_plan_vue.visible = false
+	_plan_vue.draw.connect(_dessiner_le_plan)
+	interface().add_child(_plan_vue)
+
+	# Les quatre morceaux les plus proches du départ, tout de suite ; les autres
+	# suivent à un par image pendant le décompte. Bâtir les neuf d'un coup
+	# bloquait le fil principal une seconde et demie dans le navigateur.
+	_diffuser_la_ville(4)
 
 	# Le temps de mise en place, toujours : dans le navigateur, une préparation
 	# qui bloque le fil principal plusieurs secondes fait tomber le socket.
@@ -327,12 +348,21 @@ func _ma_couleur() -> Color:
 func _planter_decor() -> void:
 	for noeud in MatieresCarnage.crepuscule():
 		monde().add_child(noeud)
+	# La voie ferrée est une droite de la ville : le shader du sol la trace en
+	# espace monde, il lui faut ses paramètres.
+	MatieresCarnage.sol().set_shader_parameter("rail", carte.rail())
 
 ## Les morceaux dont le bord passe à portée du joueur sont bâtis, du plus proche
-## au plus loin, `au_plus` par appel ; ceux qui sont partis loin sont libérés.
-## Un morceau se bâtit en quelques dizaines de millisecondes : en bâtir
-## plusieurs dans la même image ferait une saccade au passage de chaque rue.
-func _diffuser_la_ville(au_plus: int = 1) -> void:
+## au plus loin, une ÉTAPE de chantier par image ; ceux qui sont partis loin
+## sont libérés. `entiers` > 0 : autant de morceaux bâtis d'un coup, pour le
+## départ. Un morceau complet coûte quelques dizaines de millisecondes : en
+## bâtir un d'un bloc en pleine course ferait une saccade au passage de chaque
+## rue.
+func _diffuser_la_ville(entiers: int = 0) -> void:
+	if _chantier != null and entiers == 0:
+		if _chantier.avancer():
+			_chantier = null
+		return
 	var cote := PlanVille.MORCEAU * PlanVille.PAS
 	var m0 := Vector2i(int(floor((_position.x - PORTEE_MORCEAU) / cote)), int(floor((_position.y - PORTEE_MORCEAU) / cote)))
 	var m1 := Vector2i(int(floor((_position.x + PORTEE_MORCEAU) / cote)), int(floor((_position.y + PORTEE_MORCEAU) / cote)))
@@ -348,12 +378,16 @@ func _diffuser_la_ville(au_plus: int = 1) -> void:
 			if plus_proche.distance_to(_position) <= PORTEE_MORCEAU:
 				manquants.append([plus_proche.distance_squared_to(_position), cle])
 	manquants.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
-	for i in min(au_plus, manquants.size()):
+	for i in min(max(entiers, 1), manquants.size()):
 		var cle: Vector2i = manquants[i][1]
 		var morceau := MorceauVille.new()
-		morceau.batir(carte, cle, ville.reveillees)
 		monde().add_child(morceau)
 		_morceaux[cle] = morceau
+		if entiers > 0:
+			morceau.batir(carte, cle, ville.reveillees)
+		else:
+			morceau.commencer(carte, cle, ville.reveillees)
+			_chantier = morceau
 	# On ne libère qu'un morceau par image aussi : libérer neuf nœuds de mille
 	# instances d'un coup se sent autant que les bâtir.
 	for cle in _morceaux.keys():
@@ -361,9 +395,71 @@ func _diffuser_la_ville(au_plus: int = 1) -> void:
 		var plus_proche := Vector2(clamp(_position.x, rect.position.x, rect.end.x),
 			clamp(_position.y, rect.position.y, rect.end.y))
 		if plus_proche.distance_to(_position) > LIBERATION:
+			if _morceaux[cle] == _chantier:
+				_chantier = null
 			(_morceaux[cle] as Node3D).queue_free()
 			_morceaux.erase(cle)
 			break
+
+## Un lot de pâtés de la carte par image, puis les lieux secteur par secteur.
+## Cent vingt pâtés, c'est trois mille pixels et autant de tests d'eau : une
+## milliseconde native, quatre dans le navigateur. La carte est complète en
+## deux secondes de jeu sans qu'on l'ait sentie.
+const PATES_PAR_IMAGE := 120
+
+func _peindre_le_plan() -> void:
+	var total := PlanVille.pates_x() * PlanVille.pates_y()
+	var secteurs := (PlanVille.COLONNES / PlanVille.SECTEUR) * (PlanVille.LIGNES / PlanVille.SECTEUR)
+	if _plan_pate < total:
+		for i in PATES_PAR_IMAGE:
+			if _plan_pate >= total:
+				break
+			carte.peindre_pate(_plan_image, _plan_pate)
+			_plan_pate += 1
+		if _plan_pate >= total or _plan_pate % (PATES_PAR_IMAGE * 10) == 0:
+			_plan_texture.update(_plan_image)
+	elif _plan_secteur < secteurs:
+		for i in 3:
+			if _plan_secteur >= secteurs:
+				break
+			var par_ligne := PlanVille.COLONNES / PlanVille.SECTEUR
+			carte.peindre_secteur(_plan_image, Vector2i(posmod(_plan_secteur, par_ligne), _plan_secteur / par_ligne))
+			_plan_secteur += 1
+		if _plan_secteur >= secteurs:
+			_plan_texture.update(_plan_image)
+	_plan_vue.visible = Commandes.carte()
+	if _plan_vue.visible:
+		_plan_vue.queue_redraw()
+
+func _dessiner_le_plan() -> void:
+	var taille := _plan_vue.size
+	var hauteur: float = taille.y * 0.68
+	var largeur: float = hauteur * float(PlanVille.COLONNES) / float(PlanVille.LIGNES)
+	# Un peu au-dessus du milieu : la légende passe sous la carte sans mordre
+	# sur la ligne d'état du bas.
+	var cadre := Rect2((taille - Vector2(largeur, hauteur)) * 0.5 - Vector2(0.0, taille.y * 0.05), Vector2(largeur, hauteur))
+	_plan_vue.draw_rect(cadre.grow(6.0), Color(Palette.FOND, 0.9), true)
+	_plan_vue.draw_texture_rect(_plan_texture, cadre, false)
+	_plan_vue.draw_rect(cadre.grow(6.0), Palette.FILET, false, 1.0)
+	var echelle := Vector2(largeur, hauteur) / carte.etendue()
+	for cle in _autres:
+		var a: Dictionary = _autres[cle]
+		_plan_vue.draw_circle(cadre.position + Vector2(a["p"]) * echelle, 5.0,
+			Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 1))))
+	var moi := cadre.position + _position * echelle
+	var avant := Vector2.RIGHT.rotated(_angle)
+	var cote := Vector2(-avant.y, avant.x)
+	_plan_vue.draw_colored_polygon(PackedVector2Array([moi + avant * 10.0, moi - avant * 6.0 + cote * 6.0,
+		moi - avant * 6.0 - cote * 6.0]), _ma_couleur())
+	_plan_vue.draw_arc(moi, 14.0, 0, TAU, 24, _ma_couleur(), 2.0)
+	var police := Palette.police()
+	var x := cadre.position.x
+	var y := cadre.end.y + 24.0
+	for entree in [["garage", Palette.SERIE], ["cabine", Palette.AVERTISSEMENT], ["arène", Palette.CRITIQUE],
+			["repaire", Palette.ENCRE], ["parc", Color("#50a050")], ["eau", Color("#3a6a9c")], ["voie ferrée", Color("#404040")]]:
+		_plan_vue.draw_circle(Vector2(x, y - 5.0), 4.0, entree[1])
+		_plan_vue.draw_string(police, Vector2(x + 9.0, y), String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Palette.ENCRE_DOUCE)
+		x += 12.0 + police.get_string_size(String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 16.0
 
 ## Une voiture dormante s'est réveillée : on l'efface de la nappe du morceau
 ## qui la porte. Le nœud ordinaire de `_placer_les_autos` prend le relais.
@@ -469,6 +565,8 @@ func _piloter_pour_le_banc() -> void:
 	Commandes.direction_simulee = _viser(_but_du_banc())
 	Commandes.tir_simule = true
 	Commandes.klaxon_simule = fmod(temps, 9.0) < 0.3
+	# La carte pendant trois secondes : c'est ainsi qu'on la photographie.
+	Commandes.carte_simulee = temps > 8.0 and temps < 11.0
 
 ## Ce que vise le pilote du banc. Tant qu'il n'a pas de contrat, il va
 ## décrocher : sans ce détour, une cabine sur vingt-six par vingt tuiles n'est
@@ -587,6 +685,12 @@ func _marcher(delta: float) -> void:
 		_vitesse = VITESSE_A_PIED
 		var suivant := _position + commande.normalized() * VITESSE_A_PIED * delta
 		_position = carte.degager(suivant, RAYON_A_PIED)[0]
+		# À pied non plus, on ne traverse pas une voiture garée : on la contourne.
+		for p: Vector2 in _voitures_autour(60.0):
+			var vers := _position - p
+			var minimum := RAYON_A_PIED + 22.0
+			if vers.length() < minimum and vers.length() > 0.01:
+				_position = p + vers.normalized() * minimum
 	else:
 		_vitesse = 0.0
 	_surveiller_la_friche(delta)
@@ -679,20 +783,23 @@ func _heurter_les_murs() -> void:
 ## on est repoussé hors de sa silhouette et on perd la part de vitesse qu'on a
 ## mise dedans. Les dégâts et la poussée de l'autre, c'est l'hôte qui les dit —
 ## ici on ne fait que rendre le choc IMMÉDIAT sous les doigts.
-func _heurter_les_voitures() -> void:
+func _voitures_autour(rayon: float) -> Array:
 	var obstacles: Array = []
 	for auto in ville.autos:
 		if String(auto.get("pilote", "")) != "" or int(auto["genre"]) == VilleVivante.EPAVE:
 			continue
-		if (auto["p"] as Vector2).distance_to(_position) < 90.0:
+		if (auto["p"] as Vector2).distance_to(_position) < rayon:
 			obstacles.append(auto["p"])
-	for d in ville.dormantes_endormies(_position, 90.0):
+	for d in ville.dormantes_endormies(_position, rayon):
 		obstacles.append(d["p"])
+	return obstacles
+
+func _heurter_les_voitures() -> void:
 	var direction := Vector2.RIGHT.rotated(_angle)
-	for p: Vector2 in obstacles:
+	for p: Vector2 in _voitures_autour(90.0):
 		var vers := _position - p
 		var ecart := vers.length()
-		var minimum := RAYON_VOITURE + VilleVivante.RAYON_AUTO - 6.0
+		var minimum := VilleVivante.CHOC_AUTO
 		if ecart >= minimum or ecart < 0.01:
 			continue
 		var normale := vers / ecart
@@ -1007,6 +1114,14 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 	match evenement:
 		"pris":
 			var qui := String(charge.get("j", ""))
+			# Une dormante prise par N'IMPORTE QUI sort de sa nappe : l'instantané
+			# ne liste pas les voitures conduites, on ne l'apprendrait jamais
+			# autrement — et on verrait un joueur rouler dans la copie d'une
+			# voiture restée garée.
+			var id_pris := int(charge.get("id", 0))
+			if PlanVille.est_dormante(id_pris):
+				ville.reveillees[id_pris] = true
+				_effacer_la_dormante(id_pris)
 			if qui == Session.cle:
 				_prendre_le_volant(int(charge.get("id", 0)), int(charge.get("g", 0)),
 					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
@@ -1123,6 +1238,12 @@ func _recevoir_joueur(charge: Dictionary) -> void:
 	a["pied"] = int(charge.get("e", 1)) == 0
 	a["genre"] = int(charge.get("vg", VilleVivante.CIVILE))
 	a["eperon"] = int(charge.get("ep", 0)) == 1
+	# Arrivé en retard, on n'a pas vu le « pris » : la voiture qu'il conduit
+	# sort quand même de sa nappe.
+	var w := int(charge.get("w", 0))
+	if PlanVille.est_dormante(w) and not ville.reveillees.has(w):
+		ville.reveillees[w] = true
+		_effacer_la_dormante(w)
 	var modele := int(charge.get("vm", -1))
 	if modele != int(a.get("modele", -1)):
 		# Il a changé de voiture : on rebâtit la sienne. Le nœud d'avant part.
@@ -1315,7 +1436,8 @@ var _batisses := 0
 
 func rafraichir_scene(delta: float) -> void:
 	_batisses = 0
-	_diffuser_la_ville(1)
+	_diffuser_la_ville()
+	_peindre_le_plan()
 	_placer_le_joueur(delta)
 	_placer_les_autres()
 	_placer_la_foule()
@@ -1561,6 +1683,11 @@ func _placer_les_autos() -> void:
 		corps.visible = proche
 		corps.position = Decor.vers3d(auto["p"])
 		corps.rotation.y = -float(auto["a"])
+		# Une voiture à l'arrêt a ses phares éteints : allumés, on la prend
+		# pour une voiture qui arrive.
+		var phares := corps.get_node_or_null("Phares") as Node3D
+		if phares:
+			phares.visible = not bool(auto.get("garee", false))
 		_regler_jauge(corps, float(auto["pv"]) / PV_VOITURE)
 
 func _placer_les_objets() -> void:

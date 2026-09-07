@@ -25,7 +25,7 @@ const E := Decor.ECHELLE
 ## qui n'ont rien à voir entre elles.
 const MODELES := {
 	"lampadaire": {"f": "res://modeles/mobilier/streetlight.gltf", "s": 4.8,
-		"lampe": {"d": Vector2(-1.15, 0.0), "y": 4.4, "r": 6.0, "c": Color(1.0, 0.72, 0.42), "a": 0.5}},
+		"lampe": {"d": Vector2(-1.15, 0.0), "y": 4.4, "r": 5.4, "c": Color(1.0, 0.72, 0.42), "a": 0.5}},
 	"lampadaire_parc": {"f": "res://modeles/mobilier/streetlight.gltf", "s": 3.4,
 		"lampe": {"d": Vector2(-0.8, 0.0), "y": 3.1, "r": 4.2, "c": Color(0.95, 0.8, 0.55), "a": 0.42}},
 	"feu": {"f": "res://modeles/mobilier/trafficlight_A.gltf", "s": 4.8},
@@ -47,33 +47,84 @@ const MODELES := {
 var cle := Vector2i.ZERO
 var voitures: Dictionary = {}     ## id de voiture dormante -> [MultiMesh, indice]
 var cabines: Array = []           ## nœuds de cabine posés dans ce morceau, {n, id}
-var _bati := false
 
-## Bâtit le morceau `cle` : ses tuiles vont de cle*MORCEAU à (cle+1)*MORCEAU.
-## `reveillees` : les voitures dormantes que l'hôte a déjà réveillées, à ne pas
-## peindre en dormantes — elles roulent ailleurs, comme nœuds de l'écran.
-func batir(plan: PlanVille, cle_du_morceau: Vector2i, reveillees: Dictionary) -> void:
+## Le chantier : le morceau se bâtit en ÉTAPES, une par image. Tout d'un coup,
+## c'était soixante millisecondes dans le navigateur — quatre images perdues,
+## une saccade à chaque rue quand on roule vite. Le sol d'abord, puis les
+## immeubles, le mobilier, les voitures, les lumières : le morceau apparaît
+## progressivement à quinze cents pixels, là où personne ne regarde encore.
+var _plan: PlanVille
+var _reveillees: Dictionary = {}
+var _etape := 0
+var _fiches: Array = []
+var _batis: Array = []                 ## [Transform3D, Color]
+var _props: Dictionary = {}            ## modele -> Array[Transform3D]
+var _places: Dictionary = {}           ## modele -> Array[{t, c, id}]
+var _lumineux: SurfaceTool
+var _flaques: SurfaceTool
+var _quelque_chose_de_lumineux := false
+var _quelque_flaque := false
+
+## Ouvre le chantier du morceau `cle` : ses tuiles vont de cle*MORCEAU à
+## (cle+1)*MORCEAU. `reveillees` : les voitures dormantes que l'hôte a déjà
+## réveillées, à ne pas peindre en dormantes — elles roulent ailleurs, comme
+## nœuds de l'écran.
+func commencer(plan: PlanVille, cle_du_morceau: Vector2i, reveillees: Dictionary) -> void:
 	cle = cle_du_morceau
-	_bati = true
+	_plan = plan
+	_reveillees = reveillees
+	_etape = 0
+	_lumineux = SurfaceTool.new()
+	_lumineux.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_flaques = SurfaceTool.new()
+	_flaques.begin(Mesh.PRIMITIVE_TRIANGLES)
+
+## Tout d'un coup, pour le départ.
+func batir(plan: PlanVille, cle_du_morceau: Vector2i, reveillees: Dictionary) -> void:
+	commencer(plan, cle_du_morceau, reveillees)
+	while not avancer():
+		pass
+
+func fini() -> bool:
+	return _etape >= 6
+
+## Une étape de chantier. Renvoie vrai quand le morceau est complet.
+func avancer() -> bool:
+	match _etape:
+		0: _lire_les_fiches()
+		1: _poser_le_sol()
+		2: _poser_les_immeubles()
+		3: _poser_le_mobilier()
+		4: _poser_les_voitures()
+		5:
+			_poser_les_lumieres()
+			_poser_les_lieux(_plan, cle.x * PlanVille.MORCEAU, cle.y * PlanVille.MORCEAU)
+			_fiches.clear()
+			_batis.clear()
+			_props.clear()
+			_places.clear()
+	_etape += 1
+	return _etape >= 6
+
+## Étape 0 : les fiches des quatre cents tuiles, et tout ce qu'on en tire qui
+## n'est pas encore un nœud.
+func _lire_les_fiches() -> void:
 	var c0 := cle.x * PlanVille.MORCEAU
 	var l0 := cle.y * PlanVille.MORCEAU
-
-	var sol := SurfaceTool.new()
-	sol.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var batis: Array = []                 ## [Transform3D, Color]
-	var props: Dictionary = {}            ## modele -> Array[Transform3D]
-	var places: Dictionary = {}           ## modele -> Array[{t, c, id}]
-	var lumineux := SurfaceTool.new()
-	lumineux.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var flaques := SurfaceTool.new()
-	flaques.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var plan := _plan
+	var reveillees := _reveillees
+	var batis := _batis
+	var props := _props
+	var places := _places
+	var lumineux := _lumineux
+	var flaques := _flaques
 	var quelque_chose_de_lumineux := false
 	var quelque_flaque := false
 
 	for l in range(l0, l0 + PlanVille.MORCEAU):
 		for c in range(c0, c0 + PlanVille.MORCEAU):
 			var fiche := plan.tuile(c, l)
-			_dalle(sol, fiche)
+			_fiches.append(fiche)
 			for b in fiche["batis"]:
 				batis.append(_transformation_de_bati(b))
 				if b.get("chapeau", false) or (int(b["style"]) == PlanVille.F_TOUR and float(b["h"]) >= 24.0):
@@ -115,16 +166,24 @@ func batir(plan: PlanVille, cle_du_morceau: Vector2i, reveillees: Dictionary) ->
 				_flaque(flaques, Decor.vers3d(Vector2(n["p"]) + Vector2(n["n"]) * 14.0, 0.05), 3.4, Color(n["c"], 0.28))
 				quelque_chose_de_lumineux = true
 				quelque_flaque = true
+	_quelque_chose_de_lumineux = quelque_chose_de_lumineux
+	_quelque_flaque = quelque_flaque
 
-	# Le sol : un seul maillage, une seule matière.
-	sol.generate_normals()
+## Étape 1 : le sol, un seul maillage, une seule matière.
+func _poser_le_sol() -> void:
+	var sol := SurfaceTool.new()
+	sol.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for fiche in _fiches:
+		_dalle(sol, fiche)
 	var noeud_sol := MeshInstance3D.new()
 	noeud_sol.mesh = sol.commit()
 	noeud_sol.material_override = MatieresCarnage.sol()
 	noeud_sol.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(noeud_sol)
 
-	# Les immeubles : des boîtes unitaires, le shader dessine les façades.
+## Étape 2 : les immeubles, des boîtes unitaires — le shader dessine les façades.
+func _poser_les_immeubles() -> void:
+	var batis := _batis
 	if not batis.is_empty():
 		var multi := MultiMesh.new()
 		multi.transform_format = MultiMesh.TRANSFORM_3D
@@ -142,11 +201,14 @@ func batir(plan: PlanVille, cle_du_morceau: Vector2i, reveillees: Dictionary) ->
 		noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		add_child(noeud)
 
+## Étape 3 : le mobilier, une nappe par modèle.
+func _poser_le_mobilier() -> void:
+	var props := _props
 	for nom in props:
 		var liste: Array = props[nom]
 		var multi_p := MultiMesh.new()
 		multi_p.transform_format = MultiMesh.TRANSFORM_3D
-		multi_p.mesh = Decor.maillage(String(MODELES[nom]["f"]))
+		multi_p.mesh = FormesCarnage.maillage_fusionne(String(MODELES[nom]["f"]))
 		multi_p.instance_count = liste.size()
 		for i in liste.size():
 			multi_p.set_instance_transform(i, liste[i])
@@ -158,6 +220,9 @@ func batir(plan: PlanVille, cle_du_morceau: Vector2i, reveillees: Dictionary) ->
 			else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		add_child(noeud_p)
 
+## Étape 4 : les voitures dormantes, une nappe par modèle, une couleur par instance.
+func _poser_les_voitures() -> void:
+	var places := _places
 	for modele in places:
 		var liste_v: Array = places[modele]
 		var multi_v := MultiMesh.new()
@@ -175,20 +240,21 @@ func batir(plan: PlanVille, cle_du_morceau: Vector2i, reveillees: Dictionary) ->
 		noeud_v.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		add_child(noeud_v)
 
-	if quelque_chose_de_lumineux:
+## Étape 5 : les enseignes, balises et bulbes en un maillage, les flaques de
+## lumière en un autre.
+func _poser_les_lumieres() -> void:
+	if _quelque_chose_de_lumineux:
 		var noeud_l := MeshInstance3D.new()
-		noeud_l.mesh = lumineux.commit()
+		noeud_l.mesh = _lumineux.commit()
 		noeud_l.material_override = MatieresCarnage.lumineux()
 		noeud_l.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(noeud_l)
-	if quelque_flaque:
+	if _quelque_flaque:
 		var noeud_f := MeshInstance3D.new()
-		noeud_f.mesh = flaques.commit()
+		noeud_f.mesh = _flaques.commit()
 		noeud_f.material_override = MatieresCarnage.flaque()
 		noeud_f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(noeud_f)
-
-	_poser_les_lieux(plan, c0, l0)
 
 ## Les lieux dont le pâté tombe dans ce morceau : tag de repaire, dalle de
 ## garage, cabine, cercle d'arène. Ils vivent et meurent avec le morceau.
@@ -257,7 +323,9 @@ func _dalle(st: SurfaceTool, fiche: Dictionary) -> void:
 	var y := -0.3 if sol == PlanVille.S_EAU else 0.0
 	var rot := int(fiche["rot"])
 	var teinte: Color = fiche["teinte"]
-	var graine := float(posmod(hash(Vector2i(c, l)), 1000)) / 1000.0
+	# La graine : du bruit pour le shader, et ≥ 0,5 sur une avenue (le shader y
+	# trace la double ligne).
+	var graine := float(posmod(hash(Vector2i(c, l)), 1000)) / 2000.0 + float(fiche.get("graine", 0.0))
 	var coins := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
 	var indices := [0, 1, 2, 0, 2, 3]
 	for k in indices:
