@@ -64,21 +64,21 @@ const LIEUX := {
 	},
 	"armurerie": {
 		"nom": "Armurerie",
-		"lueur": {"centre": Vector2(608, 60), "taille": Vector2(30, 36)},
-		"tableau": Rect2(48, 4, 152, 38),
+		"lueur": {"centre": Vector2(288, 160), "taille": Vector2(30, 30)},
+		"tableau": Rect2(160, 6, 112, 42),
 		"rangs": 3,
 		"jeu": "enigme",
 		"titre": "ÉNIGME",
-		"pnj": [{"nom": "squelette", "position": Vector2(440, 80), "phrases": [
+		"pnj": [{"nom": "squelette", "position": Vector2(232, 104), "phrases": [
 			"Trois chambres. Aucune ne s'ouvre à un seul.",
 			"Une dalle ne reste enfoncée que si quelque chose pèse dessus — quelqu'un, ou une caisse.",
 			"Et la sortie n'accepte l'équipe qu'au complet. Personne ne finit seul.",
-			"Le portail est au bout du couloir, à droite.",
+			"Le portail est là, dans le coin, à droite.",
 		]}],
 	},
 	"auberge": {
 		"nom": "Auberge",
-		"pnj": [{"nom": "aubergiste", "position": Vector2(120, 80), "phrases": [
+		"pnj": [{"nom": "aubergiste", "position": Vector2(200, 120), "phrases": [
 			"Chut, il y a des gens qui dorment. Ici on se repose entre deux parties.",
 			"Le troisième jeu se prépare. Repasse.",
 		]}],
