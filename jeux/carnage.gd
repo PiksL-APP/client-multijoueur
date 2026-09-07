@@ -111,9 +111,15 @@ var _recharge := 0.0
 var _dernier_agresseur := ""
 var _hors_ville := 0.0
 var _garage_en_cours := -1
+var _cabine_en_cours := -1
+var _contrat: Dictionary = {}
+var _depuis_sirene := 0.0
+var _hud_contrat: Label
+var _radar: Control
 
 var _autres: Dictionary = {}       ## cle -> état distant + nœuds 3D
 var _projectiles: Array = []
+var _cabines_posees: Array = []
 var _eclats: Array = []
 var _taches: Array = []
 
@@ -133,7 +139,7 @@ func duree_manche() -> float:
 	return DUREE
 
 func aide() -> String:
-	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · les caisses donnent des armes · le garage bleu efface les étoiles."
+	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · caisse = arme · garage bleu = étoiles effacées · cabine jaune = contrat · cercle rouge = tir ami"
 
 # ------------------------------------------------------- mise en place
 
@@ -167,6 +173,30 @@ func preparer() -> void:
 	_corps_pied.visible = false
 	monde().add_child(_corps_pied)
 
+	# Le contrat a sa propre ligne, au-dessus de celle du socle : glissé dans
+	# l'état du joueur, il se perdait au milieu de sept autres mentions alors
+	# qu'il décide de la minute qui vient.
+	_hud_contrat = UI.titre("", 20)
+	_hud_contrat.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_hud_contrat.offset_left = 20
+	_hud_contrat.offset_right = -20
+	_hud_contrat.offset_top = -106
+	_hud_contrat.offset_bottom = -76
+	interface().add_child(_hud_contrat)
+
+	# Le plan, en haut à droite : sous le bandeau du socle, et à l'opposé des
+	# boutons tactiles, qui vivent en bas à droite.
+	_radar = Control.new()
+	_radar.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_radar.offset_left = -200.0
+	_radar.offset_right = -6.0
+	_radar.offset_top = 56.0
+	_radar.offset_bottom = 268.0
+	_radar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_radar.set_script(load("res://ui/radar.gd"))
+	_radar.carte = carte
+	interface().add_child(_radar)
+
 	_camera = Decor.camera(INCLINAISON, DISTANCE_AUTO, 54.0)
 	monde().add_child(_camera)
 	_camera.make_current()
@@ -197,6 +227,14 @@ func _planter_decor() -> void:
 		var dalle := FormesCarnage.dalle_garage()
 		dalle.position = Decor.vers3d(centre_garage)
 		monde().add_child(dalle)
+
+	var rang := 0
+	for centre_cabine: Vector2 in carte.cabines():
+		var poste := FormesCarnage.cabine(rang)
+		poste.position = Decor.vers3d(centre_cabine)
+		monde().add_child(poste)
+		_cabines_posees.append(poste)
+		rang += 1
 
 	var numero := 0
 	for centre_arene: Vector2 in carte.arenes():
@@ -284,19 +322,35 @@ func _piloter_pour_le_banc() -> void:
 		Commandes.tir_simule = true
 		return
 
-	Commandes.direction_simulee = _viser_le_plus_proche()
+	Commandes.direction_simulee = _viser(_but_du_banc())
 	Commandes.tir_simule = true
 
-func _viser_le_plus_proche() -> Vector2:
+## Ce que vise le pilote du banc. Tant qu'il n'a pas de contrat, il va
+## décrocher : sans ce détour, une cabine sur vingt-six par vingt tuiles n'est
+## jamais croisée par hasard, et toute la chaîne des contrats — proposition,
+## avancement, prime, respect — passe la livraison sans avoir tourné une fois.
+func _but_du_banc() -> Vector2:
+	if _contrat.is_empty():
+		var cabines := carte.cabines()
+		var proche := Vector2.INF
+		var ecart := INF
+		for c: Vector2 in cabines:
+			var d: float = _position.distance_squared_to(c)
+			if d < ecart:
+				ecart = d
+				proche = c
+		if proche != Vector2.INF:
+			return proche
 	var cible := Vector2.INF
 	var distance := INF
 	for personne in ville.gens:
-		var d: float = _position.distance_squared_to(personne["p"])
-		if d < distance:
-			distance = d
+		var d2: float = _position.distance_squared_to(personne["p"])
+		if d2 < distance:
+			distance = d2
 			cible = personne["p"]
-	if cible == Vector2.INF:
-		cible = carte.centre()
+	return cible if cible != Vector2.INF else carte.centre()
+
+func _viser(cible: Vector2) -> Vector2:
 	var ecart := wrapf((cible - _position).angle() - _angle, -PI, PI)
 	return Vector2(clamp(ecart * 2.0, -1.0, 1.0), 1.0)
 
@@ -474,6 +528,17 @@ func _surveiller_la_friche(delta: float) -> void:
 ## peinture. Il ne se déclenche qu'en voiture — repeindre un piéton n'a
 ## jamais effacé un casier.
 func _surveiller_les_lieux(_delta: float) -> void:
+	# Une cabine se décroche à pied comme au volant : obliger à descendre au
+	# milieu d'une avenue pour prendre un contrat, c'est se faire faucher.
+	var cabine := carte.cabine_de(_position)
+	if cabine != _cabine_en_cours:
+		_cabine_en_cours = cabine
+		if cabine >= 0 and _contrat.is_empty():
+			canal.envoyer("cabine", {"i": cabine, "x": int(_position.x), "y": int(_position.y)})
+			if est_hote():
+				ville.proposer_contrat(Session.cle, cabine, _position)
+				_vider_les_evenements()
+
 	if _pied:
 		_garage_en_cours = -1
 		return
@@ -701,6 +766,11 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
 					float(charge.get("a", 0.0)), float(charge.get("pv", PV_VOITURE)))
 				_vider_les_evenements()
+		"cabine":
+			if est_hote():
+				ville.proposer_contrat(String(charge.get("cle", "")), int(charge.get("i", 0)),
+					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))))
+				_vider_les_evenements()
 		"garage":
 			if est_hote():
 				ville.repeindre(String(charge.get("cle", "")))
@@ -749,6 +819,23 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 			if typeof(valeurs) == TYPE_ARRAY and (valeurs as Array).size() >= 3:
 				ville.respect[String(charge.get("j", ""))] = [
 					float(valeurs[0]), float(valeurs[1]), float(valeurs[2])]
+		"ctr":
+			if String(charge.get("j", "")) != Session.cle:
+				return
+			var etat := String(charge.get("e", ""))
+			if Commandes.pilote_automatique:
+				print("[banc] contrat %s : %s" % [etat, String(charge.get("t", ""))])
+			if etat == "gagne":
+				_contrat = {}
+				Sons.jouer("fin", 1.15, -5.0)
+			elif etat == "perdu":
+				_contrat = {}
+				Sons.jouer("choc", 0.55, -12.0)
+			else:
+				_contrat = {"t": String(charge.get("t", "")), "n": int(charge.get("n", 0)),
+					"a": int(charge.get("a", 0)), "r": float(charge.get("r", 0))}
+				if etat == "pris":
+					Sons.jouer("portail", 1.3, -9.0)
 		"peint":
 			if String(charge.get("j", "")) == Session.cle:
 				Sons.jouer("fin", 1.2, -10.0)
@@ -959,6 +1046,73 @@ func rafraichir_scene(delta: float) -> void:
 	_placer_les_objets()
 	_animer_effets(delta)
 	_placer_camera(delta)
+	_animer_les_cabines()
+	_faire_hurler_la_police(delta)
+	_rafraichir_contrat(delta)
+	_rafraichir_radar()
+
+## Le plan ne se redessine qu'avec ce qu'il montre : positions des joueurs,
+## patrouilles lancées, étoiles. Lui passer la ville entière image par image
+## coûterait plus cher que la partie.
+func _rafraichir_radar() -> void:
+	if _radar == null:
+		return
+	_radar.moi = _position
+	_radar.mon_angle = _angle
+	_radar.ma_couleur = _ma_couleur()
+	_radar.etoiles = ville.etoiles(Session.cle)
+	var voisins: Array = []
+	for cle in _autres:
+		var a: Dictionary = _autres[cle]
+		voisins.append({"p": a["p"],
+			"couleur": Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 1)))})
+	_radar.autres = voisins
+	var bleus: Array = []
+	for auto in ville.autos:
+		if int(auto["genre"]) == VilleVivante.PATROUILLE:
+			bleus.append(auto["p"])
+	_radar.patrouilles = bleus
+	_radar.queue_redraw()
+
+## Le halo d'une cabine clignote tant qu'on n'a pas de contrat en main. Une
+## cabine qui appelle alors qu'on est déjà pris ferait faire un détour pour rien.
+func _animer_les_cabines() -> void:
+	var libre := _contrat.is_empty()
+	for poste in _cabines_posees:
+		var halo := (poste as Node3D).get_node_or_null("Halo") as Node3D
+		if halo:
+			halo.visible = libre and fmod(temps, 1.0) > 0.42
+		var mot := (poste as Node3D).get_node_or_null("Mot") as Node3D
+		if mot:
+			mot.visible = libre
+
+## Une poursuite s'entend avant de se voir : c'est la sirène qui dit qu'il faut
+## tourner tout de suite, pas la voiture aperçue trois rues plus loin.
+func _faire_hurler_la_police(delta: float) -> void:
+	var niveau := ville.etoiles(Session.cle)
+	if niveau <= 0:
+		_depuis_sirene = 0.0
+		return
+	_depuis_sirene -= delta
+	if _depuis_sirene > 0.0:
+		return
+	_depuis_sirene = max(0.7, 1.6 - 0.18 * float(niveau))
+	Sons.jouer("sirene", 1.0 + 0.06 * float(niveau), -16.0)
+
+func _rafraichir_contrat(delta: float) -> void:
+	if _hud_contrat == null:
+		return
+	if _contrat.is_empty():
+		_hud_contrat.text = ""
+		return
+	_contrat["r"] = max(0.0, float(_contrat["r"]) - delta)
+	var avance := ""
+	if int(_contrat["n"]) > 1:
+		avance = "  %d/%d" % [int(_contrat["a"]), int(_contrat["n"])]
+	_hud_contrat.text = "CONTRAT — %s%s   ·   %d s" % [
+		String(_contrat["t"]), avance, int(ceil(float(_contrat["r"])))]
+	_hud_contrat.add_theme_color_override("font_color",
+		Palette.CRITIQUE if float(_contrat["r"]) <= 8.0 else Palette.AVERTISSEMENT)
 
 func _placer_le_joueur(delta: float) -> void:
 	_corps_auto.visible = not _pied and _hors_service <= 0.0

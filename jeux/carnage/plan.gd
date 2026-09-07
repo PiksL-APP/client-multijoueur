@@ -294,6 +294,17 @@ func territoire(point: Vector2) -> int:
 func nom_du_gang(indice: int) -> String:
 	return String(GANGS[posmod(indice, GANGS.size())]["nom"])
 
+## « de Le Lierre » ne se dit pas. Les noms de gang portent leur article : il
+## faut contracter avant de les coller dans une phrase, sinon les contrats
+## sortent en petit nègre.
+func du_gang(indice: int) -> String:
+	var nom := nom_du_gang(indice)
+	if nom.begins_with("Les "):
+		return "des " + nom.substr(4)
+	if nom.begins_with("Le "):
+		return "du " + nom.substr(3)
+	return "de " + nom
+
 func couleur_du_gang(indice: int) -> Color:
 	return GANGS[posmod(indice, GANGS.size())]["couleur"]
 

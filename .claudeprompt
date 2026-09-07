@@ -19,9 +19,19 @@ WebAssembly. Le socle `piks-l-nuxt-template` ne s'applique pas ici.
 
 - Godot **4.5**, rendu `gl_compatibility` (exigé par l'export web).
 - **Tout est procédural** : pas de scène `.tscn` en dehors de
-  `scenes/racine.tscn`, pas d'image binaire. Un écran est une classe qui hérite
-  d'`Ecran` et se construit dans `demarrer()`. Ça garde le dépôt lisible en
-  diff et évitable à fusionner.
+  `scenes/racine.tscn`, pas d'image binaire, pas de maillage importé. Un écran
+  est une classe qui hérite d'`Ecran` et se construit dans `demarrer()`. Ça
+  garde le dépôt lisible en diff et évitable à fusionner.
+- **2,5D** : la simulation reste en `Vector2`, le rendu est en 3D. Un écran
+  monte sa scène sous `monde()` et replace ses objets dans `rafraichir_scene`.
+  Ne jamais faire remonter une hauteur dans l'état partagé — l'axe vertical est
+  décoratif, et le jour où il ne le serait plus, tout le protocole changerait.
+- Les volumes, matières, sol, lumières et étiquettes se fabriquent par
+  `commun/decor.gd`. `Decor.ECHELLE` convertit les pixels de jeu en unités 3D ;
+  passer outre casse la portée des ombres.
+- Un `Ecran` hérite de `Node`, pas de `Node2D` : un Node3D sous un Node2D n'est
+  pas une construction garantie. L'interface va dans `interface()`, une
+  CanvasLayer — donc hors de portée de la caméra.
 - **Palette** : `commun/palette.gd`, et rien d'autre. La couleur ne porte
   jamais seule le sens — toujours une pastille ET un libellé.
 - **Interface** : passer par `ui/fabrique.gd`. Un contrôle stylé à la main
@@ -46,16 +56,78 @@ WebAssembly. Le socle `piks-l-nuxt-template` ne s'applique pas ici.
   Le socle s'occupe du canal, du décompte, du chrono, de la fin de manche et du
   dépôt du score.
 
+## Carnage — où vit quoi
+
+`jeux/carnage.gd` ne fait plus tout. Il tient les commandes, le réseau, le
+rendu et l'interface ; le reste est à côté :
+
+- `jeux/carnage/plan.gd` (`PlanVille`) — le plan de ville, déduit du CODE de la
+  manche. Murs indexés PAR TUILE : ne jamais revenir à un balayage de la liste
+  des rectangles, il coûtait vingt mille tests par image une fois la ville
+  peuplée.
+- `jeux/carnage/vivant.gd` (`VilleVivante`) — tout ce que l'HÔTE simule :
+  passants, gangs, trafic, police, contrats, respect, étoiles. Ce module ne
+  connaît ni la scène ni le réseau : il produit une liste d'événements que
+  l'écran diffuse ET applique chez lui (`broadcast.self` est à faux, l'hôte ne
+  reçoit pas ses propres messages).
+- `jeux/carnage/formes.gd` (`FormesCarnage`) — la fabrique de volumes.
+- `ui/radar.gd` — le plan en petit ; il ne fait que peindre ce qu'on lui donne.
+
+⚠ Deux noms à ne pas reprendre : `trait` est un mot réservé de GDScript et
+l'erreur ne parle que d'un « nom de variable attendu » ; `plan` est pris par le
+socle `Ecran`, le plan de ville s'appelle `carte` dans l'écran de jeu.
+
+⚠ Un client DEMANDE un véhicule, l'hôte l'ACCORDE. Ne pas court-circuiter : à
+cent millisecondes d'intervalle, deux joueurs repartent avec la même berline et
+chacun voit l'autre rouler dans le vide.
+
 ## Base de données
 
 Ajouter un jeu impose de compléter la contrainte `check (jeu in (...))` sur
 `jeu_parties` **et** le plafond de vraisemblance dans `jeu_deposer_partie`.
 Un plafond oublié, c'est un classement à sept chiffres au premier curieux.
 
+## Presque rien de binaire au dépôt
+
+Ni image, ni son : les volumes se fabriquent par `commun/decor.gd`, les
+échantillons audio par `autoload/sons.gd` — quelques dizaines de kilo-octets
+rendus en une trentaine de millisecondes au démarrage. Un son se règle en
+changeant un chiffre, pas en rouvrant un éditeur audio.
+
+Le **hub** fait exception à la 2,5D : il est en pixel art 2D (pack *Pixel
+Crawler*, dessiné en vue de dessus). Un écran choisit `plan()` ou `monde()`,
+jamais les deux. Les sprites se posent sur un pixel entier (`Pixels.poser`) et
+se filtrent au plus proche voisin — interpolés, ils bavent ; à mi-pixel, ils
+scintillent dès qu'on bouge.
+
+**Une seule exception**, et elle est délibérée : `modeles/volvo-242.glb`, la
+carrosserie du jeu Carnage. Un vrai modèle apporte ce qu'aucune boîte ne
+donnera. Il est arrivé en STL de modélisme (44 000 triangles, orienté
+Y-longueur/Z-hauteur) et a été décimé à 5 900 triangles puis réorienté avant
+d'entrer. Tout maillage ajouté suit la même règle : décimé, réorienté,
+documenté — et teint par `material_override`, jamais par une matière
+embarquée, sinon les quatre couleurs de joueur sont impossibles.
+
+## Commandes
+
+Les touches se lisent **uniquement** par `commun/commandes.gd`, qui réunit
+clavier, pavé tactile et pilote automatique. Un appel direct
+à `Input` dans un jeu rend la partie invérifiable par le banc, et le pilote
+automatique cesse alors de couvrir ce jeu.
+
 ## Avant de livrer
 
 1. `godot --headless --path . --import` — aucune erreur de script.
-2. `godot --headless --path . --banc` en deux instances — elles se voient.
-3. `./outils/exporter.sh` — et **ouvrir la page**, pas seulement constater que
-   l'export a réussi. Plusieurs pannes de ce projet passaient le build sans un
-   avertissement.
+   ⚠ L'import ne compile pas tout : les erreurs d'inférence de type
+   n'apparaissent qu'à l'exécution. Les bancs ci-dessous les révèlent.
+2. Les deux bancs, en deux instances chacune, avec des `HOME` distincts :
+   `--banc` (présence et diffusion) puis `--banc-jeu=<jeu> --manche=30`
+   (manche complète jusqu'au dépôt du score).
+3. `--photo=<dossier>` sous `xvfb-run` : une image toutes les cinq secondes.
+   Le rendu se REGARDE. C'est ainsi qu'on a vu que les monstres, nés aux bords
+   de l'arène, n'entraient jamais dans le champ de la caméra.
+4. `./outils/exporter.sh` — et **ouvrir la page**, pas seulement constater que
+   l'export a réussi. Trois défauts de ce projet ont passé le build sans un
+   avertissement : `config.cfg` absent du .pck, l'autoretour à la ligne qui
+   affichait les étiquettes à la verticale, et un cache immuable sur un nom de
+   fichier qui ne change jamais.

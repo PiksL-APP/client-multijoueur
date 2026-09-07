@@ -54,26 +54,36 @@ const SEUIL_EPERON := 80.0
 
 const PORTEE_TIR_PNJ := 640.0
 const CADENCE_TIR_PNJ := 1.15
-const DEGAT_BALLE_PNJ := 11.0
+const DEGAT_BALLE_PNJ := 9.0
 
 ## La jauge de recherche. Les crimes chauffent, le calme refroidit.
 const CHALEUR := {
-	"pieton": 16.0, "gang": 7.0, "flic": 52.0, "auto": 15.0,
+	"pieton": 12.0, "gang": 6.0, "flic": 52.0, "auto": 15.0,
 	"coup_de_feu": 2.5, "joueur": 0.0,
 }
 const PALIERS := [40.0, 115.0, 230.0, 400.0, 620.0]   ## une étoile par palier franchi
-const REFROIDISSEMENT := 7.5      ## points par seconde, après une accalmie
+const REFROIDISSEMENT := 9.0      ## points par seconde, après une accalmie
 const ACCALMIE := 4.5             ## secondes sans crime avant que ça redescende
 
 ## Le respect. Nettoyer un gang fâche ce gang et arrange les deux autres.
-const RESPECT_PERDU := 34.0
+const RESPECT_PERDU := 22.0
 const RESPECT_GAGNE := 12.0
-const RESPECT_HOSTILE := -30.0    ## en dessous, le gang tire à vue
+## ⚠ Le seuil vaut TROIS morts, pas un. À -30 pour 34 points perdus, abattre
+## un seul passant en couleurs retournait le quartier entier contre le joueur,
+## et la jauge de respect ne servait plus qu'à annoncer une catastrophe.
+const RESPECT_HOSTILE := -60.0    ## en dessous, le gang tire à vue
 const RESPECT_AMI := 50.0         ## au-dessus, il laisse passer
 
 const POINTS := {
 	"pieton": 10, "gang": 30, "flic": 60, "auto": 45, "joueur": 250,
 }
+## Les contrats. Un gang décroche son téléphone et paie pour un service rendu
+## chez le voisin. C'est ce qui donne une DIRECTION à une manche : sans eux, la
+## ville est un bac à sable où l'on tourne en rond jusqu'au chrono.
+const DUREE_CONTRAT := {"nettoyage": 55.0, "livraison": 45.0, "chasse": 32.0}
+const PRIME_CONTRAT := {"nettoyage": 260, "livraison": 300, "chasse": 340}
+const RESPECT_CONTRAT := 26.0
+
 const COMBO_FENETRE := 3.0
 const COMBO_MAX := 4              ## facteur maximum = COMBO_MAX + 1
 
@@ -84,6 +94,7 @@ var caisses: Array = []           ## {id,p,arme}
 var barrages: Array = []          ## {id,p}
 var chaleur: Dictionary = {}      ## cle -> points de recherche
 var respect: Dictionary = {}      ## cle -> [respect gang 0, 1, 2]
+var contrats: Dictionary = {}     ## cle -> {genre,employeur,rival,objectif,fait,reste,texte}
 var sortants: Array = []          ## événements à diffuser : {"e": nom, "c": charge}
 
 var _rng: RandomNumberGenerator
@@ -129,6 +140,10 @@ func crime(cle: String, genre_de_crime: String) -> void:
 ## Le garage de peinture : la seule remise à zéro du jeu. Sans échappatoire,
 ## cinq étoiles sont une condamnation et le joueur repose la manette.
 func repeindre(cle: String) -> void:
+	# ⚠ La livraison se solde AVANT le garde : sans étoile au compteur, la
+	# fonction sortait tout de suite et le contrat ne s'achevait jamais pour
+	# qui arrivait au garage la conscience tranquille.
+	_avancer_livraison(cle)
 	if float(chaleur.get(cle, 0.0)) <= 0.0:
 		return
 	chaleur[cle] = 0.0
@@ -167,6 +182,7 @@ func simuler(delta: float, temps: float, joueurs: Dictionary) -> void:
 	_animer_les_autos(delta, joueurs)
 	_arbitrer(delta, joueurs)
 	_depecher_la_police(delta, joueurs)
+	_avancer_contrats(delta, joueurs)
 
 func _refroidir(delta: float, joueurs: Dictionary) -> void:
 	for cle in joueurs:
@@ -198,7 +214,7 @@ func _peupler(delta: float, _temps: float, joueurs: Dictionary) -> void:
 		_naitre_passant(joueurs, false)
 
 	_depuis_autos += delta
-	if _depuis_autos >= 2.2 and _nombre_de(CIVILE) < 10:
+	if _depuis_autos >= 2.2 and _nombre_de(CIVILE) + _nombre_de(VOITURE_GANG) < 11:
 		_depuis_autos = 0.0
 		_naitre_auto(joueurs, CIVILE, "")
 
@@ -245,6 +261,11 @@ func _naitre_auto(joueurs: Dictionary, genre: int, cible: String) -> void:
 		autour = joueurs[cible]["p"]
 	var pose := plan.point_de_chaussee(_rng, autour, NAISSANCE_MIN, NAISSANCE_MAX)
 	var direction: Vector2 = pose["d"]
+	# Une berline sur quatre porte les couleurs du quartier : c'est ce qui fait
+	# qu'on hésite avant de tirer dans le tas sur le territoire d'un gang avec
+	# lequel on est en bons termes.
+	if genre == CIVILE and _rng.randf() < 0.25:
+		genre = VOITURE_GANG
 	autos.append({
 		"id": _id(), "p": pose["p"], "a": direction.angle(), "d": direction,
 		"vitesse": 0.0, "genre": genre, "gang": plan.territoire(pose["p"]),
@@ -359,7 +380,9 @@ func _tirer_sur(tireur: Dictionary, proie: Dictionary, _delta: float) -> void:
 	# selon la distance. Faire voler quatre-vingts projectiles de plus, c'est
 	# quatre-vingts objets à diffuser pour un résultat que personne ne suit
 	# à l'œil dans une rue de nuit.
-	var chance: float = clamp(1.0 - vers.length() / PORTEE_TIR_PNJ, 0.12, 0.72)
+	# Sept balles sur dix qui portent, avec quatre tireurs, c'est une mort
+	# toutes les trois secondes à pied : on ne sortait plus de voiture.
+	var chance: float = clamp(1.0 - vers.length() / PORTEE_TIR_PNJ, 0.10, 0.46)
 	if _rng.randf() < chance:
 		emettre("deg", {"j": proie["cle"], "d": int(DEGAT_BALLE_PNJ), "k": "balle"})
 
@@ -618,9 +641,15 @@ func _abattre(personne: Dictionary, cle: String, ecrase: bool) -> void:
 	crime(cle, quoi)
 	if genre == GANG:
 		_ajuster_respect(cle, int(personne["gang"]), RESPECT_PERDU, RESPECT_GAGNE)
+		_avancer_nettoyage(cle, int(personne["gang"]))
 	_compter(cle, Vector2(personne["p"]), int(POINTS[quoi]), quoi, ecrase)
 
 func detruire_auto(auto: Dictionary, cle: String) -> void:
+	if int(auto["genre"]) == VOITURE_GANG:
+		# Brûler la voiture d'un gang, ça se retient aussi longtemps qu'un
+		# mort : sans ça, on ferait le vide dans un quartier au lance-roquettes
+		# sans jamais fâcher personne.
+		_ajuster_respect(cle, int(auto.get("gang", 0)), RESPECT_PERDU * 0.6, RESPECT_GAGNE * 0.5)
 	auto["genre"] = EPAVE
 	auto["minuterie"] = 7.0
 	auto["vitesse"] = 0.0
@@ -654,6 +683,100 @@ func _compter(cle: String, ou: Vector2, base: int, quoi: String, avec_combo: boo
 ## que le reste pour que le tableau et les effets soient identiques.
 func compter_frag(cle: String, ou: Vector2) -> void:
 	_compter(cle, ou, int(POINTS["joueur"]), "joueur", false)
+
+# ------------------------------------------------------------ les contrats
+
+## Décrocher à une cabine. Le gang qui appelle est celui dont c'est le
+## territoire : une cabine chez Le Lierre ne fait jamais travailler pour Les
+## Braises, sinon le respect n'a plus de sens géographique.
+func proposer_contrat(cle: String, cabine: int, position: Vector2) -> void:
+	if cle == "" or contrats.has(cle):
+		return
+	var employeur := posmod(cabine, 3)
+	var rival := posmod(employeur + 1 + _rng.randi_range(0, 1), 3)
+	var tirage := _rng.randf()
+	var genre := "nettoyage"
+	var objectif := 3 + _rng.randi_range(0, 2)
+	var texte := ""
+	if tirage < 0.36:
+		texte = "%s veut la peau de %d gars %s" % [
+			plan.nom_du_gang(employeur), objectif, plan.du_gang(rival)]
+	elif tirage < 0.70:
+		genre = "livraison"
+		objectif = 1
+		texte = "%s veut cette voiture repeinte, et vite" % plan.nom_du_gang(employeur)
+	else:
+		genre = "chasse"
+		objectif = 2
+		texte = "%s paie si vous tenez %d étoiles jusqu'au bout" % [
+			plan.nom_du_gang(employeur), objectif]
+
+	contrats[cle] = {
+		"genre": genre, "employeur": employeur, "rival": rival,
+		"objectif": objectif, "fait": 0.0, "reste": float(DUREE_CONTRAT[genre]),
+		"texte": texte, "p": position,
+	}
+	_diffuser_contrat(cle, "pris")
+
+func _diffuser_contrat(cle: String, etat: String) -> void:
+	var c: Dictionary = contrats.get(cle, {})
+	emettre("ctr", {
+		"j": cle, "e": etat,
+		"t": String(c.get("texte", "")), "n": int(c.get("objectif", 0)),
+		"a": int(c.get("fait", 0.0)), "r": int(ceil(float(c.get("reste", 0.0)))),
+	})
+
+func _avancer_contrats(delta: float, joueurs: Dictionary) -> void:
+	for cle in contrats.keys():
+		var c: Dictionary = contrats[cle]
+		c["reste"] = float(c["reste"]) - delta
+		if joueurs.has(cle):
+			c["p"] = joueurs[cle]["p"]
+
+		if String(c["genre"]) == "chasse":
+			# Tenir ses étoiles, c'est un compte à rebours qu'on remonte : la
+			# jauge de recherche redescend toute seule, il faut donc continuer
+			# à faire des bêtises pour rester payé.
+			if etoiles(String(cle)) >= int(c["objectif"]):
+				c["fait"] = float(c["fait"]) + delta
+			if float(c["fait"]) >= float(DUREE_CONTRAT["chasse"]) * 0.6:
+				_solder_contrat(String(cle), true)
+				continue
+
+		if float(c["reste"]) <= 0.0:
+			_solder_contrat(String(cle), false)
+
+## Un contrat gagné paie en argent ET en respect : c'est la seule façon de
+## remonter une jauge qu'on a fait plonger en écrasant tout un pâté de maisons.
+func _solder_contrat(cle: String, gagne: bool) -> void:
+	var c: Dictionary = contrats.get(cle, {})
+	if c.is_empty():
+		return
+	var position: Vector2 = c.get("p", plan.centre())
+	contrats.erase(cle)
+	if gagne:
+		_compter(cle, position, int(PRIME_CONTRAT[String(c["genre"])]), "contrat", false)
+		# Une perte NÉGATIVE remonte la jauge de l'employeur sans toucher aux
+		# deux autres : rendre service à un gang ne fâche pas ses voisins.
+		_ajuster_respect(cle, int(c["employeur"]), -RESPECT_CONTRAT, 0.0)
+	emettre("ctr", {"j": cle, "e": "gagne" if gagne else "perdu",
+		"t": String(c.get("texte", "")), "n": 0, "a": 0, "r": 0})
+
+func _avancer_nettoyage(cle: String, gang: int) -> void:
+	var c: Dictionary = contrats.get(cle, {})
+	if c.is_empty() or String(c["genre"]) != "nettoyage" or int(c["rival"]) != gang:
+		return
+	c["fait"] = float(c["fait"]) + 1.0
+	if float(c["fait"]) >= float(c["objectif"]):
+		_solder_contrat(cle, true)
+	else:
+		_diffuser_contrat(cle, "avance")
+
+func _avancer_livraison(cle: String) -> void:
+	var c: Dictionary = contrats.get(cle, {})
+	if c.is_empty() or String(c["genre"]) != "livraison":
+		return
+	_solder_contrat(cle, true)
 
 # ------------------------------------------------------------ les véhicules
 
