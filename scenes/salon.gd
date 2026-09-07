@@ -105,10 +105,32 @@ func _lancer() -> void:
 	_canal.envoyer("go", {"table": _table, "code": code})
 	_partir(code)
 
+## Le pilote automatique lance lui-même la manche, ici, six secondes après
+## être devenu hôte d'une table. La boucle de `racine.gd` le fait aussi en
+## natif ; dans le navigateur, elle ne repart pas toujours de son `await`, et
+## la manche n'était jamais lancée — on cliquait à la main pour observer.
+var _attente_pilote := 0.0
+var _parti := false
+
+func _process(delta: float) -> void:
+	if not Commandes.pilote_automatique or _parti:
+		return
+	if not _je_suis_hote():
+		_attente_pilote = 0.0
+		return
+	_attente_pilote += delta
+	if _attente_pilote > 6.0:
+		_parti = true
+		print("[banc] manche lancée depuis le salon")
+		_lancer()
+
 ## Point d'entrée du banc d'essai : lance si et seulement si on est hôte.
 func lancer_pour_banc() -> bool:
+	if _parti:
+		return true
 	if not _je_suis_hote():
 		return false
+	_parti = true
 	_lancer()
 	return true
 
