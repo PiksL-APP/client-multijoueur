@@ -184,6 +184,10 @@ func _envoyer_jonction(canal: CanalTempsReel) -> void:
 func _recevoir(texte: String) -> void:
 	var message = JSON.parse_string(texte)
 	if typeof(message) != TYPE_DICTIONARY:
+		# On dit CE QU'ON n'a pas su lire : « Parse JSON failed » sans le texte
+		# fautif, c'est une erreur qu'on regarde pendant des semaines sans la
+		# comprendre.
+		print("[reseau] trame illisible (%d octets) : %s" % [texte.length(), texte.substr(0, 160)])
 		return
 	var topic := String(message.get("topic", ""))
 	var evenement := String(message.get("event", ""))
@@ -264,6 +268,12 @@ func _ref() -> String:
 	return str(_compteur_ref)
 
 func _perdre() -> void:
+	# Le code et la raison de fermeture : c'est la seule chose qui distingue un
+	# serveur qui nous a coupés (1008, 1009 : trame trop grosse, cadence) d'un
+	# réseau qui a lâché (1006).
+	if _ws != null:
+		print("[reseau] socket fermé — code %d, raison « %s », état %s" % [
+			_ws.get_close_code(), _ws.get_close_reason(), libelle_etat()])
 	_ws = null
 	for canal in _canaux.values():
 		canal.est_rejoint = false

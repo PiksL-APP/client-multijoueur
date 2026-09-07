@@ -190,6 +190,7 @@ func aide() -> String:
 # ------------------------------------------------------- mise en place
 
 func preparer() -> void:
+	var chrono := Time.get_ticks_msec()
 	_rng.randomize()
 	carte = PlanVille.new(code)
 	ville = VilleVivante.new(carte, _rng)
@@ -256,6 +257,11 @@ func preparer() -> void:
 	monde().add_child(_camera)
 	_camera.make_current()
 	Tactile.mode = Tactile.CONDUITE
+
+	# Le temps de mise en place, toujours : dans le navigateur, une préparation
+	# qui bloque le fil principal plusieurs secondes fait tomber le socket.
+	print("[carnage] ville prête en %d ms — %d nappes, %d places" % [
+		Time.get_ticks_msec() - chrono, carte.nappes.size(), carte.stationnements.size()])
 
 	# `--banc-etoiles=N` : partir déjà recherché. Attendre qu'un pilote au hasard
 	# gagne cinq étoiles pour voir l'hélicoptère, c'est attendre une manche sur
