@@ -24,6 +24,13 @@ Scores="*res://autoload/scores.gd"
 Sons="*res://autoload/sons.gd"
 Tactile="*res://autoload/tactile.gd"
 
+[gui]
+
+theme/custom_font="res://polices/PixelifySans.ttf"
+theme/default_font_antialiasing=0
+theme/default_font_hinting=0
+theme/default_font_subpixel_positioning=0
+
 [display]
 
 window/size/viewport_width=1280

@@ -1,11 +1,12 @@
 extends Node
-## Le son du jeu, entièrement synthétisé au démarrage.
+## Le son du jeu : les bruitages sont synthétisés au démarrage, les musiques
+## et les ambiances viennent de fichiers.
 ##
-## Pourquoi pas des fichiers : le dépôt tient la règle « rien de binaire à
-## versionner » — aucune image, aucun maillage, aucun son. Une banque de
-## quelques dizaines de kilo-octets d'échantillons fabriqués en une trentaine
-## de millisecondes coûte moins cher qu'un dossier d'assets à gérer, et se
-## règle en changeant un chiffre plutôt qu'en rouvrant un éditeur audio.
+## Les bruitages en synthèse : une banque de quelques dizaines de kilo-octets
+## fabriquée en une trentaine de millisecondes, réglable en changeant un
+## chiffre plutôt qu'en rouvrant un éditeur audio. Les musiques, elles, ne se
+## synthétisent pas : ce sont les thèmes CC0 de Pixel-boy (Sparklin Labs),
+## dans `sons/`, normalisés à -18 LUFS. Une musique par lieu, en fondu.
 ##
 ## Le navigateur refuse de jouer un son avant un geste de l'utilisateur. Ce
 ## n'est pas un problème ici : on ne fait de bruit qu'après le clic « Entrer
@@ -21,6 +22,12 @@ var _banque: Dictionary = {}
 var _voix: Array[AudioStreamPlayer] = []
 var _prochaine := 0
 var _moteur: AudioStreamPlayer
+var _musique: AudioStreamPlayer
+var _ambiance: AudioStreamPlayer
+var _musique_en_cours := ""
+var _ambiance_en_cours := ""
+const MUSIQUE_DB := -10.0
+const AMBIANCE_DB := -14.0
 
 func _ready() -> void:
 	_charger_preference()
@@ -33,11 +40,56 @@ func _ready() -> void:
 	_moteur.stream = _banque["moteur"]
 	_moteur.volume_db = -24.0
 	add_child(_moteur)
+	_musique = AudioStreamPlayer.new()
+	add_child(_musique)
+	_ambiance = AudioStreamPlayer.new()
+	add_child(_ambiance)
+
+## Lance la musique d'un lieu (`res://sons/<nom>.ogg`, en boucle), en fondu
+## depuis la précédente. `""` arrête. Rejouer le même nom ne redémarre rien.
+func musique(nom: String) -> void:
+	if nom == _musique_en_cours:
+		return
+	_musique_en_cours = nom
+	_fondre(_musique, nom, MUSIQUE_DB)
+
+func ambiance(nom: String) -> void:
+	if nom == _ambiance_en_cours:
+		return
+	_ambiance_en_cours = nom
+	_fondre(_ambiance, nom, AMBIANCE_DB)
+
+func _fondre(lecteur: AudioStreamPlayer, nom: String, volume_db: float) -> void:
+	var tween := create_tween()
+	if lecteur.playing:
+		tween.tween_property(lecteur, "volume_db", -40.0, 0.8)
+		tween.tween_callback(lecteur.stop)
+	if nom != "" and actif:
+		var flux := load("res://sons/%s.ogg" % nom) as AudioStream
+		if flux == null:
+			return
+		tween.tween_callback(func() -> void:
+			lecteur.stream = flux
+			lecteur.volume_db = -40.0
+			lecteur.play())
+		tween.tween_property(lecteur, "volume_db", volume_db, 1.2)
+
+func _reprendre_musiques() -> void:
+	var m := _musique_en_cours
+	var a := _ambiance_en_cours
+	_musique_en_cours = ""
+	_ambiance_en_cours = ""
+	musique(m)
+	ambiance(a)
 
 func basculer() -> bool:
 	actif = not actif
 	if not actif:
 		arreter_moteur()
+		_musique.stop()
+		_ambiance.stop()
+	else:
+		_reprendre_musiques()
 	var fichier := ConfigFile.new()
 	fichier.set_value("son", "actif", actif)
 	fichier.save(FICHIER)
