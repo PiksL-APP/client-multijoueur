@@ -146,18 +146,23 @@ grille de 8). Chaque dossier porte sa licence. Toute police se sert à un
 multiple de sa grille, sinon elle est floue : passer par `UI.taille_texte`
 et `UI.taille_titre`.
 
-Le **hub** fait exception à la 2,5D : il est en pixel art 2D (pack *Pixel
-Crawler*, dessiné en vue de dessus). Un écran choisit `plan()` ou `monde()`,
-jamais les deux. Les sprites se posent sur un pixel entier (`Pixels.poser`) et
-se filtrent au plus proche voisin — interpolés, ils bavent ; à mi-pixel, ils
-scintillent dès qu'on bouge. Les images du hub sortent de `outils/village.py`
-et de lui seul : jamais de découpe dans un dessin (une case entière de la
-grille de l'auteur, une pièce entière de la maquette, une planche entière),
-jamais de sprite agrandi ou réduit, un zoom de caméra entier. Un personnage
-fait trente pixels partout, dehors comme dedans. Les collisions du hub ne se
-codent pas à la main dans le moteur : elles viennent de `plan.json`, écrit par
-le même script que les images (grille de cases, `#` bloque). Pour changer le
-village, on change le plan et on relance le script.
+Le **hub** est en voxels, dans `monde()` comme les jeux. Tout son décor sort
+de `outils/voxel.py` et de lui seul : modèles bâtis cube par cube à la palette
+`P`, écrits en glTF (`modeles/voxel/*.glb`, couleurs par sommet) par un
+maillage glouton ; le village est un plan de cases (16 pixels dans la
+simulation, une unité dans le monde) qui produit à la fois le terrain, les
+objets posés et `plan.json` (cases bloquées, portes, sortie, portail, vitres,
+cheminées). Les personnages sont des glTF à six parties nommées (`tete`,
+`corps`, `bras_g`, `bras_d`, `jambe_g`, `jambe_d`), chacune exprimée autour
+de son pivot : le moteur les anime en tournant les nœuds. Pour changer le
+village, on change le script et on le relance ; `outils/voir.sh a,b` pose des
+modèles en ligne et les photographie. Un modèle fin est en voxels de 1/8
+d'unité, les arbres et le terrain en 1/4 ou 1/2 : le grain reste lisible et
+les fichiers petits (un grain de couleur se limite à trois teintes, sinon le
+maillage glouton ne fusionne plus rien). Les collisions du hub ne se codent
+pas à la main : elles viennent de `plan.json`. Le pack *Pixel Crawler*
+(`modeles/village/`, `outils/village.py`) ne sert plus qu'aux portraits de
+l'accueil.
 
 **Une seule exception**, et elle est délibérée : `modeles/volvo-242.glb`, la
 carrosserie du jeu Carnage. Un vrai modèle apporte ce qu'aucune boîte ne

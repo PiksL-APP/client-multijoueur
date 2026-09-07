@@ -56,6 +56,17 @@ ecrire(case(arbres_feuillus, 48, 96, 48, 96), "arbre_2.png")
 ecrire(case(arbres_pins, 0, 0, 48, 80), "pin_0.png")
 ecrire(case(arbres_pins, 48, 0, 48, 80), "pin_1.png")
 ecrire(case(arbres_pins, 48, 80, 48, 80), "pin_2.png")
+# Deux tailles de plus, pour une forêt qui ne soit pas une rangée de clones :
+# les grands feuillus (cases de 80 × 128 : vert, jaune, roux, brun), les
+# petits (64 × 64) et les grands pins du troisième modèle (64 × 144).
+grands_feuillus = ouvrir("Environment/Props/Static/Trees/Model_01/Size_04.png")
+petits_feuillus = ouvrir("Environment/Props/Static/Trees/Model_01/Size_02.png")
+grands_pins = ouvrir("Environment/Props/Static/Trees/Model_03/Size_03.png")
+for i, (c, r) in enumerate(((0, 0), (1, 0), (0, 1), (1, 1))):
+    ecrire(case(grands_feuillus, c * 80, r * 128, 80, 128), f"grand_arbre_{i}.png")
+    ecrire(case(petits_feuillus, c * 64, r * 64, 64, 64), f"petit_arbre_{i}.png")
+for i, (c, r) in enumerate(((0, 0), (1, 0), (0, 1))):
+    ecrire(case(grands_pins, c * 64, r * 144, 64, 144), f"grand_pin_{i}.png")
 # Buissons : la rangée des 48 × 48 (quatre teintes) et celle des 32 × 32.
 for i in range(4):
     ecrire(case(vegetation, i * 48, 96, 48, 48), f"buisson_{i}.png")
@@ -89,6 +100,8 @@ for nom, y in (("carottes", 16), ("radis", 48), ("choux", 80), ("laitues", 112))
     ecrire(case(ferme, 160, y, 16, 32), f"cageot_{nom}.png")     # le cageot plein
 ecrire(case(ouvrir("Environment/Structures/Stations/Anvil/Anvil.png"), 0, 32, 64, 48), "forge.png")
 ecrire(case(ouvrir("Environment/Structures/Stations/Furnace/Furnace.png"), 64, 64, 64, 64), "fourneau.png")
+# L'étal du marché : la structure de cuisine à auvent, entière.
+ecrire(case(ouvrir("Environment/Structures/Stations/Cooking Station/Estructure.png"), 208, 160, 64, 64), "etal.png")
 # La rôtissoire est une planche de quatre images de 64 ; copiée telle quelle.
 ecrire(ouvrir("Environment/Structures/Stations/Cooking Station/Grill/Grill_03-Sheet.png"), "rotissoire.png")
 
@@ -157,24 +170,45 @@ murs = ouvrir("Environment/Structures/Buildings/Walls.png")
 toits = ouvrir("Environment/Structures/Buildings/Roofs.png")
 
 
-def maison(mur, toit, porte):
+# Les fenêtres et la cheminée de la planche des façades, entières.
+FENETRE_CROISILLONS = (37, 96, 22, 32)     # à croisillons, sur son appui
+FENETRE_VOLETS = (69, 96, 22, 32)          # à volets de bois
+CLAUSTRA = (101, 100, 22, 22)              # le claustra de la grange
+CHEMINEE = (4, 73, 24, 55)                 # la souche de pierre, du sol au toit
+DETAILS = {}                               # maison -> fenêtres, cheminée
+
+
+def maison(nom, mur, toit, porte, fenetre, cheminee=False):
     """Un toit entier (128 × 96) posé sur un pan de mur entier (96 × 56, la
-    bande de façades de la planche) et une porte entière au milieu. Le bas du
-    toit est en chevron : c'est un pignon vu de face, et le mur remonte sous
-    lui jusqu'à la ligne des chevrons. Le petit auvent au centre du toit
-    coiffe la porte — il fait exactement sa largeur."""
+    bande de façades de la planche), une porte entière au milieu et une
+    fenêtre entière de chaque côté, sous les chevrons. Le bas du toit est en
+    chevron : c'est un pignon vu de face, et le mur remonte sous lui. La
+    cheminée est une souche de pierre adossée au flanc droit, du sol à
+    l'égout du toit ; sa fumée part de son sommet. Le plan retient la vitre
+    de chaque fenêtre (elle s'allume la nuit) et le sommet de la cheminée."""
     image = Image.new("RGBA", (128, 128))
     image.alpha_composite(case(murs, mur * 96, 184, 96, 56), (16, 72))
+    fx, fy, fl, fh = fenetre
+    vitres = []
+    for x in (24, 82):
+        y = 122 - fh
+        image.alpha_composite(case(props, fx, fy, fl, fh), (x, y))
+        vitres.append((x + fl // 2, y + fh // 2 + 1))
     image.alpha_composite(case(toits, toit * 128, 0, 128, 96), (0, 0))
     image.alpha_composite(case(props, porte * 32, 16, 32, 48), (48, 80))
-    return image
+    fumee = None
+    if cheminee:
+        image.alpha_composite(case(props, *CHEMINEE), (104, 73))
+        fumee = (116, 74)
+    DETAILS[nom] = {"fenetres": vitres, "fumee": fumee}
+    ecrire(image, f"maison_{nom}.png")
 
 
-ecrire(maison(mur=3, toit=0, porte=1), "maison_taverne.png")
-ecrire(maison(mur=0, toit=1, porte=0), "maison_armurerie.png")
-ecrire(maison(mur=2, toit=0, porte=2), "maison_auberge.png")
-ecrire(maison(mur=5, toit=1, porte=0), "maison_maison.png")    # la maison fermée de l'ouest
-ecrire(maison(mur=1, toit=0, porte=1), "maison_grange.png")    # la grange fermée de l'est
+maison("taverne", mur=3, toit=0, porte=1, fenetre=FENETRE_CROISILLONS, cheminee=True)
+maison("armurerie", mur=0, toit=1, porte=0, fenetre=FENETRE_VOLETS)
+maison("auberge", mur=2, toit=0, porte=2, fenetre=FENETRE_CROISILLONS, cheminee=True)
+maison("maison", mur=5, toit=1, porte=0, fenetre=FENETRE_CROISILLONS, cheminee=True)   # la maison fermée de l'ouest
+maison("grange", mur=1, toit=0, porte=1, fenetre=CLAUSTRA)                             # la grange fermée de l'est
 
 # ------------------------------------------------------------------ intérieurs
 # Des pièces ENTIÈRES de la maquette, murs compris. La maquette est livrée
@@ -370,12 +404,39 @@ HERBE, PIERRE, TERRE = 0, 5, 10   # colonne de départ de chaque terrain
 LARGEUR, HAUTEUR = 64, 52         # en cases → 1024 × 832 pixels
 
 
+def case_eau(x, y, image=0):
+    """Une case de la mare. Le jeu d'eau du pack est une croix de 5 × 5 :
+    l'anneau extérieur porte les rides du bord, le carré central l'eau calme.
+    La case se choisit d'après les côtés où la mare touche la rive ; les
+    deux croix claires sont les deux images de l'animation des rides."""
+    ox, oy = image * 80, 80
+    rive = lambda dx, dy: trou.get((x + dx, y + dy)) != "eau"
+    haut, bas_, gauche, droite = rive(0, -1), rive(0, 1), rive(-1, 0), rive(1, 0)
+    if haut and gauche:
+        c = (1, 0)
+    elif haut and droite:
+        c = (3, 0)
+    elif bas_ and gauche:
+        c = (1, 4)
+    elif bas_ and droite:
+        c = (3, 4)
+    elif haut:
+        c = (2, 0)
+    elif bas_:
+        c = (2, 4)
+    elif gauche:
+        c = (0, 2)
+    elif droite:
+        c = (4, 2)
+    else:
+        c = [(1, 1), (2, 1), (3, 1), (1, 2), (2, 2), (3, 2), (1, 3), (2, 3), (3, 3)][(x * 5 + y * 11) % 9]
+    return case(eau, ox + c[0] * T, oy + c[1] * T, T, T)
+
+
 def pleine(terrain, x, y):
     """Une case pleine du terrain, en alternant ses trois variantes."""
     if terrain == "eau":
-        # Les cases pleines du jeu d'eau : la plupart ridées, une lisse.
-        vx, vy = [(1, 6), (2, 6), (3, 6), (1, 7), (2, 7), (3, 7), (1, 8), (2, 8), (3, 8)][(x * 5 + y * 11) % 9]
-        return case(eau, vx * T, vy * T, T, T)
+        return case_eau(x, y)
     variante = ((x * 7 + y * 13) % 3) + 1
     return case(sols, (terrain + variante) * T, 10 * T, T, T)
 
@@ -393,13 +454,18 @@ TROUS = [
     (TERRE, 10, 26, 16, 28),
     (TERRE, 51, 20, 53, 26),      # le sentier de la grange
     (TERRE, 48, 24, 53, 26),
-    ("eau", 8, 37, 14, 43),       # la mare
 ]
 trou = {}
 for terrain, x0, y0, x1, y1 in TROUS:
     for y in range(y0, y1):
         for x in range(x0, x1):
             trou[(x, y)] = terrain
+# La mare : un octogone de 8 × 7 cases aux coins abattus, au sud-ouest.
+MARE = (8, 37, 8, 7)              # x, y, largeur, hauteur en cases
+for j in range(MARE[3]):
+    retrait = {0: 2, 1: 1, 5: 1, 6: 2}.get(j, 0)
+    for i in range(retrait, MARE[2] - retrait):
+        trou[(MARE[0] + i, MARE[1] + j)] = "eau"
 
 
 def alpha_min(a, b):
@@ -450,6 +516,21 @@ for y in range(HAUTEUR):
                 bord = alpha_min(bord, autre)
             sol.alpha_composite(bord, (x * T, y * T))
 
+# Le rond-point de la place : un pavage de brique autour du foyer, pris dans
+# le motif de brique du pack (une croix de 5 × 5 sans bord, qui se répète).
+BRIQUE = (28, 26, 8, 6)           # x, y, largeur, hauteur en cases
+for j in range(BRIQUE[3]):
+    for i in range(BRIQUE[2]):
+        bx, by = 1 + i % 3, 1 + j % 3
+        sol.alpha_composite(case(sols, (15 + bx) * T, by * T, T, T), ((BRIQUE[0] + i) * T, (BRIQUE[1] + j) * T))
+# Les deux images de la mare, pour animer ses rides ; le sol en garde une.
+for image in (0, 1):
+    mare = Image.new("RGBA", (MARE[2] * T, MARE[3] * T), (0, 0, 0, 0))
+    for (x, y), terrain in trou.items():
+        if terrain == "eau":
+            mare.alpha_composite(case_eau(x, y, image), ((x - MARE[0]) * T, (y - MARE[1]) * T))
+    ecrire(mare, f"mare_{image}.png")
+
 # La falaise du nord : le village est adossé à un plateau. Le kit de parois
 # du pack donne le dessus du plateau, la paroi, et son pied dans l'herbe ;
 # sept rangées de cases, tout en haut de la carte.
@@ -484,6 +565,11 @@ bas = lambda l, h, lignes=1: [(x, y) for y in range(h - lignes, h) for x in rang
 for i in range(3):
     declarer(f"arbre_{i}.png", [(1, 5)])
     declarer(f"pin_{i}.png", [(1, 4)])
+    declarer(f"grand_pin_{i}.png", [(1, 8), (2, 8)])
+for i in range(4):
+    declarer(f"grand_arbre_{i}.png", [(1, 7), (2, 7), (3, 7)])
+    declarer(f"petit_arbre_{i}.png", [(1, 3), (2, 3)])
+declarer("etal.png", bas(4, 4, 2))
 for i in range(4):
     declarer(f"buisson_{i}.png", bas(3, 3, 2))
     declarer(f"buisson_petit_{i}.png", bas(2, 2))
@@ -516,7 +602,7 @@ def emprise_visuelle(image):
     dont seules les deux rangées du tronc comptent — leurs cimes se
     chevauchent, c'est ce qui fait une forêt."""
     l, h = TAILLES[image]
-    depuis = h - 2 if image.startswith(("arbre_", "pin_")) else 0
+    depuis = h - 2 if image.startswith(("arbre_", "pin_", "grand_", "petit_arbre_")) else 0
     return [(x, y) for y in range(depuis, h) for x in range(l)]
 
 
@@ -557,9 +643,10 @@ for lieu, cx, cy, nom in MAISONS:
 
 # Le cœur de l'esplanade : le feu, deux bancs, les cageots du marché.
 poser("foyer.png", 31, 28)
-poser("banc.png", 25, 28)
-poser("banc.png", 35, 28)
+poser("banc.png", 24, 28)
+poser("banc.png", 36, 28)
 poser("caisses.png", 36, 24)
+poser("etal.png", 41, 24)          # l'étal du marché, à côté des cageots
 for i, nom in enumerate(("carottes", "radis", "choux", "laitues")):
     poser(f"cageot_{nom}.png", 37 + i, 23)
 poser("forge.png", 14, 22)         # l'enclume du forgeron, devant l'armurerie
@@ -589,6 +676,33 @@ def panneau(largeur=160, hauteur=60, pied=20):
 
 
 ecrire(panneau(), "tableau.png")
+
+
+# L'ombre des nuages : une nappe de 512 × 512 qui se répète sans couture,
+# des taches douces (bruit de valeur périodique, trois octaves) ; le moteur
+# la fait glisser sur le village en noir très transparent.
+def nuages(cote=512, graine=7):
+    import numpy as np
+    alea = np.random.default_rng(graine)
+    total = np.zeros((cote, cote))
+    for octave, (mailles, poids) in enumerate(((3, 1.0), (6, 0.5), (12, 0.25))):
+        grille = alea.random((mailles, mailles))
+        ys, xs = np.mgrid[0:cote, 0:cote] * (mailles / cote)
+        x0, y0 = np.floor(xs).astype(int), np.floor(ys).astype(int)
+        fx, fy = xs - x0, ys - y0
+        fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+        x1, y1 = (x0 + 1) % mailles, (y0 + 1) % mailles
+        v = (grille[y0, x0] * (1 - fx) + grille[y0, x1] * fx) * (1 - fy) + (grille[y1, x0] * (1 - fx) + grille[y1, x1] * fx) * fy
+        total += v * poids
+    total /= 1.75
+    alpha = np.clip((total - 0.5) * 3.5, 0.0, 1.0)
+    image = np.zeros((cote, cote, 4), dtype=np.uint8)
+    image[..., :3] = 255
+    image[..., 3] = (alpha * 255).astype(np.uint8)
+    return Image.fromarray(image, "RGBA")
+
+
+ecrire(nuages(), "nuages.png")
 TABLEAU = (38, 30)                                 # la case de son coin haut-gauche
 declarer("tableau.png", bas(10, 5, 2))
 poser("tableau.png", *TABLEAU)
@@ -604,8 +718,9 @@ for (x, y) in ((6, 30), (9, 30), (6, 32), (9, 32)):
     poser(f"buisson_{(x + y) % 4}.png", x, y)
 # Autour de la mare : des rochers.
 for image, x, y in (("rocher_grand_0.png", 6, 35), ("rocher_moyen_1.png", 14, 36),
-                    ("rocher_moyen_0.png", 14, 42), ("rocher_petit_0.png", 8, 43),
-                    ("rocher_grand_1.png", 15, 39), ("rocher_petit_1.png", 12, 44)):
+                    ("rocher_moyen_0.png", 15, 42), ("rocher_petit_0.png", 8, 43),
+                    ("rocher_grand_1.png", 16, 39), ("rocher_petit_1.png", 12, 44),
+                    ("buisson_petit_3.png", 6, 41), ("buisson_petit_1.png", 14, 44)):
     poser(image, x, y)
 
 # Les ateliers animés : le moteur les anime, le plan leur réserve la place.
@@ -652,18 +767,34 @@ def libre(image, cx, cy):
 
 
 def arbre():
-    return (f"arbre_{hasard.randrange(3)}.png" if hasard.random() < 0.65 else f"pin_{hasard.randrange(3)}.png")
+    """Un arbre au hasard : surtout des feuillus et des pins de taille
+    moyenne, quelques grands sujets qui dépassent de la canopée, quelques
+    petits pour boucher les trous."""
+    tirage = hasard.random()
+    if tirage < 0.42:
+        return f"arbre_{hasard.randrange(3)}.png"
+    if tirage < 0.62:
+        return f"pin_{hasard.randrange(3)}.png"
+    if tirage < 0.80:
+        return f"grand_arbre_{hasard.randrange(4)}.png"
+    if tirage < 0.90:
+        return f"grand_pin_{hasard.randrange(3)}.png"
+    return f"petit_arbre_{hasard.randrange(4)}.png"
 
 
 essais = 0
 plantes = 0
-while plantes < 420 and essais < 60000:
+while plantes < 460 and essais < 80000:
     essais += 1
     image = arbre()
     l, h = TAILLES[image]
     cx, cy = hasard.randrange(LARGEUR - l + 1), hasard.randrange(-4, HAUTEUR - h + 1)
-    pied = (cx + 1, cy + h - 1)
+    pied = (cx + l // 2, cy + h - 1)
     if pied[1] < 0 or dans_la_clairiere(*pied) or 2 <= pied[1] < FALAISE + 1:
+        continue
+    # Un grand sujet garde toute sa cime hors de la clairière : personne ne
+    # doit marcher dessous sans être vu.
+    if image.startswith("grand_") and any(dans_la_clairiere(cx + dx, cy + dy) for dx in range(l) for dy in range(h)):
         continue
     if not libre(image, cx, cy):
         continue
@@ -713,8 +844,10 @@ for o in objets + [{"image": a["image"], "x": a["x"], "y": a["y"]} for a in ANIM
     l, h = TAILLES[o["image"]]
     nom = o["image"]
     pied_x, pied_y = o["x"] + l * T // 2, o["y"] + h * T
-    if nom.startswith(("arbre_", "pin_")):
+    if nom.startswith(("arbre_", "pin_", "petit_arbre_")):
         dessin.ellipse((pied_x - 18, pied_y - 9, pied_x + 18, pied_y + 3), fill=(0, 0, 0, 39))
+    elif nom.startswith("grand_"):
+        dessin.ellipse((pied_x - 26, pied_y - 11, pied_x + 26, pied_y + 3), fill=(0, 0, 0, 39))
     elif nom.startswith("buisson_petit"):
         dessin.ellipse((pied_x - 12, pied_y - 6, pied_x + 12, pied_y + 2), fill=(0, 0, 0, 39))
     elif nom.startswith("buisson_"):
@@ -730,6 +863,8 @@ for o in objets + [{"image": a["image"], "x": a["x"], "y": a["y"]} for a in ANIM
         dessin.rectangle((o["x"] + 112, o["y"] + 96, o["x"] + 120, pied_y), fill=(0, 0, 0, 50))
     elif nom in ("banc.png", "forge.png", "caisses.png", "fourneau.png", "epouvantail.png", "rotissoire.png", "scierie.png"):
         dessin.ellipse((o["x"] + 4, pied_y - 6, o["x"] + l * T - 4, pied_y + 3), fill=(0, 0, 0, 39))
+    elif nom.startswith("etal"):
+        dessin.ellipse((o["x"] + 4, pied_y - 6, o["x"] + l * T - 4, pied_y + 3), fill=(0, 0, 0, 39))
     elif nom == "tableau.png":
         for px in (14, l * T - 22):            # une ombre au pied de chaque poteau
             dessin.ellipse((o["x"] + px - 6, pied_y - 5, o["x"] + px + 13, pied_y + 2), fill=(0, 0, 0, 39))
@@ -739,6 +874,16 @@ ecrire(sol, "sol_village.png")
 # Les objets se dessinent du plus haut au plus bas ; le moteur les trie par
 # le bas de leur image, ce qui suffit puisque aucun ne se chevauche.
 objets.sort(key=lambda o: (o["y"] + TAILLES[o["image"]][1] * T, o["x"]))
+
+
+# Les vitres et les cheminées de chaque maison posée, en pixels du village.
+fenetres, fumees = [], []
+for o in objets:
+    if o["image"].startswith("maison_"):
+        details = DETAILS[o["image"][len("maison_"):-4]]
+        fenetres += [[o["x"] + fx, o["y"] + fy] for (fx, fy) in details["fenetres"]]
+        if details["fumee"]:
+            fumees.append([o["x"] + details["fumee"][0], o["y"] + details["fumee"][1]])
 
 
 def carte(blocs, largeur, hauteur):
@@ -755,6 +900,9 @@ plan = {
         "portes": portes,
         "feu": [32 * T, 30 * T],
         "tableau": [TABLEAU[0] * T + 4, TABLEAU[1] * T + 4, 152, 52],
+        "fenetres": fenetres,
+        "fumees": fumees,
+        "mare": {"x": MARE[0] * T, "y": MARE[1] * T, "images": ["mare_0.png", "mare_1.png"]},
         "animes": ANIMES,
         # La paysanne fait le tour de la place ; elle s'arrête pour parler.
         "rondes": {"paysanne": [[352, 416], [576, 416], [576, 528], [352, 528]]},
