@@ -102,16 +102,53 @@ static func _instance(maillage: Mesh, matiere_appliquee: Material, ombre: bool) 
 ## Le maillage est mis en cache : instancier la scène glTF à chaque voiture
 ## coûterait un chargement complet par joueur et par manche.
 const CARROSSERIE := "res://modeles/volvo-242.glb"
-static var _maillage: Mesh = null
+static var _maillages: Dictionary = {}
+
+## Le maillage d'un glTF, mis en cache. Instancier la scène à chaque usage
+## coûterait un chargement complet par voiture et par tuile de ville.
+static func maillage(chemin: String) -> Mesh:
+	if not _maillages.has(chemin):
+		var scene: PackedScene = load(chemin)
+		var racine := scene.instantiate()
+		_maillages[chemin] = _premier_maillage(racine)
+		racine.queue_free()
+	return _maillages[chemin]
+
+## Une nappe de tuiles identiques en UN seul objet de rendu. Une ville de
+## quatre cents tuiles posées une par une, c'est quatre cents appels de dessin
+## par image — sur un moteur en mode compatibilité, dans un navigateur, ça ne
+## passe pas. Regroupées par modèle, il en reste une quinzaine.
+## `teinte` multiplie la texture d'origine au lieu de la remplacer : c'est ce
+## qui permet de faire passer un kit d'un blanc éclatant dans une palette
+## sombre sans perdre son atlas de couleurs. Un `material_override` posé avec
+## une matière neuve, lui, effacerait tout le décor peint.
+static func nappe(chemin: String, transformations: Array, ombre: bool = true,
+		teinte: Color = Color.WHITE) -> MultiMeshInstance3D:
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.mesh = maillage(chemin)
+	multi.instance_count = transformations.size()
+	for i in transformations.size():
+		multi.set_instance_transform(i, transformations[i])
+	var noeud := MultiMeshInstance3D.new()
+	noeud.multimesh = multi
+	if teinte != Color.WHITE:
+		var origine := multi.mesh.surface_get_material(0)
+		# glTF importé : la matière peut être une StandardMaterial3D ou une
+		# ORMMaterial3D selon les canaux du fichier. Ne tester que la première
+		# laissait le kit blanc, sans le moindre message d'erreur.
+		if origine is BaseMaterial3D:
+			var copie := (origine as BaseMaterial3D).duplicate() as BaseMaterial3D
+			copie.albedo_color = teinte
+			copie.roughness = 0.85
+			noeud.material_override = copie
+	noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if ombre \
+		else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return noeud
 
 static func carrosserie(couleur: Color) -> MeshInstance3D:
-	if _maillage == null:
-		var scene: PackedScene = load(CARROSSERIE)
-		var racine := scene.instantiate()
-		_maillage = _premier_maillage(racine)
-		racine.queue_free()
 	var noeud := MeshInstance3D.new()
-	noeud.mesh = _maillage
+	noeud.mesh = maillage(CARROSSERIE)
 	# `material_override` écrase la couleur par sommet du glTF : c'est ce qui
 	# permet de teindre la même carrosserie aux quatre couleurs de joueur.
 	# Métallicité à zéro : en mode compatibilité il n'y a ni ciel ni sonde de
@@ -170,7 +207,7 @@ static func _texture_trame(teinte: Color) -> ImageTexture:
 
 # ------------------------------------------------------------ ambiance
 
-static func ambiance(fond: Color = Palette.FOND, brouillard: bool = true) -> WorldEnvironment:
+static func ambiance(fond: Color = Palette.FOND, brouillard: bool = true, ambiante: float = 0.34) -> WorldEnvironment:
 	var environnement := Environment.new()
 	environnement.background_mode = Environment.BG_COLOR
 	environnement.background_color = fond
@@ -179,7 +216,7 @@ static func ambiance(fond: Color = Palette.FOND, brouillard: bool = true) -> Wor
 	# éclaircit le sol jusqu'à un gris bleu qui n'est plus le #0d0d0d de la
 	# palette, et toute la maison se reconnaît à ce noir-là.
 	environnement.ambient_light_color = Color("#1a212b")
-	environnement.ambient_light_energy = 0.34
+	environnement.ambient_light_energy = ambiante
 	if brouillard:
 		# Le brouillard sert la profondeur : sans lui, le fond du terrain a
 		# exactement le même contraste que le premier plan et la perspective
@@ -191,10 +228,10 @@ static func ambiance(fond: Color = Palette.FOND, brouillard: bool = true) -> Wor
 	noeud.environment = environnement
 	return noeud
 
-static func lumiere() -> DirectionalLight3D:
+static func lumiere(energie: float = 1.12) -> DirectionalLight3D:
 	var soleil := DirectionalLight3D.new()
 	soleil.light_color = Color("#e8ecf5")
-	soleil.light_energy = 1.12
+	soleil.light_energy = energie
 	# Soleil haut : en ville, un éclairage rasant projette des ombres longues
 	# dans lesquelles la voiture du joueur disparaît complètement. On perd un
 	# peu de relief, on gagne de pouvoir se voir.

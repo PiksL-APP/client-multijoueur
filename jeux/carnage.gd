@@ -15,14 +15,26 @@ extends Partie
 const DUREE := 150.0
 
 # Une ville, pas une arène : pas de mur, pas de cage. Les bords se perdent
-# dans le brouillard, et on est simplement ramené vers le centre si on
-# s'éloigne trop loin dans la friche.
-const COLONNES := 7
-const LIGNES := 5
-const PATE := 520.0                ## côté d'un pâté de maisons
-const RUE := 210.0                 ## largeur d'une rue
-const BANLIEUE := 900.0            ## friche autour de la ville
-const RETOUR := 260.0              ## au-delà, la voiture est ramenée
+# dans la verdure, et on est simplement ramené vers le centre si on s'éloigne
+# trop loin.
+#
+# Elle est pavée avec le kit de ville de Kenney (CC0) : des tuiles d'une unité
+# de côté, posées sur une grille. Une rue tous les quatre pas, des pâtés de
+# trois sur trois entre les rues.
+const TUILE := 14.0                          ## côté d'une tuile, en unités 3D
+const PAS := TUILE / Decor.ECHELLE           ## le même, en pixels de jeu
+const COLONNES := 22
+const LIGNES := 16
+const CEINTURE := 3                          ## anneau de verdure autour de la ville
+const RETOUR := 260.0                        ## au-delà, la voiture est ramenée
+
+const VILLE := "res://modeles/ville/"
+## Le kit de Kenney est d'un blanc éclatant : cette teinte le ramène dans la
+## palette sombre de la maison, en multipliant sa texture plutôt qu'en la
+## remplaçant.
+const TEINTE_VILLE := Color(0.28, 0.31, 0.38)
+const IMMEUBLES := ["building-small-a", "building-small-b", "building-small-c",
+	"building-small-d", "building-garage"]
 
 # Conduite : des valeurs d'arcade, pas de simulation. On veut qu'une voiture
 # reparte vite après un choc, sinon le jeu punit la maladresse trop longtemps.
@@ -41,8 +53,10 @@ const CADENCE_MONSTRES := 1.0 / 9.0
 const MONSTRES_MAX := 70
 const COMBO_FENETRE := 2.5
 
-const INCLINAISON := 56.0
-const DISTANCE := 62.0
+# Caméra presque à la verticale : en ville, une inclinaison basse met un
+# immeuble entre l'œil et la voiture toutes les trois secondes.
+const INCLINAISON := 70.0
+const DISTANCE := 66.0
 
 ## Les armes. `points` est volontairement plus bas que l'écrasement : l'arme
 ## sert à se sortir d'une mêlée, pas à remplacer la conduite — sinon plus
@@ -103,42 +117,76 @@ func aide() -> String:
 # ------------------------------------------------------- la ville
 
 func centre_ville() -> Vector2:
-	return Vector2(COLONNES * (PATE + RUE), LIGNES * (PATE + RUE)) * 0.5
+	return etendue() * 0.5
 
 func etendue() -> Vector2:
-	return Vector2(COLONNES * (PATE + RUE), LIGNES * (PATE + RUE))
+	return Vector2(COLONNES, LIGNES) * PAS
+
+func banlieue() -> float:
+	return CEINTURE * PAS
 
 ## Le plan se déduit du code de la manche : même code, même ville, chez tout le
 ## monde et à tout moment. Diffuser le plan aurait coûté un message de plusieurs
 ## kilo-octets et un cas de plus pour qui rejoint en retard.
-func _batir_ville() -> void:
+##
+## Renvoie, par modèle de tuile, la liste des transformations à poser.
+func _batir_ville() -> Dictionary:
 	var graine := RandomNumberGenerator.new()
 	graine.seed = hash(code)
 	_batiments.clear()
+	var nappes: Dictionary = {}
 
-	for colonne in COLONNES:
-		for ligne in LIGNES:
-			var coin := Vector2(colonne * (PATE + RUE) + RUE * 0.5, ligne * (PATE + RUE) + RUE * 0.5)
-			# Une place vide de temps en temps : une grille parfaitement
-			# remplie se conduit comme un labyrinthe, et on n'y voit jamais
-			# un monstre arriver.
-			if graine.randf() < 0.16:
-				continue
-			var decoupe := graine.randi_range(1, 4)
-			for i in decoupe:
-				var largeur := graine.randf_range(PATE * 0.35, PATE * 0.92)
-				var hauteur := graine.randf_range(PATE * 0.35, PATE * 0.92)
-				var decalage := Vector2(
-					graine.randf_range(0.0, PATE - largeur),
-					graine.randf_range(0.0, PATE - hauteur))
-				var rect := Rect2(coin + decalage, Vector2(largeur, hauteur))
-				var chevauche := false
-				for autre in _batiments:
-					if autre.grow(24.0).intersects(rect):
-						chevauche = true
-						break
-				if not chevauche:
-					_batiments.append(rect)
+	for colonne in range(-CEINTURE, COLONNES + CEINTURE):
+		for ligne in range(-CEINTURE, LIGNES + CEINTURE):
+			var dedans := colonne >= 0 and colonne < COLONNES and ligne >= 0 and ligne < LIGNES
+			var tuile := ""
+			var rotation := 0.0
+			var bloque := false
+
+			if not dedans:
+				# La ceinture : de l'herbe et des bosquets. Ils ferment
+				# l'horizon sans qu'on ait à poser un mur.
+				var t := graine.randf()
+				tuile = "grass" if t < 0.62 else ("grass-trees" if t < 0.88 else "grass-trees-tall")
+				bloque = t >= 0.62
+			elif colonne % 4 == 0 and ligne % 4 == 0:
+				tuile = "road-intersection"
+			elif colonne % 4 == 0:
+				# La tuile de route droite est orientée selon Z, donc selon
+				# l'axe Y du jeu : une avenue verticale se pose sans rotation.
+				tuile = "road-straight-lightposts" if ligne % 3 == 1 else "road-straight"
+			elif ligne % 4 == 0:
+				tuile = "road-straight-lightposts" if colonne % 3 == 1 else "road-straight"
+				rotation = PI * 0.5
+			else:
+				var t2 := graine.randf()
+				if t2 < 0.58:
+					tuile = String(IMMEUBLES[graine.randi_range(0, IMMEUBLES.size() - 1)])
+					rotation = PI * 0.5 * graine.randi_range(0, 3)
+					bloque = true
+				elif t2 < 0.88:
+					tuile = "pavement-fountain" if graine.randf() < 0.08 else "pavement"
+					bloque = tuile == "pavement-fountain"
+				else:
+					tuile = "grass-trees"
+					bloque = true
+
+			var centre := Vector2(colonne + 0.5, ligne + 0.5) * PAS
+			if bloque:
+				# Un peu plus petit que la tuile : on doit pouvoir raser un
+				# immeuble sans rester collé au trottoir.
+				var cote := PAS - 22.0
+				_batiments.append(Rect2(centre - Vector2(cote, cote) * 0.5, Vector2(cote, cote)))
+
+			if not nappes.has(tuile):
+				nappes[tuile] = []
+			# Les immeubles sont tassés en hauteur : à l'échelle du sol, le
+			# kit monte à vingt-cinq unités et on ne voit plus que des toits.
+			# Une ville écrasée se survole ; une ville haute se subit.
+			var elevation: float = TUILE * (0.5 if bloque and tuile.begins_with("building") else 1.0)
+			var base := Basis(Vector3.UP, rotation).scaled(Vector3(TUILE, elevation, TUILE))
+			nappes[tuile].append(Transform3D(base, Decor.vers3d(centre)))
+	return nappes
 
 func _dans_un_batiment(point: Vector2, marge: float = 0.0) -> bool:
 	for rect: Rect2 in _batiments:
@@ -169,8 +217,8 @@ func _degager(point: Vector2, rayon: float) -> Array:
 func _point_de_rue(autour: Vector2, rayon_min: float, rayon_max: float) -> Vector2:
 	for essai in 12:
 		var p: Vector2 = autour + Vector2.RIGHT.rotated(_rng.randf() * TAU) * _rng.randf_range(rayon_min, rayon_max)
-		p.x = clamp(p.x, -BANLIEUE * 0.5, etendue().x + BANLIEUE * 0.5)
-		p.y = clamp(p.y, -BANLIEUE * 0.5, etendue().y + BANLIEUE * 0.5)
+		p.x = clamp(p.x, -banlieue() * 0.5, etendue().x + banlieue() * 0.5)
+		p.y = clamp(p.y, -banlieue() * 0.5, etendue().y + banlieue() * 0.5)
 		if not _dans_un_batiment(p, 40.0):
 			return p
 	return autour + Vector2.RIGHT.rotated(_rng.randf() * TAU) * rayon_min
@@ -180,8 +228,7 @@ func _point_de_rue(autour: Vector2, rayon_min: float, rayon_max: float) -> Vecto
 func preparer() -> void:
 	Tactile.mode = Tactile.CONDUITE
 	_rng.randomize()
-	_batir_ville()
-	_planter_decor()
+	_planter_decor(_batir_ville())
 
 	# Départ réparti sur un cercle, dans la rue : quatre voitures au même
 	# endroit se poussent mutuellement dans un mur avant même le décompte.
@@ -201,49 +248,19 @@ func preparer() -> void:
 	monde().add_child(_camera)
 	_camera.make_current()
 
-func _planter_decor() -> void:
-	poser_ambiance()
-	var taille := etendue() + Vector2(BANLIEUE, BANLIEUE) * 2.0
-	var sol := Decor.sol(taille, 105.0, Color("#141312"), 2600.0)
-	sol.position = Decor.vers3d(centre_ville())
-	monde().add_child(sol)
+func _planter_decor(nappes: Dictionary) -> void:
+	poser_ambiance(true, 0.8)
 
-	for rect: Rect2 in _batiments:
-		_batir_immeuble(rect)
+	# Une nappe de fond, très sombre, sous la ville : elle rattrape ce que la
+	# caméra voit au-delà de la ceinture, là où il n'y a plus de tuiles.
+	var fond := Decor.sol(etendue() + Vector2(banlieue(), banlieue()) * 2.0, 140.0, Color("#101010"), 3000.0)
+	fond.position = Decor.vers3d(centre_ville(), -0.15)
+	monde().add_child(fond)
 
-func _batir_immeuble(rect: Rect2) -> void:
-	var graine := RandomNumberGenerator.new()
-	graine.seed = hash(rect.position)
-	var etages := graine.randi_range(2, 6)
-	var hauteur := 3.0 + etages * 2.2
-	var teinte := Palette.SURFACE.lightened(graine.randf_range(0.0, 0.07))
-
-	var corps := Decor.boite(
-		Vector3(rect.size.x * Decor.ECHELLE, hauteur, rect.size.y * Decor.ECHELLE), teinte)
-	corps.position = Decor.vers3d(rect.get_center(), hauteur * 0.5)
-	monde().add_child(corps)
-
-	# Un bandeau de toit : sans lui, un immeuble vu d'en haut n'est qu'un
-	# rectangle, et la ville se lit comme un damier plat.
-	var toit := Decor.boite(
-		Vector3(rect.size.x * Decor.ECHELLE + 0.6, 0.5, rect.size.y * Decor.ECHELLE + 0.6),
-		teinte.darkened(0.5))
-	toit.position = Decor.vers3d(rect.get_center(), hauteur + 0.25)
-	monde().add_child(toit)
-
-	# Quelques fenêtres allumées, sur une seule face : la ville doit avoir
-	# l'air habitée sans coûter quatre maillages par immeuble.
-	var nombre := graine.randi_range(1, 3)
-	for i in nombre:
-		var chaude := Palette.AVERTISSEMENT if graine.randf() < 0.7 else Palette.SERIE
-		var largeur_vitre: float = min(rect.size.x * Decor.ECHELLE * 0.42, 12.0)
-		var vitre := Decor.boite(Vector3(largeur_vitre, 0.7, 0.3), chaude)
-		vitre.material_override = Decor.matiere_lumineuse(chaude, 0.85)
-		vitre.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		vitre.position = Decor.vers3d(
-			rect.get_center() + Vector2(graine.randf_range(-1.0, 1.0) * rect.size.x * 0.2, rect.size.y * 0.5),
-			hauteur * graine.randf_range(0.25, 0.85))
-		monde().add_child(vitre)
+	for tuile in nappes:
+		var sans_ombre := String(tuile) in ["road-straight", "road-intersection", "pavement", "grass"]
+		monde().add_child(Decor.nappe(VILLE + String(tuile) + ".glb", nappes[tuile],
+			not sans_ombre, TEINTE_VILLE))
 
 func _batir_voiture(couleur: Color, pseudo: String) -> Node3D:
 	var racine := Node3D.new()
@@ -420,7 +437,7 @@ func _conduire(delta: float) -> void:
 ## Un mur invisible qui arrête net donne l'impression d'un défaut ; une
 ## inertie qui ramène se comprend sans explication.
 func _surveiller_la_friche(delta: float) -> void:
-	var limite := Rect2(-BANLIEUE, -BANLIEUE, etendue().x + BANLIEUE * 2.0, etendue().y + BANLIEUE * 2.0)
+	var limite := Rect2(-banlieue(), -banlieue(), etendue().x + banlieue() * 2.0, etendue().y + banlieue() * 2.0)
 	if limite.has_point(_position):
 		_hors_ville = max(0.0, _hors_ville - delta * 2.0)
 		return
