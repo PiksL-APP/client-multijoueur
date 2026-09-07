@@ -7,6 +7,7 @@ const ECRANS := {
 	"salon": "res://scenes/salon.gd",
 	"carnage": "res://jeux/carnage.gd",
 	"enigme": "res://jeux/enigme.gd",
+	"bousculade": "res://jeux/bousculade.gd",
 	"resultats": "res://scenes/resultats.gd",
 	"ferme": "res://scenes/ferme.gd",
 }

@@ -118,7 +118,7 @@ func demarrer() -> void:
 	_construire_hud()
 	preparer()
 
-	canal = Reseau.rejoindre("mj-jeu-%s-%s" % [jeu, code], {"pseudo": Session.pseudo, "id": Session.id})
+	canal = Reseau.rejoindre("mj-jeu-%s-%s" % [jeu, code], {"pseudo": Session.pseudo, "id": Session.id, "heros": Session.heros_affiche()})
 	canal.presences_changees.connect(_sur_presences)
 	canal.diffusion.connect(_sur_diffusion)
 
@@ -145,6 +145,8 @@ func _sur_presences(presences: Dictionary) -> void:
 			joueurs[cle] = {"pseudo": "?", "id": cle, "place": 0, "score": 0}
 		joueurs[cle]["pseudo"] = String(presences[cle].get("pseudo", "?"))
 		joueurs[cle]["id"] = String(presences[cle].get("id", joueurs[cle].get("id", cle)))
+		# Le héros choisi au village suit le joueur dans les jeux qui le montrent.
+		joueurs[cle]["heros"] = String(presences[cle].get("heros", ""))
 	for cle in joueurs:
 		var place := cles.find(cle)
 		if place >= 0:

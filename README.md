@@ -33,7 +33,8 @@ divergent jamais. `outils/voir.sh nom1,nom2` pose des modèles en ligne et les
 photographie, pour les juger sans lancer le jeu. Le socle (`scenes/ecran.gd`)
 porte `plan()` pour la 2D et `monde()` pour la 3D ; le hub, comme les jeux,
 vit dans `monde()`. Le pack *Pixel Crawler* (`modeles/village/`, écrit par
-`outils/village.py`) ne sert plus qu'aux portraits de l'écran d'accueil.
+`outils/village.py`) ne sert plus au rendu : l'écran d'accueil montre les
+pantins voxel eux-mêmes, dans trois petites fenêtres 3D.
 
 **2,5D.** La simulation se fait sur un plan — tout l'état réseau tient en
 `Vector2` — mais le rendu est en vraie 3D : caméra en perspective inclinée,
@@ -52,8 +53,9 @@ En ligne : **https://multijoueur.piks-l.com**
 
 | | |
 | --- | --- |
-| **Hub** | Un village en **voxels**, vu de trois quarts : on s'y croise, et on ENTRE dans les maisons. Une esplanade pavée adossée à une falaise, cinq maisons, un potager, une mare, la forêt autour, le jour qui tombe toutes les quinze minutes (même heure pour tous) et les feux qui s'allument. On choisit son héros à l'entrée (chevalier, voleur, mage), on se fait des signes (émotes 1-4), on ouvre son carnet (K : records, place au mur). La taverne, l'armurerie et l'auberge se visitent, avec leurs habitants qui parlent — et, pour les deux premières, le classement au mur et le portail qui lance la partie. Le champion d'un jeu porte une étoile devant son nom. |
+| **Hub** | Un village en **voxels**, vu de trois quarts : on s'y croise, et on ENTRE dans les maisons. Une esplanade pavée adossée à une falaise, cinq maisons, un potager, une mare, la forêt autour, le jour qui tombe toutes les quinze minutes (même heure pour tous) et les feux qui s'allument. On choisit son héros à l'entrée (chevalier, voleur, mage), on se fait des signes (émotes 1-4), on ouvre son carnet (K : records, place au mur). La taverne, l'armurerie et l'auberge se visitent, avec leurs habitants qui parlent, le classement au mur et le portail qui lance la partie (Carnage, Énigme, Bousculade). Des réverbères s'allument le soir. Le champion d'un jeu porte une étoile devant son nom. |
 | **CARNAGE** | Un GTA 2 à l'heure bleue. Une ville PROCÉDURALE de six cent quatre-vingts par cinq cent vingt tuiles — cent fois la précédente — tirée du code de la manche et générée À LA DEMANDE, morceau par morceau, autour de chaque joueur : un centre d'affaires neutre et ses tours, des quartiers de bureaux, des rues commerçantes à néons, la vieille ville, les cités, la banlieue pavillonnaire, la zone industrielle, le port, des parcs et des lacs. Trois gangs se partagent tout ça par secteurs aux frontières irrégulières. Les immeubles sont des boîtes dont un shader dessine les étages et allume les fenêtres ; le sol, les trottoirs, les passages piétons et l'eau sont un autre shader. Des dizaines de milliers de voitures dorment le long des rues et se volent toutes ; les taxis roulent au centre, les fourgons dans la zone. On conduit, on **descend** (E), on court, on tire. Les passants rapportent, les gangs plus, les flics encore plus — et tout cela fait monter les **étoiles de recherche**. Chaque secteur a son **garage** qui efface le casier, sa **cabine** qui donne des contrats, ses **repaires** tagués au sol, une **arène** une fois sur deux — le seul endroit où les joueurs peuvent se blesser. Manche de 4 minutes, radar centré sur soi en haut à droite. |
+| **BOUSCULADE** | Une île en voxels qui flotte dans le vide, quatre joueurs qui se poussent. Z Q S D pour courir, **ESPACE** pour charger : un coup d'épaule qui envoie l'autre valser. L'île s'effrite par le bord, anneau après anneau, jusqu'à un disque de trois unités. Tombé ? Repêché au centre trois secondes plus tard — mais celui qui vous a poussé a marqué cent points ; deux points par seconde debout. Chacun simule son propre pantin (pas, charge, poussée reçue, chute) ; l'hôte compte les points. Manche de 90 secondes, portail à l'auberge. |
 | **ÉNIGME** | Coopératif, trois chambres. Une dalle ne reste enfoncée que si quelqu'un — ou une caisse — pèse dessus, et la sortie d'une chambre n'accepte l'équipe qu'au complet. 3 minutes. |
 
 ### CARNAGE, dans le détail

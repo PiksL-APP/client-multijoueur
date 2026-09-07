@@ -161,8 +161,15 @@ d'unité, les arbres et le terrain en 1/4 ou 1/2 : le grain reste lisible et
 les fichiers petits (un grain de couleur se limite à trois teintes, sinon le
 maillage glouton ne fusionne plus rien). Les collisions du hub ne se codent
 pas à la main : elles viennent de `plan.json`. Le pack *Pixel Crawler*
-(`modeles/village/`, `outils/village.py`) ne sert plus qu'aux portraits de
-l'accueil.
+(`modeles/village/`, `outils/village.py`) ne sert plus qu'à `Pixels.heros_de`
+(le héros par défaut d'un identifiant) — les portraits de l'accueil sont des
+fenêtres 3D sur les pantins. Un nouveau jeu, c'est : `jeux/<nom>.gd` héritant
+de `Partie`, une entrée dans `ECRANS` (racine), un portail dans une pièce
+du hub (`voxel.py` : `porte_portail` + `scores`, `hub.gd` : `LIEUX`), et la
+liste des jeux connus en base — contrainte `jeu_parties_jeu_check` et
+fonction `jeu_deposer_partie` — étendue par une migration dans
+`supabase/migrations/` ET appliquée au projet, sinon le dépôt est refusé sans
+un bruit côté client.
 
 **Une seule exception**, et elle est délibérée : `modeles/volvo-242.glb`, la
 carrosserie du jeu Carnage. Un vrai modèle apporte ce qu'aucune boîte ne
@@ -185,9 +192,10 @@ automatique cesse alors de couvrir ce jeu.
    ⚠ L'import ne compile pas tout : les erreurs d'inférence de type
    n'apparaissent qu'à l'exécution. Les bancs ci-dessous les révèlent.
 2. Les bancs, en deux instances chacune, avec des `HOME` distincts :
-   `--banc` (présence et diffusion) puis `--banc-jeu=carnage` ET
-   `--banc-jeu=enigme` (`--manche=30`, manche complète jusqu'au dépôt du
-   score). Les DEUX jeux, même quand on n'a touché qu'à l'autre : un membre
+   `--banc` (présence et diffusion) puis `--banc-jeu=carnage`,
+   `--banc-jeu=enigme` ET `--banc-jeu=bousculade` (`--manche=30`, manche
+   complète jusqu'au dépôt du score). TOUS les jeux, même quand on n'a
+   touché qu'à un seul : un membre
    ajouté au socle `Ecran` (`_plan`) a rendu l'Énigme impossible à charger
    pendant une journée parce que seul Carnage était passé au banc.
 3. `--photo=<dossier>` sous `xvfb-run` : une image toutes les cinq secondes.
