@@ -23,11 +23,22 @@ pixel, des jeux en volume — vaut mieux qu'un mélange qui trahirait les deux.
 Le socle (`scenes/ecran.gd`) sait porter l'un ou l'autre : `plan()` pour la 2D,
 `monde()` pour la 3D, jamais les deux dans le même écran.
 
-Le village et ses intérieurs sont **cuits hors moteur** : les découpes,
-l'assemblage des maisons (toit + mur + porte) et le sol du village sont
-produits par un script Python et entrent au dépôt en PNG. Assembler des
-tuiles de seize pixels à l'aveugle dans le moteur, image après image, aurait
-coûté dix fois le temps pour un résultat moins sûr.
+Le village et ses intérieurs sont **préparés hors moteur** par
+`outils/village.py`, qui lit le pack et écrit `modeles/village/*.png`. Règle
+du script : on ne découpe jamais un dessin. Chaque image est un sprite entier
+pris dans sa case de grille (un arbre = sa case de 48 × 96), une pièce entière
+de la maquette de taverne (murs compris, ramenée à l'échelle native — la
+maquette est livrée doublée), ou une planche d'animation recopiée telle quelle.
+Les maisons sont assemblées (un toit entier, un pan de mur entier, une porte
+entière), jamais rognées. Le même script dessine le **plan** du village sur
+une grille de cases de 16 — sol, objets, portes, cases bloquées — et la zone
+de marche de chaque pièce, et écrit le tout dans `modeles/village/plan.json` :
+ce qu'on voit et ce qui arrête le joueur sortent de la même source, donc ne
+divergent jamais (les calques de vérification sortent dans `/tmp/apercu`).
+Une seule échelle partout : la case fait 16 pixels,
+un personnage 30, et la caméra zoome d'un facteur entier ; les planches de
+personnages sont remises au même gabarit (cases de 64, pieds sur le bord bas)
+pour qu'un seul point d'ancrage serve à tous, sans agrandir personne.
 
 **2,5D.** La simulation se fait sur un plan — tout l'état réseau tient en
 `Vector2` — mais le rendu est en vraie 3D : caméra en perspective inclinée,
@@ -47,7 +58,7 @@ En ligne : **https://multijoueur.piks-l.com**
 | | |
 | --- | --- |
 | **Hub** | Un village en **pixel art vu de dessus** : on s'y croise, et on ENTRE dans les maisons. La taverne, l'armurerie et l'atelier ont chacune leur intérieur, son classement au mur, son habitant qui explique le jeu, et — pour deux d'entre elles — le portail au fond de la pièce. |
-| **CARNAGE** | Un GTA 2. Une ville de vingt-six par vingt tuiles, une rue tous les quatre pas, pas de mur : on est ramené vers le centre si on part dans la friche. On conduit, on **descend** (E), on court, on tire, on prend n'importe quelle voiture qui passe. Les passants rapportent, les gangs rapportent plus, les flics encore plus — et tout cela fait monter les **étoiles de recherche**. Trois gangs tiennent leurs rues et se souviennent ; trois **garages** effacent le casier et réparent la tôle ; trois **cabines** donnent des contrats chronométrés ; deux **arènes** cerclées de rouge sont les seuls endroits où les joueurs peuvent se blesser. Manche de 4 minutes. |
+| **CARNAGE** | Un GTA 2. Une ville PROCÉDURALE de quarante-huit par trente-six tuiles, tirée du code de la manche : un centre d'affaires neutre et ses tours, et autour trois territoires qui ne se ressemblent pas — la zone industrielle des Braises, les rues commerçantes de La Fonte, la banlieue pavillonnaire du Lierre — plus des parcs. Quatre kits Kenney (CC0) : trois cents voitures dorment le long des rues et se volent toutes, les taxis roulent au centre, les fourgons dans la zone. On conduit, on **descend** (E), on court, on tire. Les passants rapportent, les gangs plus, les flics encore plus — et tout cela fait monter les **étoiles de recherche**. Chaque gang a ses **repaires** tagués au sol, un **garage** qui efface le casier, une **cabine** qui donne des contrats ; deux **arènes** sur les frontières sont les seuls endroits où les joueurs peuvent se blesser. Manche de 4 minutes, plan de la ville en haut à droite. |
 | **ÉNIGME** | Coopératif, trois chambres. Une dalle ne reste enfoncée que si quelqu'un — ou une caisse — pèse dessus, et la sortie d'une chambre n'accepte l'équipe qu'au complet. 3 minutes. |
 
 ### CARNAGE, dans le détail
@@ -90,6 +101,23 @@ contestées par construction. Le tir ami n'existe QUE là, et seulement si le
 coup part de l'arène ET y arrive : un tireur posté dehors nettoierait
 l'esplanade sans jamais y entrer. Partout ailleurs, les joueurs ne peuvent pas
 se blesser et jouent la ville ensemble.
+
+**La ville se génère par quartiers.** Le plan divise la ville en pâtés de
+trois par trois ; chaque pâté reçoit un territoire (le fief de gang le plus
+proche, avec du bruit pour que la frontière ne soit pas une droite) et un type
+de quartier — celui du gang, sauf le premier anneau autour du centre qui reste
+commerçant, et un pâté sur onze qui devient un parc. Chaque type pioche dans
+son kit : tours et immeubles de commerce, entrepôts, citernes et conteneurs,
+pavillons et arbres. Le sol prend une pointe de la couleur du territoire (une
+couleur PAR INSTANCE dans les nappes, pas une teinte par nappe), et une
+bannière nomme le quartier quand on en change.
+
+**Trois cents voitures dorment le long des rues.** Le plan les place (une tuile
+de pâté qui borde une rue a une chance sur trois d'en avoir une, selon le
+quartier) ; l'hôte leur donne un identifiant et un point de vie au coup
+d'envoi. Elles ne sont ni simulées ni diffusées tant que personne n'est à
+portée — et on ne les DESSINE qu'à mille pixels : à seize cents, un navigateur
+en mode compatibilité tombait à dix images par seconde.
 
 **Le plan, en haut à droite.** La ville fait vingt-six par vingt tuiles et la
 caméra n'en montre que trois. Sans plan, on ne retrouve ni le garage quand on
@@ -271,7 +299,16 @@ cassent le chargement de ressources tierces. Pour de la 2D, on n'y perd rien.
 - Sur téléphone, un manche virtuel et un bouton apparaissent — et n'apparaissent
   que là : un pavé tactile affiché à quelqu'un qui a un clavier passe pour un
   défaut. `--tactile` les force, pour pouvoir les vérifier au banc.
-- Deux ressources binaires au dépôt, et pas une de plus : `modeles/volvo-242.glb`
+- Les ressources binaires du dépôt sont des kits Kenney, CC0, un dossier par
+  kit avec sa licence et son atlas `Textures/colormap.png` (⚠ les glTF de
+  Kenney référencent l'atlas en fichier EXTERNE : copier les seuls maillages
+  donne un kit entièrement blanc, sans message d'erreur) : `modeles/ville/`
+  (tuiles), `modeles/voitures/` (dix carrosseries), `modeles/commerce/`,
+  `modeles/industrie/`, `modeles/banlieue/` (les immeubles des quartiers),
+  `modeles/personnages/`, `modeles/creatures/`, plus `modeles/volvo-242.glb`
+  et le village pixel art du hub. L'ancienne règle « presque rien de binaire »
+  a cédé le jour où la ville a dû ne plus se ressembler d'un quartier à
+  l'autre. Historique : `modeles/volvo-242.glb`
   (décimée de 44 000 à 5 900 triangles depuis un STL de modélisme) et
   `modeles/ville/` — le [kit de ville de Kenney](https://github.com/KenneyNL/Starter-Kit-City-Builder),
   CC0, quinze tuiles pour 412 Ko — **avec `modeles/ville/Textures/colormap.png`** :

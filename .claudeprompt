@@ -87,6 +87,18 @@ Ajouter un jeu impose de compléter la contrainte `check (jeu in (...))` sur
 `jeu_parties` **et** le plafond de vraisemblance dans `jeu_deposer_partie`.
 Un plafond oublié, c'est un classement à sept chiffres au premier curieux.
 
+## Les kits, et leurs échelles
+
+Carnage pose quatre kits Kenney (CC0), un dossier par kit sous `modeles/`, avec
+sa licence et son `Textures/colormap.png`. ⚠ Les kits n'ont PAS la même unité :
+le kit de ville fait une tuile par unité, les immeubles de commerce ~1,3 de
+côté, les pavillons jusqu'à 1,8, les voitures 2,55 de long contre 4,5 pour la
+Volvo. Les échelles vivent dans `PlanVille.KITS` et
+`FormesCarnage.ECHELLE_VOITURE` ; un modèle ajouté se mesure d'abord (les
+accesseurs `min`/`max` du JSON du glb) avant d'être posé. ⚠ Le kit de voitures
+regarde vers +Z, le jeu roule vers +X : la correction est sur un pivot
+intermédiaire (`ROTATION_KIT`), jamais sur la racine.
+
 ## Presque rien de binaire au dépôt
 
 Ni image, ni son : les volumes se fabriquent par `commun/decor.gd`, les
@@ -98,7 +110,14 @@ Le **hub** fait exception à la 2,5D : il est en pixel art 2D (pack *Pixel
 Crawler*, dessiné en vue de dessus). Un écran choisit `plan()` ou `monde()`,
 jamais les deux. Les sprites se posent sur un pixel entier (`Pixels.poser`) et
 se filtrent au plus proche voisin — interpolés, ils bavent ; à mi-pixel, ils
-scintillent dès qu'on bouge.
+scintillent dès qu'on bouge. Les images du hub sortent de `outils/village.py`
+et de lui seul : jamais de découpe dans un dessin (une case entière de la
+grille de l'auteur, une pièce entière de la maquette, une planche entière),
+jamais de sprite agrandi ou réduit, un zoom de caméra entier. Un personnage
+fait trente pixels partout, dehors comme dedans. Les collisions du hub ne se
+codent pas à la main dans le moteur : elles viennent de `plan.json`, écrit par
+le même script que les images (grille de cases, `#` bloque). Pour changer le
+village, on change le plan et on relance le script.
 
 **Une seule exception**, et elle est délibérée : `modeles/volvo-242.glb`, la
 carrosserie du jeu Carnage. Un vrai modèle apporte ce qu'aucune boîte ne

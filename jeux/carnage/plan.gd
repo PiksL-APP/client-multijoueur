@@ -61,7 +61,7 @@ const TEINTE_VILLE := Color(0.82, 0.85, 0.92)
 ## tour de cinq unités et demie monterait à cinquante-cinq — plus haut que la
 ## caméra. Une ville écrasée se survole ; une ville haute se subit.
 const KITS := {
-	COMMERCE: {"dossier": COMMERCE_KIT, "xz": 10.0, "y": 0.5,
+	COMMERCE: {"dossier": COMMERCE_KIT, "xz": 10.0, "y": 0.45,
 		"immeubles": ["building-a", "building-b", "building-c", "building-d", "building-f",
 			"building-g", "building-h", "building-i", "building-l", "building-m"],
 		"tours": ["building-skyscraper-a", "building-skyscraper-c",
@@ -381,7 +381,7 @@ func _tuile_de_pate(colonne: int, ligne: int, pate: Vector2i) -> void:
 				var tour := quartier == CENTRE and _graine.randf() < 0.42
 				var liste: Array = fiche["tours"] if tour else fiche["immeubles"]
 				_batiment(COMMERCE, String(liste[_graine.randi_range(0, liste.size() - 1)]),
-					centre_tuile(colonne, ligne), rotation, 0.4 if tour else -1.0)
+					centre_tuile(colonne, ligne), rotation, 0.32 if tour else -1.0)
 				_marquer(colonne, ligne)
 			elif t < 0.76:
 				_tuile_ville("pavement-fountain", colonne, ligne, 0.0, sol)

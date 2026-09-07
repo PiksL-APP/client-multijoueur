@@ -54,7 +54,10 @@ const CADENCE_INSTANTANE := 1.0 / 8.0
 # Caméra presque à la verticale : en ville, une inclinaison basse met un
 # immeuble entre l'œil et la voiture toutes les trois secondes. À pied on se
 # rapproche, sinon le personnage fait quatre pixels.
-const INCLINAISON := 70.0
+## ⚠ 76°, pas 70 : avec les tours du centre, à 70° une tour au sud du joueur le
+## cachait entièrement (la ligne de visée passe à dix-neuf unités au-dessus du
+## sol à une demi-tuile, la tour en fait dix-sept). GTA 2 se joue de dessus.
+const INCLINAISON := 76.0
 const DISTANCE_AUTO := 58.0
 const DISTANCE_PIED := 36.0
 
