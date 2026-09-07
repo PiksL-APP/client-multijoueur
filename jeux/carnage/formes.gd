@@ -18,6 +18,63 @@ const MODELES_ARMES := {
 const MUR_BAS := "res://modeles/creatures/wall-low.glb"
 const MUR_HAUT := "res://modeles/creatures/wall-high.glb"
 
+## Le parc automobile : le kit de voitures de Kenney (CC0). L'indice est ce qui
+## circule sur le réseau — un joueur qui vole un taxi doit être vu dans un
+## taxi par les trois autres, pas dans une berline générique.
+const VOITURES := "res://modeles/voitures/"
+const MODELES_VOITURES := ["sedan", "sedan-sports", "hatchback-sports", "suv", "suv-luxury",
+	"taxi", "van", "delivery", "truck", "police"]
+const MODELE_POLICE := 9
+## Ce que chaque quartier gare et fait rouler. Le centre roule en taxi, la zone
+## industrielle en fourgon, la banlieue en break : c'est ce qui fait qu'on sait
+## où l'on est en regardant ce qui passe.
+const VOITURES_PAR_QUARTIER := {
+	PlanVille.CENTRE: [0, 1, 4, 5, 5, 5, 1],
+	PlanVille.COMMERCE: [0, 0, 1, 4, 5, 6, 2],
+	PlanVille.INDUSTRIE: [6, 6, 7, 7, 8, 8, 3],
+	PlanVille.BANLIEUE: [0, 0, 3, 3, 2, 6, 4],
+	PlanVille.PARC: [0, 2, 3],
+}
+## Le kit de Kenney fait ses berlines en 2,55 unités de long ; la Volvo du
+## joueur en fait 4,5. Sans cette mise à l'échelle, on volerait des voitures
+## deux fois plus petites que la sienne.
+const ECHELLE_VOITURE := 1.75
+## ⚠ Le kit regarde vers +Z ; le jeu roule vers +X. Un pivot intermédiaire
+## porte la correction, et lui seul : la corriger sur la racine casserait le
+## halo et la jauge, qui ne doivent pas tourner avec.
+const ROTATION_KIT := PI * 0.5
+
+## Une nappe d'instances d'un même modèle, avec UNE COULEUR PAR INSTANCE.
+##
+## `Decor.nappe` teinte toute la nappe d'un bloc. Ici il faut que chaque tuile
+## porte la pointe de couleur de son territoire — c'est ce qui rend une
+## frontière de gang lisible au sol sans planter un panneau. Le multi-maillage
+## passe la couleur d'instance au shader, et `vertex_color_use_as_albedo` la
+## MULTIPLIE avec l'atlas du kit. Sans ce drapeau, la couleur est simplement
+## ignorée, sans message.
+static func nappe(chemin: String, transformations: Array, couleurs: Array,
+		ombre: bool, teinte: Color = Color.WHITE) -> MultiMeshInstance3D:
+	var multi := MultiMesh.new()
+	multi.transform_format = MultiMesh.TRANSFORM_3D
+	multi.use_colors = true
+	multi.mesh = Decor.maillage(chemin)
+	multi.instance_count = transformations.size()
+	for i in transformations.size():
+		multi.set_instance_transform(i, transformations[i])
+		multi.set_instance_color(i, couleurs[i] if i < couleurs.size() else Color.WHITE)
+	var noeud := MultiMeshInstance3D.new()
+	noeud.multimesh = multi
+	var origine := multi.mesh.surface_get_material(0)
+	if origine is BaseMaterial3D:
+		var copie := (origine as BaseMaterial3D).duplicate() as BaseMaterial3D
+		copie.albedo_color = teinte
+		copie.roughness = 0.85
+		copie.vertex_color_use_as_albedo = true
+		noeud.material_override = copie
+	noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if ombre \
+		else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return noeud
+
 # ------------------------------------------------------------ véhicules
 
 ## Une voiture. `halo` marque celles que quelqu'un conduit — sans lui, dans
@@ -100,6 +157,78 @@ static func voiture(couleur: Color, pseudo: String = "", halo: bool = true,
 		nom.name = "Nom"
 		nom.position = Vector3(0, 4.2, 0)
 		racine.add_child(nom)
+	return racine
+
+## Une voiture du kit de Kenney. `halo` et `pseudo` la marquent comme conduite
+## par un joueur ; `couleur` à blanc garde la peinture d'usine (un taxi reste
+## jaune), sinon la teinte descend sur toute la carrosserie — c'est ainsi que
+## les voitures d'un gang portent ses couleurs.
+static func voiture_kit(indice: int, couleur: Color = Color.WHITE, halo_couleur: Color = Color.WHITE,
+		pseudo: String = "", halo: bool = false) -> Node3D:
+	var racine := Node3D.new()
+	var nom := String(MODELES_VOITURES[clamp(indice, 0, MODELES_VOITURES.size() - 1)])
+
+	if halo:
+		var anneau := Decor.anneau(2.7, 0.22, halo_couleur, 0.95)
+		anneau.rotation_degrees = Vector3(90, 0, 0)
+		anneau.position = Vector3(0, 0.04, 0)
+		anneau.name = "Halo"
+		racine.add_child(anneau)
+
+	var pivot := Node3D.new()
+	pivot.name = "Coque"
+	pivot.rotation.y = ROTATION_KIT
+	var corps := Decor.instance(VOITURES + nom + ".glb", couleur, 0.45)
+	corps.scale = Vector3.ONE * ECHELLE_VOITURE
+	pivot.add_child(corps)
+	racine.add_child(pivot)
+
+	if indice == MODELE_POLICE:
+		var rampe := Node3D.new()
+		rampe.name = "Gyrophare"
+		for cote in [-1.0, 1.0]:
+			var feu := Decor.boite(Vector3(0.5, 0.3, 0.55), Palette.SERIE, false)
+			feu.material_override = Decor.matiere_lumineuse(Palette.SERIE, 1.5)
+			feu.position = Vector3(-0.2, 2.6, cote * 0.5)
+			rampe.add_child(feu)
+		racine.add_child(rampe)
+
+	var pare_buffle := Decor.boite(Vector3(0.3, 0.85, 2.2), Palette.SERIE)
+	pare_buffle.material_override = Decor.matiere_lumineuse(Palette.SERIE, 1.1)
+	pare_buffle.position = Vector3(2.6, 0.75, 0)
+	pare_buffle.name = "Buffle"
+	pare_buffle.visible = false
+	racine.add_child(pare_buffle)
+
+	var jauge := Decor.barre(3.4)
+	jauge.name = "Vie"
+	jauge.position = Vector3(0, 3.1, 0)
+	racine.add_child(jauge)
+
+	if pseudo != "":
+		var nom_j := Decor.etiquette(pseudo, Palette.ENCRE_DOUCE, 32)
+		nom_j.name = "Nom"
+		nom_j.position = Vector3(0, 4.4, 0)
+		racine.add_child(nom_j)
+	return racine
+
+## Le tag d'un repaire : la couleur du gang peinte au sol, son initiale, et une
+## couronne. C'est le repère qu'on voit de loin — et ce qu'on vise quand on
+## vient nettoyer.
+static func tag_de_gang(couleur: Color, nom: String) -> Node3D:
+	var racine := Node3D.new()
+	var dalle := Decor.cylindre(PlanVille.RAYON_REPAIRE * Decor.ECHELLE * 0.5, 0.08, couleur, false)
+	dalle.material_override = Decor.matiere_lumineuse(couleur, 0.55, 0.35)
+	dalle.position = Vector3(0, 0.06, 0)
+	racine.add_child(dalle)
+	racine.add_child(racine_anneau(PlanVille.RAYON_REPAIRE * Decor.ECHELLE, couleur, 0.14))
+	var initiale := Decor.etiquette(nom.substr(0, 1).to_upper() if nom.length() > 0 else "?", couleur, 96)
+	initiale.rotation_degrees = Vector3(-90, 0, 0)
+	initiale.position = Vector3(0, 0.12, 0)
+	racine.add_child(initiale)
+	var mot := Decor.etiquette("REPAIRE — " + nom.to_upper(), couleur, 30)
+	mot.position = Vector3(0, 3.6, 0)
+	racine.add_child(mot)
 	return racine
 
 ## Une épave : la même coque, éteinte, penchée, avec de la fumée. Elle reste au

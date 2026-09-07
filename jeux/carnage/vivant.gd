@@ -24,10 +24,11 @@ extends RefCounted
 enum { PIETON, GANG, FLIC }                        ## `genre` d'un passant
 enum { CIVILE, PATROUILLE, VOITURE_GANG, EPAVE }   ## `genre` d'un véhicule
 
-const GENS_MAX := 46
-const AUTOS_MAX := 18
+const GENS_MAX := 90
+const AUTOS_MOBILES_MAX := 26   ## celles qui roulent ; les garées ne comptent pas
+const PAR_REPAIRE := 5          ## gars qui traînent à un repaire
 const CAISSES_MAX := 8
-const PORTEE_VUE := 1500.0        ## au-delà, on ne diffuse plus : personne ne regarde
+const PORTEE_VUE := 1600.0        ## au-delà, on ne diffuse plus : personne ne regarde
 
 ## Une population qui naît trop loin ne menace jamais personne ; trop près,
 ## elle apparaît sous le capot. Entre les deux, on la voit arriver.
@@ -201,20 +202,22 @@ func _peupler(delta: float, _temps: float, joueurs: Dictionary) -> void:
 		return
 	if not _amorce:
 		_amorce = true
-		for i in 16:
+		_garer_la_ville()
+		for i in 28:
 			_naitre_passant(joueurs, true)
-		for i in 8:
+		for i in 12:
 			_naitre_auto(joueurs, CIVILE, "")
-		for i in 4:
+		for i in 6:
 			_poser_caisse(joueurs)
 
 	_depuis_gens += delta
-	if _depuis_gens >= 0.55 and gens.size() < GENS_MAX:
+	if _depuis_gens >= 0.32 and gens.size() < GENS_MAX:
 		_depuis_gens = 0.0
 		_naitre_passant(joueurs, false)
+		_peupler_les_repaires(joueurs)
 
 	_depuis_autos += delta
-	if _depuis_autos >= 2.2 and _nombre_de(CIVILE) + _nombre_de(VOITURE_GANG) < 11:
+	if _depuis_autos >= 1.4 and _mobiles() < AUTOS_MOBILES_MAX:
 		_depuis_autos = 0.0
 		_naitre_auto(joueurs, CIVILE, "")
 
@@ -222,6 +225,64 @@ func _peupler(delta: float, _temps: float, joueurs: Dictionary) -> void:
 	if _depuis_caisse >= 7.0 and caisses.size() < CAISSES_MAX:
 		_depuis_caisse = 0.0
 		_poser_caisse(joueurs)
+
+## Les voitures qui dorment le long des rues. Toutes d'un coup, au coup
+## d'envoi : c'est le plan qui dit où, l'hôte ne fait que leur donner un
+## identifiant et un point de vie. Une ville où l'on ne trouve pas de voiture
+## à voler à vingt mètres n'est pas un GTA.
+func _garer_la_ville() -> void:
+	for place in plan.stationnements:
+		var quartier := int(place["quartier"])
+		var gang := int(place["territoire"])
+		var genre := CIVILE
+		var modele := _modele_pour(quartier)
+		# Près d'un repaire, les voitures sont celles du gang. Ailleurs sur son
+		# territoire, une sur sept porte ses couleurs.
+		var au_repaire := false
+		for r in plan.repaires:
+			if Vector2(r["p"]).distance_to(place["p"]) <= PlanVille.RAYON_REPAIRE:
+				au_repaire = true
+		if gang >= 0 and (au_repaire or _rng.randf() < 0.14):
+			genre = VOITURE_GANG
+			modele = 1 if _rng.randf() < 0.5 else 4
+		autos.append({
+			"id": _id(), "p": place["p"], "a": float(place["a"]),
+			"d": Vector2.RIGHT.rotated(float(place["a"])), "vitesse": 0.0,
+			"genre": genre, "gang": gang, "pv": PV_AUTO, "pilote": "", "cible": "",
+			"minuterie": 0.0, "recharge": 0.0, "modele": modele, "garee": true,
+		})
+
+func _modele_pour(quartier: int) -> int:
+	var liste: Array = FormesCarnage.VOITURES_PAR_QUARTIER.get(quartier, [0])
+	return int(liste[_rng.randi_range(0, liste.size() - 1)])
+
+## Les gars d'un repaire. Ils traînent autour de leur tag et y reviennent :
+## c'est le seul endroit de la ville où l'on est sûr de trouver un gang au
+## complet — donc où l'on va quand un contrat demande de nettoyer.
+func _peupler_les_repaires(joueurs: Dictionary) -> void:
+	for r in plan.repaires:
+		if not _regarde(r["p"], joueurs):
+			continue
+		var presents := 0
+		for personne in gens:
+			if personne.has("attache") and Vector2(personne["attache"]) == Vector2(r["p"]):
+				presents += 1
+		if presents >= PAR_REPAIRE or gens.size() >= GENS_MAX:
+			continue
+		var p := plan.point_de_rue(_rng, r["p"], 30.0, PlanVille.RAYON_REPAIRE * 0.8)
+		gens.append({
+			"id": _id(), "p": p, "d": Vector2.RIGHT.rotated(_rng.randf() * TAU),
+			"genre": GANG, "gang": int(r["gang"]), "pv": PV_GANG,
+			"etat": 0, "minuterie": _rng.randf_range(0.5, 2.0), "recharge": 0.0, "a": 0.0,
+			"attache": r["p"],
+		})
+
+func _mobiles() -> int:
+	var total := 0
+	for a in autos:
+		if not bool(a.get("garee", false)) and int(a["genre"]) != EPAVE and String(a["pilote"]) == "":
+			total += 1
+	return total
 
 func _nombre_de(genre_cherche: int) -> int:
 	var total := 0
@@ -244,8 +305,14 @@ func _naitre_passant(joueurs: Dictionary, large: bool) -> void:
 	# passant sur trois en porte les couleurs. C'est ce qui fait qu'une bande
 	# de ville a une identité sans qu'on ait à la nommer.
 	var gang := plan.territoire(p)
+	var quartier := plan.quartier(p)
+	# La zone industrielle est vide le soir ; le centre et les parcs sont
+	# pleins. Sans cette différence, tous les quartiers ont la même foule et le
+	# décor ne raconte plus rien.
+	if quartier == PlanVille.INDUSTRIE and _rng.randf() < 0.55:
+		return
 	var genre := PIETON
-	if _rng.randf() < 0.34:
+	if gang >= 0 and _rng.randf() < 0.22:
 		genre = GANG
 	gens.append({
 		"id": _id(), "p": p, "d": Vector2.RIGHT.rotated(_rng.randf() * TAU),
@@ -264,12 +331,18 @@ func _naitre_auto(joueurs: Dictionary, genre: int, cible: String) -> void:
 	# Une berline sur quatre porte les couleurs du quartier : c'est ce qui fait
 	# qu'on hésite avant de tirer dans le tas sur le territoire d'un gang avec
 	# lequel on est en bons termes.
-	if genre == CIVILE and _rng.randf() < 0.25:
+	var gang := plan.territoire(pose["p"])
+	var modele := _modele_pour(plan.quartier(pose["p"]))
+	if genre == CIVILE and gang >= 0 and _rng.randf() < 0.18:
 		genre = VOITURE_GANG
+		modele = 1 if _rng.randf() < 0.5 else 4
+	if genre == PATROUILLE:
+		modele = FormesCarnage.MODELE_POLICE
 	autos.append({
 		"id": _id(), "p": pose["p"], "a": direction.angle(), "d": direction,
-		"vitesse": 0.0, "genre": genre, "gang": plan.territoire(pose["p"]),
+		"vitesse": 0.0, "genre": genre, "gang": gang,
 		"pv": PV_AUTO, "pilote": "", "cible": cible, "minuterie": 0.0, "recharge": 0.0,
+		"modele": modele, "garee": false,
 	})
 
 func _poser_caisse(joueurs: Dictionary) -> void:
@@ -340,6 +413,10 @@ func _animer_les_gens(delta: float, joueurs: Dictionary) -> void:
 			if float(personne["minuterie"]) <= 0.0:
 				personne["minuterie"] = _rng.randf_range(1.2, 4.0)
 				direction = Vector2.RIGHT.rotated(_rng.randf() * TAU)
+				# Un gars de repaire ne s'éloigne pas de son tag : parti trop
+				# loin, il rentre. Sans ça, les repaires se vident en une minute.
+				if personne.has("attache") and Vector2(personne["p"]).distance_to(personne["attache"]) > PlanVille.RAYON_REPAIRE * 0.8:
+					direction = (Vector2(personne["attache"]) - Vector2(personne["p"])).normalized()
 
 		var suivant: Vector2 = personne["p"] + direction * vitesse * delta
 		var degage := plan.degager(suivant, RAYON_PIETON)
@@ -395,6 +472,10 @@ func _animer_les_autos(delta: float, joueurs: Dictionary) -> void:
 			# Conduite par un joueur : c'est SON client qui la simule et la
 			# diffuse. L'hôte n'y touche plus, sinon la voiture se bat contre
 			# les touches de celui qui est dedans.
+			restantes.append(auto)
+			continue
+
+		if bool(auto.get("garee", false)):
 			restantes.append(auto)
 			continue
 
@@ -554,7 +635,8 @@ func _arbitrer_les_autos(joueurs: Dictionary) -> void:
 			emettre("deg", {"j": cle, "d": int(choc * 0.02), "k": "tole"})
 			# On se repousse : deux carrosseries qui s'interpénètrent finissent
 			# par se catapulter, et ça, ça se voit.
-			auto["p"] = Vector2(auto["p"]) + (Vector2(auto["p"]) - Vector2(j["p"])).normalized() * 26.0
+			auto["p"] = Vector2(auto["p"]) + (Vector2(auto["p"]) - Vector2(j["p"])).normalized() \
+				* (10.0 if bool(auto.get("garee", false)) else 26.0)
 			if float(auto["pv"]) <= 0.0:
 				detruire_auto(auto, String(cle))
 			break
@@ -796,22 +878,30 @@ func accorder_vehicule(cle: String, id: int, position: Vector2) -> void:
 	if Vector2(auto["p"]).distance_to(position) > 120.0:
 		return
 	auto["pilote"] = cle
+	auto["garee"] = false
 	if int(auto["genre"]) == PATROUILLE:
 		# Voler une voiture de police, ça se paie.
 		crime(cle, "pieton")
-	emettre("pris", {"j": cle, "id": id, "g": int(auto["genre"]),
+	elif int(auto["genre"]) == VOITURE_GANG:
+		# Voler la voiture d'un gang aussi — moins qu'un mort, plus qu'un rien.
+		_ajuster_respect(cle, int(auto.get("gang", 0)), RESPECT_PERDU * 0.4, 0.0)
+	emettre("pris", {"j": cle, "id": id, "g": int(auto["genre"]), "m": int(auto.get("modele", 0)),
 		"x": int(auto["p"].x), "y": int(auto["p"].y), "a": snapped(float(auto["a"]), 0.01),
 		"pv": int(auto["pv"])})
 
-func rendre_vehicule(cle: String, id: int, position: Vector2, angle: float, pv: float) -> void:
+func rendre_vehicule(cle: String, id: int, position: Vector2, angle: float, pv: float,
+		modele: int = -1, genre_rendu: int = CIVILE) -> void:
 	var auto := auto_par_id(id)
 	if auto.is_empty():
-		# L'hôte a changé en cours de route et ne connaît plus cette voiture :
-		# on la réinscrit plutôt que de la faire disparaître sous le joueur.
+		# L'hôte a changé en cours de route et ne connaît plus cette voiture —
+		# ou c'est la voiture de départ, qu'il découvre : on la réinscrit
+		# plutôt que de la faire disparaître sous le joueur.
 		autos.append({
 			"id": id, "p": position, "a": angle, "d": Vector2.RIGHT.rotated(angle),
-			"vitesse": 0.0, "genre": CIVILE, "gang": plan.territoire(position),
-			"pv": pv, "pilote": "", "cible": "", "minuterie": 0.0, "recharge": 0.0,
+			"vitesse": 0.0, "genre": EPAVE if pv <= 0.0 else genre_rendu,
+			"gang": plan.territoire(position),
+			"pv": pv, "pilote": "", "cible": "", "minuterie": 7.0 if pv <= 0.0 else 0.0,
+			"recharge": 0.0, "modele": modele, "garee": true,
 		})
 		return
 	if String(auto["pilote"]) != cle:
@@ -822,6 +912,10 @@ func rendre_vehicule(cle: String, id: int, position: Vector2, angle: float, pv: 
 	auto["d"] = Vector2.RIGHT.rotated(angle)
 	auto["pv"] = pv
 	auto["vitesse"] = 0.0
+	# Abandonnée, elle reste là où on l'a laissée : une voiture qu'on quitte et
+	# qui repart toute seule dans la circulation, c'est une voiture qu'on ne
+	# retrouve jamais.
+	auto["garee"] = true
 	# Rendue en morceaux : elle finit sa vie en carcasse. La remettre en
 	# circulation avec zéro point de tôle donnerait une voiture qui explose au
 	# premier trottoir sans que personne comprenne pourquoi.
@@ -862,7 +956,8 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 		if String(auto["pilote"]) != "" or not _regarde(auto["p"], joueurs):
 			continue
 		vus_autos.append([int(auto["id"]), int(auto["p"].x), int(auto["p"].y),
-			int(float(auto["a"]) * 100.0), int(auto["genre"]), int(auto["pv"])])
+			int(float(auto["a"]) * 100.0), int(auto["genre"]), int(auto["pv"]),
+			int(auto.get("modele", 0)), 1 if bool(auto.get("garee", false)) else 0])
 
 	var vues_caisses: Array = []
 	for c in caisses:
@@ -908,6 +1003,10 @@ func reprendre_la_main() -> void:
 			auto["pilote"] = ""
 		if not auto.has("minuterie"):
 			auto["minuterie"] = 0.0
+		if not auto.has("modele"):
+			auto["modele"] = 0
+		if not auto.has("garee"):
+			auto["garee"] = false
 		_prochain_id = max(_prochain_id, int(auto["id"]) + 1)
 	for c in caisses:
 		_prochain_id = max(_prochain_id, int(c["id"]) + 1)
@@ -931,6 +1030,9 @@ func appliquer_instantane(charge: Dictionary) -> void:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
 			"cible_p": Vector2(float(entree[1]), float(entree[2])),
 			"a": float(entree[3]) / 100.0, "genre": int(entree[4]), "pv": float(entree[5]),
+			"modele": int(entree[6]) if entree.size() > 6 else 0,
+			"garee": (int(entree[7]) == 1) if entree.size() > 7 else false,
+			"gang": plan.territoire(Vector2(float(entree[1]), float(entree[2]))),
 			"d": Vector2.RIGHT, "vitesse": 0.0, "pilote": "", "cible": "", "minuterie": 0.0})
 	caisses = _fusionner(caisses, charge.get("c", []), func(entree: Array) -> Dictionary:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
@@ -972,7 +1074,7 @@ func _fusionner(existants: Array, recus, fabrique: Callable) -> Array:
 			# On garde le nœud 3D et on ne déplace que la CIBLE : la position
 			# affichée glisse vers elle image par image, sinon un instantané
 			# à huit par seconde donne une ville qui saute.
-			for champ in ["genre", "gang", "pv", "a", "arme"]:
+			for champ in ["genre", "gang", "pv", "a", "arme", "garee"]:
 				if neuf.has(champ):
 					objet[champ] = neuf[champ]
 			objet["cible"] = neuf["p"]

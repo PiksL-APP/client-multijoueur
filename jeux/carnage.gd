@@ -55,7 +55,7 @@ const CADENCE_INSTANTANE := 1.0 / 8.0
 # immeuble entre l'œil et la voiture toutes les trois secondes. À pied on se
 # rapproche, sinon le personnage fait quatre pixels.
 const INCLINAISON := 70.0
-const DISTANCE_AUTO := 54.0
+const DISTANCE_AUTO := 58.0
 const DISTANCE_PIED := 36.0
 
 const RETOUR := 260.0              ## rappel vers le centre au-delà de la friche
@@ -98,6 +98,7 @@ var _vitesse := 0.0
 var _pied := false
 var _vehicule := 0
 var _genre_vehicule: int = VilleVivante.CIVILE
+var _modele_vehicule := -1        ## -1 : la Volvo de départ ; sinon un indice du kit
 var _pv_vehicule := PV_VOITURE
 var _vie := VIE_MAX
 var _sonne := 0.0
@@ -116,6 +117,10 @@ var _contrat: Dictionary = {}
 var _depuis_sirene := 0.0
 var _hud_contrat: Label
 var _radar: Control
+var _hud_banniere: Label
+var _banniere_reste := 0.0
+var _territoire_vu := -99
+var _quartier_vu := -99
 
 var _autres: Dictionary = {}       ## cle -> état distant + nœuds 3D
 var _projectiles: Array = []
@@ -176,6 +181,15 @@ func preparer() -> void:
 	# Le contrat a sa propre ligne, au-dessus de celle du socle : glissé dans
 	# l'état du joueur, il se perdait au milieu de sept autres mentions alors
 	# qu'il décide de la minute qui vient.
+	# La bannière : le nom du quartier et de qui le tient, quand on y entre.
+	# Le sol change de teinte, mais une teinte ne se nomme pas toute seule.
+	_hud_banniere = UI.titre("", 24)
+	_hud_banniere.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_hud_banniere.offset_top = 52
+	_hud_banniere.offset_bottom = 88
+	_hud_banniere.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	interface().add_child(_hud_banniere)
+
 	_hud_contrat = UI.titre("", 20)
 	_hud_contrat.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	_hud_contrat.offset_left = 20
@@ -202,6 +216,22 @@ func preparer() -> void:
 	_camera.make_current()
 	Tactile.mode = Tactile.CONDUITE
 
+## La carrosserie qu'on conduit : la Volvo au départ, puis ce qu'on a volé. On
+## reconstruit le nœud plutôt que d'en garder dix cachés — une voiture volée
+## par manche, ça se compte sur les doigts.
+func _rebatir_ma_voiture() -> void:
+	if _corps_auto != null:
+		_corps_auto.queue_free()
+	_corps_auto = _batir_voiture_de(_modele_vehicule, _ma_couleur(), Session.pseudo)
+	monde().add_child(_corps_auto)
+
+func _batir_voiture_de(modele: int, couleur: Color, pseudo: String) -> Node3D:
+	if modele < 0:
+		return FormesCarnage.voiture(couleur, pseudo)
+	# Une voiture volée garde sa peinture ; c'est le halo qui dit à qui elle
+	# est. Une voiture de gang volée, elle, garde les couleurs du gang.
+	return FormesCarnage.voiture_kit(modele, Color.WHITE, couleur, pseudo, true)
+
 ## La couleur vient de la place à la TABLE, pas de la place dans la présence :
 ## celle-ci n'arrive qu'après le premier échange, et la voiture serait bleue
 ## pendant deux secondes chez tout le monde.
@@ -218,10 +248,21 @@ func _planter_decor() -> void:
 	fond.position = Decor.vers3d(carte.centre(), -0.15)
 	monde().add_child(fond)
 
-	for tuile in carte.nappes:
-		var sans_ombre := String(tuile) in ["road-straight", "road-intersection", "pavement", "grass"]
-		monde().add_child(Decor.nappe(PlanVille.VILLE + String(tuile) + ".glb",
-			carte.nappes[tuile], not sans_ombre, PlanVille.TEINTE_VILLE))
+	for chemin in carte.nappes:
+		var nom := String(chemin).get_file().get_basename()
+		# Le sol ne porte pas d'ombre : il n'a rien à projeter, et le calculer
+		# pour huit cents dalles coûte une passe d'ombre pour rien.
+		var sans_ombre := nom in ["road-straight", "road-intersection", "pavement", "grass",
+			"road-corner", "road-split"]
+		var nappe: Dictionary = carte.nappes[chemin]
+		monde().add_child(FormesCarnage.nappe(String(chemin), nappe["t"], nappe["c"],
+			not sans_ombre, PlanVille.TEINTE_VILLE))
+
+	for r in carte.repaires:
+		var tag := FormesCarnage.tag_de_gang(carte.couleur_du_gang(int(r["gang"])),
+			carte.nom_du_gang(int(r["gang"])))
+		tag.position = Decor.vers3d(r["p"])
+		monde().add_child(tag)
 
 	for centre_garage: Vector2 in carte.garages():
 		var dalle := FormesCarnage.dalle_garage()
@@ -278,7 +319,8 @@ func simuler_local(delta: float) -> void:
 			"x": int(_position.x), "y": int(_position.y),
 			"a": snapped(_angle, 0.01), "s": int(_vitesse), "h": int(_vie),
 			"e": 2 if _hors_service > 0.0 else (0 if _pied else 1),
-			"w": _vehicule, "vg": _genre_vehicule, "ep": 1 if _eperon > 0.0 else 0,
+			"w": _vehicule, "vg": _genre_vehicule, "vm": _modele_vehicule,
+			"ep": 1 if _eperon > 0.0 else 0,
 		})
 
 	if not est_hote():
@@ -383,17 +425,24 @@ func _basculer_portiere() -> void:
 	var pv := _pv_vehicule
 	_pied = true
 	_vitesse = 0.0
-	_position = descente
 	_vehicule = 0
 	Tactile.mode = Tactile.MARCHE
 	Sons.arreter_moteur()
-	canal.envoyer("sort", {"id": id_rendu, "x": int(descente.x), "y": int(descente.y),
-		"a": snapped(_angle, 0.01), "pv": int(pv), "g": _genre_vehicule})
+	var angle_rendu := _angle
+	var modele_rendu := _modele_vehicule
+	var genre_rendu := _genre_vehicule
+	canal.envoyer("sort", {"id": id_rendu, "x": int(_position.x), "y": int(_position.y),
+		"a": snapped(angle_rendu, 0.01), "pv": int(pv), "g": genre_rendu, "m": modele_rendu})
 	if est_hote():
-		ville.rendre_vehicule(Session.cle, id_rendu, descente, _angle, pv)
+		ville.rendre_vehicule(Session.cle, id_rendu, _position, angle_rendu, pv, modele_rendu, genre_rendu)
 		_vider_les_evenements()
+	_position = descente
+	_modele_vehicule = -1
 
-func _prendre_le_volant(id: int, genre: int, position: Vector2, angle: float, pv: float) -> void:
+func _prendre_le_volant(id: int, genre: int, position: Vector2, angle: float, pv: float,
+		modele: int = -1) -> void:
+	_modele_vehicule = modele
+	_rebatir_ma_voiture()
 	# Le banc raconte ce qu'il fait : sans cette ligne, un pilote qui ne
 	# remonterait jamais en voiture rendrait exactement le même journal qu'un
 	# pilote qui joue toute la manche au volant.
@@ -764,7 +813,8 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 			if est_hote():
 				ville.rendre_vehicule(String(charge.get("cle", "")), int(charge.get("id", 0)),
 					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
-					float(charge.get("a", 0.0)), float(charge.get("pv", PV_VOITURE)))
+					float(charge.get("a", 0.0)), float(charge.get("pv", PV_VOITURE)),
+					int(charge.get("m", -1)), int(charge.get("g", VilleVivante.CIVILE)))
 				_vider_les_evenements()
 		"cabine":
 			if est_hote():
@@ -790,7 +840,8 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 			if qui == Session.cle:
 				_prendre_le_volant(int(charge.get("id", 0)), int(charge.get("g", 0)),
 					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
-					float(charge.get("a", 0.0)), float(charge.get("pv", PV_VOITURE)))
+					float(charge.get("a", 0.0)), float(charge.get("pv", PV_VOITURE)),
+					int(charge.get("m", 0)))
 		"arme":
 			var beneficiaire := String(charge.get("j", ""))
 			if beneficiaire == Session.cle:
@@ -875,7 +926,7 @@ func _recevoir_joueur(charge: Dictionary) -> void:
 		pieton.visible = false
 		monde().add_child(pieton)
 		_autres[cle] = {"p": cible, "a": 0.0, "v": 0.0, "vie": VIE_MAX, "cible": cible,
-			"angle_cible": 0.0, "pied": false, "etat": 1, "eperon": false,
+			"angle_cible": 0.0, "pied": false, "etat": 1, "eperon": false, "modele": -1,
 			"genre": VilleVivante.CIVILE, "auto": auto, "pieton": pieton}
 	var a: Dictionary = _autres[cle]
 	a["cible"] = cible
@@ -886,6 +937,17 @@ func _recevoir_joueur(charge: Dictionary) -> void:
 	a["pied"] = int(charge.get("e", 1)) == 0
 	a["genre"] = int(charge.get("vg", VilleVivante.CIVILE))
 	a["eperon"] = int(charge.get("ep", 0)) == 1
+	var modele := int(charge.get("vm", -1))
+	if modele != int(a.get("modele", -1)):
+		# Il a changé de voiture : on rebâtit la sienne. Le nœud d'avant part.
+		a["modele"] = modele
+		(a["auto"] as Node3D).queue_free()
+		var neuf := _batir_voiture_de(modele,
+			Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 1))),
+			String(joueurs.get(cle, {}).get("pseudo", "")))
+		neuf.position = Decor.vers3d(cible)
+		monde().add_child(neuf)
+		a["auto"] = neuf
 
 # ------------------------------------------------------- dégâts
 
@@ -926,9 +988,9 @@ func _vehicule_detruit() -> void:
 	# resterait invisible au milieu de la rue jusqu'à la fin de la manche.
 	if _vehicule != 0:
 		canal.envoyer("sort", {"id": _vehicule, "x": int(_position.x), "y": int(_position.y),
-			"a": snapped(_angle, 0.01), "pv": 0, "g": _genre_vehicule})
+			"a": snapped(_angle, 0.01), "pv": 0, "g": _genre_vehicule, "m": _modele_vehicule})
 		if est_hote():
-			ville.rendre_vehicule(Session.cle, _vehicule, _position, _angle, 0.0)
+			ville.rendre_vehicule(Session.cle, _vehicule, _position, _angle, 0.0, _modele_vehicule, _genre_vehicule)
 			_vider_les_evenements()
 	_encaisser(35.0, "boum", "")
 	if _hors_service <= 0.0:
@@ -936,6 +998,7 @@ func _vehicule_detruit() -> void:
 		_pied = true
 		_vitesse = 0.0
 		_vehicule = 0
+		_modele_vehicule = -1
 		_pv_vehicule = PV_VOITURE
 		Tactile.mode = Tactile.MARCHE
 		Sons.arreter_moteur()
@@ -950,6 +1013,7 @@ func _relever() -> void:
 	_vitesse = 0.0
 	_pied = true
 	_vehicule = 0
+	_modele_vehicule = -1
 	_pv_vehicule = PV_VOITURE
 	_reprendre_le_pistolet()
 	_eperon = 0.0
@@ -1050,6 +1114,28 @@ func rafraichir_scene(delta: float) -> void:
 	_faire_hurler_la_police(delta)
 	_rafraichir_contrat(delta)
 	_rafraichir_radar()
+	_rafraichir_banniere(delta)
+
+## Le nom du quartier quand on en change. Trois secondes, puis plus rien : une
+## bannière permanente serait un panneau de plus dans un écran déjà chargé.
+func _rafraichir_banniere(delta: float) -> void:
+	if _hud_banniere == null:
+		return
+	var territoire := carte.territoire(_position)
+	var quartier := carte.quartier(_position)
+	if territoire != _territoire_vu or quartier != _quartier_vu:
+		_territoire_vu = territoire
+		_quartier_vu = quartier
+		var texte := carte.nom_du_quartier(_position).capitalize()
+		var couleur := Palette.ENCRE_DOUCE
+		if territoire >= 0:
+			texte += " — chez %s" % carte.nom_du_gang(territoire)
+			couleur = carte.couleur_du_gang(territoire)
+		_hud_banniere.text = texte
+		_hud_banniere.add_theme_color_override("font_color", couleur)
+		_banniere_reste = 3.2
+	_banniere_reste -= delta
+	_hud_banniere.modulate.a = clamp(_banniere_reste / 0.8, 0.0, 1.0)
 
 ## Le plan ne se redessine qu'avec ce qu'il montre : positions des joueurs,
 ## patrouilles lancées, étoiles. Lui passer la ville entière image par image
@@ -1168,6 +1254,8 @@ func _placer_la_foule() -> void:
 	for personne in ville.gens:
 		var noeud = personne.get("noeud")
 		if noeud == null:
+			if (personne["p"] as Vector2).distance_to(_position) > VilleVivante.PORTEE_VUE:
+				continue
 			noeud = FormesCarnage.pieton(_couleur_de(personne), int(personne["genre"]) == VilleVivante.GANG)
 			monde().add_child(noeud)
 			personne["noeud"] = noeud
@@ -1176,6 +1264,9 @@ func _placer_la_foule() -> void:
 			# quarante-six parcours d'arbre par trame pour ne rien changer.
 			Decor.demarche(noeud, "walk")
 		var corps: Node3D = noeud
+		corps.visible = (personne["p"] as Vector2).distance_to(_position) <= VilleVivante.PORTEE_VUE
+		if not corps.visible:
+			continue
 		corps.position = Decor.vers3d(personne["p"])
 		corps.rotation.y = -float(personne.get("a", 0.0)) + PI * 0.5
 		_regler_jauge(corps, float(int(personne["pv"])) / float(_pv_max_de(personne)))
@@ -1205,21 +1296,31 @@ func _placer_les_autos() -> void:
 			continue
 		var noeud = auto.get("noeud")
 		var genre := int(auto["genre"])
+		# Ce qui est à plus d'un écran et demi n'est pas dessiné : l'hôte a
+		# trois cents voitures dans sa liste, et un navigateur en mode
+		# compatibilité n'en dessine pas trois cents.
+		var proche: bool = (auto["p"] as Vector2).distance_to(_position) <= VilleVivante.PORTEE_VUE
 		if noeud == null:
+			if not proche:
+				continue
 			if genre == VilleVivante.EPAVE:
 				noeud = FormesCarnage.epave()
 			else:
-				var couleur := Palette.ENCRE_FAIBLE
-				if genre == VilleVivante.PATROUILLE:
-					couleur = Palette.SERIE
-				elif genre == VilleVivante.VOITURE_GANG:
+				var couleur := Color.WHITE
+				if genre == VilleVivante.VOITURE_GANG:
 					couleur = carte.couleur_du_gang(int(auto.get("gang", 0)))
-				noeud = FormesCarnage.voiture(couleur, "", false,
-					genre == VilleVivante.PATROUILLE)
+				noeud = FormesCarnage.voiture_kit(int(auto.get("modele", 0)), couleur)
 			monde().add_child(noeud)
 			auto["noeud"] = noeud
+		elif genre == VilleVivante.EPAVE and not auto.get("epave_vue", false):
+			# Elle vient de brûler : la coque saine part, la carcasse la remplace.
+			(noeud as Node3D).queue_free()
+			noeud = FormesCarnage.epave()
+			monde().add_child(noeud)
+			auto["noeud"] = noeud
+		auto["epave_vue"] = genre == VilleVivante.EPAVE
 		var corps: Node3D = noeud
-		corps.visible = true
+		corps.visible = proche
 		corps.position = Decor.vers3d(auto["p"])
 		corps.rotation.y = -float(auto["a"])
 		_regler_jauge(corps, float(auto["pv"]) / PV_VOITURE)
@@ -1308,7 +1409,10 @@ func etat_joueur() -> String:
 		humeur = "vous chasse"
 	elif ville.gang_ami(Session.cle, territoire):
 		humeur = "vous laisse"
-	morceaux.append("%s : %s (%d)" % [carte.nom_du_gang(territoire), humeur, int(jauge[territoire])])
+	if territoire >= 0:
+		morceaux.append("%s : %s (%d)" % [carte.nom_du_gang(territoire), humeur, int(jauge[territoire])])
+	else:
+		morceaux.append("centre — terrain neutre")
 
 	if carte.arene_de(_position) >= 0:
 		morceaux.append("ARÈNE — TIR AMI ACTIF")

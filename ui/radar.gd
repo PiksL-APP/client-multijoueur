@@ -31,6 +31,24 @@ func _draw() -> void:
 	draw_rect(cadre, Color(Palette.FOND, 0.86), true)
 	draw_rect(cadre, Palette.FILET, false, 1.0)
 
+	# Les territoires d'abord, en aplat léger : c'est la première chose qu'on
+	# cherche sur le plan quand on a un contrat — où est le gang visé.
+	for py in PlanVille.pates_y():
+		for px in PlanVille.pates_x():
+			var pate := Vector2i(px, py)
+			var gang := carte.territoire_du_pate(pate)
+			var coin := _vers_plan(Vector2(px * 4 + 1, py * 4 + 1) * PlanVille.PAS, etendue)
+			var taille := _vers_plan(Vector2(3, 3) * PlanVille.PAS, etendue) - _vers_plan(Vector2.ZERO, etendue)
+			if gang >= 0:
+				draw_rect(Rect2(coin, taille), Color(carte.couleur_du_gang(gang), 0.22), true)
+			elif carte.quartier_du_pate(pate) == PlanVille.PARC:
+				draw_rect(Rect2(coin, taille), Color(Palette.BON, 0.10), true)
+			else:
+				draw_rect(Rect2(coin, taille), Color(Palette.ENCRE, 0.08), true)
+	for r in carte.repaires:
+		draw_rect(Rect2(_vers_plan(r["p"], etendue) - Vector2(3, 3), Vector2(6, 6)),
+			carte.couleur_du_gang(int(r["gang"])), true)
+
 	# Les rues : une ligne tous les quatre pas, dans les deux sens. Dessiner
 	# les immeubles ferait cinq cents rectangles pour un carré de cent
 	# soixante-douze pixels — illisible et cher.
@@ -71,7 +89,7 @@ func _draw() -> void:
 	var x := MARGE + 4.0
 	var y := MARGE + COTE + 14.0
 	for entree in [["garage", Palette.SERIE], ["cabine", Palette.AVERTISSEMENT],
-			["arène", Palette.CRITIQUE]]:
+			["arène", Palette.CRITIQUE], ["repaire", Palette.ENCRE]]:
 		draw_circle(Vector2(x, y - 4.0), 3.0, entree[1])
 		draw_string(police, Vector2(x + 7.0, y), String(entree[0]),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_DOUCE)
