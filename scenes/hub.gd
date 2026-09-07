@@ -27,6 +27,11 @@ const IMAGES := "res://modeles/village/"
 ## Toutes les planches de personnages sont au même gabarit (cases de 64,
 ## pieds sur le bord bas) : le pivot est au centre, les pieds 32 plus bas.
 const PIEDS := Vector2(0, -32)
+## Les émotes : touches 1 à 4, une bulle au-dessus de la tête, visible de tous.
+const EMOTES := ["!", "?", "<3", "zZ"]
+## Le cycle du jour, calé sur l'heure universelle pour que tous les joueurs
+## vivent la même heure : quinze minutes, dont quatre de nuit.
+const CYCLE := 900.0
 
 ## Les lieux du hub. Le village est dehors ; les trois autres sont des pièces
 ## entières de la maquette du pack, chacune avec sa zone de marche, ses
@@ -37,9 +42,10 @@ const LIEUX := {
 	"village": {
 		"nom": "Village",
 		"pnj": [{"nom": "paysanne", "position": Vector2(352, 416), "phrases": [
-			"Bienvenue. Trois portes ouvertes : la taverne, l'armurerie, l'auberge.",
+			"Salut {pseudo}. Trois portes ouvertes : la taverne, l'armurerie, l'auberge.",
 			"La taverne mène au Carnage, l'armurerie à l'Énigme. À l'auberge, on dort.",
-			"La grange et la maison du bout ? Fermées. Leurs habitants sont partis jouer.",
+			"Le champion du Carnage, c'est {champion_carnage}. À l'Énigme, {champion_enigme}. Pour l'instant.",
+			"Le tableau, là-bas au coin de la place, dit qui a joué en dernier.",
 		]}],
 	},
 	"taverne": {
@@ -64,27 +70,27 @@ const LIEUX := {
 	},
 	"armurerie": {
 		"nom": "Armurerie",
-		"lueur": {"centre": Vector2(608, 60), "taille": Vector2(30, 36)},
-		"tableau": Rect2(48, 4, 152, 38),
+		"lueur": {"centre": Vector2(288, 160), "taille": Vector2(30, 30)},
+		"tableau": Rect2(160, 6, 112, 42),
 		"rangs": 3,
 		"jeu": "enigme",
 		"titre": "ÉNIGME",
-		"pnj": [{"nom": "squelette", "position": Vector2(440, 80), "phrases": [
+		"pnj": [{"nom": "squelette", "position": Vector2(232, 104), "phrases": [
 			"Trois chambres. Aucune ne s'ouvre à un seul.",
 			"Une dalle ne reste enfoncée que si quelque chose pèse dessus — quelqu'un, ou une caisse.",
 			"Et la sortie n'accepte l'équipe qu'au complet. Personne ne finit seul.",
-			"Le portail est au bout du couloir, à droite.",
+			"Le portail est là, dans le coin, à droite.",
 		]}],
 	},
 	"auberge": {
 		"nom": "Auberge",
-		"pnj": [{"nom": "aubergiste", "position": Vector2(120, 80), "phrases": [
+		"pnj": [{"nom": "aubergiste", "position": Vector2(200, 120), "phrases": [
 			"Chut, il y a des gens qui dorment. Ici on se repose entre deux parties.",
 			"Le troisième jeu se prépare. Repasse.",
 		]}],
 	},
 	"maison": {"nom": "Maison", "ferme": "C'est fermé. Les habitants sont partis jouer au Carnage."},
-	"grange": {"nom": "Grange", "ferme": "La grange est fermée. Ça sent le foin et les radis."},
+	"grange": {"nom": "Grange", "ferme": "La grange donne sur la ferme. Elle ouvre bientôt : ça sent déjà le foin et les radis."},
 }
 
 ## Le plan du village et des pièces — sol, objets, cases bloquées, portes,
@@ -128,6 +134,13 @@ var _depuis_envoi := 0.0
 var _depuis_rappel := 0.0
 var _invite := ""
 
+var _modulation: CanvasModulate
+var _lumieres: Array[PointLight2D] = []
+var _lucioles: CPUParticles2D
+var _voile: ColorRect
+var _panneau_carnet: PanelContainer
+var _hud_carnet: Label
+var _carnet: Array = []
 var _hud_presents: Label
 var _hud_etat: HBoxContainer
 var _hud_titre: Label
@@ -135,7 +148,10 @@ var _hud_invite: Label
 var _hud_dialogue: Label
 var _panneau_dialogue: PanelContainer
 var _tableau: Label
+var _affichage: Label
+var _journal: Array = []
 var _classements: Dictionary = {}
+var _depuis_pas := 0.0
 
 func demarrer() -> void:
 	_camera = Camera2D.new()
@@ -157,18 +173,29 @@ func demarrer() -> void:
 			var xy := a.substr(9).split(",")
 			if xy.size() == 2:
 				depart = Vector2(float(xy[0]), float(xy[1]))
+		elif a.begins_with("--nuit="):
+			nuit_forcee = float(a.substr(7))
+		elif a.begins_with("--emote="):
+			var indice := int(a.substr(8))
+			get_tree().create_timer(4.0).timeout.connect(func() -> void:
+				_emote(indice)
+				_panneau_carnet.visible = true)
 	_entrer_dans(demande if LIEUX.has(demande) else "village", depart)
 
 	Tactile.mode = Tactile.MARCHE
 	Tactile.action.connect(_agir)
 
-	_canal = Reseau.rejoindre(CANAL, {"pseudo": Session.pseudo, "id": Session.id, "lieu": _lieu})
+	_canal = Reseau.rejoindre(CANAL, {"pseudo": Session.pseudo, "id": Session.id, "lieu": _lieu, "heros": Session.heros_affiche()})
 	_canal.diffusion.connect(_sur_diffusion)
 	_canal.presences_changees.connect(_sur_presences)
 
 	Scores.classement_recu.connect(_sur_classement)
+	Scores.carnet_recu.connect(_sur_carnet)
+	Scores.journal_recu.connect(_sur_journal)
 	Scores.demander_classement("carnage", 5)
 	Scores.demander_classement("enigme", 5)
+	Scores.demander_carnet(Session.id)
+	Scores.demander_journal(5)
 
 func _exit_tree() -> void:
 	Sons.musique("")
@@ -198,6 +225,9 @@ func _entrer_dans(lieu: String, arrivee: Vector2) -> void:
 	fond.y_sort_enabled = false
 	plan().add_child(fond)
 
+	_modulation = null
+	_lumieres.clear()
+	_lucioles = null
 	_bloque = PackedStringArray(geometrie["bloque"])
 	_bloque_aussi.clear()
 	_portes.clear()
@@ -207,6 +237,7 @@ func _entrer_dans(lieu: String, arrivee: Vector2) -> void:
 	_titre_du_lieu = String(fiche.get("titre", ""))
 	_pnj = []
 	_tableau = null
+	_affichage = null
 
 	if lieu == "village":
 		_batir_village(geometrie)
@@ -222,7 +253,7 @@ func _entrer_dans(lieu: String, arrivee: Vector2) -> void:
 		# Dans une pièce, on arrive sur la sortie.
 		depart = _sortie.get_center() + Vector2(0, 2)
 	_position = arrivee if arrivee != Vector2.ZERO else depart
-	_corps = _sprite_de_heros(Session.id)
+	_corps = _sprite_de_heros(Session.heros_affiche())
 	plan().add_child(_corps)
 
 	# Une pièce plus petite que l'écran se centre ; une plus grande fait
@@ -236,7 +267,7 @@ func _entrer_dans(lieu: String, arrivee: Vector2) -> void:
 	_camera.reset_smoothing()
 
 	if _canal and _canal.est_rejoint:
-		_canal.suivre({"pseudo": Session.pseudo, "id": Session.id, "lieu": _lieu})
+		_canal.suivre({"pseudo": Session.pseudo, "id": Session.id, "lieu": _lieu, "heros": Session.heros_affiche()})
 	# Dehors, le thème du village sur un fond de forêt ; dans la taverne, son
 	# propre air ; dans les autres pièces, le village continue, étouffé.
 	Sons.musique("taverne" if lieu == "taverne" else "village")
@@ -252,13 +283,23 @@ func _position_camera() -> Vector2:
 		_position.x if _taille.x > visible.x else _taille.x * 0.5,
 		_position.y if _taille.y > visible.y else _taille.y * 0.5)
 
-func _sprite_de_heros(id: String) -> AnimatedSprite2D:
+func _sprite_de_heros(nom: String) -> AnimatedSprite2D:
 	var s := AnimatedSprite2D.new()
-	s.sprite_frames = Pixels.heros(Pixels.heros_de(id))
+	s.sprite_frames = Pixels.heros(nom if nom in Pixels.HEROS else "knight")
 	s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	s.offset = PIEDS
 	s.play("repos")
+	_ombrer(s)
 	return s
+
+## L'ombre au sol d'un personnage : l'ellipse du pack, sous les pieds, derrière.
+func _ombrer(porteur: Node2D) -> void:
+	var ombre := Pixels.image(IMAGES + "ombre_personnage.png", false)
+	ombre.centered = true
+	ombre.offset = Vector2.ZERO
+	ombre.position = Vector2(0, -3)
+	ombre.show_behind_parent = true
+	porteur.add_child(ombre)
 
 func _batir_village(geometrie: Dictionary) -> void:
 	# Chaque objet du plan est une image entière, posée à sa case ; le
@@ -297,6 +338,59 @@ func _batir_village(geometrie: Dictionary) -> void:
 		atelier.play("marche")
 		plan().add_child(atelier)
 	_semer_les_feuilles()
+	_eclairer_le_village(geometrie)
+	# Le tableau d'affichage de la place : les dernières parties jouées.
+	# Le panneau de bois est un objet du plan ; ici, seule l'inscription.
+	_affichage = _tableau_mural(rect_de(geometrie["tableau"]))
+	_affichage.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_affichage.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	_affichage.z_index = 1
+	plan().add_child(_affichage)
+	_rafraichir_affichage()
+
+func _sur_journal(lignes: Array) -> void:
+	_journal = lignes
+	_rafraichir_affichage()
+
+func _rafraichir_affichage() -> void:
+	if _affichage == null or not is_instance_valid(_affichage):
+		return
+	# Dix-neuf caractères de large, six lignes : la place du panneau.
+	var texte := " DERNIERES PARTIES\n"
+	if _journal.is_empty():
+		texte += "\n  PERSONNE N'A JOUE"
+	for ligne in _journal.slice(0, 5):
+		var quand := _il_y_a(String(ligne.get("cree_le", "")))
+		texte += "%-6s %-3s %4d %3s\n" % [String(ligne.get("pseudo", "?")).to_upper().left(6),
+			String(ligne.get("jeu", "")).to_upper().left(3), mini(int(ligne.get("score", 0)), 9999), quand]
+	_affichage.text = texte.trim_suffix("\n")
+
+## « 3m », « 2h », « 5j » : l'âge d'une date ISO, en trois caractères au plus.
+static func _il_y_a(iso: String) -> String:
+	if iso.length() < 19:
+		return ""
+	var d := Time.get_unix_time_from_datetime_string(iso.substr(0, 19))
+	var ecart := int(Time.get_unix_time_from_system()) - int(d)
+	if ecart < 3600:
+		return "%dm" % maxi(1, int(ecart / 60))
+	if ecart < 86400:
+		return "%dh" % int(ecart / 3600)
+	return "%dj" % mini(99, int(ecart / 86400))
+
+## Les phrases des habitants parlent du monde : {pseudo}, {champion_carnage},
+## {champion_enigme} sont remplis au moment de parler.
+func _phrase_du_monde(texte: String) -> String:
+	return texte.format({
+		"pseudo": Session.pseudo,
+		"champion_carnage": _champion("carnage"),
+		"champion_enigme": _champion("enigme"),
+	})
+
+func _champion(jeu: String) -> String:
+	var lignes: Array = _classements.get(jeu, [])
+	if lignes.is_empty():
+		return "personne encore"
+	return String(lignes[0].get("pseudo", "?"))
 
 ## Des feuilles qui tombent de la lisière, en points de deux pixels : assez
 ## pour que le village respire, pas assez pour qu'on les remarque une à une.
@@ -344,6 +438,7 @@ func _poser_pnj(pnj: Dictionary) -> void:
 	sprite.offset = PIEDS
 	Pixels.poser(sprite, pnj["position"])
 	sprite.play("repos")
+	_ombrer(sprite)
 	plan().add_child(sprite)
 	var fiche := {"position": (pnj["position"] as Vector2).round(), "phrases": pnj["phrases"], "noeud": sprite}
 	# Un habitant qui a une ronde dans le plan marche d'un point à l'autre ;
@@ -462,6 +557,8 @@ func _ecriteau(texte: String, taille_police: int) -> Label:
 
 func _process(delta: float) -> void:
 	_faire_les_rondes(delta)
+	if _lieu == "village":
+		_tomber_la_nuit()
 	var direction := Commandes.direction()
 	if direction != Vector2.ZERO:
 		var avant := _position
@@ -479,6 +576,14 @@ func _process(delta: float) -> void:
 	else:
 		_marche = false
 
+	# Un pas toutes les 0,32 s en marchant ; plus sec et plus aigu dedans.
+	if _marche:
+		_depuis_pas += delta
+		if _depuis_pas >= 0.32:
+			_depuis_pas = 0.0
+			Sons.jouer("pas", 1.0 if _lieu == "village" else 1.5, -22.0)
+	else:
+		_depuis_pas = 0.3
 	var animation := "marche" if _marche else "repos"
 	if _corps.animation != animation:
 		_corps.play(animation)
@@ -558,8 +663,19 @@ func _chercher_quoi_faire() -> void:
 		_rafraichir_hud()
 
 func _unhandled_input(evenement: InputEvent) -> void:
-	if evenement is InputEventKey and evenement.pressed and not evenement.echo and evenement.keycode == KEY_E:
-		_agir()
+	if not (evenement is InputEventKey and evenement.pressed and not evenement.echo):
+		return
+	match evenement.keycode:
+		KEY_E:
+			_agir()
+		KEY_K:
+			_panneau_carnet.visible = not _panneau_carnet.visible
+			if _panneau_carnet.visible:
+				Scores.demander_carnet(Session.id)
+		KEY_1, KEY_KP_1: _emote(0)
+		KEY_2, KEY_KP_2: _emote(1)
+		KEY_3, KEY_KP_3: _emote(2)
+		KEY_4, KEY_KP_4: _emote(3)
 
 func _agir() -> void:
 	if not is_inside_tree():
@@ -573,17 +689,22 @@ func _agir() -> void:
 			_rafraichir_hud()
 			return
 		Sons.jouer("porte", 1.0, -10.0)
-		_entrer_dans(lieu, Vector2.ZERO)
+		_invite = ""
+		_fondu(Palette.FOND, 0.4, func() -> void: _entrer_dans(lieu, Vector2.ZERO))
 	elif _invite == "sortir":
 		Sons.jouer("porte", 0.8, -10.0)
 		var retour := Vector2.ZERO
 		for porte in carte()["village"]["portes"]:
 			if String(porte["lieu"]) == _lieu:
 				retour = Vector2(float(porte["x"]) + float(porte["l"]) * 0.5, float(porte["y"]) + float(porte["h"]) + 6.0)
-		_entrer_dans("village", retour)
+		_invite = ""
+		_fondu(Palette.FOND, 0.4, func() -> void: _entrer_dans("village", retour))
 	elif _invite == "portail" and _jeu_du_lieu != "":
 		Sons.jouer("portail", 1.0, -8.0)
-		demande_ecran.emit("salon", {"jeu": _jeu_du_lieu, "titre": _titre_du_lieu})
+		var jeu := _jeu_du_lieu
+		var titre := _titre_du_lieu
+		_invite = ""
+		_fondu(Palette.SERIE.lightened(0.6), 0.7, func() -> void: demande_ecran.emit("salon", {"jeu": jeu, "titre": titre}))
 	elif _invite == "parler" and _pnj_proche >= 0:
 		var phrases: Array = _pnj[_pnj_proche]["phrases"]
 		_phrase = (_phrase + 1) % (phrases.size() + 1)
@@ -593,12 +714,16 @@ func _agir() -> void:
 # ---------------------------------------------------------------- réseau
 
 func _sur_diffusion(evenement: String, charge: Dictionary) -> void:
-	if evenement != "p":
-		return
 	var cle := String(charge.get("cle", ""))
 	if cle == "" or cle == Session.cle or not _autres.has(cle):
 		return
-	_autres[cle]["cible"] = Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
+	match evenement:
+		"p":
+			_autres[cle]["cible"] = Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
+		"emo":
+			var indice := int(charge.get("e", -1))
+			if indice >= 0 and indice < EMOTES.size():
+				_afficher_emote(_autres[cle]["noeud"], EMOTES[indice])
 
 func _sur_presences(presences: Dictionary) -> void:
 	for cle in _autres.keys():
@@ -613,20 +738,223 @@ func _sur_presences(presences: Dictionary) -> void:
 		if String(meta.get("lieu", "village")) != _lieu:
 			continue
 		if not _autres.has(cle):
-			var sprite := _sprite_de_heros(String(meta.get("id", cle)))
+			var heros := String(meta.get("heros", ""))
+			if heros == "":
+				heros = Pixels.heros_de(String(meta.get("id", cle)))
+			var sprite := _sprite_de_heros(heros)
 			Pixels.poser(sprite, _position)
 			plan().add_child(sprite)
-			var nom := _ecriteau(String(meta.get("pseudo", "?")), 8)
+			var nom := _ecriteau(_titre(String(meta.get("pseudo", "?"))), 8)
 			nom.position = Vector2(-48, -46)
 			nom.size = Vector2(96, 10)
+			nom.name = "nom"
 			sprite.add_child(nom)
 			_autres[cle] = {"cible": _position, "affichee": _position,
 				"pseudo": String(meta.get("pseudo", "?")), "noeud": sprite}
 	_rafraichir_hud()
 
+## Le premier d'un classement porte une étoile devant son nom : le village
+## sait qui est le champion, sans qu'on ait à ouvrir un tableau.
+func _titre(pseudo: String) -> String:
+	for jeu in _classements:
+		var lignes: Array = _classements[jeu]
+		if not lignes.is_empty() and String(lignes[0].get("pseudo", "")) == pseudo:
+			return "* " + pseudo
+	return pseudo
+
+# ---------------------------------------------------------------- émotes
+
+func _emote(indice: int) -> void:
+	if indice < 0 or indice >= EMOTES.size():
+		return
+	_afficher_emote(_corps, EMOTES[indice])
+	Sons.jouer("clic", 1.6, -18.0)
+	if _canal:
+		_canal.envoyer("emo", {"e": indice})
+
+func _afficher_emote(porteur: Node2D, texte: String) -> void:
+	if porteur == null or not is_instance_valid(porteur):
+		return
+	var ancienne := porteur.get_node_or_null("emote")
+	if ancienne:
+		ancienne.queue_free()
+	var bulle := Label.new()
+	bulle.name = "emote"
+	bulle.text = texte
+	bulle.add_theme_font_override("font", UI.TITRE_POLICE)
+	bulle.add_theme_font_size_override("font_size", 8)
+	bulle.add_theme_color_override("font_color", Palette.FOND)
+	bulle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bulle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	var style := StyleBoxFlat.new()
+	style.bg_color = Palette.ENCRE
+	style.set_corner_radius_all(3)
+	style.set_content_margin_all(3)
+	bulle.add_theme_stylebox_override("normal", style)
+	bulle.position = Vector2(6, -62)
+	bulle.z_index = 60
+	porteur.add_child(bulle)
+	var tween := create_tween()
+	tween.tween_interval(2.0)
+	tween.tween_property(bulle, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(bulle.queue_free)
+
+# ---------------------------------------------------------------- le jour et la nuit
+
+## Une phase de 0 (plein jour) à 1 (pleine nuit), continue.
+static var nuit_forcee := -1.0     ## `--nuit=0.8` au banc, pour photographier la nuit
+
+func _nuit() -> float:
+	if nuit_forcee >= 0.0:
+		return nuit_forcee
+	var t := fmod(Time.get_unix_time_from_system(), CYCLE)
+	if t < 540.0:
+		return 0.0
+	if t < 600.0:
+		return (t - 540.0) / 60.0
+	if t < 840.0:
+		return 1.0
+	return 1.0 - (t - 840.0) / 60.0
+
+func _eclairer_le_village(geometrie: Dictionary) -> void:
+	_modulation = CanvasModulate.new()
+	plan().add_child(_modulation)
+	_lumieres.clear()
+	# Le feu de camp, le fourneau, et la porte de chaque maison : les seules
+	# sources de lumière du village une fois la nuit tombée.
+	var feu := Vector2(float(geometrie["feu"][0]), float(geometrie["feu"][1]) - 8.0)
+	_lumieres.append(_lumiere(feu, Color(1.0, 0.72, 0.42), 1.4, 1.1))
+	for porte in geometrie["portes"]:
+		var p := Vector2(float(porte["x"]) + float(porte["l"]) * 0.5, float(porte["y"]) - 20.0)
+		_lumieres.append(_lumiere(p, Color(1.0, 0.85, 0.55), 0.8, 0.55))
+	for objet in geometrie["objets"]:
+		if String(objet["image"]) == "fourneau.png":
+			_lumieres.append(_lumiere(Vector2(float(objet["x"]) + 32.0, float(objet["y"]) + 52.0), Color(1.0, 0.6, 0.3), 0.7, 0.9))
+	# Des lucioles au-dessus de l'herbe, la nuit seulement.
+	_lucioles = CPUParticles2D.new()
+	_lucioles.amount = 40
+	_lucioles.lifetime = 4.0
+	_lucioles.preprocess = 4.0
+	_lucioles.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	_lucioles.emission_rect_extents = _taille * 0.5
+	_lucioles.position = _taille * 0.5
+	_lucioles.gravity = Vector2.ZERO
+	_lucioles.initial_velocity_min = 3.0
+	_lucioles.initial_velocity_max = 8.0
+	_lucioles.spread = 180.0
+	_lucioles.scale_amount_min = 1.0
+	_lucioles.scale_amount_max = 1.0
+	var lueur := Gradient.new()
+	lueur.set_color(0, Color(1.0, 0.95, 0.5, 0.0))
+	lueur.add_point(0.5, Color(1.0, 0.95, 0.5, 1.0))
+	lueur.set_color(1, Color(1.0, 0.95, 0.5, 0.0))
+	_lucioles.color_ramp = lueur
+	_lucioles.z_index = 80
+	_lucioles.emitting = false
+	plan().add_child(_lucioles)
+
+func _lumiere(position: Vector2, couleur: Color, portee: float, energie: float) -> PointLight2D:
+	var l := PointLight2D.new()
+	var texture := GradientTexture2D.new()
+	texture.fill = GradientTexture2D.FILL_RADIAL
+	texture.fill_from = Vector2(0.5, 0.5)
+	texture.fill_to = Vector2(0.5, 0.0)
+	var degrade := Gradient.new()
+	degrade.set_color(0, Color(1, 1, 1, 1))
+	degrade.set_color(1, Color(1, 1, 1, 0))
+	texture.gradient = degrade
+	texture.width = 128
+	texture.height = 128
+	l.texture = texture
+	l.texture_scale = portee
+	l.color = couleur
+	l.energy = energie
+	l.position = position
+	l.blend_mode = Light2D.BLEND_MODE_ADD
+	plan().add_child(l)
+	return l
+
+func _tomber_la_nuit() -> void:
+	if _modulation == null or not is_instance_valid(_modulation):
+		return
+	var nuit := _nuit()
+	# Le jour est blanc ; le soir vire à l'ambre, la nuit au bleu profond.
+	var soir := Color(1.0, 0.78, 0.6)
+	var noir := Color(0.36, 0.42, 0.70)
+	var teinte := Color.WHITE
+	if nuit < 0.5:
+		teinte = Color.WHITE.lerp(soir, nuit * 2.0)
+	else:
+		teinte = soir.lerp(noir, (nuit - 0.5) * 2.0)
+	_modulation.color = teinte
+	var vacillement := 0.9 + 0.1 * sin(Time.get_ticks_msec() * 0.011)
+	for i in _lumieres.size():
+		var l := _lumieres[i]
+		l.enabled = nuit > 0.05
+		l.energy = (1.1 if i == 0 else 0.7) * nuit * (vacillement if i == 0 else 1.0)
+	if _lucioles:
+		_lucioles.emitting = nuit > 0.6
+
+# ---------------------------------------------------------------- le carnet
+
+func _sur_carnet(lignes: Array) -> void:
+	_carnet = lignes
+	_rafraichir_carnet()
+
+func _rafraichir_carnet() -> void:
+	if _hud_carnet == null:
+		return
+	var meilleurs := {"carnage": 0, "enigme": 0}
+	var parties := {"carnage": 0, "enigme": 0}
+	for ligne in _carnet:
+		var jeu := String(ligne.get("jeu", ""))
+		if not meilleurs.has(jeu):
+			continue
+		parties[jeu] += 1
+		meilleurs[jeu] = maxi(int(meilleurs[jeu]), int(ligne.get("score", 0)))
+	var noms := {"knight": "chevalier", "rogue": "voleur", "wizzard": "mage"}
+	var texte := "%s, %s\n\n" % [Session.pseudo, String(noms.get(Session.heros_affiche(), ""))]
+	for jeu in ["carnage", "enigme"]:
+		var rang := _rang_de(jeu, Session.pseudo)
+		texte += "%s : %d partie%s, record %d%s\n" % [
+			jeu.capitalize(), int(parties[jeu]), "s" if int(parties[jeu]) > 1 else "",
+			int(meilleurs[jeu]), (" — %de au mur" % rang) if rang > 0 else ""]
+	if _carnet.is_empty():
+		texte += "\nPas encore de partie. Le portail de la taverne t'attend."
+	_hud_carnet.text = texte.strip_edges()
+
+func _rang_de(jeu: String, pseudo: String) -> int:
+	var lignes: Array = _classements.get(jeu, [])
+	for i in lignes.size():
+		if String(lignes[i].get("pseudo", "")) == pseudo:
+			return i + 1
+	return 0
+
+# ---------------------------------------------------------------- fondus
+
+## Un voile qui se ferme puis se rouvre : le passage d'une porte ou d'un
+## portail se sent, au lieu de couper net d'une image à l'autre.
+func _fondu(couleur: Color, duree: float, au_milieu: Callable) -> void:
+	if _voile == null:
+		_voile = ColorRect.new()
+		_voile.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_voile.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_voile.color = Color(couleur, 0.0)
+		interface().add_child(_voile)
+	_voile.color = Color(couleur, 0.0)
+	var tween := create_tween()
+	tween.tween_property(_voile, "color:a", 1.0, duree * 0.5)
+	tween.tween_callback(au_milieu)
+	tween.tween_property(_voile, "color:a", 0.0, duree * 0.5)
+
 func _sur_classement(jeu: String, lignes: Array) -> void:
 	_classements[jeu] = lignes
 	_rafraichir_tableau()
+	_rafraichir_carnet()
+	for cle in _autres:
+		var nom: Label = (_autres[cle]["noeud"] as Node).get_node_or_null("nom")
+		if nom:
+			nom.text = _titre(String(_autres[cle]["pseudo"]))
 
 ## Utilisé par le banc d'essai : combien de joueurs ce client voit-il ?
 func nombre_de_joueurs() -> int:
@@ -681,6 +1009,26 @@ func _construire_hud() -> void:
 	_hud_dialogue.custom_minimum_size = Vector2(620, 0)
 	_panneau_dialogue.add_child(_hud_dialogue)
 
+	# Le carnet (K) : qui je suis, mes records, ma place au mur.
+	var coin := MarginContainer.new()
+	coin.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	coin.offset_left = -440
+	coin.offset_right = -20
+	coin.offset_top = 56
+	coin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	couche.add_child(coin)
+	_panneau_carnet = UI.panneau()
+	_panneau_carnet.visible = false
+	coin.add_child(_panneau_carnet)
+	var colonne := VBoxContainer.new()
+	colonne.add_theme_constant_override("separation", 8)
+	_panneau_carnet.add_child(colonne)
+	colonne.add_child(UI.titre("Carnet", 16))
+	_hud_carnet = UI.texte("", 16, Palette.ENCRE_DOUCE, true)
+	_hud_carnet.custom_minimum_size = Vector2(380, 0)
+	colonne.add_child(_hud_carnet)
+	colonne.add_child(UI.texte("K pour refermer · 1 2 3 4 : émotes", 11, Palette.ENCRE_FAIBLE))
+
 func _rafraichir_hud() -> void:
 	if _hud_etat == null:
 		return
@@ -697,13 +1045,13 @@ func _rafraichir_hud() -> void:
 		"sortir": _hud_invite.text = "E — ressortir"
 		"portail": _hud_invite.text = "E — franchir le portail"
 		"parler": _hud_invite.text = "E — parler"
-		_: _hud_invite.text = "Z Q S D ou les flèches pour marcher."
+		_: _hud_invite.text = "Z Q S D pour marcher · K : carnet · 1-4 : émotes"
 
 	var parle := _invite == "parler" and _pnj_proche >= 0 and _phrase >= 0 \
 		and _phrase < (_pnj[_pnj_proche]["phrases"] as Array).size()
 	var porte_fermee: bool = _invite.begins_with("entrer:") and _phrase == 0 and LIEUX[_invite.substr(7)].has("ferme")
 	_panneau_dialogue.visible = parle or porte_fermee
 	if parle:
-		_hud_dialogue.text = String(_pnj[_pnj_proche]["phrases"][_phrase])
+		_hud_dialogue.text = _phrase_du_monde(String(_pnj[_pnj_proche]["phrases"][_phrase]))
 	elif porte_fermee:
 		_hud_dialogue.text = String(LIEUX[_invite.substr(7)]["ferme"])

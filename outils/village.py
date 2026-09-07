@@ -18,7 +18,7 @@ import random
 import sys
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 if len(sys.argv) < 2:
     sys.exit(__doc__)
@@ -80,6 +80,8 @@ ecrire(ouvrir("Environment/Structures/Stations/Bonfire/Fire_01-Sheet.png"), "feu
 ecrire(case(props, 24, 176, 16, 16), "cloture_h.png")
 ecrire(case(props, 8, 208, 16, 16), "cloture_v.png")
 ecrire(case(props, 48, 152, 32, 24), "jardiniere.png")
+# L'ombre d'un personnage : la petite ellipse de la planche d'ombres du pack.
+ecrire(case(ouvrir("Environment/Props/Static/Shadows.png"), 0, 104, 32, 16), "ombre_personnage.png")
 ferme = ouvrir("Environment/Props/Static/Farm.png")
 ecrire(case(ferme, 240, 32, 32, 48), "epouvantail.png")
 for nom, y in (("carottes", 16), ("radis", 48), ("choux", 80), ("laitues", 112)):
@@ -195,8 +197,164 @@ def piece(x0, y0, x1, y1):
 
 
 ecrire(piece(176, 8, 632, 345), "interieur_taverne.png")      # la grande salle
-ecrire(piece(0, 352, 640, 436), "interieur_armurerie.png")     # le couloir aux armes
-ecrire(piece(136, 472, 278, 633), "interieur_auberge.png")     # une chambre
+
+# ------------------------------------------------------------------ pièces composées
+# L'armurerie et l'auberge sont ASSEMBLÉES avec le kit d'intérieur du pack :
+# un mur du fond (rebord, face, plinthe), des rebords latéraux et bas, un sol
+# en cases, puis des meubles entiers de la planche « Interior_Props_01 ».
+# Chaque meuble déclare son emprise au sol ; le masque de marche en découle.
+class Masque:
+    def __init__(self, colonnes, rangees):
+        self.cases = [["#"] * colonnes for _ in range(rangees)]
+
+    def marquer(self, c, x0, y0, x1, y1):
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                self.cases[y][x] = c
+        return self
+
+    def libre(self, x0, y0, x1, y1):
+        return self.marquer(".", x0, y0, x1, y1)
+
+    def bloque(self, x0, y0, x1, y1):
+        return self.marquer("#", x0, y0, x1, y1)
+
+    def lignes(self):
+        return ["".join(l) for l in self.cases]
+
+
+kit = ouvrir("Environment/Structures/Buildings/Interior/Interior_Walls_01.png")
+meubles = ouvrir("Environment/Structures/Buildings/Interior/Interior_Props_01.png")
+KITS = {"rondins": 0, "pierre": 6, "planches": 12, "platre": 18}   # colonne de départ
+SOLS = {"bois": 0, "pierre": 5, "sombre": 10, "chevrons": 15}      # blocs de sol (y = 20)
+
+
+def case_kit(kx, x, y, noir_transparent=False):
+    image = case(kit, (kx + x) * T, y * T, T, T)
+    if noir_transparent:
+        # Le noir du gabarit est l'intérieur de la pièce, pas du mur.
+        px = image.load()
+        for j in range(T):
+            for i in range(T):
+                if px[i, j][:3] == (0, 0, 0):
+                    px[i, j] = (0, 0, 0, 0)
+    return image
+
+
+class Piece:
+    """Une pièce de `largeur` × `hauteur` cases : quatre rangées de mur du
+    fond, un sol, un rebord tout autour. `poser` ajoute un meuble entier
+    (rectangle de la planche, en pixels) à une case, avec son emprise."""
+
+    def __init__(self, largeur, hauteur, mur, sol):
+        self.largeur, self.hauteur = largeur, hauteur
+        self.image = Image.new("RGBA", (largeur * T, hauteur * T), (0, 0, 0, 0))
+        self.masque = Masque(largeur, hauteur)
+        kx, sx = KITS[mur], SOLS[sol]
+        for y in range(3, hauteur):
+            for x in range(largeur):
+                self._put(case(kit, (sx + 1 + x % 3) * T, (21 + y % 3) * T, T, T), x, y)
+        for x in range(largeur):
+            fx = 0 if x == 0 else 1 if x == 1 else 5 if x == largeur - 1 else 4 if x == largeur - 2 else 2 + x % 2
+            for r in range(4):
+                self._put(case_kit(kx, fx, 5 + r), x, r)
+        for y in range(4, hauteur - 1):
+            self._put(case_kit(kx, 0, 2 + y % 2, True), 0, y)
+            self._put(case_kit(kx, 5, 2 + y % 2, True), largeur - 1, y)
+        self._put(case_kit(kx, 0, 4, True), 0, hauteur - 1)
+        self._put(case_kit(kx, 5, 4, True), largeur - 1, hauteur - 1)
+        for x in range(1, largeur - 1):
+            self._put(case_kit(kx, 2 + x % 2, 5, True), x, hauteur - 1)
+        self.masque.libre(1, 4, largeur - 2, hauteur - 2)
+
+    def _put(self, image, x, y):
+        self.image.alpha_composite(image, (x * T, y * T))
+
+    def poser(self, rect, x, y, emprise=None):
+        """`rect` : (x, y, largeur, hauteur) en pixels sur la planche des
+        meubles ; `emprise` : (x0, y0, x1, y1) en cases, relatives au coin du
+        meuble, bornes incluses ; None = décor mural, on passe devant."""
+        image = case(meubles, *rect)
+        self.image.alpha_composite(image, (x * T, y * T))
+        if emprise:
+            self.masque.bloque(x + emprise[0], y + emprise[1], x + emprise[2], y + emprise[3])
+
+    def sortie(self, x0, y0, x1, y1):
+        self.masque.marquer("S", x0, y0, x1, y1)
+
+    def portail(self, x0, y0, x1, y1):
+        self.masque.marquer("P", x0, y0, x1, y1)
+
+
+# Les meubles, en pixels sur la planche : (x, y, largeur, hauteur).
+CHEMINEE_PIERRE = (272, 40, 48, 104)
+CHEMINEE_BRIQUE = (384, 40, 48, 104)
+ETABLI_ENCLUME = (128, 96, 52, 32)
+COMPTOIR = (368, 0, 64, 52)
+TONNEAU = (224, 120, 16, 24)
+CAISSE = (208, 120, 16, 24)
+COFFRE = (144, 72, 32, 24)
+COFFRE_FORT = (176, 72, 32, 24)
+CANDELABRE = (240, 104, 32, 56)
+TAPIS_SOMBRE = (384, 330, 48, 54)
+TAPIS_VERT = (336, 330, 48, 54)
+EPEE = (96, 256, 32, 16)
+HACHE = (128, 256, 32, 16)
+BOUCLIER = (128, 272, 16, 16)
+ECUSSON = (64, 256, 32, 32)
+TETE_DE_LOUP = (544, 0, 32, 32)
+TETE_D_OURS = (576, 0, 32, 32)
+LIT = (0, 288, 32, 64)
+GRAND_LIT = (32, 288, 48, 64)
+BANQUETTE = (80, 300, 48, 36)
+TABLE_RONDE = (80, 0, 32, 48)
+CHAISE_DROITE = (64, 0, 16, 32)
+CHAISE_GAUCHE = (64, 64, 16, 32)
+FENETRE = (64, 176, 32, 40)
+TABLEAU_PEINT = (80, 320, 16, 16)
+PLANTE = (16, 352, 16, 32)
+PLANTE_LARGE = (48, 352, 32, 32)
+ARMOIRE = (272, 0, 48, 48)
+BAIGNOIRE = (124, 140, 56, 36)
+
+armurerie_piece = Piece(20, 12, "pierre", "pierre")
+armurerie_piece.poser(CHEMINEE_PIERRE, 2, 0, (0, 4, 2, 6))          # la forge, âtre sur le sol
+armurerie_piece.poser(EPEE, 6, 1)
+armurerie_piece.poser(HACHE, 6, 2)
+armurerie_piece.poser(BOUCLIER, 8, 1)
+armurerie_piece.poser(ECUSSON, 8, 2)
+armurerie_piece.poser(TETE_DE_LOUP, 17, 0)
+armurerie_piece.poser(TAPIS_SOMBRE, 8, 7)
+armurerie_piece.poser(COMPTOIR, 14, 3, (0, 1, 3, 2))                # le comptoir, appuyé au mur
+armurerie_piece.poser(ETABLI_ENCLUME, 6, 5, (0, 0, 2, 1))
+armurerie_piece.poser(COFFRE, 1, 7, (0, 0, 1, 1))
+armurerie_piece.poser(COFFRE_FORT, 3, 7, (0, 0, 1, 1))
+armurerie_piece.poser(TONNEAU, 1, 9, (0, 0, 0, 1))
+armurerie_piece.poser(TONNEAU, 2, 9, (0, 0, 0, 1))
+armurerie_piece.poser(CAISSE, 3, 9, (0, 0, 0, 1))
+armurerie_piece.poser(CANDELABRE, 12, 5, (0, 2, 1, 3))
+armurerie_piece.sortie(9, 10, 10, 10)
+armurerie_piece.portail(17, 9, 18, 10)
+ecrire(armurerie_piece.image, "interieur_armurerie.png")
+
+auberge_piece = Piece(18, 12, "rondins", "bois")
+auberge_piece.poser(CHEMINEE_BRIQUE, 8, 0, (0, 4, 2, 6))
+auberge_piece.poser(FENETRE, 3, 1)
+auberge_piece.poser(FENETRE, 13, 1)
+auberge_piece.poser(TABLEAU_PEINT, 6, 1)
+auberge_piece.poser(ARMOIRE, 11, 1, (0, 2, 2, 2))
+auberge_piece.poser(LIT, 1, 3, (0, 0, 1, 3))
+auberge_piece.poser(LIT, 4, 3, (0, 0, 1, 3))
+auberge_piece.poser(GRAND_LIT, 14, 3, (0, 0, 2, 3))
+auberge_piece.poser(PLANTE, 6, 5, (0, 1, 0, 1))
+auberge_piece.poser(PLANTE_LARGE, 12, 5, (0, 1, 1, 1))
+auberge_piece.poser(TAPIS_VERT, 7, 8)
+auberge_piece.poser(TABLE_RONDE, 8, 7, (0, 1, 1, 2))
+auberge_piece.poser(CHAISE_DROITE, 7, 7, (0, 1, 0, 1))
+auberge_piece.poser(CHAISE_GAUCHE, 10, 7, (0, 1, 0, 1))
+auberge_piece.poser(BAIGNOIRE, 1, 8, (0, 0, 2, 1))
+auberge_piece.sortie(8, 10, 9, 10)
+ecrire(auberge_piece.image, "interieur_auberge.png")
 
 # ------------------------------------------------------------------ le plan
 # Le village est dessiné sur une grille de cases de 16 pixels. Le même plan
@@ -291,6 +449,21 @@ for y in range(HAUTEUR):
             for autre in bords[1:]:
                 bord = alpha_min(bord, autre)
             sol.alpha_composite(bord, (x * T, y * T))
+
+# La falaise du nord : le village est adossé à un plateau. Le kit de parois
+# du pack donne le dessus du plateau, la paroi, et son pied dans l'herbe ;
+# sept rangées de cases, tout en haut de la carte.
+parois = ouvrir("Environment/Tilesets/Wall_Tiles.png")
+FALAISE = 7                        # rangées occupées par le plateau et sa paroi
+for y in range(FALAISE):
+    for x in range(LARGEUR):
+        if y < 2:
+            gy = 1 + (y + x) % 3          # le dessus, uni
+        elif y < 5:
+            gy = 5 + (y - 2)              # la paroi
+        else:
+            gy = 8 + (y - 5)              # le pied, puis son fondu dans l'herbe
+        sol.alpha_composite(case(parois, (1 + x % 4) * T, gy * T, T, T), (x * T, y * T))
 
 # ------------------------------------------------------------------ les objets
 # Chaque objet : son image, la case de son coin haut-gauche, et son emprise
@@ -394,6 +567,31 @@ poser("fourneau.png", 13, 18)      # et son fourneau, derrière
 poser("jardiniere.png", 27, 23)
 poser("jardiniere.png", 34, 23)
 
+# Le tableau d'affichage, au coin sud-est de la place : le moteur y écrit les
+# dernières parties. Le panneau est dessiné ici, aux couleurs du bois du pack
+# (celles du banc), à la taille de son texte : 19 caractères de 8 px sur
+# 6 lignes, plus le cadre. Deux poteaux le plantent au sol.
+def panneau(largeur=160, hauteur=60, pied=20):
+    contour, sombre, bois, clair, noir = (0, 0, 0), (47, 28, 16), (90, 54, 30), (169, 108, 63), (0, 0, 0)
+    im = Image.new("RGBA", (largeur, hauteur + pied), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for px in (14, largeur - 22):                  # les poteaux, derrière le panneau
+        d.rectangle([px, hauteur - 4, px + 7, hauteur + pied - 1], fill=bois, outline=contour)
+        d.line([px + 2, hauteur, px + 2, hauteur + pied - 3], fill=clair)
+    d.rectangle([0, 0, largeur - 1, hauteur - 1], fill=sombre, outline=contour)
+    d.rectangle([1, 1, largeur - 2, hauteur - 2], outline=clair)
+    d.rectangle([2, 2, largeur - 3, hauteur - 3], outline=bois)
+    d.rectangle([3, 3, largeur - 4, hauteur - 4], outline=(30, 18, 10))
+    for cx in (6, largeur - 7):                    # les clous du cadre
+        for cy in (6, hauteur - 7):
+            d.point((cx, cy), fill=clair)
+    return im
+
+
+ecrire(panneau(), "tableau.png")
+TABLEAU = (38, 30)                                 # la case de son coin haut-gauche
+declarer("tableau.png", bas(10, 5, 2))
+poser("tableau.png", *TABLEAU)
 # Le potager de la grange : un enclos, des rangs de cultures, l'épouvantail.
 cloture(49, 27, 58, 34, ouvertures={(51, 27), (52, 27)})
 for i, nom in enumerate(("carottes", "radis", "choux", "laitues")):
@@ -446,7 +644,9 @@ hasard = random.Random(20260907)
 
 def libre(image, cx, cy):
     l, h = TAILLES[image]
-    if cx < 0 or cy < 0 or cx + l > LARGEUR or cy + h > HAUTEUR:
+    # Un arbre peut dépasser du haut de la carte : la caméra ne monte
+    # jamais au-dessus de zéro, sa cime n'y est jamais vue.
+    if cx < 0 or cy + h < 2 or cy < -4 or cx + l > LARGEUR or cy + h > HAUTEUR:
         return False
     return all((cx + x, cy + y) not in occupe for (x, y) in emprise_visuelle(image))
 
@@ -461,14 +661,25 @@ while plantes < 420 and essais < 60000:
     essais += 1
     image = arbre()
     l, h = TAILLES[image]
-    cx, cy = hasard.randrange(LARGEUR - l + 1), hasard.randrange(HAUTEUR - h + 1)
+    cx, cy = hasard.randrange(LARGEUR - l + 1), hasard.randrange(-4, HAUTEUR - h + 1)
     pied = (cx + 1, cy + h - 1)
-    if dans_la_clairiere(*pied):
+    if pied[1] < 0 or dans_la_clairiere(*pied) or 2 <= pied[1] < FALAISE + 1:
         continue
     if not libre(image, cx, cy):
         continue
     poser(image, cx, cy)
     plantes += 1
+# Sur le plateau : des rochers et des buissons bas, entre les arbres.
+essais = 0
+haut = 0
+while haut < 16 and essais < 3000:
+    essais += 1
+    image = hasard.choice(["rocher_moyen_0.png", "rocher_moyen_1.png", "buisson_petit_0.png", "buisson_petit_2.png", "rocher_petit_0.png"])
+    cx = hasard.randrange(LARGEUR - 2)
+    cy = 0 if TAILLES[image][1] == 2 else hasard.randrange(0, 2)
+    if libre(image, cx, cy):
+        poser(image, cx, cy)
+        haut += 1
 # Des bosquets dans les coins de la clairière, et des buissons épars.
 for image, x, y in (("arbre_0.png", 6, 9), ("pin_1.png", 9, 10), ("arbre_2.png", 55, 9),
                     ("pin_0.png", 52, 10), ("arbre_1.png", 6, 43), ("pin_2.png", 54, 42),
@@ -490,7 +701,7 @@ plantes_sol = [case(vegetation, x * T, y * T, T, T) for (x, y) in ((4, 9), (0, 9
 fleurs = [case(vegetation, x * T, y * T, T, T) for y in (23, 24, 25) for x in (3, 4, 6, 7)]
 for _ in range(260):
     x, y = hasard.randrange(LARGEUR), hasard.randrange(HAUTEUR)
-    if (x, y) in trou or (x, y) in occupe or not dans_la_clairiere(x, y):
+    if (x, y) in trou or (x, y) in occupe or not dans_la_clairiere(x, y) or y < FALAISE:
         continue
     sol.alpha_composite(hasard.choice(plantes_sol) if hasard.random() < 0.6 else hasard.choice(fleurs), (x * T, y * T))
 # Les ombres au sol, cuites dans l'image : le pack les dessine comme des
@@ -519,6 +730,9 @@ for o in objets + [{"image": a["image"], "x": a["x"], "y": a["y"]} for a in ANIM
         dessin.rectangle((o["x"] + 112, o["y"] + 96, o["x"] + 120, pied_y), fill=(0, 0, 0, 50))
     elif nom in ("banc.png", "forge.png", "caisses.png", "fourneau.png", "epouvantail.png", "rotissoire.png", "scierie.png"):
         dessin.ellipse((o["x"] + 4, pied_y - 6, o["x"] + l * T - 4, pied_y + 3), fill=(0, 0, 0, 39))
+    elif nom == "tableau.png":
+        for px in (14, l * T - 22):            # une ombre au pied de chaque poteau
+            dessin.ellipse((o["x"] + px - 6, pied_y - 5, o["x"] + px + 13, pied_y + 2), fill=(0, 0, 0, 39))
 sol.alpha_composite(ombres)
 ecrire(sol, "sol_village.png")
 
@@ -540,9 +754,10 @@ plan = {
         "objets": objets,
         "portes": portes,
         "feu": [32 * T, 30 * T],
+        "tableau": [TABLEAU[0] * T + 4, TABLEAU[1] * T + 4, 152, 52],
         "animes": ANIMES,
         # La paysanne fait le tour de la place ; elle s'arrête pour parler.
-        "rondes": {"paysanne": [[352, 416], [672, 416], [672, 528], [352, 528]]},
+        "rondes": {"paysanne": [[352, 416], [576, 416], [576, 528], [352, 528]]},
     },
 }
 
@@ -551,26 +766,6 @@ plan = {
 # part d'une pièce entièrement bloquée, on LIBÈRE le sol, puis on rebloque
 # les meubles. `S` marque la sortie, `P` le portail. Les rectangles sont en
 # cases, bornes incluses, relevés sur l'image quadrillée (`grille_*.png`).
-
-
-class Masque:
-    def __init__(self, colonnes, rangees):
-        self.cases = [["#"] * colonnes for _ in range(rangees)]
-
-    def marquer(self, c, x0, y0, x1, y1):
-        for y in range(y0, y1 + 1):
-            for x in range(x0, x1 + 1):
-                self.cases[y][x] = c
-        return self
-
-    def libre(self, x0, y0, x1, y1):
-        return self.marquer(".", x0, y0, x1, y1)
-
-    def bloque(self, x0, y0, x1, y1):
-        return self.marquer("#", x0, y0, x1, y1)
-
-    def lignes(self):
-        return ["".join(l) for l in self.cases]
 
 
 taverne = Masque(29, 22)
@@ -590,17 +785,8 @@ for col in (16, 21, 27):
     taverne.bloque(col, 3, col, 3)                       # les plantes
 taverne.marquer("S", 0, 20, 2, 20).marquer("P", 10, 9, 10, 9).marquer("P", 12, 9, 12, 9)
 
-armurerie = Masque(40, 6)
-armurerie.libre(1, 4, 38, 4)                             # la bande de sol
-armurerie.bloque(19, 4, 21, 4).bloque(29, 4, 30, 4)      # la passante, les coffres
-armurerie.marquer("S", 11, 3, 13, 3).marquer("P", 37, 4, 38, 4)
-
-auberge = Masque(9, 11)
-auberge.libre(1, 3, 7, 8)
-auberge.bloque(1, 3, 2, 6).bloque(3, 3, 3, 4)            # le lit, la dormeuse debout
-auberge.bloque(4, 3, 7, 3)                               # la plante, l'armoire
-auberge.bloque(5, 6, 7, 8).bloque(1, 8, 2, 8)            # la table, la caisse
-auberge.marquer("S", 3, 9, 4, 9)
+armurerie = armurerie_piece.masque
+auberge = auberge_piece.masque
 
 INTERIEURS = {"taverne": taverne.lignes(), "armurerie": armurerie.lignes(), "auberge": auberge.lignes()}
 for nom, lignes in INTERIEURS.items():
