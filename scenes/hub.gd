@@ -45,7 +45,8 @@ const LIEUX := {
 	"taverne": {
 		"nom": "Taverne",
 		"lueur": {"centre": Vector2(182, 112), "taille": Vector2(34, 44)},
-		"tableau": Rect2(206, 84, 52, 44),
+		"tableau": Rect2(280, 6, 152, 54),
+		"rangs": 5,
 		"jeu": "carnage",
 		"titre": "CARNAGE",
 		"pnj": [{"nom": "serveuse", "position": Vector2(56, 328), "phrases": [
@@ -64,7 +65,8 @@ const LIEUX := {
 	"armurerie": {
 		"nom": "Armurerie",
 		"lueur": {"centre": Vector2(608, 60), "taille": Vector2(30, 36)},
-		"tableau": Rect2(64, 14, 64, 36),
+		"tableau": Rect2(48, 4, 152, 38),
+		"rangs": 3,
 		"jeu": "enigme",
 		"titre": "ÉNIGME",
 		"pnj": [{"nom": "squelette", "position": Vector2(440, 80), "phrases": [
@@ -169,6 +171,8 @@ func demarrer() -> void:
 	Scores.demander_classement("enigme", 5)
 
 func _exit_tree() -> void:
+	Sons.musique("")
+	Sons.ambiance("")
 	if Tactile.action.is_connected(_agir):
 		Tactile.action.disconnect(_agir)
 	if _canal:
@@ -233,6 +237,10 @@ func _entrer_dans(lieu: String, arrivee: Vector2) -> void:
 
 	if _canal and _canal.est_rejoint:
 		_canal.suivre({"pseudo": Session.pseudo, "id": Session.id, "lieu": _lieu})
+	# Dehors, le thème du village sur un fond de forêt ; dans la taverne, son
+	# propre air ; dans les autres pièces, le village continue, étouffé.
+	Sons.musique("taverne" if lieu == "taverne" else "village")
+	Sons.ambiance("foret" if lieu == "village" else "")
 	_rafraichir_hud()
 
 func _vue() -> Vector2:
@@ -264,9 +272,9 @@ func _batir_village(geometrie: Dictionary) -> void:
 	for porte in geometrie["portes"]:
 		var rect := Rect2(float(porte["x"]), float(porte["y"]), float(porte["l"]), float(porte["h"]))
 		_portes.append({"rect": rect, "lieu": String(porte["lieu"]), "nom": String(porte["nom"])})
-		var enseigne := _ecriteau(String(porte["nom"]), 7)
-		enseigne.position = rect.get_center() + Vector2(-60, -8 * _case - 12)
-		enseigne.size = Vector2(120, 10)
+		var enseigne := _ecriteau(String(porte["nom"]), 8)
+		enseigne.position = rect.get_center() + Vector2(-64, -8 * _case - 14)
+		enseigne.size = Vector2(128, 10)
 		plan().add_child(enseigne)
 	# La flamme du feu de camp, animée, posée dans le foyer du plan.
 	var feu := AnimatedSprite2D.new()
@@ -294,7 +302,7 @@ func _batir_village(geometrie: Dictionary) -> void:
 ## pour que le village respire, pas assez pour qu'on les remarque une à une.
 func _semer_les_feuilles() -> void:
 	var feuilles := CPUParticles2D.new()
-	feuilles.amount = 70
+	feuilles.amount = 36
 	feuilles.lifetime = 7.0
 	feuilles.preprocess = 7.0
 	feuilles.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
@@ -305,11 +313,11 @@ func _semer_les_feuilles() -> void:
 	feuilles.gravity = Vector2(6, 10)
 	feuilles.initial_velocity_min = 6.0
 	feuilles.initial_velocity_max = 14.0
-	feuilles.scale_amount_min = 2.0
-	feuilles.scale_amount_max = 3.0
+	feuilles.scale_amount_min = 1.0
+	feuilles.scale_amount_max = 2.0
 	var teintes := Gradient.new()
-	teintes.set_color(0, Color(0.55, 0.72, 0.22))
-	teintes.set_color(1, Color(0.80, 0.55, 0.18))
+	teintes.set_color(0, Color(0.45, 0.62, 0.20))
+	teintes.set_color(1, Color(0.70, 0.48, 0.16))
 	feuilles.color_ramp = teintes
 	feuilles.z_index = 90
 	plan().add_child(feuilles)
@@ -400,8 +408,10 @@ func _tableau_mural(cadre: Rect2) -> Label:
 	ardoise.z_index = 4
 	ardoise.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ardoise.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	ardoise.add_theme_font_size_override("font_size", 6)
-	ardoise.add_theme_constant_override("line_spacing", -2)
+	# La police des inscriptions du décor : 8 pixels, sa grille native.
+	ardoise.add_theme_font_override("font", UI.TITRE_POLICE)
+	ardoise.add_theme_font_size_override("font_size", 8)
+	ardoise.add_theme_constant_override("line_spacing", 0)
 	ardoise.add_theme_color_override("font_color", Color(0.93, 0.88, 0.74))
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.19, 0.12, 0.07)
@@ -417,13 +427,17 @@ func _rafraichir_tableau() -> void:
 	var lignes = _classements.get(_jeu_du_lieu, null)
 	var texte := _titre_du_lieu + "\n"
 	if lignes == null:
-		texte += "…"
+		texte += "..."
 	elif (lignes as Array).is_empty():
-		texte += "aucun score"
+		texte += "AUCUN SCORE"
 	else:
 		var rang := 1
+		var rangs := int(LIEUX[_lieu].get("rangs", 5))
 		for ligne in lignes:
-			texte += "%d. %s  %d\n" % [rang, String(ligne.get("pseudo", "?")).left(9), int(ligne.get("score", 0))]
+			if rang > rangs:
+				break
+			var pseudo := String(ligne.get("pseudo", "?")).to_upper().left(8)
+			texte += "%d %-8s %5d\n" % [rang, pseudo, int(ligne.get("score", 0))]
 			rang += 1
 	_tableau.text = texte.strip_edges()
 
@@ -435,7 +449,8 @@ static func _article(lieu: String) -> String:
 func _ecriteau(texte: String, taille_police: int) -> Label:
 	var e := Label.new()
 	e.text = texte
-	e.add_theme_font_size_override("font_size", taille_police)
+	e.add_theme_font_override("font", UI.TITRE_POLICE)
+	e.add_theme_font_size_override("font_size", UI.taille_titre(taille_police))
 	e.add_theme_color_override("font_color", Palette.ENCRE)
 	e.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	e.add_theme_constant_override("outline_size", 3)
@@ -601,9 +616,9 @@ func _sur_presences(presences: Dictionary) -> void:
 			var sprite := _sprite_de_heros(String(meta.get("id", cle)))
 			Pixels.poser(sprite, _position)
 			plan().add_child(sprite)
-			var nom := _ecriteau(String(meta.get("pseudo", "?")), 6)
-			nom.position = Vector2(-40, -44)
-			nom.size = Vector2(80, 8)
+			var nom := _ecriteau(String(meta.get("pseudo", "?")), 8)
+			nom.position = Vector2(-48, -46)
+			nom.size = Vector2(96, 10)
 			sprite.add_child(nom)
 			_autres[cle] = {"cible": _position, "affichee": _position,
 				"pseudo": String(meta.get("pseudo", "?")), "noeud": sprite}

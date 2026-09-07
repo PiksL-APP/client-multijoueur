@@ -66,7 +66,13 @@ var _parcelles: Dictionary = {}
 var _recoltes := 0
 var _brins: Dictionary = {}               ## case -> brins d'herbe posés dessus
 var _cageots: int = 0                     ## cageots posés devant la grange
+var _cageots_noeuds: Array = []
+var _a_vendre: int = 0                    ## valeur des cageots en attente
+var _pieces := PIECES_DEPART
 var _voile: ColorRect                     ## le noir du sommeil
+var _lumiere_feu: PointLight2D
+var _lanterne: PointLight2D
+var _scintille := 0.0
 var _voile_texte: Label
 var _endormi := false
 
@@ -78,6 +84,21 @@ const ECLAT := {
 	"arrosage": [Color8(0x5a, 0xa8, 0xe0), Color8(0xbf, 0xe6, 0xff)],
 	"recolte": [Color8(0xfa, 0xb2, 0x19), Color8(0xff, 0xf3, 0xc0)],
 }
+## Les cultures. `nuits` : combien de nuits arrosées pour arriver à maturité ;
+## `graine` : le prix du sachet ; `prix` : ce que rapporte le cageot.
+##
+## Les écarts font le jeu. Le radis est rapide et rapporte peu, le chou est
+## lent et rapporte beaucoup : semer l'un ou l'autre est un choix, et un champ
+## de radis n'est pas un champ de choux. Sans ça, changer de graine est une
+## question de couleur.
+const FICHES := {
+	"radis":    {"nuits": 2, "graine": 2, "prix": 5},
+	"carottes": {"nuits": 3, "graine": 3, "prix": 9},
+	"laitues":  {"nuits": 3, "graine": 3, "prix": 8},
+	"choux":    {"nuits": 4, "graine": 5, "prix": 15},
+}
+const PIECES_DEPART := 20
+
 ## Où s'empilent les cageots : à droite de la grange, quatre par rangée.
 const CAGEOTS := Vector2(184, 236)
 const CAGEOTS_PAR_RANG := 4
@@ -94,14 +115,25 @@ var _hud_outil: Label
 var _hud_compte: Label
 var _hud_heure: Label
 var _hud_energie: Label
+var _hud_pieces: Label
 var _hud_jauge: ColorRect
 var _hud_aide: Label
 var _hud_message: Label
 
 func demarrer() -> void:
+	# Réglages de banc, sur le modèle de `--lieu=` : `--jour=<s>` raccourcit la
+	# journée, `--heure=<0..1>` la commence où l'on veut, `--depart=x,y` pose le
+	# personnage. Photographier le feu à minuit sans ces trois-là demanderait
+	# d'attendre et de marcher, et personne ne le fait avant chaque livraison.
 	for a in OS.get_cmdline_args():
 		if a.begins_with("--jour="):
 			_duree_jour = maxf(4.0, float(a.substr(7)))
+		elif a.begins_with("--heure="):
+			_heure = clampf(float(a.substr(8)), 0.0, 0.999)
+		elif a.begins_with("--depart="):
+			var xy := a.substr(9).split(",")
+			if xy.size() == 2:
+				_position = Vector2(float(xy[0]), float(xy[1]))
 
 	_camera = Camera2D.new()
 	_camera.zoom = Vector2(ZOOM, ZOOM)
@@ -139,6 +171,12 @@ func demarrer() -> void:
 	_corps.add_child(Terrain.ombre())
 	_corps.play("repos")
 	plan().add_child(_corps)
+	# Une lanterne sur le joueur, pour qu'on voie ce qu'on fait après le
+	# coucher du soleil — sans elle, la nuit est jouable mais on n'y voit plus
+	# la différence entre une terre arrosée et une terre sèche.
+	_lanterne = _lumiere(Color8(0xf4, 0xea, 0xd2), 64.0)
+	_lanterne.position = Vector2(0, -14)
+	_corps.add_child(_lanterne)
 
 	Tactile.mode = Tactile.MARCHE
 	Tactile.action.connect(_agir)
@@ -207,6 +245,13 @@ func _batir_la_ferme() -> void:
 	feu.play("feu")
 	Pixels.poser(feu, GRANGE + Vector2(44, 55))
 	plan().add_child(feu)
+	# Le feu ÉCLAIRE. La nuit du prototype était une teinte bleue uniforme, et
+	# une nuit sans une seule source chaude est un filtre, pas une nuit. La
+	# lumière se règle à zéro le jour : allumée en plein soleil, elle blanchit
+	# le sol autour du foyer.
+	_lumiere_feu = _lumiere(Color8(0xff, 0xc8, 0x8a), 120.0)
+	_lumiere_feu.position = GRANGE + Vector2(44, 40)
+	plan().add_child(_lumiere_feu)
 
 	_poser("epouvantail.png", champ.position + Vector2(champ.size.x + 22, 18), Rect2())
 
@@ -303,6 +348,7 @@ func _semer_les_premiers_rangs() -> void:
 				fiche["etat"] = SEMEE
 				fiche["culture"] = (x / 4) % Terrain.CULTURES.size()
 				fiche["stade"] = mini((x + y) % 4, Terrain.dernier_stade())
+				fiche["nuits"] = int(fiche["stade"]) * int(_fiche(int(fiche["culture"]))["nuits"]) / Terrain.dernier_stade()
 				fiche["arrosee"] = y == CHAMP.position.y
 			_redessiner(case)
 
@@ -314,7 +360,7 @@ func _case_sous_les_pieds() -> Vector2i:
 func _etat_de(case: Vector2i) -> Dictionary:
 	if not _parcelles.has(case):
 		_parcelles[case] = {"etat": FRICHE, "arrosee": false, "stade": 0, "culture": 0,
-			"sol": null, "plante": null}
+			"nuits": 0, "sol": null, "plante": null}
 	return _parcelles[case]
 
 func _agir() -> void:
@@ -335,8 +381,11 @@ func _agir() -> void:
 			fiche["etat"] = LABOUREE
 			fiche["arrosee"] = false
 			_recoltes += 1
+			var prix: int = int(_fiche(int(fiche["culture"]))["prix"])
+			_a_vendre += prix
 			Sons.jouer("depart", 1.3, -14.0)
-			_dire("%s récolté." % Terrain.nom_culture(int(fiche["culture"])).capitalize())
+			_dire("%s récolté — %d pièces au matin." % [
+				Terrain.nom_culture(int(fiche["culture"])).capitalize(), prix])
 			_redessiner(case)
 			_eclater(case, "recolte")
 			_empiler(int(fiche["culture"]))
@@ -352,11 +401,16 @@ func _agir() -> void:
 				_redessiner(case)
 				_eclater(case, "labour")
 		GRAINES:
+			var sachet: int = int(_fiche(_culture)["graine"])
 			if etat != LABOUREE:
 				_dire("Il faut d'abord passer la houe.")
+			elif _pieces < sachet:
+				_dire("Pas assez de pièces pour un sachet de %s (%d)." % [Terrain.nom_culture(_culture), sachet])
 			elif _depenser("semis"):
+				_pieces -= sachet
 				fiche["etat"] = SEMEE
 				fiche["stade"] = 0
+				fiche["nuits"] = 0
 				fiche["culture"] = _culture
 				Sons.jouer("clic", 1.4, -16.0)
 				_dire("%s semé." % Terrain.nom_culture(_culture).capitalize())
@@ -399,16 +453,30 @@ func _dormir() -> void:
 		var fiche: Dictionary = _parcelles[case]
 		if int(fiche["etat"]) == SEMEE and bool(fiche["arrosee"]) \
 				and int(fiche["stade"]) < Terrain.dernier_stade():
-			fiche["stade"] = int(fiche["stade"]) + 1
+			# Le stade se DÉDUIT des nuits arrosées : un chou met quatre nuits
+			# là où un radis en met deux, avec les mêmes quatre images.
+			fiche["nuits"] = int(fiche["nuits"]) + 1
+			var necessaires: int = int(_fiche(int(fiche["culture"]))["nuits"])
+			fiche["stade"] = mini(Terrain.dernier_stade(),
+				int(floor(float(Terrain.dernier_stade()) * float(fiche["nuits"]) / float(necessaires))))
 			pousses += 1
 		fiche["arrosee"] = false
 		_redessiner(case)
+	# Les cageots partent dans la nuit et reviennent en pièces : c'est la
+	# caisse d'expédition, le seul endroit où la ferme rapporte.
+	var vendu := _a_vendre
+	_pieces += vendu
+	_a_vendre = 0
+	for noeud in _cageots_noeuds:
+		(noeud as Node).queue_free()
+	_cageots_noeuds.clear()
+	_cageots = 0
 	_jour += 1
 	_heure = LEVER
 	_energie = ENERGIE_MAX
 	Sons.jouer("portail", 0.7, -12.0)
-	_voile_texte.text = "Jour %d" % _jour
-	_dire("Jour %d. %d plants ont poussé cette nuit." % [_jour, pousses])
+	_voile_texte.text = "Jour %d" % _jour + ("\n+ %d pièces" % vendu if vendu > 0 else "")
+	_dire("Jour %d. %d plants ont poussé, %d pièces encaissées." % [_jour, pousses, vendu])
 	_rafraichir_hud()
 	await get_tree().create_timer(0.9).timeout
 	var leve := create_tween()
@@ -460,7 +528,11 @@ func _empiler(culture: int) -> void:
 	var rang := _cageots / CAGEOTS_PAR_RANG
 	Pixels.poser(cageot, CAGEOTS + Vector2(colonne * 18, rang * 12))
 	plan().add_child(cageot)
+	_cageots_noeuds.append(cageot)
 	_cageots += 1
+
+func _fiche(culture: int) -> Dictionary:
+	return FICHES[Terrain.nom_culture(culture)]
 
 func _dire(texte: String) -> void:
 	_message = texte
@@ -578,6 +650,34 @@ func _placer_curseur() -> void:
 			ARROSOIR: possible = etat != FRICHE and not bool(fiche["arrosee"])
 	_curseur.modulate = Palette.BON.lerp(Color.WHITE, 0.3) if possible else Color(1, 1, 1, 0.45)
 
+## Une source de lumière ronde, fabriquée : un dégradé radial du moteur, sans
+## fichier.
+##
+## ⚠ Additif, mais DOUX. Deux essais vus à l'image : en additif à pleine
+## puissance, le personnage sous sa lanterne devenait rose et saturé, comme
+## surexposé ; en mode mélange, la lampe ne perce pas la teinte de nuit du
+## `CanvasModulate` — celle-ci s'applique après, et la flaque de lumière
+## disparaissait presque. Reste l'additif à mi-puissance : la flaque se voit,
+## le sprite s'éclaire sans brûler. Le jour, à zéro, la lampe n'existe pas.
+func _lumiere(couleur: Color, rayon: float) -> PointLight2D:
+	var degrade := Gradient.new()
+	degrade.set_color(0, Color(1, 1, 1, 1))
+	degrade.set_color(1, Color(1, 1, 1, 0))
+	var texture := GradientTexture2D.new()
+	texture.gradient = degrade
+	texture.fill = GradientTexture2D.FILL_RADIAL
+	texture.fill_from = Vector2(0.5, 0.5)
+	texture.fill_to = Vector2(0.5, 1.0)
+	texture.width = 128
+	texture.height = 128
+	var lampe := PointLight2D.new()
+	lampe.texture = texture
+	lampe.texture_scale = rayon / 64.0
+	lampe.color = couleur
+	lampe.energy = 0.0
+	lampe.blend_mode = Light2D.BLEND_MODE_ADD
+	return lampe
+
 ## Le temps passe, la lumière tourne. Quatre teintes suffisent : la nuit,
 ## l'aube, le plein jour, le crépuscule — interpolées, elles donnent une
 ## journée entière sans qu'on ait à écrire une courbe.
@@ -586,9 +686,15 @@ func _avancer_l_heure(delta: float) -> void:
 	while _heure >= 1.0:
 		_heure -= 1.0
 		_jour += 1
-	_teinte.color = _lumiere(_heure)
+	_teinte.color = _teinte_du_jour(_heure)
+	# Force de la nuit : 0 en plein jour, 1 au plus sombre. Les lampes suivent,
+	# et le feu vacille un peu — un feu fixe se lit comme une image collée.
+	var nuit := clampf((1.0 - _teinte.color.get_luminance()) / 0.5, 0.0, 1.0)
+	_scintille += delta * 9.0
+	_lumiere_feu.energy = nuit * (0.62 + 0.07 * sin(_scintille) + 0.04 * sin(_scintille * 2.7))
+	_lanterne.energy = nuit * 0.38
 
-func _lumiere(heure: float) -> Color:
+func _teinte_du_jour(heure: float) -> Color:
 	if heure < LEVER - 0.06:
 		return NUIT
 	if heure < LEVER + 0.06:
@@ -652,6 +758,8 @@ func _construire_hud() -> void:
 	cadre_haut.add_child(haut)
 	_hud_outil = UI.titre("", 20)
 	haut.add_child(_hud_outil)
+	_hud_pieces = UI.texte("", 15, Palette.AVERTISSEMENT)
+	haut.add_child(_hud_pieces)
 	_hud_energie = UI.texte("", 15, Palette.ENCRE_DOUCE)
 	haut.add_child(_hud_energie)
 	var fond := ColorRect.new()
@@ -701,8 +809,10 @@ func _construire_hud() -> void:
 func _rafraichir_hud() -> void:
 	if _hud_outil == null:
 		return
-	_hud_outil.text = "En main : " + (("Graines de " + Terrain.nom_culture(_culture))
+	_hud_outil.text = "En main : " + (("Graines de %s (%d p., %d nuits)" % [
+		Terrain.nom_culture(_culture), int(_fiche(_culture)["graine"]), int(_fiche(_culture)["nuits"])])
 		if _outil == GRAINES else String(OUTILS[_outil]))
+	_hud_pieces.text = "%d pièces" % _pieces + ("  (+%d au matin)" % _a_vendre if _a_vendre > 0 else "")
 	_hud_energie.text = "Énergie %d" % _energie
 	_hud_jauge.size = Vector2(120.0 * float(_energie) / float(ENERGIE_MAX), 10)
 	# La couleur ne porte jamais seule le sens : le chiffre est écrit à côté.

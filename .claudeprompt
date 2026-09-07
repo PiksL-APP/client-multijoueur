@@ -99,12 +99,18 @@ accesseurs `min`/`max` du JSON du glb) avant d'être posé. ⚠ Le kit de voitur
 regarde vers +Z, le jeu roule vers +X : la correction est sur un pivot
 intermédiaire (`ROTATION_KIT`), jamais sur la racine.
 
-## Presque rien de binaire au dépôt
+## Du binaire au dépôt : seulement des œuvres tierces, sous licence libre
 
-Ni image, ni son : les volumes se fabriquent par `commun/decor.gd`, les
-échantillons audio par `autoload/sons.gd` — quelques dizaines de kilo-octets
-rendus en une trentaine de millisecondes au démarrage. Un son se règle en
-changeant un chiffre, pas en rouvrant un éditeur audio.
+Les volumes se fabriquent par `commun/decor.gd`, les bruitages par
+`autoload/sons.gd` — quelques dizaines de kilo-octets rendus au démarrage. Ce
+qui entre en binaire, c'est ce qu'on ne sait pas fabriquer aussi bien : les
+kits Kenney (CC0) et le pack Pixel Crawler (Anokolisa) pour le décor, les
+musiques et l'ambiance de forêt de Pixel-boy / Sparklin Labs (CC0, `sons/`),
+et deux polices pixel sous OFL (`polices/` : Pixelify Sans pour le texte,
+grille de 11 ; Press Start 2P pour les titres et les inscriptions du décor,
+grille de 8). Chaque dossier porte sa licence. Toute police se sert à un
+multiple de sa grille, sinon elle est floue : passer par `UI.taille_texte`
+et `UI.taille_titre`.
 
 Le **hub** fait exception à la 2,5D : il est en pixel art 2D (pack *Pixel
 Crawler*, dessiné en vue de dessus). Un écran choisit `plan()` ou `monde()`,
