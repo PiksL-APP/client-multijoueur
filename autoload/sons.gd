@@ -160,6 +160,8 @@ func _fabriquer_banque() -> void:
 	_banque["cri"] = _rendre(_glissando(980.0, 420.0, 0.34, 0.30), 0.34)
 	_banque["battement"] = _rendre(_impact(62.0, 0.12, 0.75), 0.12)
 	_banque["moteur"] = _rendre_boucle(_moteur_echantillon(), 0.5)
+	# Le pas : un coup sourd très court. Joué grave dehors, plus sec dedans.
+	_banque["pas"] = _rendre(_impact(210.0, 0.05, 0.35), 0.05)
 
 func _enveloppe(i: int, total: int, attaque: float, extinction: float) -> float:
 	var t := float(i) / float(total)

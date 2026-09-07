@@ -18,7 +18,7 @@ import random
 import sys
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 if len(sys.argv) < 2:
     sys.exit(__doc__)
@@ -80,6 +80,8 @@ ecrire(ouvrir("Environment/Structures/Stations/Bonfire/Fire_01-Sheet.png"), "feu
 ecrire(case(props, 24, 176, 16, 16), "cloture_h.png")
 ecrire(case(props, 8, 208, 16, 16), "cloture_v.png")
 ecrire(case(props, 48, 152, 32, 24), "jardiniere.png")
+# L'ombre d'un personnage : la petite ellipse de la planche d'ombres du pack.
+ecrire(case(ouvrir("Environment/Props/Static/Shadows.png"), 0, 104, 32, 16), "ombre_personnage.png")
 ferme = ouvrir("Environment/Props/Static/Farm.png")
 ecrire(case(ferme, 240, 32, 32, 48), "epouvantail.png")
 for nom, y in (("carottes", 16), ("radis", 48), ("choux", 80), ("laitues", 112)):
@@ -565,6 +567,31 @@ poser("fourneau.png", 13, 18)      # et son fourneau, derrière
 poser("jardiniere.png", 27, 23)
 poser("jardiniere.png", 34, 23)
 
+# Le tableau d'affichage, au coin sud-est de la place : le moteur y écrit les
+# dernières parties. Le panneau est dessiné ici, aux couleurs du bois du pack
+# (celles du banc), à la taille de son texte : 19 caractères de 8 px sur
+# 6 lignes, plus le cadre. Deux poteaux le plantent au sol.
+def panneau(largeur=160, hauteur=60, pied=20):
+    contour, sombre, bois, clair, noir = (0, 0, 0), (47, 28, 16), (90, 54, 30), (169, 108, 63), (0, 0, 0)
+    im = Image.new("RGBA", (largeur, hauteur + pied), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for px in (14, largeur - 22):                  # les poteaux, derrière le panneau
+        d.rectangle([px, hauteur - 4, px + 7, hauteur + pied - 1], fill=bois, outline=contour)
+        d.line([px + 2, hauteur, px + 2, hauteur + pied - 3], fill=clair)
+    d.rectangle([0, 0, largeur - 1, hauteur - 1], fill=sombre, outline=contour)
+    d.rectangle([1, 1, largeur - 2, hauteur - 2], outline=clair)
+    d.rectangle([2, 2, largeur - 3, hauteur - 3], outline=bois)
+    d.rectangle([3, 3, largeur - 4, hauteur - 4], outline=(30, 18, 10))
+    for cx in (6, largeur - 7):                    # les clous du cadre
+        for cy in (6, hauteur - 7):
+            d.point((cx, cy), fill=clair)
+    return im
+
+
+ecrire(panneau(), "tableau.png")
+TABLEAU = (38, 30)                                 # la case de son coin haut-gauche
+declarer("tableau.png", bas(10, 5, 2))
+poser("tableau.png", *TABLEAU)
 # Le potager de la grange : un enclos, des rangs de cultures, l'épouvantail.
 cloture(49, 27, 58, 34, ouvertures={(51, 27), (52, 27)})
 for i, nom in enumerate(("carottes", "radis", "choux", "laitues")):
@@ -703,6 +730,9 @@ for o in objets + [{"image": a["image"], "x": a["x"], "y": a["y"]} for a in ANIM
         dessin.rectangle((o["x"] + 112, o["y"] + 96, o["x"] + 120, pied_y), fill=(0, 0, 0, 50))
     elif nom in ("banc.png", "forge.png", "caisses.png", "fourneau.png", "epouvantail.png", "rotissoire.png", "scierie.png"):
         dessin.ellipse((o["x"] + 4, pied_y - 6, o["x"] + l * T - 4, pied_y + 3), fill=(0, 0, 0, 39))
+    elif nom == "tableau.png":
+        for px in (14, l * T - 22):            # une ombre au pied de chaque poteau
+            dessin.ellipse((o["x"] + px - 6, pied_y - 5, o["x"] + px + 13, pied_y + 2), fill=(0, 0, 0, 39))
 sol.alpha_composite(ombres)
 ecrire(sol, "sol_village.png")
 
@@ -724,9 +754,10 @@ plan = {
         "objets": objets,
         "portes": portes,
         "feu": [32 * T, 30 * T],
+        "tableau": [TABLEAU[0] * T + 4, TABLEAU[1] * T + 4, 152, 52],
         "animes": ANIMES,
         # La paysanne fait le tour de la place ; elle s'arrête pour parler.
-        "rondes": {"paysanne": [[352, 416], [672, 416], [672, 528], [352, 528]]},
+        "rondes": {"paysanne": [[352, 416], [576, 416], [576, 528], [352, 528]]},
     },
 }
 

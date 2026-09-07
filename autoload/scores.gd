@@ -10,6 +10,27 @@ extends Node
 signal depot_termine(reussi: bool, message: String)
 signal classement_recu(jeu: String, lignes: Array)
 signal carnet_recu(lignes: Array)
+signal journal_recu(lignes: Array)
+
+## Les dernières lignes de score, tous jeux et joueurs confondus : le
+## tableau d'affichage de la place.
+func demander_journal(limite: int = 6) -> void:
+	if not Config.est_configure():
+		journal_recu.emit([])
+		return
+	var requete := HTTPRequest.new()
+	add_child(requete)
+	requete.request_completed.connect(func(_r, code_http, _h, corps):
+		requete.queue_free()
+		var lignes: Array = []
+		if code_http == 200:
+			var analyse = JSON.parse_string(corps.get_string_from_utf8())
+			if typeof(analyse) == TYPE_ARRAY:
+				lignes = analyse
+		journal_recu.emit(lignes)
+	)
+	var chemin := "jeu_scores?select=pseudo,jeu,score,cree_le&order=cree_le.desc&limit=%d" % limite
+	requete.request(Config.url_rest(chemin), Config.entetes_rest(), HTTPClient.METHOD_GET)
 
 ## Toutes les lignes de score d'un joueur, les plus récentes d'abord : de
 ## quoi tenir son carnet (meilleurs scores, nombre de parties).

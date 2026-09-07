@@ -42,9 +42,10 @@ const LIEUX := {
 	"village": {
 		"nom": "Village",
 		"pnj": [{"nom": "paysanne", "position": Vector2(352, 416), "phrases": [
-			"Bienvenue. Trois portes ouvertes : la taverne, l'armurerie, l'auberge.",
+			"Salut {pseudo}. Trois portes ouvertes : la taverne, l'armurerie, l'auberge.",
 			"La taverne mène au Carnage, l'armurerie à l'Énigme. À l'auberge, on dort.",
-			"La grange et la maison du bout ? Fermées. Leurs habitants sont partis jouer.",
+			"Le champion du Carnage, c'est {champion_carnage}. À l'Énigme, {champion_enigme}. Pour l'instant.",
+			"Le tableau, là-bas au coin de la place, dit qui a joué en dernier.",
 		]}],
 	},
 	"taverne": {
@@ -89,7 +90,7 @@ const LIEUX := {
 		]}],
 	},
 	"maison": {"nom": "Maison", "ferme": "C'est fermé. Les habitants sont partis jouer au Carnage."},
-	"grange": {"nom": "Grange", "ferme": "La grange est fermée. Ça sent le foin et les radis."},
+	"grange": {"nom": "Grange", "ferme": "La grange donne sur la ferme. Elle ouvre bientôt : ça sent déjà le foin et les radis."},
 }
 
 ## Le plan du village et des pièces — sol, objets, cases bloquées, portes,
@@ -147,7 +148,10 @@ var _hud_invite: Label
 var _hud_dialogue: Label
 var _panneau_dialogue: PanelContainer
 var _tableau: Label
+var _affichage: Label
+var _journal: Array = []
 var _classements: Dictionary = {}
+var _depuis_pas := 0.0
 
 func demarrer() -> void:
 	_camera = Camera2D.new()
@@ -187,9 +191,11 @@ func demarrer() -> void:
 
 	Scores.classement_recu.connect(_sur_classement)
 	Scores.carnet_recu.connect(_sur_carnet)
+	Scores.journal_recu.connect(_sur_journal)
 	Scores.demander_classement("carnage", 5)
 	Scores.demander_classement("enigme", 5)
 	Scores.demander_carnet(Session.id)
+	Scores.demander_journal(5)
 
 func _exit_tree() -> void:
 	Sons.musique("")
@@ -231,6 +237,7 @@ func _entrer_dans(lieu: String, arrivee: Vector2) -> void:
 	_titre_du_lieu = String(fiche.get("titre", ""))
 	_pnj = []
 	_tableau = null
+	_affichage = null
 
 	if lieu == "village":
 		_batir_village(geometrie)
@@ -282,7 +289,17 @@ func _sprite_de_heros(nom: String) -> AnimatedSprite2D:
 	s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	s.offset = PIEDS
 	s.play("repos")
+	_ombrer(s)
 	return s
+
+## L'ombre au sol d'un personnage : l'ellipse du pack, sous les pieds, derrière.
+func _ombrer(porteur: Node2D) -> void:
+	var ombre := Pixels.image(IMAGES + "ombre_personnage.png", false)
+	ombre.centered = true
+	ombre.offset = Vector2.ZERO
+	ombre.position = Vector2(0, -3)
+	ombre.show_behind_parent = true
+	porteur.add_child(ombre)
 
 func _batir_village(geometrie: Dictionary) -> void:
 	# Chaque objet du plan est une image entière, posée à sa case ; le
@@ -322,6 +339,58 @@ func _batir_village(geometrie: Dictionary) -> void:
 		plan().add_child(atelier)
 	_semer_les_feuilles()
 	_eclairer_le_village(geometrie)
+	# Le tableau d'affichage de la place : les dernières parties jouées.
+	# Le panneau de bois est un objet du plan ; ici, seule l'inscription.
+	_affichage = _tableau_mural(rect_de(geometrie["tableau"]))
+	_affichage.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_affichage.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	_affichage.z_index = 1
+	plan().add_child(_affichage)
+	_rafraichir_affichage()
+
+func _sur_journal(lignes: Array) -> void:
+	_journal = lignes
+	_rafraichir_affichage()
+
+func _rafraichir_affichage() -> void:
+	if _affichage == null or not is_instance_valid(_affichage):
+		return
+	# Dix-neuf caractères de large, six lignes : la place du panneau.
+	var texte := " DERNIERES PARTIES\n"
+	if _journal.is_empty():
+		texte += "\n  PERSONNE N'A JOUE"
+	for ligne in _journal.slice(0, 5):
+		var quand := _il_y_a(String(ligne.get("cree_le", "")))
+		texte += "%-6s %-3s %4d %3s\n" % [String(ligne.get("pseudo", "?")).to_upper().left(6),
+			String(ligne.get("jeu", "")).to_upper().left(3), mini(int(ligne.get("score", 0)), 9999), quand]
+	_affichage.text = texte.trim_suffix("\n")
+
+## « 3m », « 2h », « 5j » : l'âge d'une date ISO, en trois caractères au plus.
+static func _il_y_a(iso: String) -> String:
+	if iso.length() < 19:
+		return ""
+	var d := Time.get_unix_time_from_datetime_string(iso.substr(0, 19))
+	var ecart := int(Time.get_unix_time_from_system()) - int(d)
+	if ecart < 3600:
+		return "%dm" % maxi(1, int(ecart / 60))
+	if ecart < 86400:
+		return "%dh" % int(ecart / 3600)
+	return "%dj" % mini(99, int(ecart / 86400))
+
+## Les phrases des habitants parlent du monde : {pseudo}, {champion_carnage},
+## {champion_enigme} sont remplis au moment de parler.
+func _phrase_du_monde(texte: String) -> String:
+	return texte.format({
+		"pseudo": Session.pseudo,
+		"champion_carnage": _champion("carnage"),
+		"champion_enigme": _champion("enigme"),
+	})
+
+func _champion(jeu: String) -> String:
+	var lignes: Array = _classements.get(jeu, [])
+	if lignes.is_empty():
+		return "personne encore"
+	return String(lignes[0].get("pseudo", "?"))
 
 ## Des feuilles qui tombent de la lisière, en points de deux pixels : assez
 ## pour que le village respire, pas assez pour qu'on les remarque une à une.
@@ -369,6 +438,7 @@ func _poser_pnj(pnj: Dictionary) -> void:
 	sprite.offset = PIEDS
 	Pixels.poser(sprite, pnj["position"])
 	sprite.play("repos")
+	_ombrer(sprite)
 	plan().add_child(sprite)
 	var fiche := {"position": (pnj["position"] as Vector2).round(), "phrases": pnj["phrases"], "noeud": sprite}
 	# Un habitant qui a une ronde dans le plan marche d'un point à l'autre ;
@@ -506,6 +576,14 @@ func _process(delta: float) -> void:
 	else:
 		_marche = false
 
+	# Un pas toutes les 0,32 s en marchant ; plus sec et plus aigu dedans.
+	if _marche:
+		_depuis_pas += delta
+		if _depuis_pas >= 0.32:
+			_depuis_pas = 0.0
+			Sons.jouer("pas", 1.0 if _lieu == "village" else 1.5, -22.0)
+	else:
+		_depuis_pas = 0.3
 	var animation := "marche" if _marche else "repos"
 	if _corps.animation != animation:
 		_corps.play(animation)
@@ -974,6 +1052,6 @@ func _rafraichir_hud() -> void:
 	var porte_fermee: bool = _invite.begins_with("entrer:") and _phrase == 0 and LIEUX[_invite.substr(7)].has("ferme")
 	_panneau_dialogue.visible = parle or porte_fermee
 	if parle:
-		_hud_dialogue.text = String(_pnj[_pnj_proche]["phrases"][_phrase])
+		_hud_dialogue.text = _phrase_du_monde(String(_pnj[_pnj_proche]["phrases"][_phrase]))
 	elif porte_fermee:
 		_hud_dialogue.text = String(LIEUX[_invite.substr(7)]["ferme"])
