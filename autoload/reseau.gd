@@ -64,6 +64,7 @@ func _process(delta: float) -> void:
 	match _ws.get_ready_state():
 		WebSocketPeer.STATE_OPEN:
 			if etat != EN_LIGNE:
+				print("[reseau] socket ouvert après %d essai(s)" % _essais)
 				_essais = 0
 				_passer(EN_LIGNE)
 				# Une reconnexion ne recrée pas les canaux : elle les rejoint.
@@ -195,6 +196,12 @@ func _recevoir(texte: String) -> void:
 	if typeof(charge) != TYPE_DICTIONARY:
 		charge = {}
 
+	# Ce que le serveur dit de LUI-MÊME (`system`, erreurs) se lit dans la
+	# console : c'est la seule trace qu'on ait quand le navigateur se connecte
+	# en trente secondes là où le natif met une.
+	if evenement in ["system", "phx_error", "phx_close"] or \
+			(evenement == "phx_reply" and String(charge.get("status", "")) != "ok"):
+		print("[reseau] ← %s sur %s : %s" % [evenement, topic, JSON.stringify(charge).substr(0, 300)])
 	if topic == "phoenix":
 		return
 	if not _canaux.has(topic):
