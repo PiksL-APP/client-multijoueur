@@ -321,7 +321,9 @@ func _naitre_passant(joueurs: Dictionary, large: bool) -> void:
 	})
 
 func _naitre_auto(joueurs: Dictionary, genre: int, cible: String) -> void:
-	if autos.size() >= AUTOS_MAX:
+	# Le plafond porte sur ce qui ROULE : les garées sont trois cents et ne
+	# comptent pas, sinon plus rien ne circulerait jamais.
+	if _mobiles() >= AUTOS_MOBILES_MAX and genre != PATROUILLE:
 		return
 	var autour := _autour_d_un_joueur(joueurs)
 	if cible != "" and joueurs.has(cible):

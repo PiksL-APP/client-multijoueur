@@ -576,8 +576,8 @@ func nom_du_quartier(point: Vector2) -> String:
 	return String(NOMS_QUARTIERS[clamp(quartier(point), 0, NOMS_QUARTIERS.size() - 1)])
 
 func _pate_proche(point: Vector2) -> Vector2i:
-	var colonne := clamp(int(floor(point.x / PAS)), 0, COLONNES - 1)
-	var ligne := clamp(int(floor(point.y / PAS)), 0, LIGNES - 1)
+	var colonne: int = clamp(int(floor(point.x / PAS)), 0, COLONNES - 1)
+	var ligne: int = clamp(int(floor(point.y / PAS)), 0, LIGNES - 1)
 	var pate := pate_de(colonne, ligne)
 	if pate.x >= 0:
 		return pate
