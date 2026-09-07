@@ -653,6 +653,21 @@ def etal():
     return m
 
 
+def lanterne():
+    """Un réverbère de bois : un poteau, une potence, une lanterne de fer à
+    vitres jaunes. Le moteur y accroche une lumière la nuit."""
+    m = Modele()
+    m.boite(-1, 0, -1, 0, 20, 0, P["bois2"])
+    m.boite(-2, 0, -2, 1, 0, 1, P["rocher"])
+    m.boite(-1, 20, -1, 4, 20, 0, P["bois2"])
+    m.boite(3, 15, -2, 6, 19, 1, P["fer2"])                # la cage
+    m.creux(4, 16, -1, 5, 18, 0)
+    m.boite(4, 16, -1, 5, 18, 0, P["vitre_nuit"])
+    m.boite(4, 14, -1, 5, 14, 0, P["fer2"])
+    return m
+
+
+ecrire("lanterne", lanterne())
 ecrire("banc", banc())
 ecrire("caisses", caisses())
 for nom, c in (("carottes", P["carotte"]), ("radis", P["radis"]), ("choux", P["chou"]), ("laitues", P["laitue"])):
@@ -668,6 +683,42 @@ ecrire("rotissoire", rotissoire())
 ecrire("scierie", scierie())
 ecrire("tableau", tableau())
 ecrire("etal", etal())
+
+# ------------------------------------------------------------------ l'arène
+# L'île de la Bousculade : un disque de terre et d'herbe qui flotte, découpé
+# en anneaux d'une unité pour qu'ils puissent s'effondrer un à un. Voxels
+# d'une demi-unité : le bord est franc, le dessous en gradins.
+RAYON_ARENE = 8
+
+
+def anneau_arene(r_int, r_ext, graine=0):
+    m = Modele(0.5)
+    R = int(math.ceil(r_ext * 2))
+    for x in range(-R, R):
+        for z in range(-R, R):
+            d = math.hypot(x + 0.5, z + 0.5) / 2.0
+            if r_int <= d < r_ext:
+                m.poser(x, -1, z, P["herbe"] if r_int % 2 == 0 else P["herbe2"])
+                m.poser(x, -2, z, P["terre"])
+                # Le dessous s'amincit vers le bord : une île qui flotte.
+                fond = -3 - int((RAYON_ARENE - d) * 0.5)
+                for y in range(fond, -2):
+                    m.poser(x, y, z, P["falaise"] if y % 2 else P["falaise2"])
+    return m
+
+
+for i in range(RAYON_ARENE):
+    ecrire(f"arene_{i}", anneau_arene(i, i + 1, graine=100 + i), centrer=False)
+# Des îlots pour le lointain : un disque plein ; le moteur y plante un arbre.
+for i, r in enumerate((2.5, 3.5, 2.0)):
+    ecrire(f"ilot_{i}", anneau_arene(0, r, graine=200 + i), centrer=False)
+# Un pavage de brique au centre, pour le point de départ.
+centre_arene = Modele(0.5)
+for x in range(-4, 4):
+    for z in range(-4, 4):
+        if math.hypot(x + 0.5, z + 0.5) < 3.8:
+            centre_arene.poser(x, -1, z, P["brique"] if (x + z) % 2 else P["brique2"])
+ecrire("arene_centre", centre_arene, centrer=False)
 
 # ------------------------------------------------------------------ personnages
 # Seize voxels de haut, six de large : jambes, corps, bras, tête, chacun un
@@ -1013,6 +1064,12 @@ poser("jardiniere", 27, 23)
 poser("jardiniere", 34, 23)
 poser("rotissoire", 23, 22)
 poser("scierie", 55, 21)
+# Des réverbères aux coins de la place et le long de la grand-rue : ils
+# s'allument à la nuit.
+declarer("lanterne", 1, 1)
+LANTERNES = [(17, 25), (46, 25), (17, 33), (29, 36), (35, 36), (29, 44), (35, 44)]
+for (x, y) in LANTERNES:
+    poser("lanterne", x, y)
 # Le tableau d'affichage : dix cases de large, au sud-est de la place.
 poser("tableau", 42, 33)
 TABLEAU = (42.5, 33.5)               # centre du panneau, en cases
@@ -1440,9 +1497,7 @@ aub = Piece("auberge", 14, 9, "bois", "rondins")
 for y in (1, 4):
     aub.meuble(lit(), 0, y, 1, 2)
 aub.meuble(lit(), 12, 5, 1, 2)
-aub.meuble(armoire(), 4, 0, 2, 1)
-aub.meuble(cheminee_int(), 8, -1, 2, 1, contre_le_mur=True)
-aub.cases(8, 0, 2, 1)
+aub.meuble(armoire(), 2, 0, 2, 1)
 aub.meuble(table(), 7, 5, 2, 1)
 aub.meuble(chaise(), 6, 5, rot=270)
 aub.meuble(chaise(), 9, 5, rot=90)
@@ -1450,8 +1505,10 @@ aub.meuble(baignoire(), 12, 1, 1, 2)
 aub.meuble(tapis(32, 24, P["coussin"]), 6, 2, 4, 3, bloque=False)
 aub.meuble(plante(), 13, 8)
 aub.meuble(plante(), 3, 8)
-aub.fenetre(2)
-aub.fenetre(11)
+aub.meuble(candelabre(), 10, 1)
+aub.fenetre(4)
+aub.scores(5, 6)
+aub.porte_portail(11)
 PIECES["auberge"] = {"piece": aub, "sortie": aub.sortie_sud(), "rondes": {}}
 
 for nom, p in PIECES.items():
@@ -1474,6 +1531,7 @@ plan = {
         "tableau": [TABLEAU[0], 19 * FIN, TABLEAU[1] + 0.1, 9.0, 2.5],
         "fenetres": fenetres,
         "fumees": fumees,
+        "lanternes": [[x + 0.5 + 4.5 * FIN, 17 * FIN, y + 0.5] for (x, y) in LANTERNES],
         "mare": {"cases": [[x, y] for (x, y), t in terrain.items() if t == "eau"], "niveau": -0.35},
         "plateau": FALAISE,
         "rondes": {"paysanne": [[352, 416], [576, 416], [576, 528], [352, 528]]},

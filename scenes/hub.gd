@@ -42,8 +42,9 @@ const LIEUX := {
 		"nom": "Village",
 		"pnj": [{"nom": "paysanne", "position": Vector2(352, 416), "phrases": [
 			"Salut {pseudo}. Trois portes ouvertes : la taverne, l'armurerie, l'auberge.",
-			"La taverne mène au Carnage, l'armurerie à l'Énigme. À l'auberge, on dort.",
-			"Le champion du Carnage, c'est {champion_carnage}. À l'Énigme, {champion_enigme}. Pour l'instant.",
+			"La taverne mène au Carnage, l'armurerie à l'Énigme, l'auberge à la Bousculade.",
+			"Le champion du Carnage, c'est {champion_carnage}. À l'Énigme, {champion_enigme}. À la Bousculade, {champion_bousculade}.",
+			"Les réverbères s'allument tout seuls le soir. Personne ne sait qui les entretient.",
 			"Le tableau, là-bas au coin de la place, dit qui a joué en dernier.",
 		]}],
 	},
@@ -79,9 +80,15 @@ const LIEUX := {
 	},
 	"auberge": {
 		"nom": "Auberge",
+		"rangs": 5,
+		"jeu": "bousculade",
+		"titre": "BOUSCULADE",
 		"pnj": [{"nom": "aubergiste", "position": Vector2(168, 72), "phrases": [
 			"Chut, il y a des gens qui dorment. Ici on se repose entre deux parties.",
-			"Le troisième jeu se prépare. Repasse.",
+			"Derrière l'arche, l'île flotte. On s'y bouscule : le dernier debout gagne.",
+			"Espace pour charger. Une charge dans le dos, et l'autre part dans le vide.",
+			"L'île s'effrite par le bord. Reste au milieu, ou pousse plus fort que les autres.",
+			"Tombé ? On te repêche au centre trois secondes plus tard. Mais l'autre a marqué.",
 		]}],
 	},
 	"maison": {"nom": "Maison", "ferme": "C'est fermé. Les habitants sont partis jouer au Carnage."},
@@ -105,58 +112,6 @@ static func rect_de(valeur) -> Rect2:
 ## Un point du plan (pixels) → le monde (unités), au sol.
 static func au_sol(plan_px: Vector2, hauteur: float = 0.0) -> Vector3:
 	return Vector3(plan_px.x / UNITE, hauteur, plan_px.y / UNITE)
-
-# ---------------------------------------------------------------- le pantin
-## Un personnage voxel : les six parties du glTF, qu'on balance en marchant.
-## Le visage regarde vers +z au repos ; on tourne le tout vers la direction
-## du dernier pas.
-class Pantin extends Node3D:
-	var parties: Dictionary = {}
-	var phase := 0.0
-	var marche := false
-	var cap := 0.0                     # l'orientation visée, en radians
-	var _corps_y := 0.0
-
-	static func depuis(chemin: String) -> Pantin:
-		var p := Pantin.new()
-		var modele := (load(chemin) as PackedScene).instantiate() as Node3D
-		p.add_child(modele)
-		for n in modele.find_children("*", "MeshInstance3D", true, false):
-			p.parties[n.name] = n
-		return p
-
-	func regarder(direction: Vector2) -> void:
-		if direction.length() > 0.01:
-			cap = atan2(direction.x, direction.y)
-
-	func _process(delta: float) -> void:
-		rotation.y = lerp_angle(rotation.y, cap, clampf(delta * 14.0, 0.0, 1.0))
-		var cible := 0.0
-		if marche:
-			phase += delta * 11.0
-			cible = sin(phase) * 0.7
-		else:
-			phase = 0.0
-		var lisse: float = clamp(delta * 12.0, 0.0, 1.0)
-		for nom in parties:
-			var partie: Node3D = parties[nom]
-			match nom:
-				"jambe_g", "bras_d":
-					partie.rotation.x = lerp(partie.rotation.x, cible, lisse)
-				"jambe_d", "bras_g":
-					partie.rotation.x = lerp(partie.rotation.x, -cible, lisse)
-		# Le buste et la tête sautillent d'un voxel en marchant.
-		var saut := (absf(sin(phase)) * 0.06) if marche else 0.0
-		for nom in ["corps", "tete", "bras_g", "bras_d"]:
-			if parties.has(nom):
-				var partie: Node3D = parties[nom]
-				partie.position.y = _base_y(nom) + saut
-
-	func _base_y(nom: String) -> float:
-		match nom:
-			"tete": return 1.5
-			"bras_g", "bras_d": return 1.4375
-			_: return 0.75
 
 var _canal: CanalTempsReel
 var _camera: Camera3D
@@ -249,6 +204,7 @@ func demarrer() -> void:
 	Scores.journal_recu.connect(_sur_journal)
 	Scores.demander_classement("carnage", 5)
 	Scores.demander_classement("enigme", 5)
+	Scores.demander_classement("bousculade", 5)
 	Scores.demander_carnet(Session.id)
 	Scores.demander_journal(5)
 
@@ -441,6 +397,16 @@ func _batir_village(geometrie: Dictionary) -> void:
 	for porte in geometrie["portes"]:
 		var p := au_sol(Vector2(float(porte["x"]) + float(porte["l"]) * 0.5, float(porte["y"])), 1.6)
 		_lumieres.append(_lampe(p, Color(1.0, 0.85, 0.6), 4.5, 0.0))
+	# Les réverbères : une lueur dans la cage, une lumière chaude au sol.
+	for lanterne in geometrie.get("lanternes", []):
+		var l := Vector3(float(lanterne[0]), float(lanterne[1]), float(lanterne[2]))
+		var lueur := Decor.boite(Vector3(0.3, 0.4, 0.3), Color(1.0, 0.86, 0.5), false)
+		lueur.material_override = Decor.matiere_lumineuse(Color(1.0, 0.86, 0.5), 1.5)
+		lueur.position = l
+		lueur.visible = false
+		monde().add_child(lueur)
+		_vitres.append(lueur)
+		_lumieres.append(_lampe(l + Vector3(0, -0.3, 0), Color(1.0, 0.8, 0.5), 6.5, 0.0))
 	_semer_les_lucioles()
 	_semer_les_feuilles()
 	# Le tableau d'affichage de la place : les dernières parties jouées.
@@ -719,6 +685,7 @@ func _phrase_du_monde(texte: String) -> String:
 		"pseudo": Session.pseudo,
 		"champion_carnage": _champion("carnage"),
 		"champion_enigme": _champion("enigme"),
+		"champion_bousculade": _champion("bousculade"),
 	})
 
 func _champion(jeu: String) -> String:
@@ -1102,8 +1069,8 @@ func _sur_carnet(lignes: Array) -> void:
 func _rafraichir_carnet() -> void:
 	if _hud_carnet == null:
 		return
-	var parties := {"carnage": 0, "enigme": 0}
-	var meilleurs := {"carnage": 0, "enigme": 0}
+	var parties := {"carnage": 0, "enigme": 0, "bousculade": 0}
+	var meilleurs := {"carnage": 0, "enigme": 0, "bousculade": 0}
 	for ligne in _carnet:
 		var jeu := String(ligne.get("jeu", ""))
 		if not meilleurs.has(jeu):
@@ -1112,7 +1079,7 @@ func _rafraichir_carnet() -> void:
 		meilleurs[jeu] = maxi(int(meilleurs[jeu]), int(ligne.get("score", 0)))
 	var noms := {"knight": "chevalier", "rogue": "voleur", "wizzard": "mage"}
 	var texte := "%s, %s\n\n" % [Session.pseudo, String(noms.get(Session.heros_affiche(), ""))]
-	for jeu in ["carnage", "enigme"]:
+	for jeu in ["carnage", "enigme", "bousculade"]:
 		var rang := _rang_de(jeu, Session.pseudo)
 		texte += "%s : %d partie%s, record %d%s\n" % [
 			jeu.capitalize(), int(parties[jeu]), "s" if int(parties[jeu]) > 1 else "",

@@ -5,6 +5,7 @@ extends Ecran
 
 var _champ: LineEdit
 var _bouton: Button
+var _portraits: Dictionary = {}    # nom -> Button
 var _etat: HBoxContainer
 var _avertissement: Label
 var _anneaux: Array[Node3D] = []
@@ -37,6 +38,34 @@ func demarrer() -> void:
 	_champ.text_changed.connect(func(_t): _rafraichir())
 	colonne.add_child(_champ)
 
+	# Le héros qu'on incarne dans le village : chevalier, voleur ou mage.
+	# Les autres nous voient sous ce trait, il fait partie de l'identité.
+	colonne.add_child(UI.texte("Votre héros", 15, Palette.ENCRE_FAIBLE))
+	var rangee := HBoxContainer.new()
+	rangee.add_theme_constant_override("separation", 12)
+	colonne.add_child(rangee)
+	var noms := {"knight": "Chevalier", "rogue": "Voleur", "wizzard": "Mage"}
+	for nom in Pixels.HEROS:
+		var b := Button.new()
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(128, 148)
+		b.tooltip_text = String(noms[nom])
+		b.pressed.connect(func() -> void:
+			Session.definir_heros(nom)
+			_rafraichir())
+		# Le héros lui-même, en voxels, qui tourne lentement dans une petite
+		# fenêtre 3D posée sur le bouton : on choisit ce qu'on verra au village.
+		b.add_child(_vitrine(nom))
+		var legende := UI.texte(String(noms[nom]), 13, Palette.ENCRE_DOUCE)
+		legende.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		legende.offset_top = -26
+		legende.offset_bottom = -6
+		legende.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		legende.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(legende)
+		rangee.add_child(b)
+		_portraits[nom] = b
+
 	_bouton = UI.bouton("Entrer dans le hub", true)
 	_bouton.pressed.connect(_entrer)
 	colonne.add_child(_bouton)
@@ -54,6 +83,70 @@ func demarrer() -> void:
 	Reseau.etat_change.connect(func(_e): _rafraichir())
 	_champ.grab_focus()
 	_rafraichir()
+
+## Une fenêtre 3D à part (son propre monde, fond transparent) : le pantin
+## voxel, une lumière, une caméra à hauteur d'épaule.
+func _vitrine(nom: String) -> SubViewportContainer:
+	var cadre := SubViewportContainer.new()
+	cadre.stretch = true
+	cadre.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cadre.offset_bottom = -22
+	cadre.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var fenetre := SubViewport.new()
+	fenetre.transparent_bg = true
+	fenetre.own_world_3d = true
+	fenetre.msaa_3d = Viewport.MSAA_2X
+	cadre.add_child(fenetre)
+	var environnement := Environment.new()
+	environnement.background_mode = Environment.BG_COLOR
+	environnement.background_color = Color(0, 0, 0, 0)
+	environnement.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environnement.ambient_light_color = Color("#b8c4d8")
+	environnement.ambient_light_energy = 0.7
+	var monde_env := WorldEnvironment.new()
+	monde_env.environment = environnement
+	fenetre.add_child(monde_env)
+	var lumiere := DirectionalLight3D.new()
+	lumiere.rotation_degrees = Vector3(-42, -35, 0)
+	lumiere.light_energy = 1.3
+	lumiere.light_color = Color("#fff3df")
+	fenetre.add_child(lumiere)
+	var pantin := Pantin.depuis(Pantin.MODELES + "heros_%s.glb" % nom)
+	pantin.name = "pantin"
+	fenetre.add_child(pantin)
+	var camera := Camera3D.new()
+	camera.fov = 30.0
+	fenetre.add_child(camera)
+	camera.position = Vector3(0, 1.7, 5.6)
+	camera.look_at(Vector3(0, 1.2, 0))
+	_vitrines.append(pantin)
+	return cadre
+
+var _vitrines: Array[Pantin] = []
+
+## Les héros tournent sur eux-mêmes ; l'élu marche sur place.
+func _animer_vitrines(delta: float) -> void:
+	var choisi := Session.heros_affiche()
+	for pantin in _vitrines:
+		if not is_instance_valid(pantin):
+			continue
+		pantin.cap += delta * 0.7
+		var nom := String(pantin.get_child(0).name)
+		pantin.marche = nom.ends_with(choisi)
+
+func _rafraichir_portraits() -> void:
+	var choisi := Session.heros_affiche()
+	for nom in _portraits:
+		var b: Button = _portraits[nom]
+		var elu: bool = nom == choisi
+		var style := StyleBoxFlat.new()
+		style.bg_color = Palette.SURFACE.lightened(0.06) if elu else Palette.SURFACE
+		style.border_color = Palette.SERIE if elu else Palette.FILET
+		style.set_border_width_all(2 if elu else 1)
+		style.set_content_margin_all(8)
+		for etat in ["normal", "hover", "pressed"]:
+			b.add_theme_stylebox_override(etat, style)
+		b.modulate = Color.WHITE if elu else Color(1, 1, 1, 0.6)
 
 func _decor() -> void:
 	poser_ambiance(false)
@@ -85,6 +178,7 @@ func _decor() -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
+	_animer_vitrines(delta)
 	for i in _anneaux.size():
 		var n := _anneaux[i]
 		n.rotation.y = _t * (0.35 + i * 0.22)
@@ -92,6 +186,7 @@ func _process(delta: float) -> void:
 
 func _rafraichir() -> void:
 	UI.rafraichir_etat_reseau(_etat)
+	_rafraichir_portraits()
 	var pseudo := Session.nettoyer_pseudo(_champ.text)
 	var pret := pseudo.length() >= 2 and Reseau.etat == Reseau.EN_LIGNE
 	_bouton.disabled = not pret
