@@ -15,7 +15,7 @@ var donnees: Dictionary = {}
 
 var _couche: CanvasLayer = null
 var _monde: Node3D = null
-var _plan: Node2D = null
+var _plan_2d: Node2D = null
 
 ## Les contrôles vont dans une couche, jamais en enfant direct : un Control
 ## dont le parent n'est pas un Control n'a pas de rectangle de référence, ses
@@ -34,11 +34,11 @@ func interface() -> CanvasLayer:
 ## `y_sort_enabled` fait passer devant ce qui est plus bas à l'écran — sans
 ## lui, un joueur marche à travers un arbre au lieu de passer derrière.
 func plan() -> Node2D:
-	if _plan == null:
-		_plan = Node2D.new()
-		_plan.y_sort_enabled = true
-		add_child(_plan)
-	return _plan
+	if _plan_2d == null:
+		_plan_2d = Node2D.new()
+		_plan_2d.y_sort_enabled = true
+		add_child(_plan_2d)
+	return _plan_2d
 
 func monde() -> Node3D:
 	if _monde == null:

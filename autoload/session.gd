@@ -11,12 +11,14 @@ const PSEUDO_MAX := 16
 var id: String = ""      ## stable, gardé d'une visite à l'autre : sert aux scores
 var cle: String = ""     ## propre à cet onglet : sert au réseau
 var pseudo: String = ""
+var heros: String = ""   ## knight, rogue ou wizzard ; vide = tiré de l'identifiant
 
 func _ready() -> void:
 	var fichier := ConfigFile.new()
 	if fichier.load(FICHIER) == OK:
 		id = String(fichier.get_value("joueur", "id", ""))
 		pseudo = String(fichier.get_value("joueur", "pseudo", ""))
+		heros = String(fichier.get_value("joueur", "heros", ""))
 	if id.length() < 8:
 		id = _tirer_identifiant()
 		_ecrire()
@@ -29,6 +31,15 @@ func _ready() -> void:
 func definir_pseudo(nouveau: String) -> void:
 	pseudo = nettoyer_pseudo(nouveau)
 	_ecrire()
+
+func definir_heros(nom: String) -> void:
+	heros = nom
+	_ecrire()
+
+## Le héros affiché : celui qu'on a choisi, sinon celui que l'identifiant
+## désigne — le même calcul chez tous les clients.
+func heros_affiche() -> String:
+	return heros if heros in Pixels.HEROS else Pixels.heros_de(id)
 
 static func nettoyer_pseudo(brut: String) -> String:
 	var propre := ""
@@ -57,4 +68,5 @@ func _ecrire() -> void:
 	var fichier := ConfigFile.new()
 	fichier.set_value("joueur", "id", id)
 	fichier.set_value("joueur", "pseudo", pseudo)
+	fichier.set_value("joueur", "heros", heros)
 	fichier.save(FICHIER)

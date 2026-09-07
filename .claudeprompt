@@ -145,9 +145,12 @@ automatique cesse alors de couvrir ce jeu.
 1. `godot --headless --path . --import` — aucune erreur de script.
    ⚠ L'import ne compile pas tout : les erreurs d'inférence de type
    n'apparaissent qu'à l'exécution. Les bancs ci-dessous les révèlent.
-2. Les deux bancs, en deux instances chacune, avec des `HOME` distincts :
-   `--banc` (présence et diffusion) puis `--banc-jeu=<jeu> --manche=30`
-   (manche complète jusqu'au dépôt du score).
+2. Les bancs, en deux instances chacune, avec des `HOME` distincts :
+   `--banc` (présence et diffusion) puis `--banc-jeu=carnage` ET
+   `--banc-jeu=enigme` (`--manche=30`, manche complète jusqu'au dépôt du
+   score). Les DEUX jeux, même quand on n'a touché qu'à l'autre : un membre
+   ajouté au socle `Ecran` (`_plan`) a rendu l'Énigme impossible à charger
+   pendant une journée parce que seul Carnage était passé au banc.
 3. `--photo=<dossier>` sous `xvfb-run` : une image toutes les cinq secondes.
    Le rendu se REGARDE. C'est ainsi qu'on a vu que les monstres, nés aux bords
    de l'arène, n'entraient jamais dans le champ de la caméra.

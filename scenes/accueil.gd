@@ -5,6 +5,7 @@ extends Ecran
 
 var _champ: LineEdit
 var _bouton: Button
+var _portraits: Dictionary = {}    # nom -> Button
 var _etat: HBoxContainer
 var _avertissement: Label
 var _anneaux: Array[Node3D] = []
@@ -42,6 +43,29 @@ func demarrer() -> void:
 	_champ.text_changed.connect(func(_t): _rafraichir())
 	colonne.add_child(_champ)
 
+	# Le héros qu'on incarne dans le village : chevalier, voleur ou mage.
+	# Les autres nous voient sous ce trait, il fait partie de l'identité.
+	colonne.add_child(UI.texte("Votre héros", 15, Palette.ENCRE_FAIBLE))
+	var rangee := HBoxContainer.new()
+	rangee.add_theme_constant_override("separation", 12)
+	colonne.add_child(rangee)
+	var noms := {"knight": "Chevalier", "rogue": "Voleur", "wizzard": "Mage"}
+	for nom in Pixels.HEROS:
+		var b := Button.new()
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(128, 128)
+		b.icon = Pixels.portrait(nom)
+		b.expand_icon = true
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER
+		b.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		b.tooltip_text = String(noms[nom])
+		b.pressed.connect(func() -> void:
+			Session.definir_heros(nom)
+			_rafraichir())
+		rangee.add_child(b)
+		_portraits[nom] = b
+
 	_bouton = UI.bouton("Entrer dans le hub", true)
 	_bouton.pressed.connect(_entrer)
 	colonne.add_child(_bouton)
@@ -59,6 +83,21 @@ func demarrer() -> void:
 	Reseau.etat_change.connect(func(_e): _rafraichir())
 	_champ.grab_focus()
 	_rafraichir()
+
+func _rafraichir_portraits() -> void:
+	var choisi := Session.heros_affiche()
+	for nom in _portraits:
+		var b: Button = _portraits[nom]
+		var elu: bool = nom == choisi
+		var style := StyleBoxFlat.new()
+		style.bg_color = Palette.SURFACE.lightened(0.06) if elu else Palette.SURFACE
+		style.border_color = Palette.SERIE if elu else Palette.FILET
+		style.set_border_width_all(2 if elu else 1)
+		style.set_corner_radius_all(8)
+		style.set_content_margin_all(8)
+		for etat in ["normal", "hover", "pressed"]:
+			b.add_theme_stylebox_override(etat, style)
+		b.modulate = Color.WHITE if elu else Color(1, 1, 1, 0.6)
 
 func _decor() -> void:
 	poser_ambiance(false)
@@ -96,6 +135,7 @@ func _process(delta: float) -> void:
 		n.rotation.x = deg_to_rad(78.0) + sin(_t * 0.5 + i) * 0.12
 
 func _rafraichir() -> void:
+	_rafraichir_portraits()
 	UI.rafraichir_etat_reseau(_etat)
 	var pseudo := Session.nettoyer_pseudo(_champ.text)
 	var pret := pseudo.length() >= 2 and Reseau.etat == Reseau.EN_LIGNE

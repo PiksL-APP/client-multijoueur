@@ -43,6 +43,13 @@ static func heros(nom: String) -> SpriteFrames:
 	ajouter(poses, "marche", base + "marche.png", 10.0)
 	return poses
 
+## Le portrait d'un héros : la première image de sa planche de repos.
+static func portrait(nom: String) -> Texture2D:
+	var morceau := AtlasTexture.new()
+	morceau.atlas = planche("res://modeles/village/heros_%s_repos.png" % nom)
+	morceau.region = Rect2(0, 0, 64, 64)
+	return morceau
+
 ## Le héros d'un joueur découle de son identité : tous les clients font le
 ## même calcul, donc tous voient le même personnage pour la même personne.
 static func heros_de(id: String) -> String:

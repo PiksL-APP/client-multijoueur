@@ -9,6 +9,27 @@ extends Node
 
 signal depot_termine(reussi: bool, message: String)
 signal classement_recu(jeu: String, lignes: Array)
+signal carnet_recu(lignes: Array)
+
+## Toutes les lignes de score d'un joueur, les plus récentes d'abord : de
+## quoi tenir son carnet (meilleurs scores, nombre de parties).
+func demander_carnet(joueur_id: String) -> void:
+	if not Config.est_configure():
+		carnet_recu.emit([])
+		return
+	var requete := HTTPRequest.new()
+	add_child(requete)
+	requete.request_completed.connect(func(_r, code_http, _h, corps):
+		requete.queue_free()
+		var lignes: Array = []
+		if code_http == 200:
+			var analyse = JSON.parse_string(corps.get_string_from_utf8())
+			if typeof(analyse) == TYPE_ARRAY:
+				lignes = analyse
+		carnet_recu.emit(lignes)
+	)
+	var chemin := "jeu_scores?select=jeu,score,cree_le&joueur_id=eq.%s&order=cree_le.desc&limit=300" % joueur_id.uri_encode()
+	requete.request(Config.url_rest(chemin), Config.entetes_rest(), HTTPClient.METHOD_GET)
 
 func deposer(jeu: String, code: String, duree_s: int, resultats: Array) -> void:
 	if not Config.est_configure():
