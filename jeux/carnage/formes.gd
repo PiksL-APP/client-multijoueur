@@ -32,11 +32,103 @@ const MODELE_POLICE := 9
 ## où l'on est en regardant ce qui passe.
 const VOITURES_PAR_QUARTIER := {
 	PlanVille.CENTRE: [0, 1, 4, 5, 5, 5, 1],
+	PlanVille.AFFAIRES: [0, 1, 4, 4, 5, 1, 0],
 	PlanVille.COMMERCE: [0, 0, 1, 4, 5, 6, 2],
+	PlanVille.VIEUX: [0, 2, 2, 0, 5, 3, 6],
+	PlanVille.RESIDENCES: [0, 0, 2, 3, 6, 0, 2],
 	PlanVille.INDUSTRIE: [6, 6, 7, 7, 8, 8, 3],
+	PlanVille.PORT: [7, 8, 8, 6, 3, 7, 6],
 	PlanVille.BANLIEUE: [0, 0, 3, 3, 2, 6, 4],
 	PlanVille.PARC: [0, 2, 3],
+	PlanVille.EAU: [0],
 }
+
+## Les carrosseries FUSIONNÉES : le kit livre chaque voiture en cinq maillages
+## (la caisse et quatre roues). Une nappe ne prend qu'un maillage par
+## instance ; on recolle donc les cinq en un seul, une fois, par modèle. C'est
+## ce qui permet de peindre cent cinquante voitures dormantes d'un morceau en
+## dix appels de dessin au lieu de sept cent cinquante.
+static var _fusionnees: Dictionary = {}
+static var _matieres_teintees: Dictionary = {}
+
+static func maillage_voiture(indice: int) -> Mesh:
+	var nom := String(MODELES_VOITURES[clamp(indice, 0, MODELES_VOITURES.size() - 1)])
+	if _fusionnees.has(nom):
+		return _fusionnees[nom]
+	var scene := (load(VOITURES + nom + ".glb") as PackedScene).instantiate()
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var matiere: Material = null
+	var pile: Array = [[scene, Transform3D()]]
+	while not pile.is_empty():
+		var entree: Array = pile.pop_back()
+		var noeud: Node = entree[0]
+		var t: Transform3D = entree[1]
+		if noeud is Node3D:
+			t = t * (noeud as Node3D).transform
+		if noeud is MeshInstance3D:
+			var m := (noeud as MeshInstance3D).mesh
+			for s in m.get_surface_count():
+				st.append_from(m, s, t)
+				if matiere == null:
+					matiere = m.surface_get_material(s)
+		for enfant in noeud.get_children():
+			pile.append([enfant, t])
+	var fusion := st.commit()
+	if matiere != null and fusion.get_surface_count() > 0:
+		fusion.surface_set_material(0, matiere)
+	scene.free()
+	_fusionnees[nom] = fusion
+	return fusion
+
+## La matière du kit, qui accepte la couleur d'instance : c'est elle qui fait
+## qu'une voiture de gang dans une nappe porte ses couleurs.
+static func matiere_voiture_teintee(indice: int) -> Material:
+	var nom := String(MODELES_VOITURES[clamp(indice, 0, MODELES_VOITURES.size() - 1)])
+	if _matieres_teintees.has(nom):
+		return _matieres_teintees[nom]
+	var origine := maillage_voiture(indice).surface_get_material(0)
+	var copie: BaseMaterial3D = (origine as BaseMaterial3D).duplicate() if origine is BaseMaterial3D else StandardMaterial3D.new()
+	copie.vertex_color_use_as_albedo = true
+	copie.roughness = 0.55
+	_matieres_teintees[nom] = copie
+	return copie
+
+## Les phares d'une voiture conduite : deux flaques chaudes devant, une lueur
+## rouge derrière. Au crépuscule, c'est ce qui dit dans quel sens on roule et
+## ce qu'on va percuter — bien avant la silhouette.
+static func phares(racine: Node3D, avant: float, arriere: float) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_flaque(st, Vector3(avant + 4.6, 0.05, 0.0), Vector3(6.0, 0, 0), Vector3(0, 0, 4.4), Color(1.0, 0.82, 0.55, 0.55))
+	_flaque(st, Vector3(arriere - 1.2, 0.05, 0.0), Vector3(1.8, 0, 0), Vector3(0, 0, 1.9), Color(1.0, 0.15, 0.1, 0.35))
+	var noeud := MeshInstance3D.new()
+	noeud.mesh = st.commit()
+	noeud.material_override = MatieresCarnage.flaque()
+	noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	noeud.name = "Phares"
+	racine.add_child(noeud)
+	# Les optiques elles-mêmes : deux points chauds à l'avant, deux rouges à l'arrière.
+	var lum := SurfaceTool.new()
+	lum.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for cote in [-0.75, 0.75]:
+		_flaque(lum, Vector3(avant, 0.95, cote), Vector3(0.2, 0, 0), Vector3(0, 0, 0.3), Color(1.0, 0.95, 0.8, 1.0))
+		_flaque(lum, Vector3(arriere, 0.9, cote), Vector3(0.15, 0, 0), Vector3(0, 0, 0.28), Color(1.0, 0.2, 0.15, 1.0))
+	var optiques := MeshInstance3D.new()
+	optiques.mesh = lum.commit()
+	optiques.material_override = MatieresCarnage.lumineux()
+	optiques.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	optiques.name = "Optiques"
+	racine.add_child(optiques)
+
+static func _flaque(st: SurfaceTool, centre: Vector3, dx: Vector3, dz: Vector3, couleur: Color) -> void:
+	var p := [centre - dx - dz, centre + dx - dz, centre + dx + dz, centre - dx + dz]
+	var uvs := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
+	for k in [0, 1, 2, 0, 2, 3]:
+		st.set_color(couleur)
+		st.set_uv(uvs[k])
+		st.set_normal(Vector3.UP)
+		st.add_vertex(p[k])
 ## Le kit de Kenney fait ses berlines en 2,55 unités de long ; la Volvo du
 ## joueur en fait 4,5. Sans cette mise à l'échelle, on volerait des voitures
 ## deux fois plus petites que la sienne.
@@ -149,6 +241,8 @@ static func voiture(couleur: Color, pseudo: String = "", halo: bool = true,
 	pare_buffle.visible = false
 	racine.add_child(pare_buffle)
 
+	phares(racine, 2.85, -2.3)
+
 	var jauge := Decor.barre(3.4)
 	jauge.name = "Vie"
 	jauge.position = Vector3(0, 2.9, 0)
@@ -201,6 +295,8 @@ static func voiture_kit(indice: int, couleur: Color = Color.WHITE, halo_couleur:
 	pare_buffle.name = "Buffle"
 	pare_buffle.visible = false
 	racine.add_child(pare_buffle)
+
+	phares(racine, 2.25, -2.2)
 
 	var jauge := Decor.barre(3.4)
 	jauge.name = "Vie"
@@ -428,6 +524,81 @@ static func caisse(arme: String, couleur: Color) -> Node3D:
 	objet.position = Vector3(0, 1.6, 0)
 	racine.add_child(objet)
 	return racine
+
+## La fumée d'un pot d'échappement, ou d'un moteur qui souffre : un émetteur
+## de particules processeur, ce que le mode compatibilité fait de mieux. Il ne
+## tourne que quand on accélère — un panache permanent cache la voiture.
+static func echappement(arriere: float) -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.name = "Fumee"
+	p.amount = 22
+	p.lifetime = 0.9
+	p.emitting = false
+	p.local_coords = false
+	var grain := SphereMesh.new()
+	grain.radius = 0.22
+	grain.height = 0.44
+	grain.radial_segments = 6
+	grain.rings = 3
+	p.mesh = grain
+	p.direction = Vector3(-1.0, 0.5, 0.0)
+	p.spread = 22.0
+	p.initial_velocity_min = 2.5
+	p.initial_velocity_max = 5.0
+	p.gravity = Vector3(0, 1.4, 0)
+	p.scale_amount_min = 0.6
+	p.scale_amount_max = 1.5
+	var teinte := Gradient.new()
+	teinte.set_color(0, Color(0.8, 0.8, 0.82, 0.45))
+	teinte.set_color(1, Color(0.6, 0.6, 0.64, 0.0))
+	p.color_ramp = teinte
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	p.material_override = m
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.position = Vector3(arriere, 0.45, 0.6)
+	return p
+
+## Une explosion : une bouffée de feu qui vire au noir, tirée d'un coup. Le
+## nœud se détruit tout seul à la fin de sa vie.
+static func explosion() -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.amount = 46
+	p.lifetime = 1.3
+	p.one_shot = true
+	p.explosiveness = 0.95
+	p.emitting = true
+	p.local_coords = false
+	var grain := SphereMesh.new()
+	grain.radius = 0.5
+	grain.height = 1.0
+	grain.radial_segments = 6
+	grain.rings = 3
+	p.mesh = grain
+	p.direction = Vector3(0, 1, 0)
+	p.spread = 180.0
+	p.initial_velocity_min = 6.0
+	p.initial_velocity_max = 16.0
+	p.gravity = Vector3(0, -5.0, 0)
+	p.damping_min = 3.0
+	p.damping_max = 5.0
+	p.scale_amount_min = 1.0
+	p.scale_amount_max = 2.6
+	var teinte := Gradient.new()
+	teinte.add_point(0.0, Color(1.0, 0.85, 0.5, 1.0))
+	teinte.set_color(1, Color(1.0, 0.45, 0.15, 0.95))
+	teinte.add_point(0.45, Color(0.25, 0.22, 0.2, 0.8))
+	teinte.add_point(1.0, Color(0.1, 0.1, 0.1, 0.0))
+	p.color_ramp = teinte
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	p.material_override = m
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return p
 
 ## Un anneau posé à plat. Répété six fois dans ce fichier avant d'être extrait :
 ## la rotation de 90° s'oublie une fois sur deux et l'anneau part debout.

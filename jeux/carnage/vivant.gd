@@ -231,7 +231,6 @@ func _peupler(delta: float, _temps: float, joueurs: Dictionary) -> void:
 		return
 	if not _amorce:
 		_amorce = true
-		_garer_la_ville()
 		for i in 28:
 			_naitre_passant(joueurs, true)
 		for i in 12:
@@ -266,31 +265,38 @@ func _peupler(delta: float, _temps: float, joueurs: Dictionary) -> void:
 		_depuis_caisse = 0.0
 		_poser_caisse(joueurs)
 
-## Les voitures qui dorment le long des rues. Toutes d'un coup, au coup
-## d'envoi : c'est le plan qui dit où, l'hôte ne fait que leur donner un
-## identifiant et un point de vie. Une ville où l'on ne trouve pas de voiture
-## à voler à vingt mètres n'est pas un GTA.
-func _garer_la_ville() -> void:
-	for place in plan.stationnements:
-		var quartier := int(place["quartier"])
-		var gang := int(place["territoire"])
-		var genre := CIVILE
-		var modele := _modele_pour(quartier)
-		# Près d'un repaire, les voitures sont celles du gang. Ailleurs sur son
-		# territoire, une sur sept porte ses couleurs.
-		var au_repaire := false
-		for r in plan.repaires:
-			if Vector2(r["p"]).distance_to(place["p"]) <= PlanVille.RAYON_REPAIRE:
-				au_repaire = true
-		if gang >= 0 and (au_repaire or _rng.randf() < 0.14):
-			genre = VOITURE_GANG
-			modele = 1 if _rng.randf() < 0.5 else 4
-		autos.append({
-			"id": _id(), "p": place["p"], "a": float(place["a"]),
-			"d": Vector2.RIGHT.rotated(float(place["a"])), "vitesse": 0.0,
-			"genre": genre, "gang": gang, "pv": PV_AUTO, "pilote": "", "cible": "",
-			"minuterie": 0.0, "recharge": 0.0, "modele": modele, "garee": true,
-		})
+## Les voitures qui dorment le long des rues n'existent pas ici : le plan les
+## décrit, le morceau les peint. L'hôte n'en prend une en charge que quand
+## elle se RÉVEILLE — volée, percutée, tirée. Une ville de cent mille voitures
+## garées ne peut pas vivre dans une liste qu'on parcourt à chaque image.
+var reveillees: Dictionary = {}    ## id dormante -> vrai, chez l'hôte comme chez le client
+
+func reveiller(id: int) -> Dictionary:
+	var deja := auto_par_id(id)
+	if not deja.is_empty():
+		return deja
+	var fiche := plan.dormante(id)
+	if fiche.is_empty():
+		return {}
+	var gang := int(fiche["gang"])
+	var auto := {
+		"id": id, "p": fiche["p"], "a": float(fiche["a"]),
+		"d": Vector2.RIGHT.rotated(float(fiche["a"])), "vitesse": 0.0,
+		"genre": VOITURE_GANG if gang >= 0 else CIVILE, "gang": gang, "pv": PV_AUTO,
+		"pilote": "", "cible": "", "minuterie": 0.0, "recharge": 0.0,
+		"modele": int(fiche["modele"]), "garee": true,
+	}
+	autos.append(auto)
+	reveillees[id] = true
+	return auto
+
+## Les voitures dormantes encore endormies autour d'un point.
+func dormantes_endormies(autour: Vector2, rayon: float) -> Array:
+	var liste: Array = []
+	for d in plan.dormantes_autour(autour, rayon):
+		if not reveillees.has(int(d["id"])):
+			liste.append(d)
+	return liste
 
 func _modele_pour(quartier: int) -> int:
 	var liste: Array = FormesCarnage.VOITURES_PAR_QUARTIER.get(quartier, [0])
@@ -300,9 +306,12 @@ func _modele_pour(quartier: int) -> int:
 ## c'est le seul endroit de la ville où l'on est sûr de trouver un gang au
 ## complet — donc où l'on va quand un contrat demande de nettoyer.
 func _peupler_les_repaires(joueurs: Dictionary) -> void:
-	for r in plan.repaires:
-		if not _regarde(r["p"], joueurs):
-			continue
+	var vus: Dictionary = {}
+	for cle in joueurs:
+		for r in plan.lieux_autour(joueurs[cle]["p"], PORTEE_VUE)["repaires"]:
+			vus[int(r["id"])] = r
+	for id in vus:
+		var r: Dictionary = vus[id]
 		var presents := 0
 		for personne in gens:
 			if personne.has("attache") and Vector2(personne["attache"]) == Vector2(r["p"]):
@@ -349,7 +358,9 @@ func _naitre_passant(joueurs: Dictionary, large: bool) -> void:
 	# La zone industrielle est vide le soir ; le centre et les parcs sont
 	# pleins. Sans cette différence, tous les quartiers ont la même foule et le
 	# décor ne raconte plus rien.
-	if quartier == PlanVille.INDUSTRIE and _rng.randf() < 0.55:
+	if quartier in [PlanVille.INDUSTRIE, PlanVille.PORT] and _rng.randf() < 0.55:
+		return
+	if quartier == PlanVille.EAU:
 		return
 	var genre := PIETON
 	if gang >= 0 and _rng.randf() < 0.22:
@@ -474,8 +485,8 @@ func _animer_les_gens(delta: float, joueurs: Dictionary) -> void:
 				# Un passant préfère le trottoir : s'il s'apprête à descendre
 				# sur la chaussée, il se ravise deux fois sur trois. Sans ce
 				# réflexe, la moitié de la foule marche au milieu des avenues.
-				if plan.sur_une_rue(Vector2(personne["p"]) + direction * 90.0) \
-						and not plan.sur_une_rue(personne["p"]) and _rng.randf() < 0.66:
+				if plan.sur_la_chaussee(Vector2(personne["p"]) + direction * 90.0) \
+						and not plan.sur_la_chaussee(personne["p"]) and _rng.randf() < 0.66:
 					direction = -direction
 				# Un gars de repaire ne s'éloigne pas de son tag : parti trop
 				# loin, il rentre. Sans ça, les repaires se vident en une minute.
@@ -634,6 +645,10 @@ func _obstacle_devant(auto: Dictionary, joueurs: Dictionary) -> bool:
 	for personne in gens:
 		if _dans_le_cone(ici, direction, personne["p"], 22.0):
 			return true
+	# Une voiture dormante en travers (mal garée, poussée) : on freine aussi.
+	for d in dormantes_endormies(ici + direction * DISTANCE_FREIN * 0.5, DISTANCE_FREIN * 0.6):
+		if _dans_le_cone(ici, direction, d["p"], 26.0):
+			return true
 	return false
 
 func _dans_le_cone(ici: Vector2, direction: Vector2, point: Vector2, largeur: float) -> bool:
@@ -785,6 +800,14 @@ func _arbitrer_les_passants(joueurs: Dictionary) -> void:
 		_abattre(couple[0], String(couple[1]), true)
 
 func _arbitrer_les_autos(joueurs: Dictionary) -> void:
+	# Une voiture dormante qu'un joueur percute se réveille : à partir de là,
+	# c'est une voiture comme les autres, poussée, cabossée, diffusée.
+	for cle in joueurs:
+		var j: Dictionary = joueurs[cle]
+		if bool(j.get("pied", true)) or abs(float(j.get("v", 0.0))) < 40.0:
+			continue
+		for d in dormantes_endormies(j["p"], RAYON_AUTO * 2.0):
+			reveiller(int(d["id"]))
 	for auto in autos:
 		if int(auto["genre"]) == EPAVE or String(auto["pilote"]) != "":
 			continue
@@ -1058,6 +1081,8 @@ func auto_par_id(id: int) -> Dictionary:
 ## chacun voit l'autre rouler dans le vide.
 func accorder_vehicule(cle: String, id: int, position: Vector2) -> void:
 	var auto := auto_par_id(id)
+	if auto.is_empty() and PlanVille.est_dormante(id):
+		auto = reveiller(id)
 	if auto.is_empty() or String(auto["pilote"]) != "" or int(auto["genre"]) == EPAVE:
 		return
 	if Vector2(auto["p"]).distance_to(position) > 120.0:
@@ -1088,6 +1113,8 @@ func rendre_vehicule(cle: String, id: int, position: Vector2, angle: float, pv: 
 			"pv": pv, "pilote": "", "cible": "", "minuterie": 7.0 if pv <= 0.0 else 0.0,
 			"recharge": 0.0, "modele": modele, "garee": true,
 		})
+		if PlanVille.est_dormante(id):
+			reveillees[id] = true
 		return
 	if String(auto["pilote"]) != cle:
 		return
@@ -1120,6 +1147,16 @@ func vehicule_proche(position: Vector2, rayon: float) -> Dictionary:
 		if d < distance:
 			distance = d
 			meilleur = auto
+	# Les dormantes : elles ne sont dans aucune liste, mais on les vole quand
+	# même — c'est même la plupart de ce qu'on vole.
+	for dormante in dormantes_endormies(position, rayon):
+		var d2: float = Vector2(dormante["p"]).distance_squared_to(position)
+		if d2 < distance:
+			distance = d2
+			meilleur = {"id": int(dormante["id"]), "p": dormante["p"], "a": float(dormante["a"]),
+				"genre": VOITURE_GANG if int(dormante["gang"]) >= 0 else CIVILE,
+				"gang": int(dormante["gang"]), "pv": PV_AUTO, "pilote": "", "modele": int(dormante["modele"]),
+				"garee": true, "dormante": true}
 	return meilleur
 
 # ------------------------------------------------------------ diffusion
@@ -1196,7 +1233,10 @@ func reprendre_la_main() -> void:
 			auto["modele"] = 0
 		if not auto.has("garee"):
 			auto["garee"] = false
-		_prochain_id = max(_prochain_id, int(auto["id"]) + 1)
+		if PlanVille.est_dormante(int(auto["id"])):
+			reveillees[int(auto["id"])] = true
+		else:
+			_prochain_id = max(_prochain_id, int(auto["id"]) + 1)
 	for c in caisses:
 		_prochain_id = max(_prochain_id, int(c["id"]) + 1)
 	# ⚠ On ne déclare la ville amorcée que s'il y a VRAIMENT quelque chose à
@@ -1215,6 +1255,9 @@ func appliquer_instantane(charge: Dictionary) -> void:
 			"genre": int(entree[3]), "gang": int(entree[4]), "pv": int(entree[5]),
 			"a": float(entree[6]) / 100.0, "d": Vector2.RIGHT, "etat": 0,
 			"minuterie": 0.0, "recharge": 0.0})
+	for entree in charge.get("a", []):
+		if typeof(entree) == TYPE_ARRAY and (entree as Array).size() > 0 and PlanVille.est_dormante(int(entree[0])):
+			reveillees[int(entree[0])] = true
 	autos = _fusionner(autos, charge.get("a", []), func(entree: Array) -> Dictionary:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
 			"cible_p": Vector2(float(entree[1]), float(entree[2])),

@@ -1,19 +1,20 @@
 extends Control
-## Le plan de la ville, en petit, dans un coin de l'écran.
+## Le radar : les alentours du joueur, vus de haut, dans un coin de l'écran.
 ##
-## Pourquoi il a fallu l'ajouter : la ville fait vingt-six par vingt tuiles et
-## la caméra n'en montre que trois. Sans plan, on ne retrouve ni le garage de
-## peinture quand on a cinq étoiles, ni la cabine qui donne un contrat, ni
-## l'arène — et un joueur qui ne sait pas où aller tourne en rond puis s'en va.
-##
-## Il montre la ville ENTIÈRE et non les alentours : ce qu'on cherche dessus
-## est toujours à l'autre bout, jamais à dix mètres.
+## L'ancien plan montrait la ville ENTIÈRE : elle faisait quarante-huit tuiles
+## de large et tenait dans cent soixante-douze pixels. Celle-ci en fait six
+## cent quatre-vingts — un pixel vaudrait quatre tuiles, et un garage y serait
+## un point qu'on ne trouve pas. Le radar est donc centré sur soi, le nord en
+## haut, et ce qu'il ne montre pas — la cible d'un contrat — il l'indique par
+## une flèche au bord. C'est la grammaire de GTA depuis toujours.
 ##
 ## Séparé de l'écran de jeu comme `ui/manche.gd` l'est du tactile : ici on ne
-## fait que peindre ce qu'on nous a donné.
+## fait que peindre ce qu'on nous a donné, en interrogeant le plan pour le
+## décor.
 
 const COTE := 172.0
 const MARGE := 8.0
+const ECHELLE := 1.0 / 26.0          ## pixels de radar par pixel de jeu
 
 var carte: PlanVille = null
 var moi := Vector2.ZERO
@@ -27,78 +28,125 @@ var cible: Dictionary = {}    ## {k: genre du contrat, g: gang visé} — ce qu'
 func _draw() -> void:
 	if carte == null:
 		return
-	var etendue := carte.etendue()
 	var cadre := Rect2(Vector2(MARGE, MARGE), Vector2(COTE, COTE))
-	draw_rect(cadre, Color(Palette.FOND, 0.86), true)
-	draw_rect(cadre, Palette.FILET, false, 1.0)
+	var centre := cadre.get_center()
+	draw_rect(cadre, Color(Palette.FOND, 0.88), true)
+	var rayon_vue := COTE * 0.5 / ECHELLE     # en pixels de jeu, la moitié du cadre
 
-	# Les territoires d'abord, en aplat léger : c'est la première chose qu'on
-	# cherche sur le plan quand on a un contrat — où est le gang visé.
-	for py in PlanVille.pates_y():
-		for px in PlanVille.pates_x():
+	# Les pâtés : un aplat par territoire, plus fort pour les parcs et l'eau,
+	# qui se lisent comme du relief sur un plan.
+	var pas := PlanVille.PAS
+	var p0 := Vector2i(int(floor((moi.x - rayon_vue) / pas / PlanVille.PERIODE)) - 1,
+		int(floor((moi.y - rayon_vue) / pas / PlanVille.PERIODE)) - 1)
+	var p1 := Vector2i(int(floor((moi.x + rayon_vue) / pas / PlanVille.PERIODE)) + 1,
+		int(floor((moi.y + rayon_vue) / pas / PlanVille.PERIODE)) + 1)
+	for py in range(p0.y, p1.y + 1):
+		for px in range(p0.x, p1.x + 1):
 			var pate := Vector2i(px, py)
+			var coin := PlanVille.coin_pate(pate)
+			var rect := Rect2(_vers_radar(Vector2(coin) * pas, centre), Vector2(3, 3) * pas * ECHELLE)
+			var visible := rect.intersection(cadre)
+			if visible.size.x <= 0.0 or visible.size.y <= 0.0:
+				continue
+			var quartier := carte.quartier_du_pate(pate)
 			var gang := carte.territoire_du_pate(pate)
-			var coin := _vers_plan(Vector2(px * 4 + 1, py * 4 + 1) * PlanVille.PAS, etendue)
-			var taille := _vers_plan(Vector2(3, 3) * PlanVille.PAS, etendue) - _vers_plan(Vector2.ZERO, etendue)
-			if gang >= 0:
-				draw_rect(Rect2(coin, taille), Color(carte.couleur_du_gang(gang), 0.22), true)
-			elif carte.quartier_du_pate(pate) == PlanVille.PARC:
-				draw_rect(Rect2(coin, taille), Color(Palette.BON, 0.10), true)
-			else:
-				draw_rect(Rect2(coin, taille), Color(Palette.ENCRE, 0.08), true)
-	for r in carte.repaires:
-		draw_rect(Rect2(_vers_plan(r["p"], etendue) - Vector2(3, 3), Vector2(6, 6)),
-			carte.couleur_du_gang(int(r["gang"])), true)
+			var couleur := Color(Palette.ENCRE, 0.10)
+			if quartier == PlanVille.EAU:
+				couleur = Color(Palette.SERIE, 0.22)
+			elif quartier == PlanVille.PARC:
+				couleur = Color(Palette.BON, 0.16)
+			elif gang >= 0:
+				couleur = Color(carte.couleur_du_gang(gang), 0.24)
+			draw_rect(visible, couleur, true)
 
-	# Les rues : une ligne tous les quatre pas, dans les deux sens. Dessiner
-	# les immeubles ferait cinq cents rectangles pour un carré de cent
-	# soixante-douze pixels — illisible et cher.
-	for colonne in range(0, PlanVille.COLONNES + 1, 4):
-		var abscisse := _vers_plan(Vector2(float(colonne) * PlanVille.PAS, 0.0), etendue).x
-		draw_line(Vector2(abscisse, cadre.position.y), Vector2(abscisse, cadre.end.y),
-			Color(1, 1, 1, 0.16), 1.0)
-	for ligne in range(0, PlanVille.LIGNES + 1, 4):
-		var ordonnee := _vers_plan(Vector2(0.0, float(ligne) * PlanVille.PAS), etendue).y
-		draw_line(Vector2(cadre.position.x, ordonnee), Vector2(cadre.end.x, ordonnee),
-			Color(1, 1, 1, 0.16), 1.0)
+	# Les rues : deux tuiles de large, en sombre, sur les axes de la grille.
+	var largeur_rue := 2.0 * pas * ECHELLE
+	var premier_x := int(floor((moi.x - rayon_vue) / pas / PlanVille.PERIODE)) * PlanVille.PERIODE
+	for colonne in range(premier_x, int(ceil((moi.x + rayon_vue) / pas)) + PlanVille.PERIODE, PlanVille.PERIODE):
+		var x := _vers_radar(Vector2(float(colonne + 1) * pas, 0.0), centre).x
+		if x + largeur_rue * 0.5 < cadre.position.x or x - largeur_rue * 0.5 > cadre.end.x:
+			continue
+		draw_line(Vector2(x, cadre.position.y), Vector2(x, cadre.end.y), Color(0.05, 0.05, 0.06, 0.9), largeur_rue)
+	var premier_y := int(floor((moi.y - rayon_vue) / pas / PlanVille.PERIODE)) * PlanVille.PERIODE
+	for ligne in range(premier_y, int(ceil((moi.y + rayon_vue) / pas)) + PlanVille.PERIODE, PlanVille.PERIODE):
+		var y := _vers_radar(Vector2(0.0, float(ligne + 1) * pas), centre).y
+		if y + largeur_rue * 0.5 < cadre.position.y or y - largeur_rue * 0.5 > cadre.end.y:
+			continue
+		draw_line(Vector2(cadre.position.x, y), Vector2(cadre.end.x, y), Color(0.05, 0.05, 0.06, 0.9), largeur_rue)
 
-	for centre_arene: Vector2 in carte.arenes():
-		draw_arc(_vers_plan(centre_arene, etendue), 9.0, 0, TAU, 20, Palette.CRITIQUE, 1.5)
-	for centre_garage: Vector2 in carte.garages():
-		_pastille(_vers_plan(centre_garage, etendue), 4.0, Palette.SERIE)
-	for centre_cabine: Vector2 in carte.cabines():
-		_pastille(_vers_plan(centre_cabine, etendue), 3.0, Palette.AVERTISSEMENT)
+	# Les lieux à portée : repaires, arènes, garages, cabines.
+	var lieux := carte.lieux_autour(moi, rayon_vue * 1.5)
+	for r in lieux["repaires"]:
+		var ou := _vers_radar(r["p"], centre)
+		if cadre.has_point(ou):
+			draw_rect(Rect2(ou - Vector2(3, 3), Vector2(6, 6)), carte.couleur_du_gang(int(r["gang"])), true)
+	for a in lieux["arenes"]:
+		var ou := _vers_radar(a["p"], centre)
+		if cadre.grow(-6.0).has_point(ou):
+			draw_arc(ou, PlanVille.RAYON_ARENE * ECHELLE, 0, TAU, 20, Palette.CRITIQUE, 1.5)
+	for g in lieux["garages"]:
+		var ou := _vers_radar(g["p"], centre)
+		if cadre.has_point(ou):
+			_pastille(ou, 4.0, Palette.SERIE)
+	for c in lieux["cabines"]:
+		var ou := _vers_radar(c["p"], centre)
+		if cadre.has_point(ou):
+			_pastille(ou, 3.0, Palette.AVERTISSEMENT)
 
-	# La cible du contrat clignote : les repaires du gang à nettoyer, ou les
-	# garages où livrer. Un contrat sans cible sur le plan, c'est un chrono qui
-	# tourne pendant qu'on cherche.
-	if not cible.is_empty() and fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.5:
+	# La cible du contrat : le repaire du gang à nettoyer ou le garage où livrer.
+	# Dans le cadre, elle clignote ; hors du cadre, une flèche au bord dit où
+	# aller. Un contrat sans cible visible, c'est un chrono qui tourne pendant
+	# qu'on cherche.
+	if not cible.is_empty():
 		var genre := String(cible.get("k", ""))
+		var visee := {}
 		if genre == "nettoyage":
-			for r in carte.repaires:
-				if int(r["gang"]) == int(cible.get("g", -1)):
-					draw_arc(_vers_plan(r["p"], etendue), 8.0, 0, TAU, 16, Palette.AVERTISSEMENT, 2.0)
+			visee = carte.repaire_le_plus_proche(moi, int(cible.get("g", -1)))
 		elif genre == "livraison":
-			for g: Vector2 in carte.garages():
-				draw_arc(_vers_plan(g, etendue), 8.0, 0, TAU, 16, Palette.AVERTISSEMENT, 2.0)
+			visee = carte.garage_le_plus_proche(moi)
+		if not visee.is_empty():
+			var ou := _vers_radar(visee["p"], centre)
+			var clignote := fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.5
+			if cadre.grow(-8.0).has_point(ou):
+				if clignote:
+					draw_arc(ou, 8.0, 0, TAU, 16, Palette.AVERTISSEMENT, 2.0)
+			else:
+				var direction := (ou - centre).normalized()
+				var bord := centre + direction * (COTE * 0.5 - 9.0)
+				var cote := Vector2(-direction.y, direction.x)
+				draw_colored_polygon(PackedVector2Array([bord + direction * 7.0,
+					bord - direction * 4.0 + cote * 5.0, bord - direction * 4.0 - cote * 5.0]),
+					Palette.AVERTISSEMENT if clignote else Palette.AVERTISSEMENT.darkened(0.3))
+				var police := Palette.police()
+				var distance := int(Vector2(visee["p"]).distance_to(moi) / PlanVille.PAS)
+				draw_string(police, bord - direction * 16.0 - Vector2(10, -4), "%d" % distance,
+					HORIZONTAL_ALIGNMENT_CENTER, 20, 10, Palette.AVERTISSEMENT)
 
 	for p: Vector2 in patrouilles:
-		_pastille(_vers_plan(p, etendue), 2.5, Palette.SERIE.lightened(0.3))
+		var ou := _vers_radar(p, centre)
+		if cadre.has_point(ou):
+			_pastille(ou, 2.5, Palette.SERIE.lightened(0.3))
 	for a in autres:
-		_pastille(_vers_plan(a["p"], etendue), 3.5, a["couleur"])
+		var ou := _vers_radar(a["p"], centre)
+		if cadre.has_point(ou):
+			_pastille(ou, 3.5, a["couleur"])
+		else:
+			# Un coéquipier hors du cadre : un point au bord, dans sa direction.
+			var direction := (ou - centre).normalized()
+			_pastille(centre + direction * (COTE * 0.5 - 4.0), 2.5, a["couleur"])
 
-	# Soi-même : un triangle, pas un rond. Sur un plan, savoir où l'on regarde
-	# vaut autant que savoir où l'on est.
-	var point := _vers_plan(moi, etendue)
+	# Soi-même : un triangle au centre, pas un rond. Sur un plan, savoir où l'on
+	# regarde vaut autant que savoir où l'on est.
 	var avant := Vector2.RIGHT.rotated(mon_angle)
-	var cote := Vector2(-avant.y, avant.x)
+	var cote_m := Vector2(-avant.y, avant.x)
 	draw_colored_polygon(PackedVector2Array([
-		point + avant * 6.0, point - avant * 3.5 + cote * 3.5,
-		point - avant * 3.5 - cote * 3.5]), ma_couleur)
+		centre + avant * 7.0, centre - avant * 4.0 + cote_m * 4.0,
+		centre - avant * 4.0 - cote_m * 4.0]), ma_couleur)
+
+	draw_rect(cadre, Palette.FILET, false, 1.0)
 
 	# La couleur ne porte jamais seule le sens : chaque pastille est nommée à
-	# côté d'elle. La légende en une phrase — « bleu : garage, jaune : … » —
-	# débordait du cadre et se coupait au milieu du dernier mot.
+	# côté d'elle, sous le cadre.
 	var police := Palette.police()
 	var x := MARGE + 4.0
 	var y := MARGE + COTE + 14.0
@@ -113,11 +161,5 @@ func _draw() -> void:
 func _pastille(ou: Vector2, rayon: float, couleur: Color) -> void:
 	draw_circle(ou, rayon, couleur)
 
-## Les coordonnées de jeu peuvent sortir de la ville — la friche est jouable.
-## On les serre dans le cadre plutôt que de les laisser peindre par-dessus le
-## chrono.
-func _vers_plan(point: Vector2, etendue: Vector2) -> Vector2:
-	var part := Vector2(
-		clamp(point.x / max(1.0, etendue.x), -0.06, 1.06),
-		clamp(point.y / max(1.0, etendue.y), -0.06, 1.06))
-	return Vector2(MARGE, MARGE) + part * COTE
+func _vers_radar(point: Vector2, centre: Vector2) -> Vector2:
+	return centre + (point - moi) * ECHELLE

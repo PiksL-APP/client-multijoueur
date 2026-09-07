@@ -3,37 +3,58 @@ extends RefCounted
 ## Le plan de la ville de CARNAGE, déduit du CODE de la manche.
 ##
 ## Rien de tout ceci ne circule sur le réseau : même code, même ville, chez
-## tout le monde et à tout instant. Diffuser un plan de quarante-huit par
-## trente-six tuiles coûterait des dizaines de kilo-octets par partie et
-## ajouterait un cas de plus pour qui rejoint en retard.
+## tout le monde et à tout instant, y compris pour qui rejoint en retard.
 ##
-## La ville est PROCÉDURALE et par QUARTIERS : un centre d'affaires neutre, et
-## autour, trois territoires qui ne se ressemblent pas — la zone industrielle
-## des Braises, les rues commerçantes de La Fonte, la banlieue pavillonnaire du
-## Lierre — plus des parcs semés au hasard. C'est le décor qui dit chez qui on
-## est, avant la jauge de respect. Chaque quartier a ses immeubles (quatre kits
-## Kenney, CC0), ses voitures garées, ses passants et ses repaires de gang.
+## La ville fait six cent quatre-vingts tuiles sur cinq cent vingt — cent fois
+## la surface de la précédente. Elle ne se génère donc JAMAIS d'un bloc : tout
+## est une FONCTION PURE des coordonnées et du code (`_bruit`), calculée à la
+## demande, pâté par pâté, et mise en cache. Un joueur ne voit jamais qu'une
+## poignée de morceaux ; l'hôte ne simule qu'autour des joueurs. Générer trois
+## cent cinquante mille tuiles au coup d'envoi bloquerait le navigateur dix
+## secondes et ferait tomber le socket — pour bâtir une ville dont personne ne
+## visitera jamais les neuf dixièmes.
 ##
-## ⚠ Les collisions ne balayent PAS une liste de rectangles. La ville en
-## compte près de mille ; avec quatre-vingt-dix piétons, trois cents voitures
-## et des projectiles, un balayage linéaire coûterait des centaines de
-## milliers de tests par image. Une tuile se déduit d'une position par deux
-## divisions : on ne teste jamais plus des quatre tuiles qui touchent le
-## cercle.
+## Dix types de quartiers, tirés par un zonage de Voronoï à graines jetées sur
+## une grille : le centre d'affaires neutre et ses tours, les quartiers de
+## bureaux, les rues commerçantes, la vieille ville, les cités, la banlieue
+## pavillonnaire, la zone industrielle, le port, les parcs et les plans d'eau.
+## Trois gangs se partagent la ville par secteurs angulaires bruités : les
+## frontières sont irrégulières, et le décor dit chez qui on est avant la jauge.
+##
+## Les rues font DEUX tuiles de large : trottoir, file de stationnement, voie
+## de circulation, de chaque côté d'un axe. Une rue d'une tuile ne laissait pas
+## la place à la fois aux voitures garées et au trafic : celui-ci freinait
+## derrière les garées et klaxonnait sans fin.
+##
+## ⚠ Les collisions ne balayent PAS une liste de rectangles : une tuile se
+## déduit d'une position par deux divisions, et chaque tuile porte au plus un
+## rectangle. On ne teste jamais plus des quatre tuiles qui touchent le cercle.
 
-const TUILE := 14.0                          ## côté d'une tuile, en unités 3D
-const PAS := TUILE / Decor.ECHELLE           ## le même, en pixels de jeu
-const COLONNES := 48
-const LIGNES := 36
-const CEINTURE := 3                          ## anneau de verdure autour de la ville
-const RETRAIT := 22.0                        ## le mur est un peu en retrait de la tuile
-const RAYON_CENTRE := 6.5                    ## en tuiles : le centre d'affaires, neutre
+const TUILE := 10.0                          ## côté d'une tuile, en unités 3D
+const PAS := TUILE / Decor.ECHELLE           ## le même, en pixels de jeu (100)
+const PERIODE := 5                           ## 2 tuiles de rue + 3 tuiles de pâté
+const COLONNES := 680
+const LIGNES := 520
+const MORCEAU := 20                          ## tuiles par morceau rendu (4 pâtés)
+const SECTEUR := 40                          ## tuiles par secteur de lieux (8 pâtés)
+const TROTTOIR := 20.0                       ## px : la bande piétonne au bord d'une rue
+const FILE := 25.0                           ## px : la voie de circulation, depuis l'axe
+const STATIONNEMENT := 35.0                  ## px : la file de stationnement, depuis le bord
+const RETRAIT := 12.0                        ## px : une façade s'écarte un peu du bord de tuile
+const RAYON_CENTRE := 8.0                    ## en pâtés : le centre d'affaires, neutre
 
-## Les quartiers. Chacun a sa liste de bâtiments, sa densité de passants, ses
-## voitures et sa part de places de stationnement le long des rues.
-enum { CENTRE, COMMERCE, INDUSTRIE, BANLIEUE, PARC }
-const NOMS_QUARTIERS := ["centre d'affaires", "rues commerçantes", "zone industrielle",
-	"banlieue pavillonnaire", "parc"]
+## Les quartiers.
+enum { CENTRE, AFFAIRES, COMMERCE, VIEUX, RESIDENCES, BANLIEUE, INDUSTRIE, PORT, PARC, EAU }
+const NOMS_QUARTIERS := ["centre d'affaires", "quartier des bureaux", "rues commerçantes",
+	"vieille ville", "les cités", "banlieue pavillonnaire", "zone industrielle", "le port",
+	"parc", "plan d'eau"]
+
+## Les sols, tels que le shader du sol les dessine (`jeux/carnage/matieres.gd`).
+enum { S_ROUTE, S_PASSAGE_A, S_PASSAGE_B, S_CARREFOUR, S_TROTTOIR, S_PAVES, S_HERBE,
+	S_ALLEE_V, S_ALLEE_H, S_ALLEE_X, S_BETON, S_PARKING, S_EAU, S_TERRE }
+
+## Les styles de façade, tels que le shader des immeubles les dessine.
+enum { F_BUREAUX, F_LOGEMENTS, F_COMMERCE, F_VIEUX, F_HANGAR, F_MAISON, F_PLEIN, F_TOUR }
 
 ## Trois gangs, trois territoires, trois façons de bâtir. La couleur du gang
 ## n'est jamais SÉRIE : le bleu est à la police, et on ne confond pas celui qui
@@ -44,75 +65,48 @@ const GANGS := [
 	{"nom": "Le Lierre", "couleur": Palette.BON, "quartier": BANLIEUE},
 ]
 
-const VILLE := "res://modeles/ville/"
-const COMMERCE_KIT := "res://modeles/commerce/"
-const INDUSTRIE_KIT := "res://modeles/industrie/"
-const BANLIEUE_KIT := "res://modeles/banlieue/"
-
-## Le kit de Kenney est clair : cette teinte le refroidit à peine, juste assez
-## pour qu'il tienne dans la palette sombre de la maison. Elle MULTIPLIE
-## l'atlas de couleurs plutôt que de le remplacer.
-const TEINTE_VILLE := Color(0.82, 0.85, 0.92)
-
-## Ce que chaque kit pose, avec son échelle : les kits n'ont pas la même
-## unité. Le kit de ville fait une tuile par unité ; les immeubles de commerce
-## font ~1,3 de côté, les pavillons jusqu'à 1,8 — mis à la même échelle, ils
-## déborderaient sur la rue. `y` tasse la hauteur : à l'échelle du sol, une
-## tour de cinq unités et demie monterait à cinquante-cinq — plus haut que la
-## caméra. Une ville écrasée se survole ; une ville haute se subit.
-const KITS := {
-	COMMERCE: {"dossier": COMMERCE_KIT, "xz": 10.0, "y": 0.45,
-		"immeubles": ["building-a", "building-b", "building-c", "building-d", "building-f",
-			"building-g", "building-h", "building-i", "building-l", "building-m"],
-		"tours": ["building-skyscraper-a", "building-skyscraper-c",
-			"building-skyscraper-d", "building-skyscraper-e"]},
-	INDUSTRIE: {"dossier": INDUSTRIE_KIT, "xz": 10.0, "y": 0.6,
-		"immeubles": ["building-e", "building-f", "building-g", "building-m"],
-		"larges": ["building-a", "building-b", "building-c", "building-l", "building-q", "building-r"],
-		"details": ["shipping-container-a", "shipping-container-b", "detail-tank-large",
-			"water-tower", "chimney-large"]},
-	BANLIEUE: {"dossier": BANLIEUE_KIT, "xz": 7.5, "y": 0.75,
-		"immeubles": ["building-type-a", "building-type-b", "building-type-c", "building-type-d",
-			"building-type-e", "building-type-f", "building-type-j", "building-type-n",
-			"building-type-o", "building-type-s", "building-type-t"],
-		"arbres": ["tree-large", "tree-small"]},
+## Les teintes de façade par style. Ce sont des matières de décor, pas des
+## couleurs d'interface : elles restent sourdes pour que la palette (joueurs,
+## gangs, lieux) garde seule le droit d'être vive.
+const TEINTES := {
+	F_BUREAUX: [Color("#5b6572"), Color("#6b7380"), Color("#4d5866"), Color("#7a8290"), Color("#596b7a")],
+	F_TOUR: [Color("#3d4a5c"), Color("#4a5a6e"), Color("#2f3b4c"), Color("#556478")],
+	F_LOGEMENTS: [Color("#8a8378"), Color("#9a9285"), Color("#7d7a70"), Color("#a39a8a"), Color("#8c8c84")],
+	F_COMMERCE: [Color("#8e6f5c"), Color("#6f7d86"), Color("#9c8a6a"), Color("#7b6a7e"), Color("#6c8a7a"), Color("#a08070")],
+	F_VIEUX: [Color("#b08a5a"), Color("#a3674d"), Color("#b89a78"), Color("#9c7a62"), Color("#c0a080"), Color("#8f5f4f")],
+	F_HANGAR: [Color("#5a5f5c"), Color("#6a625a"), Color("#4f5a58"), Color("#736a5a"), Color("#5d6b62")],
+	F_MAISON: [Color("#c8c2b4"), Color("#d2c8b0"), Color("#bcc4c8"), Color("#cbbfa8"), Color("#d8d0c0"), Color("#b9c2b0")],
+	F_PLEIN: [Color("#3a3d42"), Color("#44474c"), Color("#2e3136")],
 }
+## Les enseignes : uniquement des couleurs de la palette, pour que le néon d'un
+## bar ne se confonde pas avec un signal du jeu — il les EMPRUNTE, ce qui reste
+## lisible parce qu'une enseigne est en hauteur, sur une façade.
+const NEONS := [Palette.CRITIQUE, Palette.SERIEUX, Palette.AVERTISSEMENT, Palette.BON, Palette.SERIE]
 
-const RAYON_ARENE := 200.0
-const RAYON_GARAGE := 74.0
+const RAYON_ARENE := 190.0
+const RAYON_GARAGE := 60.0
 const RAYON_CABINE := 68.0
 const RAYON_REPAIRE := 230.0
 
-var code := ""
-## Chemin complet d'un modèle -> {"t": Array[Transform3D], "c": Array[Color]}
-var nappes: Dictionary = {}
-## Les places de stationnement : {p, a, quartier, territoire}. C'est l'hôte qui
-## en fait des voitures ; le plan ne fait que dire où elles dorment.
-var stationnements: Array = []
-## Les repaires : {p, gang}. Là où les gars traînent et où leurs voitures dorment.
-var repaires: Array = []
+## Identifiant de la première voiture dormante. Une voiture garée par le plan
+## n'existe chez l'hôte qu'une fois RÉVEILLÉE (volée, percutée, tirée) : son
+## identifiant se déduit de sa tuile, et ne croise jamais ceux de l'hôte.
+const ID_DORMANTE := 1000000
+const COTES := 6            ## quatre bords de tuile + deux places de parking intérieur
 
-var _arenes: Array = []       ## Vector2 (centres)
-var _garages: Array = []      ## Vector2
-var _cabines: Array = []      ## Vector2
-var _largeur := COLONNES + CEINTURE * 2
-var _hauteur := LIGNES + CEINTURE * 2
-var _bloc := PackedByteArray()               ## 1 = la tuile porte un mur
-var _quartier := PackedByteArray()           ## par pâté : son type
-var _territoire := PackedByteArray()         ## par pâté : gang + 1 (0 = neutre)
-var _graine := RandomNumberGenerator.new()
+var code := ""
+var _sel := 0
+var _semences: Dictionary = {}    ## Vector2i (cellule de 8 pâtés) -> {p, type, gang}
+var _zones: Dictionary = {}       ## indice de pâté -> type | (gang + 1) << 8
+var _pates: Dictionary = {}       ## Vector2i (pâté) -> Array[9] de fiches de tuile
+var _rues: Dictionary = {}        ## indice de tuile -> fiche de tuile de rue
+var _secteurs: Dictionary = {}    ## Vector2i -> {garages, cabines, arenes, repaires}
 
 # ------------------------------------------------------------ construction
 
 func _init(code_de_manche: String) -> void:
 	code = code_de_manche
-	_graine.seed = hash(code)
-	_bloc.resize(_largeur * _hauteur)
-	_quartier.resize(pates_x() * pates_y())
-	_territoire.resize(pates_x() * pates_y())
-	_zoner()
-	_placer_les_lieux()
-	_batir()
+	_sel = hash(code)
 
 func etendue() -> Vector2:
 	return Vector2(COLONNES, LIGNES) * PAS
@@ -120,23 +114,42 @@ func etendue() -> Vector2:
 func centre() -> Vector2:
 	return etendue() * 0.5
 
+## Marge jouable au-delà des dernières tuiles : c'est de l'eau, et le rappel
+## vers le centre ramène qui s'y aventure.
 func banlieue() -> float:
-	return CEINTURE * PAS
+	return 3.0 * PAS
 
-## Vrai si cette colonne (ou cette ligne) porte une rue. Une rue tous les
-## quatre pas : des pâtés de trois sur trois, assez grands pour se cacher
-## derrière, assez petits pour qu'un carrefour ne soit jamais loin.
+# ------------------------------------------------------------ le bruit
+
+## LE générateur de toute la ville : un nombre dans [0,1) qui ne dépend que de
+## deux coordonnées, d'un sel et du code. Pas d'état, pas d'ordre d'appel :
+## n'importe quel morceau peut se calculer avant n'importe quel autre, chez
+## n'importe quel joueur, et donner la même chose.
+func _bruit(a: int, b: int, sel: int) -> float:
+	var h := hash(Vector4i(a, b, sel, _sel))
+	return float(h & 0x7FFFFF) / 8388608.0
+
+func _entier(a: int, b: int, sel: int, n: int) -> int:
+	return min(n - 1, int(_bruit(a, b, sel) * float(n)))
+
+func _parmi(liste: Array, a: int, b: int, sel: int):
+	return liste[_entier(a, b, sel, liste.size())]
+
+# ------------------------------------------------------------ la grille
+
+## Vrai si cette colonne (ou cette ligne) porte une rue. Deux tuiles de rue
+## puis trois de pâté : la période est de cinq.
 static func est_voie(indice: int) -> bool:
-	return posmod(indice, 4) == 0
+	return posmod(indice, PERIODE) < 2
 
 static func centre_tuile(colonne: int, ligne: int) -> Vector2:
 	return Vector2(colonne + 0.5, ligne + 0.5) * PAS
 
 static func pates_x() -> int:
-	return COLONNES / 4
+	return COLONNES / PERIODE
 
 static func pates_y() -> int:
-	return LIGNES / 4
+	return LIGNES / PERIODE
 
 ## Le pâté (3×3 tuiles entre les rues) qui contient une tuile, ou (-1,-1).
 static func pate_de(colonne: int, ligne: int) -> Vector2i:
@@ -144,339 +157,951 @@ static func pate_de(colonne: int, ligne: int) -> Vector2i:
 		return Vector2i(-1, -1)
 	if est_voie(colonne) or est_voie(ligne):
 		return Vector2i(-1, -1)
-	return Vector2i(colonne / 4, ligne / 4)
+	return Vector2i(colonne / PERIODE, ligne / PERIODE)
+
+## Première tuile (nord-ouest) d'un pâté.
+static func coin_pate(pate: Vector2i) -> Vector2i:
+	return Vector2i(pate.x * PERIODE + 2, pate.y * PERIODE + 2)
 
 static func centre_pate(pate: Vector2i) -> Vector2:
-	return centre_tuile(pate.x * 4 + 2, pate.y * 4 + 2)
+	return centre_tuile(pate.x * PERIODE + 3, pate.y * PERIODE + 3)
+
+static func indice_pate(pate: Vector2i) -> int:
+	return pate.y * pates_x() + pate.x
+
+static func pate_par_indice(indice: int) -> Vector2i:
+	return Vector2i(posmod(indice, pates_x()), indice / pates_x())
+
+## L'axe de la rue la plus proche, dans un axe : entre les deux tuiles de rue.
+func voie_proche(valeur: float) -> float:
+	var k := int(round((valeur / PAS - 1.0) / float(PERIODE)))
+	return float(k * PERIODE + 1) * PAS
+
+func carrefour_proche(point: Vector2) -> Vector2:
+	return Vector2(voie_proche(point.x), voie_proche(point.y))
+
+## Vrai sur le BITUME d'une rue — pas sur son trottoir. C'est ce que le passant
+## consulte avant de descendre du trottoir, et il se ravise deux fois sur
+## trois : sans ça, la moitié de la foule marche au milieu des avenues.
+func sur_la_chaussee(point: Vector2) -> bool:
+	var colonne := int(floor(point.x / PAS))
+	var ligne := int(floor(point.y / PAS))
+	var vc := est_voie(colonne)
+	var vl := est_voie(ligne)
+	if not vc and not vl:
+		return false
+	var dx: float = abs(point.x - voie_proche(point.x))
+	var dy: float = abs(point.y - voie_proche(point.y))
+	return (vc and dx < PAS - TROTTOIR) or (vl and dy < PAS - TROTTOIR)
+
+func sur_une_rue(point: Vector2, tolerance: float = 0.0) -> bool:
+	var colonne := int(floor(point.x / PAS))
+	var ligne := int(floor(point.y / PAS))
+	if est_voie(colonne) or est_voie(ligne):
+		return true
+	if tolerance <= 0.0:
+		return false
+	return abs(point.x - voie_proche(point.x)) < PAS + tolerance \
+		or abs(point.y - voie_proche(point.y)) < PAS + tolerance
+
+# ------------------------------------------------------------ le zonage
+
+## La graine de zonage d'une cellule de huit pâtés : une position bruitée dans
+## la cellule, un type de quartier tiré selon la distance au centre, un gang
+## tiré selon l'angle. Voronoï sur ces graines : chaque pâté revient à la plus
+## proche, avec un peu de bruit pour que la frontière ne soit pas une droite.
+const CELLULE := 8.0
+
+func _semence(cellule: Vector2i) -> Dictionary:
+	if _semences.has(cellule):
+		return _semences[cellule]
+	var p := Vector2(cellule) * CELLULE + Vector2(
+		0.5 + (_bruit(cellule.x, cellule.y, 11) - 0.5) * 0.9,
+		0.5 + (_bruit(cellule.x, cellule.y, 12) - 0.5) * 0.9) * CELLULE
+	var milieu := Vector2(pates_x(), pates_y()) * 0.5
+	var r := p.distance_to(milieu)
+	var au_bord: float = min(min(p.x, float(pates_x()) - p.x), min(p.y, float(pates_y()) - p.y))
+	var angle := (p - milieu).angle() + (_bruit(cellule.x, cellule.y, 13) - 0.5) * 0.9
+	var gang := posmod(int(floor((angle + PI * 0.5) / (TAU / 3.0))), 3)
+	var t := _bruit(cellule.x, cellule.y, 14)
+	var type := BANLIEUE
+	if r < RAYON_CENTRE + 9.0:
+		type = AFFAIRES if t < 0.42 else (COMMERCE if t < 0.72 else VIEUX)
+	elif r < RAYON_CENTRE + 26.0:
+		if t < 0.18: type = COMMERCE
+		elif t < 0.42: type = RESIDENCES
+		elif t < 0.52: type = VIEUX
+		elif t < 0.68: type = INDUSTRIE
+		elif t < 0.80: type = PARC
+		elif t < 0.92: type = BANLIEUE
+		else: type = EAU
+	else:
+		if t < 0.30: type = BANLIEUE
+		elif t < 0.48: type = INDUSTRIE
+		elif t < 0.60: type = RESIDENCES
+		elif t < 0.74: type = PARC
+		elif t < 0.86: type = EAU
+		else: type = PORT if au_bord < 14.0 else INDUSTRIE
+	# Chaque gang bâtit à sa façon : une graine sur trois de son secteur prend
+	# le type de quartier qui le caractérise. C'est ce qui fait que les terres
+	# des Braises FUMENT et que celles du Lierre ont des jardins.
+	if r >= RAYON_CENTRE + 9.0 and type != EAU and type != PORT and _bruit(cellule.x, cellule.y, 15) < 0.34:
+		type = int(GANGS[gang]["quartier"])
+	var fiche := {"p": p, "type": type, "gang": gang}
+	_semences[cellule] = fiche
+	return fiche
+
+func _zone(pate: Vector2i) -> int:
+	var indice := indice_pate(pate)
+	if _zones.has(indice):
+		return _zones[indice]
+	var ici := Vector2(pate) + Vector2(0.5, 0.5)
+	var milieu := Vector2(pates_x(), pates_y()) * 0.5
+	var valeur := 0
+	if ici.distance_to(milieu) < RAYON_CENTRE:
+		valeur = CENTRE                      # gang -1 -> 0 dans l'octet haut
+	else:
+		var cellule := Vector2i(int(floor(ici.x / CELLULE)), int(floor(ici.y / CELLULE)))
+		var meilleure := INF
+		var gagnante := {}
+		for dx in range(-1, 2):
+			for dy in range(-1, 2):
+				var s := _semence(cellule + Vector2i(dx, dy))
+				var d: float = ici.distance_to(s["p"]) + (_bruit(pate.x, pate.y, 16 + dx * 3 + dy) - 0.5) * 1.6
+				if d < meilleure:
+					meilleure = d
+					gagnante = s
+		var type := int(gagnante["type"])
+		var gang := int(gagnante["gang"])
+		# Le premier anneau autour du centre reste commerçant et se dégrade
+		# doucement : une ville a un dégradé, pas une frontière au carrefour.
+		if ici.distance_to(milieu) < RAYON_CENTRE + 3.0 and type != EAU and _bruit(pate.x, pate.y, 17) < 0.5:
+			type = AFFAIRES if _bruit(pate.x, pate.y, 18) < 0.5 else COMMERCE
+		# Un peu de parc partout : c'est ce qui aère les cités et la banlieue.
+		elif type != EAU and type != PARC and type != CENTRE and _bruit(pate.x, pate.y, 19) < 0.06:
+			type = PARC
+		valeur = type | ((gang + 1) << 8)
+	_zones[indice] = valeur
+	return valeur
 
 func quartier_du_pate(pate: Vector2i) -> int:
 	if pate.x < 0 or pate.y < 0 or pate.x >= pates_x() or pate.y >= pates_y():
-		return PARC
-	return _quartier[pate.y * pates_x() + pate.x]
+		return EAU
+	return _zone(pate) & 0xFF
 
 func territoire_du_pate(pate: Vector2i) -> int:
 	if pate.x < 0 or pate.y < 0 or pate.x >= pates_x() or pate.y >= pates_y():
 		return -1
-	return int(_territoire[pate.y * pates_x() + pate.x]) - 1
+	return (_zone(pate) >> 8) - 1
 
-# ------------------------------------------------------------ le zonage
+# ------------------------------------------------------------ les lieux
 
-## Qui tient quoi. Le centre est neutre ; autour, chaque pâté revient au gang
-## dont le fief est le plus proche — avec un peu de bruit, pour que la
-## frontière ne soit pas une droite qu'on lit comme un défaut de génération.
-func _zoner() -> void:
-	var milieu := Vector2(pates_x(), pates_y()) * 0.5
-	var fiefs: Array = []
-	for g in 3:
-		var angle := -PI * 0.5 + TAU * float(g) / 3.0
-		fiefs.append(milieu + Vector2.RIGHT.rotated(angle) * Vector2(pates_x(), pates_y()) * 0.36)
-
-	for py in pates_y():
-		for px in pates_x():
-			var ici := Vector2(px + 0.5, py + 0.5)
-			var indice := py * pates_x() + px
-			var au_centre: float = (ici - milieu).length() * 4.0   # en tuiles
-			if au_centre < RAYON_CENTRE:
-				_quartier[indice] = CENTRE
-				_territoire[indice] = 0
-				continue
-			var gang := 0
-			var meilleure := INF
-			for g in 3:
-				var d: float = (ici - Vector2(fiefs[g])).length() + _graine.randf_range(-0.9, 0.9)
-				if d < meilleure:
-					meilleure = d
-					gang = g
-			_territoire[indice] = gang + 1
-			var type := int(GANGS[gang]["quartier"])
-			# Le premier anneau autour du centre reste commerçant, quel que soit
-			# le gang : une ville a un dégradé, pas une frontière au carrefour.
-			if au_centre < RAYON_CENTRE + 4.0 and _graine.randf() < 0.55:
-				type = COMMERCE
-			elif _graine.randf() < 0.09:
-				type = PARC
-			_quartier[indice] = type
-
-## Les lieux qui font quelque chose : arènes sur une frontière, garage et
-## cabine par territoire, deux repaires par gang.
-func _placer_les_lieux() -> void:
+## Les lieux d'un secteur de huit pâtés sur huit : un garage de peinture, une
+## cabine à contrats, un ou deux repaires, et une arène une fois sur deux. À
+## l'échelle de la ville, c'est un garage à moins de deux minutes de partout —
+## le précédent plan en avait trois pour toute la ville, et à cinq étoiles on
+## mourait avant d'en voir un.
+func _lieux_du_secteur(secteur: Vector2i) -> Dictionary:
+	if _secteurs.has(secteur):
+		return _secteurs[secteur]
+	var fiche := {"garages": [], "cabines": [], "arenes": [], "repaires": []}
+	var par_pate := SECTEUR / PERIODE
+	var candidats: Array = []
 	var frontieres: Array = []
-	var par_gang: Dictionary = {0: [], 1: [], 2: []}
-	for py in pates_y():
-		for px in pates_x():
-			var pate := Vector2i(px, py)
-			var t := territoire_du_pate(pate)
-			if t < 0 or quartier_du_pate(pate) == PARC:
+	for j in par_pate:
+		for i in par_pate:
+			var pate := Vector2i(secteur.x * par_pate + i, secteur.y * par_pate + j)
+			if pate.x < 0 or pate.y < 0 or pate.x >= pates_x() or pate.y >= pates_y():
 				continue
-			par_gang[t].append(pate)
+			var q := quartier_du_pate(pate)
+			if q == EAU or q == PARC:
+				continue
+			candidats.append(pate)
+			var t := territoire_du_pate(pate)
 			for voisin in [Vector2i(1, 0), Vector2i(0, 1)]:
 				var autre := territoire_du_pate(pate + voisin)
-				if autre >= 0 and autre != t:
+				if autre >= 0 and t >= 0 and autre != t:
 					frontieres.append(pate)
 					break
+	if candidats.is_empty():
+		_secteurs[secteur] = fiche
+		return fiche
+	# Un tirage déterministe : le même secteur donne les mêmes lieux chez tout
+	# le monde, sans qu'il faille les diffuser.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(Vector3i(secteur.x, secteur.y, _sel))
+	var pris: Array = []
+	var choisir := func(liste: Array) -> Vector2i:
+		for essai in 24:
+			var p: Vector2i = liste[rng.randi_range(0, liste.size() - 1)]
+			if not (p in pris):
+				pris.append(p)
+				return p
+		return Vector2i(-1, -1)
+	var g: Vector2i = choisir.call(candidats)
+	if g.x >= 0:
+		var coin := coin_pate(g)
+		fiche["garages"].append({"p": centre_tuile(coin.x, coin.y), "id": indice_pate(g), "pate": g})
+	var c: Vector2i = choisir.call(candidats)
+	if c.x >= 0:
+		var coin_c := coin_pate(c)
+		# Sur le trottoir du carrefour nord-ouest du pâté : au milieu du
+		# carrefour, la première voiture qui tourne l'emporte.
+		fiche["cabines"].append({"p": centre_tuile(coin_c.x, coin_c.y) - Vector2(PAS * 0.5 + 10.0, PAS * 0.5 + 10.0),
+			"id": indice_pate(c), "pate": c})
+	if rng.randf() < 0.55:
+		var a: Vector2i = choisir.call(frontieres if frontieres.size() > 2 else candidats)
+		if a.x >= 0:
+			fiche["arenes"].append({"p": centre_pate(a), "id": indice_pate(a), "pate": a})
+	var combien := 1 + (1 if rng.randf() < 0.6 else 0)
+	for k in combien:
+		var r: Vector2i = choisir.call(candidats)
+		if r.x >= 0 and territoire_du_pate(r) >= 0:
+			fiche["repaires"].append({"p": centre_pate(r), "gang": territoire_du_pate(r),
+				"id": indice_pate(r), "pate": r})
+	_secteurs[secteur] = fiche
+	return fiche
 
-	# Deux arènes, aux frontières, loin l'une de l'autre.
-	frontieres.shuffle()
-	var premiere: Vector2i = frontieres[0] if not frontieres.is_empty() else Vector2i(2, 2)
-	var seconde: Vector2i = premiere
-	var ecart := -1.0
-	for pate: Vector2i in frontieres:
-		var d := float((pate - premiere).length())
-		if d > ecart:
-			ecart = d
-			seconde = pate
-	_arenes = [centre_pate(premiere), centre_pate(seconde)]
-	var pris: Array = [premiere, seconde]
+func _secteur_de(point: Vector2) -> Vector2i:
+	return Vector2i(int(floor(point.x / (SECTEUR * PAS))), int(floor(point.y / (SECTEUR * PAS))))
 
-	for g in 3:
-		var candidats: Array = par_gang[g].duplicate()
-		candidats.shuffle()
-		var poses := 0
-		for pate: Vector2i in candidats:
-			if pate in pris:
-				continue
-			pris.append(pate)
-			# Le garage occupe la tuile d'angle nord-ouest du pâté : colonne et
-			# ligne à un pas d'une rue, on y entre sans manœuvrer.
-			if poses == 0:
-				_garages.append(centre_tuile(pate.x * 4 + 1, pate.y * 4 + 1))
-			elif poses == 1:
-				# La cabine, à l'angle du carrefour nord-ouest du pâté, décalée
-				# du centre : au milieu du carrefour, la première voiture qui
-				# tourne l'emporte.
-				_cabines.append(centre_tuile(pate.x * 4, pate.y * 4) + Vector2(PAS, PAS) * 0.34)
-			else:
-				repaires.append({"p": centre_pate(pate), "gang": g, "pate": pate})
-			poses += 1
-			if poses >= 4:
-				break
+## Tous les lieux à moins de `rayon` d'un point : on ne regarde que les
+## secteurs que le cercle touche.
+func lieux_autour(point: Vector2, rayon: float) -> Dictionary:
+	var resultat := {"garages": [], "cabines": [], "arenes": [], "repaires": []}
+	var s0 := _secteur_de(point - Vector2(rayon, rayon))
+	var s1 := _secteur_de(point + Vector2(rayon, rayon))
+	for sy in range(max(0, s0.y), min(LIGNES / SECTEUR, s1.y + 1)):
+		for sx in range(max(0, s0.x), min(COLONNES / SECTEUR, s1.x + 1)):
+			var fiche := _lieux_du_secteur(Vector2i(sx, sy))
+			for genre in resultat:
+				for lieu in fiche[genre]:
+					if Vector2(lieu["p"]).distance_to(point) <= rayon:
+						resultat[genre].append(lieu)
+	return resultat
 
-func _est_lieu(pate: Vector2i) -> String:
-	var c := centre_pate(pate)
-	for a: Vector2 in _arenes:
-		if a == c:
-			return "arene"
-	for r in repaires:
-		if Vector2(r["p"]) == c:
-			return "repaire"
+func _lieu_du_pate(pate: Vector2i) -> String:
+	var fiche := _lieux_du_secteur(Vector2i(pate.x * PERIODE / SECTEUR, pate.y * PERIODE / SECTEUR))
+	for genre in ["arenes", "repaires", "garages", "cabines"]:
+		for lieu in fiche[genre]:
+			if Vector2i(lieu["pate"]) == pate:
+				return genre
 	return ""
 
-# ------------------------------------------------------------ la bâtisse
+## Dans quelle arène se trouve ce point, ou -1. C'est cette réponse, et elle
+## seule, qui autorise un joueur à en blesser un autre.
+func arene_de(point: Vector2) -> int:
+	return _lieu_de(point, "arenes", RAYON_ARENE)
 
-func _poser(chemin: String, transformation: Transform3D, couleur: Color = Color.WHITE) -> void:
-	if not nappes.has(chemin):
-		nappes[chemin] = {"t": [], "c": []}
-	nappes[chemin]["t"].append(transformation)
-	nappes[chemin]["c"].append(couleur)
+func garage_de(point: Vector2) -> int:
+	return _lieu_de(point, "garages", RAYON_GARAGE)
 
-func _tuile_ville(nom: String, colonne: int, ligne: int, rotation: float, couleur: Color,
-		elevation: float = 1.0) -> void:
-	var base := Basis(Vector3.UP, rotation).scaled(Vector3(TUILE, TUILE * elevation, TUILE))
-	_poser(VILLE + nom + ".glb", Transform3D(base, Decor.vers3d(centre_tuile(colonne, ligne))), couleur)
+func cabine_de(point: Vector2) -> int:
+	return _lieu_de(point, "cabines", RAYON_CABINE)
 
-## Un bâtiment d'un kit, posé au centre d'une tuile (ou entre deux, pour les
-## larges). Le sol vient à part : ces kits n'ont pas de dalle, contrairement
-## au kit de ville.
-func _batiment(kit: int, nom: String, position: Vector2, rotation: float, echelle_y: float = -1.0) -> void:
-	var fiche: Dictionary = KITS[kit]
-	var xz := float(fiche["xz"])
-	var y: float = xz * (float(fiche["y"]) if echelle_y < 0.0 else echelle_y)
-	var base := Basis(Vector3.UP, rotation).scaled(Vector3(xz, y, xz))
-	_poser(String(fiche["dossier"]) + nom + ".glb", Transform3D(base, Decor.vers3d(position)))
+func _lieu_de(point: Vector2, genre: String, rayon: float) -> int:
+	for lieu in lieux_autour(point, rayon)[genre]:
+		return int(lieu["id"])
+	return -1
+
+func repaire_le_plus_proche(point: Vector2, gang: int) -> Dictionary:
+	var meilleur := {}
+	var distance := INF
+	for r in lieux_autour(point, SECTEUR * PAS * 1.6)["repaires"]:
+		if gang >= 0 and int(r["gang"]) != gang:
+			continue
+		var d: float = Vector2(r["p"]).distance_to(point)
+		if d < distance:
+			distance = d
+			meilleur = r
+	return meilleur
+
+func garage_le_plus_proche(point: Vector2) -> Dictionary:
+	var meilleur := {}
+	var distance := INF
+	for g in lieux_autour(point, SECTEUR * PAS * 1.6)["garages"]:
+		var d: float = Vector2(g["p"]).distance_to(point)
+		if d < distance:
+			distance = d
+			meilleur = g
+	return meilleur
+
+# ------------------------------------------------------------ les tuiles
+
+## La fiche d'une tuile : son sol, ce qui y est bâti, son mobilier, ses
+## voitures dormantes, et son rectangle de collision. Tout le rendu et toute la
+## physique lisent ces fiches ; rien d'autre n'est jamais calculé.
+func tuile(colonne: int, ligne: int) -> Dictionary:
+	if colonne < 0 or ligne < 0 or colonne >= COLONNES or ligne >= LIGNES:
+		return _mer(colonne, ligne)
+	var pate := pate_de(colonne, ligne)
+	if pate.x < 0:
+		var indice := ligne * COLONNES + colonne
+		if not _rues.has(indice):
+			_rues[indice] = _amenager_rue(colonne, ligne)
+		return _rues[indice]
+	var coin := coin_pate(pate)
+	return _fiches_du_pate(pate)[(ligne - coin.y) * 3 + (colonne - coin.x)]
+
+func _fiches_du_pate(pate: Vector2i) -> Array:
+	if not _pates.has(pate):
+		_pates[pate] = _amenager_pate(pate)
+	return _pates[pate]
+
+func _vierge(colonne: int, ligne: int, sol: int) -> Dictionary:
+	return {"c": colonne, "l": ligne, "sol": sol, "rot": 0, "bloc": false, "rect": null,
+		"batis": [], "props": [], "places": [], "teinte": Color.WHITE, "neons": []}
+
+func _mer(colonne: int, ligne: int) -> Dictionary:
+	var fiche := _vierge(colonne, ligne, S_EAU)
+	fiche["bloc"] = true
+	fiche["rect"] = Rect2(Vector2(colonne, ligne) * PAS, Vector2(PAS, PAS))
+	return fiche
 
 func _teinte_territoire(gang: int, force: float) -> Color:
 	if gang < 0:
 		return Color.WHITE
 	return Color.WHITE.lerp(GANGS[gang]["couleur"], force)
 
-func _batir() -> void:
-	nappes.clear()
-	stationnements.clear()
+## Un accessoire posé : un modèle du kit, une position en pixels, un angle et
+## une échelle. Le morceau les regroupe par modèle en nappes.
+func _prop(fiche: Dictionary, modele: String, p: Vector2, angle: float = 0.0, echelle: float = 1.0) -> void:
+	fiche["props"].append({"m": modele, "p": p, "a": angle, "s": echelle})
 
-	for colonne in range(-CEINTURE, COLONNES + CEINTURE):
-		for ligne in range(-CEINTURE, LIGNES + CEINTURE):
-			var dedans := colonne >= 0 and colonne < COLONNES and ligne >= 0 and ligne < LIGNES
-			if not dedans:
-				# La ceinture : de l'herbe et des bosquets. Ils ferment
-				# l'horizon sans qu'on ait à poser un mur.
-				var t := _graine.randf()
-				var nom := "grass" if t < 0.62 else ("grass-trees" if t < 0.88 else "grass-trees-tall")
-				_tuile_ville(nom, colonne, ligne, 0.0, Color.WHITE)
-				if t >= 0.62:
-					_marquer(colonne, ligne)
-				continue
+## Un volume bâti : centre en pixels, emprise en pixels, hauteur en unités 3D,
+## style de façade et teinte. `bloque` à faux pour un auvent qu'on traverse.
+func _bati(fiche: Dictionary, p: Vector2, largeur: float, profondeur: float, hauteur: float,
+		style: int, couleur: Color, bloque: bool = true, base: float = 0.0) -> void:
+	fiche["batis"].append({"p": p, "w": largeur, "d": profondeur, "h": hauteur, "y": base,
+		"style": style, "c": couleur})
+	if bloque:
+		_bloquer(fiche, Rect2(p - Vector2(largeur, profondeur) * 0.5, Vector2(largeur, profondeur)))
 
-			var pate := pate_de(colonne, ligne)
-			if pate.x < 0:
-				_rue(colonne, ligne)
-				continue
-			_tuile_de_pate(colonne, ligne, pate)
+func _bloquer(fiche: Dictionary, rect: Rect2) -> void:
+	fiche["bloc"] = true
+	if fiche["rect"] == null:
+		fiche["rect"] = rect
+	else:
+		fiche["rect"] = (fiche["rect"] as Rect2).merge(rect)
 
-func _rue(colonne: int, ligne: int) -> void:
+func _teinte_de(style: int, a: int, b: int, sel: int) -> Color:
+	var liste: Array = TEINTES[style]
+	var base: Color = liste[_entier(a, b, sel, liste.size())]
+	# Une pointe de variation : deux immeubles voisins du même style ne sont
+	# jamais exactement de la même couleur, sinon la rue se lit comme un motif.
+	return base.lightened((_bruit(a, b, sel + 100) - 0.5) * 0.12)
+
+# ------------------------------------------------------------ les rues
+
+func _amenager_rue(colonne: int, ligne: int) -> Dictionary:
+	var vc := est_voie(colonne)
+	var vl := est_voie(ligne)
+	var pate := _pate_proche_de(colonne, ligne)
+	var gang := territoire_du_pate(pate)
+	var quartier := quartier_du_pate(pate)
+	var fiche := _vierge(colonne, ligne, S_ROUTE)
 	# La rue prend une pointe de la couleur du territoire qu'elle traverse :
 	# pas assez pour changer le bitume, assez pour lire la frontière au sol.
-	var gang := territoire_du_pate(pate_de(colonne + 1, ligne + 1))
-	if gang < 0:
-		gang = territoire_du_pate(pate_de(colonne - 1, ligne - 1))
-	var teinte := _teinte_territoire(gang, 0.10)
-	if est_voie(colonne) and est_voie(ligne):
-		_tuile_ville("road-intersection", colonne, ligne, 0.0, teinte)
-	elif est_voie(colonne):
-		# La tuile de route droite est orientée selon Z, donc selon l'axe Y
-		# du jeu : une avenue verticale se pose sans rotation.
-		_tuile_ville("road-straight-lightposts" if posmod(ligne, 3) == 1 else "road-straight",
-			colonne, ligne, 0.0, teinte)
-	else:
-		_tuile_ville("road-straight-lightposts" if posmod(colonne, 3) == 1 else "road-straight",
-			colonne, ligne, PI * 0.5, teinte)
+	fiche["teinte"] = _teinte_territoire(gang, 0.12)
+	var dense := quartier in [CENTRE, AFFAIRES, COMMERCE, VIEUX]
+	var pc := posmod(colonne, PERIODE)
+	var pl := posmod(ligne, PERIODE)
+	var centre_px := centre_tuile(colonne, ligne)
 
-func _tuile_de_pate(colonne: int, ligne: int, pate: Vector2i) -> void:
+	if vc and vl:
+		fiche["sol"] = S_CARREFOUR
+		# Le quart de trottoir est à l'angle EXTÉRIEUR du carrefour ; la
+		# rotation le tourne vers le pâté voisin.
+		var coin := Vector2(-1, -1)
+		if pc == 0 and pl == 0: fiche["rot"] = 0
+		elif pc == 1 and pl == 0: fiche["rot"] = 1; coin = Vector2(1, -1)
+		elif pc == 1 and pl == 1: fiche["rot"] = 2; coin = Vector2(1, 1)
+		else: fiche["rot"] = 3; coin = Vector2(-1, 1)
+		if dense and _bruit(colonne, ligne, 21) < 0.7:
+			_prop(fiche, "feu", centre_px + coin * (PAS * 0.5 - 12.0), coin.angle() + PI * 0.75)
+		return fiche
+
+	if vc:
+		# Rue verticale : la tuile ouest a son trottoir à l'ouest, la tuile est
+		# à l'est. Le passage piéton est au bout qui touche le carrefour.
+		var ouest := pc == 0
+		fiche["rot"] = 0 if ouest else 2
+		if pl == 2:
+			fiche["sol"] = S_PASSAGE_A if ouest else S_PASSAGE_B
+		elif pl == 4:
+			fiche["sol"] = S_PASSAGE_B if ouest else S_PASSAGE_A
+		var bord := Vector2(-1.0 if ouest else 1.0, 0.0)
+		_mobilier_de_trottoir(fiche, centre_px, bord, Vector2(0, 1), pl, quartier, colonne, ligne)
+		return fiche
+
+	var nord := pl == 0
+	fiche["rot"] = 1 if nord else 3
+	if pc == 2:
+		fiche["sol"] = S_PASSAGE_B if nord else S_PASSAGE_A
+	elif pc == 4:
+		fiche["sol"] = S_PASSAGE_A if nord else S_PASSAGE_B
+	var bord_h := Vector2(0.0, -1.0 if nord else 1.0)
+	_mobilier_de_trottoir(fiche, centre_px, bord_h, Vector2(1, 0), pc, quartier, colonne, ligne)
+	return fiche
+
+## Ce qui vit sur un trottoir : un lampadaire au milieu de chaque façade de
+## pâté, et selon le quartier, une bouche d'incendie, une poubelle, un banc, un
+## arbre. Les lampadaires sont ce qui fait la nuit : sans leurs flaques de
+## lumière, une rue au crépuscule n'est qu'un ruban gris.
+func _mobilier_de_trottoir(fiche: Dictionary, centre_px: Vector2, bord: Vector2, le_long: Vector2,
+		rang: int, quartier: int, colonne: int, ligne: int) -> void:
+	var sur_trottoir: Vector2 = centre_px + bord * (PAS * 0.5 - TROTTOIR * 0.5)
+	var face := bord.angle()
+	if rang == 3:
+		_prop(fiche, "lampadaire", sur_trottoir, face)
+		return
+	var t := _bruit(colonne, ligne, 22)
+	var decale: Vector2 = sur_trottoir + le_long * (_bruit(colonne, ligne, 23) - 0.5) * 50.0
+	match quartier:
+		CENTRE, AFFAIRES:
+			if t < 0.14: _prop(fiche, "borne", decale)
+			elif t < 0.26: _prop(fiche, "poubelle", decale)
+			elif t < 0.40: _prop(fiche, "arbre_petit", decale, 0.0, 0.8)
+		COMMERCE, VIEUX:
+			if t < 0.12: _prop(fiche, "borne", decale)
+			elif t < 0.30: _prop(fiche, "poubelle", decale)
+			elif t < 0.42: _prop(fiche, "banc", decale, face + PI * 0.5)
+		RESIDENCES, BANLIEUE, PARC:
+			if t < 0.34: _prop(fiche, "arbre_petit" if t < 0.2 else "arbre", decale, 0.0, 0.85)
+			elif t < 0.44: _prop(fiche, "banc", decale, face + PI * 0.5)
+			elif t < 0.50: _prop(fiche, "borne", decale)
+		INDUSTRIE, PORT:
+			if t < 0.10: _prop(fiche, "borne", decale)
+			elif t < 0.18: _prop(fiche, "poubelle", decale)
+
+func _pate_proche_de(colonne: int, ligne: int) -> Vector2i:
+	var pate := pate_de(colonne, ligne)
+	if pate.x >= 0:
+		return pate
+	# Sur une rue : le pâté au sud-est (les deux tuiles de rue 5k et 5k+1
+	# précèdent le pâté k). Arbitraire, mais identique chez tout le monde —
+	# c'est tout ce qu'on demande d'une rue frontière.
+	var px: int = clamp(colonne / PERIODE, 0, pates_x() - 1)
+	var py: int = clamp(ligne / PERIODE, 0, pates_y() - 1)
+	return Vector2i(px, py)
+
+# ------------------------------------------------------------ les pâtés
+
+func _amenager_pate(pate: Vector2i) -> Array:
+	var coin := coin_pate(pate)
 	var quartier := quartier_du_pate(pate)
 	var gang := territoire_du_pate(pate)
-	var lieu := _est_lieu(pate)
-	var centre_c := pate.x * 4 + 2
-	var centre_l := pate.y * 4 + 2
-	var au_milieu := colonne == centre_c and ligne == centre_l
-	var sol := _teinte_territoire(gang, 0.16)
-	var rotation := PI * 0.5 * float(_graine.randi_range(0, 3))
-
-	# Les lieux d'abord : ils ont leur propre plan.
-	if lieu == "arene":
-		# L'arène est une esplanade : pas de mur, on y entre lancé et on en
-		# ressort de même. Les pièges se posent tout seuls quand quatre
-		# voitures s'y croisent.
-		_tuile_ville("pavement", colonne, ligne, 0.0, sol)
-		return
-	if lieu == "repaire":
-		if au_milieu:
-			_tuile_ville("pavement", colonne, ligne, 0.0, _teinte_territoire(gang, 0.45))
-			return
-		# Autour du repaire : de la dalle et des voitures du gang — un squat,
-		# pas une rue.
-		if _graine.randf() < 0.45:
-			_tuile_ville("pavement", colonne, ligne, 0.0, sol)
-			_stationner(colonne, ligne, pate, quartier, gang, 0.0)
-			return
-	if Vector2(centre_tuile(colonne, ligne)) in _garages:
-		# Un garage se traverse : c'est la seule façade dans laquelle on
-		# entre. Le maillage reste, la collision part.
-		_tuile_ville("building-garage", colonne, ligne, rotation, Color.WHITE, 0.5)
-		return
-
-	var t := _graine.randf()
+	var fiches: Array = []
+	var sol_de_base := S_TROTTOIR
 	match quartier:
-		PARC:
-			if au_milieu:
-				_tuile_ville("pavement-fountain", colonne, ligne, 0.0, sol)
-				_marquer(colonne, ligne)
-			elif t < 0.55:
-				_tuile_ville("grass-trees" if t < 0.35 else "grass-trees-tall", colonne, ligne, rotation, sol)
-				_marquer(colonne, ligne)
-			else:
-				_tuile_ville("grass", colonne, ligne, 0.0, sol)
-		CENTRE, COMMERCE:
-			if t < 0.70:
-				_tuile_ville("pavement", colonne, ligne, 0.0, sol)
-				var fiche: Dictionary = KITS[COMMERCE]
-				var tour := quartier == CENTRE and _graine.randf() < 0.42
-				var liste: Array = fiche["tours"] if tour else fiche["immeubles"]
-				_batiment(COMMERCE, String(liste[_graine.randi_range(0, liste.size() - 1)]),
-					centre_tuile(colonne, ligne), rotation, 0.32 if tour else -1.0)
-				_marquer(colonne, ligne)
-			elif t < 0.76:
-				_tuile_ville("pavement-fountain", colonne, ligne, 0.0, sol)
-				_marquer(colonne, ligne)
-			else:
-				_tuile_ville("pavement", colonne, ligne, 0.0, sol)
-			_stationner(colonne, ligne, pate, quartier, gang, 0.42)
-		INDUSTRIE:
-			var fiche_i: Dictionary = KITS[INDUSTRIE]
-			if t < 0.50:
-				_tuile_ville("pavement", colonne, ligne, 0.0, sol)
-				var liste_i: Array = fiche_i["immeubles"]
-				_batiment(INDUSTRIE, String(liste_i[_graine.randi_range(0, liste_i.size() - 1)]),
-					centre_tuile(colonne, ligne), rotation)
-				_marquer(colonne, ligne)
-			elif t < 0.70:
-				_tuile_ville("pavement", colonne, ligne, 0.0, sol)
-				var liste_d: Array = fiche_i["details"]
-				_batiment(INDUSTRIE, String(liste_d[_graine.randi_range(0, liste_d.size() - 1)]),
-					centre_tuile(colonne, ligne), rotation)
-				_marquer(colonne, ligne)
-			elif t < 0.82:
-				_tuile_ville("grass", colonne, ligne, 0.0, sol)
-			else:
-				_tuile_ville("pavement", colonne, ligne, 0.0, sol)
-			_stationner(colonne, ligne, pate, quartier, gang, 0.30)
-		BANLIEUE:
-			var fiche_b: Dictionary = KITS[BANLIEUE]
-			if t < 0.56:
-				_tuile_ville("grass", colonne, ligne, 0.0, sol)
-				var liste_b: Array = fiche_b["immeubles"]
-				_batiment(BANLIEUE, String(liste_b[_graine.randi_range(0, liste_b.size() - 1)]),
-					centre_tuile(colonne, ligne), rotation)
-				_marquer(colonne, ligne)
-			elif t < 0.80:
-				_tuile_ville("grass", colonne, ligne, 0.0, sol)
-				var arbres: Array = fiche_b["arbres"]
-				for i in _graine.randi_range(2, 4):
-					var ou := centre_tuile(colonne, ligne) + Vector2(
-						_graine.randf_range(-40.0, 40.0), _graine.randf_range(-40.0, 40.0))
-					_batiment(BANLIEUE, String(arbres[_graine.randi_range(0, arbres.size() - 1)]),
-						ou, _graine.randf() * TAU, 1.0)
-				_marquer(colonne, ligne)
-			else:
-				_tuile_ville("grass", colonne, ligne, 0.0, sol)
-			_stationner(colonne, ligne, pate, quartier, gang, 0.34)
+		CENTRE, AFFAIRES: sol_de_base = S_PAVES
+		VIEUX: sol_de_base = S_PAVES
+		RESIDENCES, BANLIEUE, PARC: sol_de_base = S_HERBE
+		INDUSTRIE, PORT: sol_de_base = S_BETON
+		EAU: sol_de_base = S_EAU
+	for j in 3:
+		for i in 3:
+			var fiche := _vierge(coin.x + i, coin.y + j, sol_de_base)
+			fiche["teinte"] = _teinte_territoire(gang, 0.16)
+			fiches.append(fiche)
 
-## Une place de stationnement le long de la rue voisine, si la tuile en borde
-## une. La voiture dort SUR la chaussée, contre le trottoir, dans le sens de la
-## rue — c'est ce qui fait qu'une avenue a l'air habitée avant qu'on y croise
-## quelqu'un. `chance` à zéro pose la place sans tirage (les repaires).
-func _stationner(colonne: int, ligne: int, pate: Vector2i, quartier: int, gang: int, chance: float) -> void:
+	if quartier == EAU:
+		for fiche in fiches:
+			_bloquer(fiche, Rect2(Vector2(fiche["c"], fiche["l"]) * PAS, Vector2(PAS, PAS)))
+		return fiches
+
+	var lieu := _lieu_du_pate(pate)
+	match lieu:
+		"arenes":
+			_esplanade(fiches, pate)
+		"repaires":
+			_repaire(fiches, pate, quartier, gang)
+		"garages", "cabines":
+			_simple(fiches, pate, quartier, gang, lieu == "garages")
+		_:
+			match quartier:
+				CENTRE: _centre(fiches, pate)
+				AFFAIRES: _affaires(fiches, pate)
+				COMMERCE: _commerce(fiches, pate)
+				VIEUX: _vieux(fiches, pate)
+				RESIDENCES: _residences(fiches, pate)
+				BANLIEUE: _banlieue(fiches, pate)
+				INDUSTRIE: _industrie(fiches, pate, false)
+				PORT: _industrie(fiches, pate, true)
+				PARC: _parc(fiches, pate)
+
+	# Les voitures dormantes le long des rues, sauf sur une esplanade d'arène.
+	if lieu != "arenes":
+		_garer(fiches, pate, quartier, gang, lieu == "repaires")
+	return fiches
+
+func _f(fiches: Array, i: int, j: int) -> Dictionary:
+	return fiches[j * 3 + i]
+
+func _centre_de(fiches: Array, i: int, j: int) -> Vector2:
+	var fiche: Dictionary = _f(fiches, i, j)
+	return centre_tuile(int(fiche["c"]), int(fiche["l"]))
+
+## Un immeuble sur une emprise de `w`×`d` tuiles ancrée en (i, j). Toutes les
+## tuiles couvertes reçoivent le même rectangle : `degager` retrouve ainsi le
+## mur complet depuis n'importe laquelle.
+func _immeuble(fiches: Array, i: int, j: int, w: int, d: int, hauteur: float, style: int,
+		pate: Vector2i, sel: int, retrait: float = RETRAIT, plein: float = 1.0) -> Dictionary:
+	var coin_px := _centre_de(fiches, i, j) - Vector2(PAS, PAS) * 0.5
+	var taille := Vector2(w, d) * PAS
+	var emprise := Rect2(coin_px + Vector2(retrait, retrait), taille - Vector2(retrait, retrait) * 2.0)
+	if plein < 1.0:
+		var reduit := emprise.size * plein
+		emprise = Rect2(emprise.get_center() - reduit * 0.5, reduit)
+	var couleur := _teinte_de(style, pate.x * 3 + i, pate.y * 3 + j, sel)
+	var ancre: Dictionary = _f(fiches, i, j)
+	_bati(ancre, emprise.get_center(), emprise.size.x, emprise.size.y, hauteur, style, couleur)
+	for jj in range(j, j + d):
+		for ii in range(i, i + w):
+			if ii == i and jj == j:
+				continue
+			_bloquer(_f(fiches, ii, jj), emprise)
+	return ancre["batis"][-1]
+
+func _hauteur(pate: Vector2i, sel: int, basse: float, haute: float) -> float:
+	return lerpf(basse, haute, _bruit(pate.x, pate.y, sel))
+
+## Une enseigne au néon sur la façade tournée vers la rue. `cote` : le bord de
+## la tuile qui donne sur la rue.
+func _neon(fiches: Array, i: int, j: int, bati: Dictionary, pate: Vector2i, sel: int) -> void:
 	var cotes: Array = []
-	if colonne == pate.x * 4 + 1: cotes.append(Vector2(-1, 0))
-	if colonne == pate.x * 4 + 3: cotes.append(Vector2(1, 0))
-	if ligne == pate.y * 4 + 1: cotes.append(Vector2(0, -1))
-	if ligne == pate.y * 4 + 3: cotes.append(Vector2(0, 1))
-	for cote: Vector2 in cotes:
-		if chance > 0.0 and _graine.randf() > chance:
-			continue
-		var p: Vector2 = centre_tuile(colonne, ligne) + cote * (PAS * 0.5 + 24.0)
-		# Le long de la rue : perpendiculaire au côté par lequel on l'a atteinte.
-		var direction := Vector2(-cote.y, cote.x)
-		if _graine.randf() < 0.5:
-			direction = -direction
-		stationnements.append({"p": p, "a": direction.angle(), "quartier": quartier, "territoire": gang})
+	if i == 0: cotes.append(Vector2(-1, 0))
+	if i == 2: cotes.append(Vector2(1, 0))
+	if j == 0: cotes.append(Vector2(0, -1))
+	if j == 2: cotes.append(Vector2(0, 1))
+	if cotes.is_empty():
+		return
+	var cote: Vector2 = cotes[_entier(pate.x * 3 + i, pate.y * 3 + j, sel, cotes.size())]
+	var p: Vector2 = bati["p"] + cote * (Vector2(bati["w"], bati["d"]) * 0.5 + Vector2(1.0, 1.0)).abs()
+	var couleur: Color = _parmi(NEONS, pate.x * 3 + i, pate.y * 3 + j, sel + 1)
+	var largeur: float = (float(bati["d"]) if cote.x != 0.0 else float(bati["w"])) * lerpf(0.35, 0.7, _bruit(i, j, sel + 2))
+	_f(fiches, i, j)["neons"].append({"p": p, "n": cote, "w": largeur, "h": 0.9,
+		"y": lerpf(3.6, 5.2, _bruit(pate.x * 3 + i, pate.y * 3 + j, sel + 3)), "c": couleur})
 
-func _marquer(colonne: int, ligne: int) -> void:
-	var indice := _indice(colonne, ligne)
-	if indice >= 0:
-		_bloc[indice] = 1
+# --- les gabarits de pâté
 
-func _indice(colonne: int, ligne: int) -> int:
-	var c := colonne + CEINTURE
-	var l := ligne + CEINTURE
-	if c < 0 or c >= _largeur or l < 0 or l >= _hauteur:
-		return -1
-	return l * _largeur + c
+func _centre(fiches: Array, pate: Vector2i) -> void:
+	var t := _bruit(pate.x, pate.y, 30)
+	if t < 0.45:
+		_immeuble(fiches, 0, 0, 2, 2, _hauteur(pate, 31, 18.0, 30.0), F_TOUR, pate, 31)
+		_immeuble(fiches, 2, 0, 1, 1, _hauteur(pate, 32, 10.0, 16.0), F_BUREAUX, pate, 32)
+		_immeuble(fiches, 2, 1, 1, 1, _hauteur(pate, 33, 9.0, 14.0), F_BUREAUX, pate, 33)
+		_immeuble(fiches, 0, 2, 1, 1, _hauteur(pate, 34, 9.0, 14.0), F_BUREAUX, pate, 34)
+		_immeuble(fiches, 1, 2, 1, 1, _hauteur(pate, 35, 8.0, 14.0), F_COMMERCE, pate, 35)
+		_place(fiches, 2, 2, pate, 36)
+	elif t < 0.75:
+		var tour := _immeuble(fiches, 1, 1, 1, 1, _hauteur(pate, 37, 24.0, 34.0), F_TOUR, pate, 37, RETRAIT, 0.86)
+		tour["chapeau"] = true
+		for j in 3:
+			for i in 3:
+				if i == 1 and j == 1:
+					continue
+				_place(fiches, i, j, pate, 38 + j * 3 + i)
+	else:
+		_immeuble(fiches, 0, 0, 1, 2, _hauteur(pate, 47, 14.0, 22.0), F_BUREAUX, pate, 47)
+		_immeuble(fiches, 2, 0, 1, 2, _hauteur(pate, 48, 12.0, 18.0), F_BUREAUX, pate, 48)
+		_place(fiches, 1, 0, pate, 49)
+		_place(fiches, 1, 1, pate, 50)
+		for i in 3:
+			var b := _immeuble(fiches, i, 2, 1, 1, _hauteur(pate, 51 + i, 6.0, 9.0), F_COMMERCE, pate, 51 + i)
+			_neon(fiches, i, 2, b, pate, 60 + i)
+
+## Une place : dallage, et selon le tirage une fontaine, des arbres ou des bancs.
+func _place(fiches: Array, i: int, j: int, pate: Vector2i, sel: int) -> void:
+	var fiche: Dictionary = _f(fiches, i, j)
+	fiche["sol"] = S_PAVES
+	var c := _centre_de(fiches, i, j)
+	var t := _bruit(pate.x * 3 + i, pate.y * 3 + j, sel)
+	if t < 0.25:
+		_prop(fiche, "fontaine", c)
+		_bloquer(fiche, Rect2(c - Vector2(30, 30), Vector2(60, 60)))
+	elif t < 0.6:
+		_prop(fiche, "arbre", c + Vector2(-22, -18), 0.0, 0.9)
+		_prop(fiche, "arbre_petit", c + Vector2(24, 20), 0.0, 0.9)
+		_prop(fiche, "banc", c + Vector2(20, -24), PI * 0.5)
+	else:
+		_prop(fiche, "banc", c + Vector2(-24, 0), 0.0)
+		_prop(fiche, "banc", c + Vector2(24, 0), PI)
+		_prop(fiche, "lampadaire_parc", c + Vector2(0, -30))
+
+func _affaires(fiches: Array, pate: Vector2i) -> void:
+	if _bruit(pate.x, pate.y, 70) < 0.5:
+		_immeuble(fiches, 0, 0, 2, 1, _hauteur(pate, 71, 10.0, 18.0), F_BUREAUX, pate, 71)
+		_immeuble(fiches, 2, 0, 1, 1, _hauteur(pate, 72, 8.0, 14.0), F_BUREAUX, pate, 72)
+		_parking(fiches, 0, 1, pate, 73)
+		_immeuble(fiches, 1, 1, 2, 1, _hauteur(pate, 74, 9.0, 15.0), F_BUREAUX, pate, 74)
+		if _bruit(pate.x, pate.y, 75) < 0.4:
+			_immeuble(fiches, 0, 2, 2, 1, _hauteur(pate, 76, 10.0, 18.0), F_BUREAUX, pate, 76)
+			_immeuble(fiches, 2, 2, 1, 1, _hauteur(pate, 77, 8.0, 12.0), F_COMMERCE, pate, 77)
+		else:
+			for i in 3:
+				_immeuble(fiches, i, 2, 1, 1, _hauteur(pate, 78 + i, 8.0, 16.0), F_BUREAUX, pate, 78 + i)
+	else:
+		_immeuble(fiches, 1, 1, 2, 2, _hauteur(pate, 81, 14.0, 24.0), F_TOUR, pate, 81)
+		_immeuble(fiches, 0, 0, 1, 1, _hauteur(pate, 82, 8.0, 14.0), F_BUREAUX, pate, 82)
+		_immeuble(fiches, 0, 1, 1, 1, _hauteur(pate, 83, 8.0, 14.0), F_BUREAUX, pate, 83)
+		_immeuble(fiches, 0, 2, 1, 1, _hauteur(pate, 84, 6.0, 10.0), F_COMMERCE, pate, 84)
+		_place(fiches, 1, 0, pate, 85)
+		_place(fiches, 2, 0, pate, 86)
+
+## Un parking : des places au sol et deux voitures qui dorment.
+func _parking(fiches: Array, i: int, j: int, pate: Vector2i, sel: int) -> void:
+	var fiche: Dictionary = _f(fiches, i, j)
+	fiche["sol"] = S_PARKING
+	var c := _centre_de(fiches, i, j)
+	for k in 2:
+		if _bruit(pate.x * 3 + i, pate.y * 3 + j, sel + k) < 0.62:
+			fiche["places"].append({"p": c + Vector2(-22.0 + 44.0 * float(k), 0.0), "a": PI * 0.5,
+				"cote": 4 + k})
+
+func _commerce(fiches: Array, pate: Vector2i) -> void:
+	for j in 3:
+		for i in 3:
+			if i == 1 and j == 1:
+				# L'arrière-cour : du béton, des bennes. Une rue commerçante a
+				# un envers, c'est ce qui la rend crédible.
+				var cour: Dictionary = _f(fiches, 1, 1)
+				cour["sol"] = S_BETON
+				var c := _centre_de(fiches, 1, 1)
+				_prop(cour, "benne", c + Vector2(-20, -18), 0.3)
+				_prop(cour, "benne", c + Vector2(18, 14), -0.2)
+				_prop(cour, "poubelle", c + Vector2(28, -22))
+				continue
+			var sel := 90 + j * 3 + i
+			var haut := _bruit(pate.x * 3 + i, pate.y * 3 + j, sel) < 0.3
+			var b := _immeuble(fiches, i, j, 1, 1, _hauteur(pate, sel, 10.0, 15.0) if haut else _hauteur(pate, sel, 5.0, 9.0),
+				F_COMMERCE, pate, sel, RETRAIT * 0.5)
+			if _bruit(pate.x * 3 + i, pate.y * 3 + j, sel + 20) < 0.6:
+				_neon(fiches, i, j, b, pate, sel + 40)
+
+func _vieux(fiches: Array, pate: Vector2i) -> void:
+	for j in 3:
+		for i in 3:
+			if i == 1 and j == 1:
+				var cour: Dictionary = _f(fiches, 1, 1)
+				cour["sol"] = S_PAVES
+				var c := _centre_de(fiches, 1, 1)
+				_prop(cour, "arbre", c, 0.0, 0.95)
+				_bloquer(cour, Rect2(c - Vector2(14, 14), Vector2(28, 28)))
+				_prop(cour, "banc", c + Vector2(0, 30), 0.0)
+				continue
+			var sel := 120 + j * 3 + i
+			var clocher := _bruit(pate.x * 3 + i, pate.y * 3 + j, sel) < 0.08
+			var b := _immeuble(fiches, i, j, 1, 1, 10.0 if clocher else _hauteur(pate, sel, 4.2, 7.0),
+				F_VIEUX, pate, sel, RETRAIT * 0.4)
+			if not clocher and _bruit(pate.x * 3 + i, pate.y * 3 + j, sel + 30) < 0.25:
+				_neon(fiches, i, j, b, pate, sel + 50)
+
+func _residences(fiches: Array, pate: Vector2i) -> void:
+	if _bruit(pate.x, pate.y, 140) < 0.7:
+		_immeuble(fiches, 0, 0, 3, 1, _hauteur(pate, 141, 9.0, 15.0), F_LOGEMENTS, pate, 141)
+		_immeuble(fiches, 0, 2, 3, 1, _hauteur(pate, 142, 9.0, 15.0), F_LOGEMENTS, pate, 142)
+		_parking(fiches, 0, 1, pate, 143)
+		_jardin(fiches, 1, 1, pate, 144)
+		_jardin(fiches, 2, 1, pate, 145)
+	else:
+		_immeuble(fiches, 0, 0, 1, 3, _hauteur(pate, 146, 10.0, 16.0), F_LOGEMENTS, pate, 146)
+		_immeuble(fiches, 2, 0, 1, 3, _hauteur(pate, 147, 10.0, 16.0), F_LOGEMENTS, pate, 147)
+		_jardin(fiches, 1, 0, pate, 148)
+		_parking(fiches, 1, 1, pate, 149)
+		_jardin(fiches, 1, 2, pate, 150)
+
+## Un coin d'herbe : un arbre (qui bloque, un tronc n'est pas une pelouse), des
+## buissons, parfois un banc.
+func _jardin(fiches: Array, i: int, j: int, pate: Vector2i, sel: int) -> void:
+	var fiche: Dictionary = _f(fiches, i, j)
+	fiche["sol"] = S_HERBE
+	var c := _centre_de(fiches, i, j)
+	var t := _bruit(pate.x * 3 + i, pate.y * 3 + j, sel)
+	if t < 0.7:
+		var ou := c + Vector2((_bruit(i, j, sel + 1) - 0.5) * 30.0, (_bruit(i, j, sel + 2) - 0.5) * 30.0)
+		_prop(fiche, "arbre" if t < 0.4 else "arbre_petit", ou, 0.0, lerpf(0.85, 1.1, _bruit(i, j, sel + 3)))
+		_bloquer(fiche, Rect2(ou - Vector2(12, 12), Vector2(24, 24)))
+	_prop(fiche, "buisson", c + Vector2(-32, 26), 0.0, lerpf(0.8, 1.2, _bruit(i, j, sel + 4)))
+	_prop(fiche, "buisson", c + Vector2(30, -28), 0.0, lerpf(0.8, 1.2, _bruit(i, j, sel + 5)))
+	if t > 0.5:
+		_prop(fiche, "banc", c + Vector2(28, 24), PI)
+
+func _banlieue(fiches: Array, pate: Vector2i) -> void:
+	for j in 3:
+		for i in 3:
+			var sel := 160 + j * 3 + i
+			var fiche: Dictionary = _f(fiches, i, j)
+			var c := _centre_de(fiches, i, j)
+			if i == 1 and j == 1 and _bruit(pate.x, pate.y, 159) < 0.5:
+				_jardin(fiches, 1, 1, pate, sel)
+				continue
+			# La maison n'est pas au milieu de sa parcelle : elle est du côté
+			# de la rue, et le jardin derrière — comme partout.
+			var vers_rue := Vector2(-1 if i == 0 else (1 if i == 2 else 0), -1 if j == 0 else (1 if j == 2 else 0))
+			var ou := c + vers_rue * 12.0 + Vector2((_bruit(pate.x * 3 + i, pate.y * 3 + j, sel) - 0.5) * 16.0,
+				(_bruit(pate.x * 3 + i, pate.y * 3 + j, sel + 1) - 0.5) * 16.0)
+			var w: float = lerp(48.0, 60.0, _bruit(pate.x * 3 + i, pate.y * 3 + j, sel + 2))
+			var d: float = lerp(42.0, 54.0, _bruit(pate.x * 3 + i, pate.y * 3 + j, sel + 3))
+			var h := _hauteur(pate, sel + 4, 3.2, 4.4)
+			var couleur := _teinte_de(F_MAISON, pate.x * 3 + i, pate.y * 3 + j, sel)
+			_bati(fiche, ou, w, d, h, F_MAISON, couleur)
+			# Le toit : une dalle sombre qui déborde. C'est ce qui fait
+			# « maison » vu de dessus, là où une boîte fait « garage ».
+			_bati(fiche, ou, w + 6.0, d + 6.0, 0.5, F_PLEIN, _teinte_de(F_PLEIN, i, j, sel + 5), false, h)
+			var jardin: Vector2 = c - vers_rue * 30.0
+			_prop(fiche, "buisson", jardin + Vector2(-18, 10), 0.0, 1.0)
+			if _bruit(pate.x * 3 + i, pate.y * 3 + j, sel + 6) < 0.5:
+				_prop(fiche, "arbre_petit", jardin + Vector2(14, -8), 0.0, 0.9)
+				_bloquer(fiche, Rect2(jardin + Vector2(14, -8) - Vector2(10, 10), Vector2(20, 20)))
+
+func _industrie(fiches: Array, pate: Vector2i, port: bool) -> void:
+	var t := _bruit(pate.x, pate.y, 180)
+	if t < 0.5:
+		_immeuble(fiches, 0, 0, 2, 2, _hauteur(pate, 181, 5.0, 7.5), F_HANGAR, pate, 181)
+		_chantier(fiches, 2, 0, pate, 182, port)
+		_chantier(fiches, 2, 1, pate, 183, port)
+		_immeuble(fiches, 0, 2, 1, 1, _hauteur(pate, 184, 5.0, 6.5), F_HANGAR, pate, 184)
+		_prop(_f(fiches, 0, 2), "cheminee", _centre_de(fiches, 0, 2) + Vector2(-30, -30))
+		_chantier(fiches, 1, 2, pate, 185, port)
+		_chantier(fiches, 2, 2, pate, 186, port)
+	else:
+		_immeuble(fiches, 0, 0, 3, 1, _hauteur(pate, 187, 6.0, 8.5), F_HANGAR, pate, 187)
+		for i in 3:
+			_chantier(fiches, i, 1, pate, 188 + i, port)
+		_immeuble(fiches, 0, 2, 2, 1, _hauteur(pate, 191, 5.0, 6.5), F_HANGAR, pate, 191)
+		var chateau: Dictionary = _f(fiches, 2, 2)
+		var c := _centre_de(fiches, 2, 2)
+		_prop(chateau, "chateau_eau", c)
+		_bloquer(chateau, Rect2(c - Vector2(26, 26), Vector2(52, 52)))
+	if port:
+		# La grue : le repère du port, visible de loin. Deux boîtes suffisent.
+		var q: Dictionary = _f(fiches, 2, 1) if t < 0.5 else _f(fiches, 1, 1)
+		var pied := _centre_de(fiches, 2, 1) if t < 0.5 else _centre_de(fiches, 1, 1)
+		_bati(q, pied, 14.0, 14.0, 17.0, F_PLEIN, Color("#8a4a3a"))
+		_bati(q, pied + Vector2(0.0, -40.0), 9.0, 110.0, 1.4, F_PLEIN, Color("#8a4a3a"), false, 17.0)
+
+## Une cour d'usine : des conteneurs, une citerne, une benne — du volume bas qui
+## se contourne. Tout bloque : c'est de l'acier.
+func _chantier(fiches: Array, i: int, j: int, pate: Vector2i, sel: int, port: bool) -> void:
+	var fiche: Dictionary = _f(fiches, i, j)
+	fiche["sol"] = S_BETON
+	var c := _centre_de(fiches, i, j)
+	var t := _bruit(pate.x * 3 + i, pate.y * 3 + j, sel)
+	if t < (0.6 if port else 0.4):
+		var angle := PI * 0.5 * float(_entier(pate.x * 3 + i, pate.y * 3 + j, sel + 1, 2))
+		_prop(fiche, "conteneur_a" if t < 0.3 else "conteneur_b", c + Vector2(-16, -10), angle)
+		_prop(fiche, "conteneur_b" if t < 0.3 else "conteneur_a", c + Vector2(18, 16), angle)
+		_bloquer(fiche, Rect2(c - Vector2(38, 34), Vector2(76, 68)))
+	elif t < 0.7:
+		_prop(fiche, "citerne", c)
+		_bloquer(fiche, Rect2(c - Vector2(34, 34), Vector2(68, 68)))
+	elif t < 0.85:
+		_prop(fiche, "benne", c + Vector2(-24, 0), 0.2)
+		_prop(fiche, "benne", c + Vector2(20, 6), -0.15)
+	# sinon : une dalle vide, où l'on se garera
+
+func _parc(fiches: Array, pate: Vector2i) -> void:
+	for j in 3:
+		for i in 3:
+			var fiche: Dictionary = _f(fiches, i, j)
+			var c := _centre_de(fiches, i, j)
+			var sel := 200 + j * 3 + i
+			if i == 1 and j == 1:
+				fiche["sol"] = S_ALLEE_X
+				_prop(fiche, "fontaine", c)
+				_bloquer(fiche, Rect2(c - Vector2(30, 30), Vector2(60, 60)))
+				continue
+			if i == 1:
+				fiche["sol"] = S_ALLEE_V
+				_prop(fiche, "banc", c + Vector2(-26, 0), 0.0)
+				_prop(fiche, "lampadaire_parc", c + Vector2(26, 20))
+				continue
+			if j == 1:
+				fiche["sol"] = S_ALLEE_H
+				_prop(fiche, "banc", c + Vector2(0, -26), PI * 0.5)
+				_prop(fiche, "lampadaire_parc", c + Vector2(20, 26))
+				continue
+			fiche["sol"] = S_HERBE
+			var ou := c + Vector2((_bruit(pate.x * 3 + i, pate.y * 3 + j, sel) - 0.5) * 36.0,
+				(_bruit(pate.x * 3 + i, pate.y * 3 + j, sel + 1) - 0.5) * 36.0)
+			_prop(fiche, "arbre", ou, 0.0, lerpf(0.95, 1.25, _bruit(i, j, sel + 2)))
+			_bloquer(fiche, Rect2(ou - Vector2(13, 13), Vector2(26, 26)))
+			_prop(fiche, "arbre_petit", c - (ou - c) * 0.9, 0.0, 0.9)
+			_prop(fiche, "buisson", c + Vector2(34, -30), 0.0, 1.1)
+			_prop(fiche, "buisson", c + Vector2(-32, 32), 0.0, 0.9)
+
+## Une esplanade : une arène. Pas de mur, on y entre lancé et on en ressort de
+## même. Les pièges se posent tout seuls quand quatre voitures s'y croisent.
+func _esplanade(fiches: Array, _pate: Vector2i) -> void:
+	for fiche in fiches:
+		fiche["sol"] = S_PAVES
+
+## Un repaire : la dalle du gang au milieu, deux cours où dorment ses voitures,
+## et de la vieille bâtisse basse autour — un squat, pas une rue.
+func _repaire(fiches: Array, pate: Vector2i, quartier: int, gang: int) -> void:
+	var milieu: Dictionary = _f(fiches, 1, 1)
+	milieu["sol"] = S_PAVES
+	milieu["teinte"] = _teinte_territoire(gang, 0.45)
+	var cours: Array = [Vector2i(1, 0), Vector2i(0, 1), Vector2i(2, 1), Vector2i(1, 2)]
+	var a: Vector2i = cours[_entier(pate.x, pate.y, 210, 4)]
+	var b: Vector2i = cours[posmod(_entier(pate.x, pate.y, 210, 4) + 2, 4)]
+	for j in 3:
+		for i in 3:
+			if i == 1 and j == 1:
+				continue
+			var ici := Vector2i(i, j)
+			if ici == a or ici == b:
+				var cour: Dictionary = _f(fiches, i, j)
+				cour["sol"] = S_BETON
+				cour["teinte"] = _teinte_territoire(gang, 0.3)
+				var c := _centre_de(fiches, i, j)
+				var le_long := Vector2(1, 0) if a.y == 1 else Vector2(0, 1)
+				for k in 2:
+					cour["places"].append({"p": c + le_long * (-22.0 + 44.0 * float(k)),
+						"a": le_long.angle() + PI * 0.5, "cote": 4 + k, "gang": gang})
+				continue
+			var sel := 211 + j * 3 + i
+			var style := F_VIEUX if quartier in [VIEUX, COMMERCE, CENTRE, AFFAIRES] else \
+				(F_HANGAR if quartier in [INDUSTRIE, PORT] else F_LOGEMENTS)
+			_immeuble(fiches, i, j, 1, 1, _hauteur(pate, sel, 4.0, 7.0), style, pate, sel)
+
+## Un pâté SIMPLE : des immeubles d'une tuile, pour que le garage ou la cabine
+## qu'il porte en (0,0) ne se retrouve pas sous une tour de quatre tuiles.
+func _simple(fiches: Array, pate: Vector2i, quartier: int, _gang: int, garage: bool) -> void:
+	var style := F_BUREAUX
+	match quartier:
+		COMMERCE: style = F_COMMERCE
+		VIEUX: style = F_VIEUX
+		RESIDENCES, BANLIEUE: style = F_LOGEMENTS
+		INDUSTRIE, PORT: style = F_HANGAR
+		CENTRE: style = F_TOUR
+	for j in 3:
+		for i in 3:
+			if i == 0 and j == 0 and garage:
+				# Le garage : une dalle, quatre piliers, un auvent qu'on traverse.
+				# La seule façade de la ville dans laquelle on ENTRE.
+				var fiche: Dictionary = _f(fiches, 0, 0)
+				fiche["sol"] = S_BETON
+				var c := _centre_de(fiches, 0, 0)
+				for dx in [-1.0, 1.0]:
+					for dy in [-1.0, 1.0]:
+						_bati(fiche, c + Vector2(dx, dy) * 36.0, 6.0, 6.0, 4.2, F_PLEIN, Color("#3a3d42"), false)
+				_bati(fiche, c, 92.0, 92.0, 0.6, F_PLEIN, Palette.SERIE.darkened(0.55), false, 4.2)
+				continue
+			if i == 1 and j == 1 and quartier in [PARC, RESIDENCES, BANLIEUE]:
+				_jardin(fiches, 1, 1, pate, 230)
+				continue
+			var sel := 231 + j * 3 + i
+			var haute := style == F_TOUR
+			_immeuble(fiches, i, j, 1, 1, _hauteur(pate, sel, 14.0, 24.0) if haute else _hauteur(pate, sel, 5.0, 10.0),
+				style, pate, sel)
+
+## Les voitures qui dorment le long des rues : sur la file de stationnement de
+## la rue voisine, dans le sens de la circulation. `cote` : 0 ouest, 1 nord,
+## 2 est, 3 sud. Près d'un repaire, une sur deux porte les couleurs du gang ;
+## ailleurs sur son territoire, une sur sept.
+func _garer(fiches: Array, pate: Vector2i, quartier: int, gang: int, repaire: bool) -> void:
+	var chance := 0.45
+	match quartier:
+		CENTRE: chance = 0.5
+		COMMERCE, VIEUX: chance = 0.58
+		BANLIEUE: chance = 0.36
+		INDUSTRIE, PORT: chance = 0.28
+		PARC: chance = 0.14
+	for j in 3:
+		for i in 3:
+			var fiche: Dictionary = _f(fiches, i, j)
+			var c := _centre_de(fiches, i, j)
+			var bords: Array = []
+			if i == 0: bords.append([Vector2(-1, 0), 0, -PI * 0.5])
+			if i == 2: bords.append([Vector2(1, 0), 2, PI * 0.5])
+			if j == 0: bords.append([Vector2(0, -1), 1, 0.0])
+			if j == 2: bords.append([Vector2(0, 1), 3, PI])
+			for bord in bords:
+				var cote := int(bord[1])
+				if _bruit(int(fiche["c"]), int(fiche["l"]), 240 + cote) > chance:
+					continue
+				var place := {"p": c + (bord[0] as Vector2) * (PAS * 0.5 + STATIONNEMENT), "a": float(bord[2]), "cote": cote}
+				if gang >= 0 and (repaire or _bruit(int(fiche["c"]), int(fiche["l"]), 250 + cote) < 0.14):
+					place["gang"] = gang
+				fiche["places"].append(place)
+
+# ------------------------------------------------------------ voitures dormantes
+
+## L'identifiant d'une place : la tuile et son côté. C'est lui que le client
+## demande à l'hôte quand il ouvre une portière, et que l'hôte diffuse quand
+## la voiture se réveille.
+static func id_dormante(colonne: int, ligne: int, cote: int) -> int:
+	return ID_DORMANTE + (ligne * COLONNES + colonne) * COTES + cote
+
+static func est_dormante(id: int) -> bool:
+	return id >= ID_DORMANTE
+
+## La fiche complète d'une voiture dormante : {id, p, a, modele, gang, quartier}
+## ou vide si l'identifiant ne correspond à rien.
+func dormante(id: int) -> Dictionary:
+	if id < ID_DORMANTE:
+		return {}
+	var brut := id - ID_DORMANTE
+	var cote := posmod(brut, COTES)
+	var indice := brut / COTES
+	var colonne := posmod(indice, COLONNES)
+	var ligne := indice / COLONNES
+	if ligne >= LIGNES:
+		return {}
+	var fiche := tuile(colonne, ligne)
+	for place in fiche["places"]:
+		if int(place["cote"]) == cote:
+			return decrire(fiche, place)
+	return {}
+
+## La fiche complète d'une place d'une tuile : identifiant, position, angle,
+## modèle (tiré selon le quartier) et gang. Le morceau s'en sert pour poser la
+## carrosserie, l'hôte pour réveiller la voiture.
+func decrire(fiche: Dictionary, place: Dictionary) -> Dictionary:
+	var colonne := int(fiche["c"])
+	var ligne := int(fiche["l"])
+	var quartier := quartier_du_pate(_pate_proche_de(colonne, ligne))
+	var gang := int(place.get("gang", -1))
+	var liste: Array = FormesCarnage.VOITURES_PAR_QUARTIER.get(quartier, [0])
+	var modele := int(liste[_entier(colonne, ligne, 260 + int(place["cote"]), liste.size())])
+	if gang >= 0:
+		modele = 1 if _bruit(colonne, ligne, 270) < 0.5 else 4
+	return {"id": id_dormante(colonne, ligne, int(place["cote"])), "p": place["p"], "a": float(place["a"]),
+		"modele": modele, "gang": gang, "quartier": quartier}
+
+## Les voitures dormantes autour d'un point : pour la collision, le vol, et le
+## trafic qui freine. On balaie les tuiles du carré, pas la ville.
+func dormantes_autour(point: Vector2, rayon: float) -> Array:
+	var liste: Array = []
+	var c0 := int(floor((point.x - rayon) / PAS))
+	var c1 := int(floor((point.x + rayon) / PAS))
+	var l0 := int(floor((point.y - rayon) / PAS))
+	var l1 := int(floor((point.y + rayon) / PAS))
+	for l in range(l0, l1 + 1):
+		for c in range(c0, c1 + 1):
+			if c < 0 or l < 0 or c >= COLONNES or l >= LIGNES or est_voie(c) or est_voie(l):
+				continue
+			var fiche := tuile(c, l)
+			for place in fiche["places"]:
+				if Vector2(place["p"]).distance_to(point) <= rayon:
+					liste.append(decrire(fiche, place))
+	return liste
 
 # ------------------------------------------------------------ collisions
 
 func bloquee(colonne: int, ligne: int) -> bool:
-	var indice := _indice(colonne, ligne)
-	# Hors de la carte : rien ne bloque. La friche se garde autrement, par le
-	# rappel vers le centre — un mur invisible passe pour un défaut.
-	return indice >= 0 and _bloc[indice] == 1
+	return bool(tuile(colonne, ligne)["bloc"])
 
 func rectangle_tuile(colonne: int, ligne: int) -> Rect2:
-	# Un peu plus petit que la tuile : on doit pouvoir raser un immeuble sans
-	# rester collé au trottoir.
-	var cote := PAS - RETRAIT
-	return Rect2(centre_tuile(colonne, ligne) - Vector2(cote, cote) * 0.5, Vector2(cote, cote))
+	var fiche := tuile(colonne, ligne)
+	if fiche["rect"] != null:
+		return fiche["rect"]
+	return Rect2(Vector2(colonne, ligne) * PAS + Vector2(RETRAIT, RETRAIT), Vector2(PAS - RETRAIT * 2.0, PAS - RETRAIT * 2.0))
 
-## Les tuiles susceptibles de toucher un cercle. Au plus quatre : c'est ce qui
-## remplace le balayage de mille rectangles.
+## Les tuiles bloquées susceptibles de toucher un cercle. Au plus quatre : c'est
+## ce qui remplace le balayage de milliers de rectangles.
 func _tuiles_autour(point: Vector2, rayon: float) -> Array:
 	var c0 := int(floor((point.x - rayon) / PAS))
 	var c1 := int(floor((point.x + rayon) / PAS))
@@ -516,26 +1141,7 @@ func degager(point: Vector2, rayon: float) -> Array:
 		touche = true
 	return [corrige, touche]
 
-# ------------------------------------------------------------ les rues
-
-## Position sur la voie la plus proche, dans l'axe demandé. Sert à remettre une
-## voiture d'IA sur sa file après un choc.
-func voie_proche(valeur: float) -> float:
-	var indice := int(round(valeur / PAS / 4.0)) * 4
-	return (float(indice) + 0.5) * PAS
-
-func sur_une_rue(point: Vector2, tolerance: float = 0.0) -> bool:
-	var colonne := int(floor(point.x / PAS))
-	var ligne := int(floor(point.y / PAS))
-	if est_voie(colonne) or est_voie(ligne):
-		return true
-	if tolerance <= 0.0:
-		return false
-	return abs(point.x - voie_proche(point.x)) < tolerance or abs(point.y - voie_proche(point.y)) < tolerance
-
-## Le carrefour le plus proche : la maille des rues, arrondie.
-func carrefour_proche(point: Vector2) -> Vector2:
-	return Vector2(voie_proche(point.x), voie_proche(point.y))
+# ------------------------------------------------------------ points utiles
 
 ## Un point libre dans une rue, autour d'un lieu. Quatorze essais puis on
 ## abandonne : insister davantage coûterait plus cher que le défaut à éviter.
@@ -543,29 +1149,28 @@ func point_de_rue(rng: RandomNumberGenerator, autour: Vector2,
 		rayon_min: float, rayon_max: float) -> Vector2:
 	for essai in 14:
 		var p: Vector2 = autour + Vector2.RIGHT.rotated(rng.randf() * TAU) * rng.randf_range(rayon_min, rayon_max)
-		p.x = clamp(p.x, -banlieue() * 0.5, etendue().x + banlieue() * 0.5)
-		p.y = clamp(p.y, -banlieue() * 0.5, etendue().y + banlieue() * 0.5)
+		p.x = clamp(p.x, PAS, etendue().x - PAS)
+		p.y = clamp(p.y, PAS, etendue().y - PAS)
 		if not dans_un_batiment(p, 40.0):
 			return p
-	return autour + Vector2.RIGHT.rotated(rng.randf() * TAU) * rayon_min
+	return degager(autour + Vector2.RIGHT.rotated(rng.randf() * TAU) * rayon_min, 40.0)[0]
 
-## Un point de la chaussée, pour faire naître une voiture qui roule.
+## Un point de la chaussée, pour faire naître une voiture qui roule : sur la
+## file de droite de la rue la plus proche, dans un sens ou l'autre.
 func point_de_chaussee(rng: RandomNumberGenerator, autour: Vector2,
 		rayon_min: float, rayon_max: float) -> Dictionary:
 	var p := point_de_rue(rng, autour, rayon_min, rayon_max)
 	var carrefour := carrefour_proche(p)
-	# On la pose sur l'axe le plus proche, et elle roulera le long de cet axe.
 	var horizontal: bool = abs(p.y - carrefour.y) < abs(p.x - carrefour.x)
 	var sens: float = 1.0 if rng.randf() < 0.5 else -1.0
 	if horizontal:
-		return {"p": Vector2(p.x, carrefour.y), "d": Vector2(sens, 0.0)}
-	return {"p": Vector2(carrefour.x, p.y), "d": Vector2(0.0, sens)}
+		var d := Vector2(sens, 0.0)
+		return {"p": Vector2(p.x, carrefour.y + Vector2(-d.y, d.x).y * FILE), "d": d}
+	var dv := Vector2(0.0, sens)
+	return {"p": Vector2(carrefour.x + Vector2(-dv.y, dv.x).x * FILE, p.y), "d": dv}
 
-# ------------------------------------------------------------ les lieux
+# ------------------------------------------------------------ qui, où
 
-## À qui appartient ce coin de ville : le gang du pâté le plus proche. Sur une
-## rue, on regarde le pâté d'à côté — une rue frontière appartient à qui la
-## borde au sud-est, ce qui est arbitraire mais identique chez tout le monde.
 func territoire(point: Vector2) -> int:
 	return territoire_du_pate(_pate_proche(point))
 
@@ -578,14 +1183,7 @@ func nom_du_quartier(point: Vector2) -> String:
 func _pate_proche(point: Vector2) -> Vector2i:
 	var colonne: int = clamp(int(floor(point.x / PAS)), 0, COLONNES - 1)
 	var ligne: int = clamp(int(floor(point.y / PAS)), 0, LIGNES - 1)
-	var pate := pate_de(colonne, ligne)
-	if pate.x >= 0:
-		return pate
-	# Sur une rue : le pâté au sud-est, sinon au nord-ouest.
-	pate = pate_de(colonne + 1, ligne + 1)
-	if pate.x >= 0:
-		return pate
-	return pate_de(max(1, colonne - 1), max(1, ligne - 1))
+	return _pate_proche_de(colonne, ligne)
 
 func nom_du_gang(indice: int) -> String:
 	return String(GANGS[posmod(indice, GANGS.size())]["nom"])
@@ -603,44 +1201,14 @@ func du_gang(indice: int) -> String:
 func couleur_du_gang(indice: int) -> Color:
 	return GANGS[posmod(indice, GANGS.size())]["couleur"]
 
-func garages() -> Array:
-	return _garages
-
-func cabines() -> Array:
-	return _cabines
-
-func arenes() -> Array:
-	return _arenes
-
-## Dans quelle arène se trouve ce point, ou -1. C'est cette réponse, et elle
-## seule, qui autorise un joueur à en blesser un autre.
-func arene_de(point: Vector2) -> int:
-	var i := 0
-	for centre_arene: Vector2 in _arenes:
-		if point.distance_to(centre_arene) <= RAYON_ARENE:
-			return i
-		i += 1
-	return -1
-
-func garage_de(point: Vector2) -> int:
-	var i := 0
-	for centre_garage: Vector2 in _garages:
-		if point.distance_to(centre_garage) <= RAYON_GARAGE:
-			return i
-		i += 1
-	return -1
-
-func cabine_de(point: Vector2) -> int:
-	var i := 0
-	for centre_cabine: Vector2 in _cabines:
-		if point.distance_to(centre_cabine) <= RAYON_CABINE:
-			return i
-		i += 1
-	return -1
-
 ## Départs répartis sur un cercle au centre, dans la rue : quatre voitures au
 ## même endroit se poussent mutuellement dans un mur avant même le décompte.
 func depart(place: int, rng: RandomNumberGenerator) -> Dictionary:
 	var angle := TAU * float(posmod(place, 4)) / 4.0
-	var p := point_de_rue(rng, centre() + Vector2.RIGHT.rotated(angle) * 380.0, 0.0, 220.0)
+	var p := point_de_rue(rng, centre() + Vector2.RIGHT.rotated(angle) * 420.0, 0.0, 240.0)
 	return {"p": p, "a": angle + PI}
+
+## Le nombre de fiches en cache : pour le journal du banc, qui vérifie que la
+## ville se génère à la demande et pas d'un bloc.
+func fiches_en_cache() -> int:
+	return _pates.size() * 9 + _rues.size()

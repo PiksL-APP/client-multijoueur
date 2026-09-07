@@ -47,7 +47,8 @@ func _ready() -> void:
 		return
 	aller_a("accueil", {})
 
-## `?pilote=carnage&manche=60&etoiles=5` → `--banc-jeu=carnage --manche=60 --banc-etoiles=5`.
+## `?pilote=carnage&manche=60&etoiles=5&position=120,110` → `--banc-jeu=carnage
+## --manche=60 --banc-etoiles=5 --banc-position=120,110`.
 static func _arguments_depuis_url(arguments: PackedStringArray) -> PackedStringArray:
 	var recherche = JavaScriptBridge.eval("window.location.search", true)
 	if typeof(recherche) != TYPE_STRING or String(recherche).length() < 2:
@@ -61,6 +62,7 @@ static func _arguments_depuis_url(arguments: PackedStringArray) -> PackedStringA
 			"pilote": copie.append("--banc-jeu=" + String(paire[1]))
 			"manche": copie.append("--manche=" + String(paire[1]))
 			"etoiles": copie.append("--banc-etoiles=" + String(paire[1]))
+			"position": copie.append("--banc-position=" + String(paire[1]))
 	return copie
 
 static func _argument(arguments: PackedStringArray, nom: String, defaut: String = "") -> String:

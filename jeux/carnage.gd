@@ -54,12 +54,13 @@ const CADENCE_INSTANTANE := 1.0 / 8.0
 # Caméra presque à la verticale : en ville, une inclinaison basse met un
 # immeuble entre l'œil et la voiture toutes les trois secondes. À pied on se
 # rapproche, sinon le personnage fait quatre pixels.
-## ⚠ 76°, pas 70 : avec les tours du centre, à 70° une tour au sud du joueur le
-## cachait entièrement (la ligne de visée passe à dix-neuf unités au-dessus du
-## sol à une demi-tuile, la tour en fait dix-sept). GTA 2 se joue de dessus.
-const INCLINAISON := 76.0
-const DISTANCE_AUTO := 58.0
-const DISTANCE_PIED := 36.0
+## ⚠ 79°, pas 70 : avec les tours du centre, à 70° une tour au sud du joueur le
+## cachait entièrement. À 76° et des tours de trente unités, la façade d'une
+## tour en bas d'écran couvrait encore un quart de l'image. GTA 2 se joue de
+## dessus ; on recule un peu pour garder la rue entière.
+const INCLINAISON := 79.0
+const DISTANCE_AUTO := 64.0
+const DISTANCE_PIED := 40.0
 
 const RETOUR := 260.0              ## rappel vers le centre au-delà de la friche
 
@@ -73,6 +74,13 @@ const PORTEE_RENDU := 1050.0
 ## instanciées d'un coup à l'entrée d'un quartier font une saccade d'une
 ## demi-seconde qu'on prend pour un plantage.
 const BATISSES_PAR_IMAGE := 6
+## Les MORCEAUX de ville : bâtis quand leur bord passe à moins de
+## PORTEE_MORCEAU du joueur, un par image au plus, libérés au-delà de
+## LIBERATION. Neuf morceaux suffisent à couvrir l'écran et sa marge.
+const PORTEE_MORCEAU := 1500.0
+const LIBERATION := 3400.0
+## La caméra recule avec la vitesse : à fond, on voit venir le carrefour.
+const RECUL_VITESSE := 16.0
 
 ## Les armes. Le pistolet ne s'épuise jamais : sans lui, un joueur à pied et à
 ## court de munitions n'a plus qu'à attendre la fin de la manche.
@@ -128,6 +136,8 @@ const ID_VOITURE_DEPART := 10000
 
 var carte: PlanVille
 var ville: VilleVivante
+var _morceaux: Dictionary = {}       ## Vector2i -> MorceauVille, les morceaux bâtis
+var _cachees: Dictionary = {}        ## id dormante -> vrai : déjà effacée de sa nappe
 
 # ------------------------------------------------------- le joueur local
 var _position := Vector2.ZERO
@@ -165,7 +175,6 @@ var _quartier_vu := -99
 
 var _autres: Dictionary = {}       ## cle -> état distant + nœuds 3D
 var _projectiles: Array = []
-var _cabines_posees: Array = []
 var _eclats: Array = []
 var _taches: Array = []
 
@@ -211,10 +220,21 @@ func preparer() -> void:
 	var pose := carte.depart(place, graine)
 	_position = pose["p"]
 	_angle = float(pose["a"])
+	# `--banc-position=colonne,ligne` (en tuiles) : partir ailleurs qu'au
+	# centre. La ville fait six cent quatre-vingts tuiles ; sans ça, le banc ne
+	# photographierait jamais le port ni la banlieue.
+	if Commandes.pilote_automatique:
+		for argument in OS.get_cmdline_args():
+			if String(argument).begins_with("--banc-position="):
+				var xy := String(argument).substr(16).split(",")
+				if xy.size() == 2:
+					_position = carte.point_de_rue(_rng,
+						Vector2(float(xy[0]), float(xy[1])) * PlanVille.PAS, 0.0, 160.0)
 	_vehicule = ID_VOITURE_DEPART + place
 	_pied = false
 
 	_corps_auto = FormesCarnage.voiture(_ma_couleur(), Session.pseudo)
+	_corps_auto.add_child(FormesCarnage.echappement(-2.4))
 	monde().add_child(_corps_auto)
 	_corps_pied = FormesCarnage.pieton(_ma_couleur(), false, Session.pseudo, true)
 	_corps_pied.visible = false
@@ -258,10 +278,14 @@ func preparer() -> void:
 	_camera.make_current()
 	Tactile.mode = Tactile.CONDUITE
 
+	# Les neuf morceaux autour du départ, tout de suite : le décompte dure trois
+	# secondes, on ne montre pas un joueur posé dans le vide.
+	_diffuser_la_ville(9)
+
 	# Le temps de mise en place, toujours : dans le navigateur, une préparation
 	# qui bloque le fil principal plusieurs secondes fait tomber le socket.
-	print("[carnage] ville prête en %d ms — %d nappes, %d places" % [
-		Time.get_ticks_msec() - chrono, carte.nappes.size(), carte.stationnements.size()])
+	print("[carnage] ville prête en %d ms — %d morceaux, %d fiches en cache" % [
+		Time.get_ticks_msec() - chrono, _morceaux.size(), carte.fiches_en_cache()])
 
 	# `--banc-etoiles=N` : partir déjà recherché. Attendre qu'un pilote au hasard
 	# gagne cinq étoiles pour voir l'hélicoptère, c'est attendre une manche sur
@@ -281,6 +305,7 @@ func _rebatir_ma_voiture() -> void:
 	if _corps_auto != null:
 		_corps_auto.queue_free()
 	_corps_auto = _batir_voiture_de(_modele_vehicule, _ma_couleur(), Session.pseudo)
+	_corps_auto.add_child(FormesCarnage.echappement(-2.4 if _modele_vehicule < 0 else -2.2))
 	monde().add_child(_corps_auto)
 
 func _batir_voiture_de(modele: int, couleur: Color, pseudo: String) -> Node3D:
@@ -296,51 +321,58 @@ func _batir_voiture_de(modele: int, couleur: Color, pseudo: String) -> Node3D:
 func _ma_couleur() -> Color:
 	return Palette.couleur_joueur(_place)
 
+## L'heure bleue, et rien d'autre : la ville elle-même arrive par morceaux,
+## autour du joueur, dans `_diffuser_la_ville`. Les lieux (repaires, garages,
+## cabines, arènes) vivent dans le morceau qui porte leur pâté.
 func _planter_decor() -> void:
-	poser_ambiance(true, 0.92)
+	for noeud in MatieresCarnage.crepuscule():
+		monde().add_child(noeud)
 
-	# Une nappe de fond, très sombre, sous la ville : elle rattrape ce que la
-	# caméra voit au-delà de la ceinture, là où il n'y a plus de tuiles.
-	var fond := Decor.sol(carte.etendue() + Vector2(carte.banlieue(), carte.banlieue()) * 2.0,
-		140.0, Color("#101010"), 3000.0)
-	fond.position = Decor.vers3d(carte.centre(), -0.15)
-	monde().add_child(fond)
+## Les morceaux dont le bord passe à portée du joueur sont bâtis, du plus proche
+## au plus loin, `au_plus` par appel ; ceux qui sont partis loin sont libérés.
+## Un morceau se bâtit en quelques dizaines de millisecondes : en bâtir
+## plusieurs dans la même image ferait une saccade au passage de chaque rue.
+func _diffuser_la_ville(au_plus: int = 1) -> void:
+	var cote := PlanVille.MORCEAU * PlanVille.PAS
+	var m0 := Vector2i(int(floor((_position.x - PORTEE_MORCEAU) / cote)), int(floor((_position.y - PORTEE_MORCEAU) / cote)))
+	var m1 := Vector2i(int(floor((_position.x + PORTEE_MORCEAU) / cote)), int(floor((_position.y + PORTEE_MORCEAU) / cote)))
+	var manquants: Array = []
+	for my in range(m0.y, m1.y + 1):
+		for mx in range(m0.x, m1.x + 1):
+			var cle := Vector2i(mx, my)
+			if _morceaux.has(cle):
+				continue
+			var rect := Rect2(Vector2(mx, my) * cote, Vector2(cote, cote))
+			var plus_proche := Vector2(clamp(_position.x, rect.position.x, rect.end.x),
+				clamp(_position.y, rect.position.y, rect.end.y))
+			if plus_proche.distance_to(_position) <= PORTEE_MORCEAU:
+				manquants.append([plus_proche.distance_squared_to(_position), cle])
+	manquants.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
+	for i in min(au_plus, manquants.size()):
+		var cle: Vector2i = manquants[i][1]
+		var morceau := MorceauVille.new()
+		morceau.batir(carte, cle, ville.reveillees)
+		monde().add_child(morceau)
+		_morceaux[cle] = morceau
+	# On ne libère qu'un morceau par image aussi : libérer neuf nœuds de mille
+	# instances d'un coup se sent autant que les bâtir.
+	for cle in _morceaux.keys():
+		var rect := Rect2(Vector2(cle) * cote, Vector2(cote, cote))
+		var plus_proche := Vector2(clamp(_position.x, rect.position.x, rect.end.x),
+			clamp(_position.y, rect.position.y, rect.end.y))
+		if plus_proche.distance_to(_position) > LIBERATION:
+			(_morceaux[cle] as Node3D).queue_free()
+			_morceaux.erase(cle)
+			break
 
-	for chemin in carte.nappes:
-		var nom := String(chemin).get_file().get_basename()
-		# Le sol ne porte pas d'ombre : il n'a rien à projeter, et le calculer
-		# pour huit cents dalles coûte une passe d'ombre pour rien.
-		var sans_ombre := nom in ["road-straight", "road-intersection", "pavement", "grass",
-			"road-corner", "road-split"]
-		var nappe: Dictionary = carte.nappes[chemin]
-		monde().add_child(FormesCarnage.nappe(String(chemin), nappe["t"], nappe["c"],
-			not sans_ombre, PlanVille.TEINTE_VILLE))
-
-	for r in carte.repaires:
-		var tag := FormesCarnage.tag_de_gang(carte.couleur_du_gang(int(r["gang"])),
-			carte.nom_du_gang(int(r["gang"])))
-		tag.position = Decor.vers3d(r["p"])
-		monde().add_child(tag)
-
-	for centre_garage: Vector2 in carte.garages():
-		var dalle := FormesCarnage.dalle_garage()
-		dalle.position = Decor.vers3d(centre_garage)
-		monde().add_child(dalle)
-
-	var rang := 0
-	for centre_cabine: Vector2 in carte.cabines():
-		var poste := FormesCarnage.cabine(rang)
-		poste.position = Decor.vers3d(centre_cabine)
-		monde().add_child(poste)
-		_cabines_posees.append(poste)
-		rang += 1
-
-	var numero := 0
-	for centre_arene: Vector2 in carte.arenes():
-		var cercle := FormesCarnage.cercle_arene(numero)
-		cercle.position = Decor.vers3d(centre_arene)
-		monde().add_child(cercle)
-		numero += 1
+## Une voiture dormante s'est réveillée : on l'efface de la nappe du morceau
+## qui la porte. Le nœud ordinaire de `_placer_les_autos` prend le relais.
+func _effacer_la_dormante(id: int) -> void:
+	if _cachees.has(id):
+		return
+	_cachees[id] = true
+	for cle in _morceaux:
+		(_morceaux[cle] as MorceauVille).cacher_voiture(id)
 
 # ------------------------------------------------------- simulation locale
 
@@ -405,9 +437,9 @@ func _piloter_pour_le_banc() -> void:
 	_depuis_rapport += get_process_delta_time()
 	if _depuis_rapport >= 5.0:
 		_depuis_rapport = 0.0
-		print("[banc] t=%ds fps=%d gens=%d autos=%d noeuds=%d %s" % [int(temps),
-			Engine.get_frames_per_second(), ville.gens.size(), ville.autos.size(),
-			get_tree().get_node_count(), "hôte" if est_hote() else "client"])
+		print("[banc] t=%ds fps=%d gens=%d autos=%d morceaux=%d fiches=%d noeuds=%d %s" % [int(temps),
+			Engine.get_frames_per_second(), ville.gens.size(), ville.autos.size(), _morceaux.size(),
+			carte.fiches_en_cache(), get_tree().get_node_count(), "hôte" if est_hote() else "client"])
 	# ⚠ L'action se PULSE. Maintenue, elle ne produit qu'un seul front : le
 	# pilote descendait de voiture et ne remontait jamais, et la moitié du jeu
 	# passait le banc sans être exercée.
@@ -444,14 +476,13 @@ func _piloter_pour_le_banc() -> void:
 ## avancement, prime, respect — passe la livraison sans avoir tourné une fois.
 func _but_du_banc() -> Vector2:
 	if _contrat.is_empty():
-		var cabines := carte.cabines()
 		var proche := Vector2.INF
 		var ecart := INF
-		for c: Vector2 in cabines:
-			var d: float = _position.distance_squared_to(c)
+		for c in carte.lieux_autour(_position, PlanVille.SECTEUR * PlanVille.PAS * 1.5)["cabines"]:
+			var d: float = _position.distance_squared_to(c["p"])
 			if d < ecart:
 				ecart = d
-				proche = c
+				proche = c["p"]
 		if proche != Vector2.INF:
 			return proche
 	var cible := Vector2.INF
@@ -512,6 +543,9 @@ func _basculer_portiere() -> void:
 
 func _prendre_le_volant(id: int, genre: int, position: Vector2, angle: float, pv: float,
 		modele: int = -1) -> void:
+	if PlanVille.est_dormante(id):
+		ville.reveillees[id] = true
+		_effacer_la_dormante(id)
 	_modele_vehicule = modele
 	_rebatir_ma_voiture()
 	# Le banc raconte ce qu'il fait : sans cette ligne, un pilote qui ne
@@ -592,6 +626,7 @@ func _conduire(delta: float) -> void:
 
 	_position += Vector2.RIGHT.rotated(_angle) * _vitesse * delta
 	_heurter_les_murs()
+	_heurter_les_voitures()
 	_surveiller_la_friche(delta)
 	Sons.regime(clamp(abs(_vitesse) / VITESSE_MAX, 0.0, 1.0))
 
@@ -639,6 +674,34 @@ func _heurter_les_murs() -> void:
 	if tangente.dot(direction) < 0.0:
 		tangente = -tangente
 	_angle = lerp_angle(_angle, tangente.angle(), (1.0 - frontal) * 0.4)
+
+## Une voiture garée n'est pas un mur, mais on ne la traverse pas non plus :
+## on est repoussé hors de sa silhouette et on perd la part de vitesse qu'on a
+## mise dedans. Les dégâts et la poussée de l'autre, c'est l'hôte qui les dit —
+## ici on ne fait que rendre le choc IMMÉDIAT sous les doigts.
+func _heurter_les_voitures() -> void:
+	var obstacles: Array = []
+	for auto in ville.autos:
+		if String(auto.get("pilote", "")) != "" or int(auto["genre"]) == VilleVivante.EPAVE:
+			continue
+		if (auto["p"] as Vector2).distance_to(_position) < 90.0:
+			obstacles.append(auto["p"])
+	for d in ville.dormantes_endormies(_position, 90.0):
+		obstacles.append(d["p"])
+	var direction := Vector2.RIGHT.rotated(_angle)
+	for p: Vector2 in obstacles:
+		var vers := _position - p
+		var ecart := vers.length()
+		var minimum := RAYON_VOITURE + VilleVivante.RAYON_AUTO - 6.0
+		if ecart >= minimum or ecart < 0.01:
+			continue
+		var normale := vers / ecart
+		_position = p + normale * minimum
+		var frontal: float = abs(direction.dot(normale))
+		if frontal > 0.5 and abs(_vitesse) > 260.0:
+			Sons.jouer("choc", 0.9, -12.0)
+			_secousse = max(_secousse, 0.2)
+		_vitesse *= lerp(0.96, 0.45, frontal)
 
 func _solidite() -> float:
 	return float(CARACTERES.get(_modele_vehicule, CARACTERES[-1])["t"])
@@ -773,6 +836,17 @@ func _resoudre_impact(tir: Dictionary) -> bool:
 		auto["pv"] = float(auto["pv"]) - float(fiche["degat"])
 		if float(auto["pv"]) <= 0.0:
 			ville.detruire_auto(auto, par)
+		_vider_les_evenements()
+		return true
+	# Une voiture dormante touchée se réveille cabossée : à partir de là, elle
+	# est diffusée comme les autres et finira en épave si on insiste.
+	for d in ville.dormantes_endormies(point, VilleVivante.RAYON_AUTO + 12.0):
+		var reveillee := ville.reveiller(int(d["id"]))
+		if reveillee.is_empty():
+			continue
+		reveillee["pv"] = float(reveillee["pv"]) - float(fiche["degat"])
+		if float(reveillee["pv"]) <= 0.0:
+			ville.detruire_auto(reveillee, par)
 		_vider_les_evenements()
 		return true
 
@@ -1130,8 +1204,10 @@ func _relever() -> void:
 	_reprendre_le_pistolet()
 	_eperon = 0.0
 	Tactile.mode = Tactile.MARCHE
-	_position = carte.point_de_rue(_rng, carte.centre(), 200.0,
-		max(carte.etendue().x, carte.etendue().y) * 0.45)
+	# Trois à sept rues plus loin : assez pour semer qui vous a eu, pas assez
+	# pour perdre le quartier où l'on jouait. Réapparaître au centre d'une ville
+	# de soixante-huit mille pixels, c'était repartir de zéro à chaque mort.
+	_position = carte.point_de_rue(_rng, _position, 300.0, 700.0)
 	Sons.jouer("depart", 0.8, -8.0)
 
 # ------------------------------------------------------- effets
@@ -1175,6 +1251,20 @@ func _effet_gain(position: Vector2, points: int, facteur: int, cle: String, quoi
 func _effet_explosion(position: Vector2) -> void:
 	Sons.jouer("ecrasement", 0.6, -4.0)
 	_secousse = max(_secousse, 0.4)
+	# La bouffée de feu, et un éclair orange sur les façades autour : au
+	# crépuscule, une explosion doit ÉCLAIRER, pas seulement projeter des éclats.
+	var bouffee := FormesCarnage.explosion()
+	bouffee.position = Decor.vers3d(position, 1.0)
+	monde().add_child(bouffee)
+	bouffee.finished.connect(bouffee.queue_free)
+	var eclair := OmniLight3D.new()
+	eclair.light_color = Color(1.0, 0.6, 0.25)
+	eclair.light_energy = 4.0
+	eclair.omni_range = 30.0
+	eclair.shadow_enabled = false
+	eclair.position = Decor.vers3d(position, 3.0)
+	monde().add_child(eclair)
+	_eclats.append({"noeud": eclair, "v": Vector3.ZERO, "t": 0.5, "t0": 0.5, "lumiere": true})
 	for i in 18:
 		var eclat := Decor.sphere(_rng.randf_range(0.3, 0.7), Palette.SERIEUX, false)
 		eclat.material_override = Decor.matiere_lumineuse(Palette.SERIEUX, 1.2)
@@ -1203,7 +1293,7 @@ func _animer_effets(delta: float) -> void:
 			continue
 		var v: Vector3 = e["v"]
 		noeud.position += v * delta
-		if not e.has("texte"):
+		if not e.has("texte") and not e.has("lumiere"):
 			v.y -= 26.0 * delta          # les éclats retombent
 			e["v"] = v
 			if noeud.position.y < 0.12:
@@ -1212,6 +1302,8 @@ func _animer_effets(delta: float) -> void:
 		var reste: float = clamp(float(e["t"]) / float(e["t0"]), 0.0, 1.0)
 		if noeud is Label3D:
 			(noeud as Label3D).modulate.a = reste
+		elif noeud is OmniLight3D:
+			(noeud as OmniLight3D).light_energy = 4.0 * reste
 		else:
 			noeud.scale = Vector3.ONE * max(0.05, reste)
 		restants.append(e)
@@ -1223,6 +1315,7 @@ var _batisses := 0
 
 func rafraichir_scene(delta: float) -> void:
 	_batisses = 0
+	_diffuser_la_ville(1)
 	_placer_le_joueur(delta)
 	_placer_les_autres()
 	_placer_la_foule()
@@ -1294,13 +1387,15 @@ func _rafraichir_radar() -> void:
 ## cabine qui appelle alors qu'on est déjà pris ferait faire un détour pour rien.
 func _animer_les_cabines() -> void:
 	var libre := _contrat.is_empty()
-	for poste in _cabines_posees:
-		var halo := (poste as Node3D).get_node_or_null("Halo") as Node3D
-		if halo:
-			halo.visible = libre and fmod(temps, 1.0) > 0.42
-		var mot := (poste as Node3D).get_node_or_null("Mot") as Node3D
-		if mot:
-			mot.visible = libre
+	for cle in _morceaux:
+		for entree in (_morceaux[cle] as MorceauVille).cabines:
+			var poste: Node3D = entree["n"]
+			var halo := poste.get_node_or_null("Halo") as Node3D
+			if halo:
+				halo.visible = libre and fmod(temps, 1.0) > 0.42
+			var mot := poste.get_node_or_null("Mot") as Node3D
+			if mot:
+				mot.visible = libre
 
 ## Une poursuite s'entend avant de se voir : c'est la sirène qui dit qu'il faut
 ## tourner tout de suite, pas la voiture aperçue trois rues plus loin.
@@ -1347,6 +1442,15 @@ func _placer_le_joueur(delta: float) -> void:
 		var buffle := _corps_auto.get_node_or_null("Buffle") as MeshInstance3D
 		if buffle:
 			buffle.visible = _eperon > 0.0
+		# La fumée : un filet à l'accélération, un panache noir quand la tôle
+		# est à bout. C'est ce qui dit qu'il est temps de changer de voiture.
+		var fumee := _corps_auto.get_node_or_null("Fumee") as CPUParticles3D
+		if fumee:
+			var abime := _pv_vehicule < PV_VOITURE * 0.35
+			fumee.emitting = abime or (Commandes.conduite().y > 0.1 and _hors_service <= 0.0)
+			fumee.amount = 40 if abime else 22
+			if fumee.color_ramp:
+				(fumee.color_ramp as Gradient).set_color(0, Color(0.15, 0.15, 0.15, 0.7) if abime else Color(0.8, 0.8, 0.82, 0.45))
 		_regler_jauge(_corps_auto, _pv_vehicule / PV_VOITURE)
 
 	if _corps_pied.visible:
@@ -1420,6 +1524,8 @@ func _pv_max_de(personne: Dictionary) -> int:
 
 func _placer_les_autos() -> void:
 	for auto in ville.autos:
+		if PlanVille.est_dormante(int(auto["id"])):
+			_effacer_la_dormante(int(auto["id"]))
 		if String(auto.get("pilote", "")) != "":
 			var conduit = auto.get("noeud")
 			if conduit != null:
@@ -1540,8 +1646,10 @@ func _regler_jauge(porteur: Node3D, part: float) -> void:
 func _placer_camera(delta: float) -> void:
 	if _camera == null:
 		return
-	var distance: float = DISTANCE_PIED if _pied else DISTANCE_AUTO
-	var vise := Decor.viser(_camera, _position, INCLINAISON, distance)
+	var distance: float = DISTANCE_PIED if _pied else DISTANCE_AUTO + RECUL_VITESSE * clamp(abs(_vitesse) / VITESSE_MAX, 0.0, 1.0)
+	# Un peu d'avance dans le sens de la marche : on regarde où l'on va.
+	var avance := Vector2.RIGHT.rotated(_angle) * _vitesse * 0.22 if not _pied else Vector2.ZERO
+	var vise := Decor.viser(_camera, _position + avance, INCLINAISON, distance)
 	if _secousse > 0.0:
 		_secousse = max(0.0, _secousse - delta * 2.0)
 		vise += Vector3(_rng.randf_range(-1, 1), _rng.randf_range(-1, 1), 0) * _secousse * 2.5
