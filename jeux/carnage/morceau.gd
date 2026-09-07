@@ -194,7 +194,7 @@ func _poser_immeuble(b: Dictionary, id: int) -> void:
 				if not _expose(solide, nx, nz, ny, i, j, k):
 					continue
 				inst[(i * 16 + j) * 32 + k] = _n
-				_poser_voxel(v, i, j, k, couleurs[(i * nz + j) * ny + k])
+				_poser_voxel(v, i, j, k, couleurs[(i * nz + j) * ny + k], _dehors(solide, nx, nz, ny, i, j, k))
 	_immeubles[id] = {"v": v, "inst": inst}
 	# Les ornements — corniches, balcons, stores, toits — hors de la grille :
 	# ils ne se cassent pas, mais ils font la différence entre une boîte et
@@ -219,8 +219,33 @@ func _centre_voxel(v: Dictionary, i: int, j: int, k: int) -> Vector3:
 	var h := float(v["hauteur"])
 	return (v["origine"] as Vector3) + Vector3((i + 0.5) * t, (k + 0.5) * h, (j + 0.5) * t)
 
-func _poser_voxel(v: Dictionary, i: int, j: int, k: int, couleur: Color) -> void:
-	_instance(_centre_voxel(v, i, j, k), Vector3(float(v["taille"]), float(v["hauteur"]), float(v["taille"])), couleur)
+## Le côté horizontal par lequel un cube donne sur le vide (le bord de la
+## grille ou un creux), ou ZERO s'il n'en a pas : c'est la normale de la façade.
+static func _dehors(solide: PackedByteArray, nx: int, nz: int, ny: int, i: int, j: int, k: int) -> Vector3:
+	if i == 0 or solide[((i - 1) * nz + j) * ny + k] == 0:
+		return Vector3(-1, 0, 0)
+	if i == nx - 1 or solide[((i + 1) * nz + j) * ny + k] == 0:
+		return Vector3(1, 0, 0)
+	if j == 0 or solide[(i * nz + j - 1) * ny + k] == 0:
+		return Vector3(0, 0, -1)
+	if j == nz - 1 or solide[(i * nz + j + 1) * ny + k] == 0:
+		return Vector3(0, 0, 1)
+	return Vector3.ZERO
+
+## Un cube d'immeuble. Une FENÊTRE (vitre ou lumière) est en RETRAIT : le cube
+## s'amincit et rentre dans la façade de deux tiers ; les flancs des cubes
+## voisins, qui sont des cubes entiers, deviennent l'encadrement. C'est ce qui
+## donne du relief à un mur — une fenêtre à fleur de mur, c'est un sticker.
+func _poser_voxel(v: Dictionary, i: int, j: int, k: int, couleur: Color, dehors: Vector3 = Vector3.ZERO) -> void:
+	var t := float(v["taille"])
+	var h := float(v["hauteur"])
+	var centre := _centre_voxel(v, i, j, k)
+	var taille := Vector3(t, h, t)
+	if couleur.a < 0.75 and dehors != Vector3.ZERO and not bool(v["plat"]):
+		var profondeur := 0.62 * t
+		centre -= dehors * profondeur * 0.5
+		taille -= dehors.abs() * profondeur
+	_instance(centre, taille, couleur)
 
 func _cube(centre: Vector3, cote: float, couleur: Color) -> void:
 	_instance(centre, Vector3(cote, cote, cote), couleur)

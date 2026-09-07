@@ -272,8 +272,8 @@ void fragment() {
 		for (int i = 1; i < 3; i++) r = min(r, length(pq - etoiles[i].xy));
 		float anneau_p = mod(floor(r / 4.0), 2.0);
 		float ton = hache(celm + vec2(23.0));
-		col = mix(mix(vec3(0.46, 0.42, 0.38), vec3(0.54, 0.50, 0.44), step(0.5, ton)),
-			mix(vec3(0.58, 0.52, 0.44), vec3(0.66, 0.60, 0.50), step(0.5, ton)), anneau_p);
+		col = mix(mix(vec3(0.40, 0.37, 0.34), vec3(0.47, 0.44, 0.39), step(0.5, ton)),
+			mix(vec3(0.50, 0.45, 0.39), vec3(0.57, 0.52, 0.44), step(0.5, ton)), anneau_p);
 		rug = 0.8;
 		spec = 0.15;
 	} else {
@@ -535,8 +535,12 @@ void fragment() {
 		float arete = smoothstep(0.74, 0.98, max(f.x, f.y));
 		// Un grain par sous-cube : deux briques voisines ne sont jamais tout à
 		// fait de la même teinte. Les vitres restent lisses.
-		float g = (fract(sin(dot(cel + floor(posm.xz * 0.01), vec2(127.1, 311.7))) * 43758.5453) - 0.5) * 0.10;
-		col *= (1.0 + g * (1.0 - vitre)) * (1.0 - 0.16 * arete * (1.0 - lumiere) * (1.0 - vitre));
+		float g = (fract(sin(dot(cel + floor(posm.xz * 0.01), vec2(127.1, 311.7))) * 43758.5453) - 0.5) * 0.14;
+		// L'arête du HAUT de chaque sous-cube prend la lumière, celle du bas la
+		// perd : c'est ce qui fait lire un relief et non un carrelage.
+		float fy = fract(pf.y / SOUS);
+		float haut_c = (an.y > 0.5) ? 0.0 : smoothstep(0.86, 0.98, fy) * 0.10;
+		col *= (1.0 + g * (1.0 - vitre)) * (1.0 - 0.16 * arete * (1.0 - lumiere) * (1.0 - vitre)) * (1.0 + haut_c * (1.0 - vitre));
 		col *= 1.0 - 0.10 * bord * (1.0 - lumiere);
 	} else {
 		col *= 1.0 - 0.20 * bord * (1.0 - lumiere);

@@ -141,11 +141,24 @@ static func immeuble(b: Dictionary, graine: int) -> Dictionary:
 					couleur = teinte
 				else:
 					couleur = _facade(style, teinte, i, j, k, nx, nz, ny, part, rng)
-					# La crasse du bas : une façade est plus sombre au ras du
-					# trottoir qu'au dernier étage. Sur les murs seulement — une
-					# fenêtre allumée ne se salit pas.
-					if couleur.a > 0.75 and ny > 1:
-						couleur = couleur.darkened(0.16 * (1.0 - float(k) / float(ny - 1)))
+					if couleur.a > 0.75:
+						# La crasse du bas : une façade est plus sombre au ras du
+						# trottoir qu'au dernier étage. Sur les murs seulement — une
+						# fenêtre allumée ne se salit pas.
+						if ny > 1:
+							couleur = couleur.darkened(0.16 * (1.0 - float(k) / float(ny - 1)))
+						# L'occlusion : un cube dans un angle rentrant (trois voisins
+						# pleins autour de lui) reçoit moins de ciel — et le dernier
+						# rang, sous la corniche, un peu moins aussi.
+						var voisins := 0
+						if i > 0 and solide[((i - 1) * nz + j) * ny + k] == 1: voisins += 1
+						if i < nx - 1 and solide[((i + 1) * nz + j) * ny + k] == 1: voisins += 1
+						if j > 0 and solide[(i * nz + j - 1) * ny + k] == 1: voisins += 1
+						if j < nz - 1 and solide[(i * nz + j + 1) * ny + k] == 1: voisins += 1
+						if voisins >= 3:
+							couleur = couleur.darkened(0.14)
+						if k == ny - 2 and ny >= 3:
+							couleur = couleur.darkened(0.08)
 				couleurs[(i * nz + j) * ny + k] = couleur
 	return {"nx": nx, "nz": nz, "ny": ny, "origine": origine, "taille": V,
 		"hauteur": float(g["hauteur"]), "solide": solide, "couleurs": couleurs, "style": style,
@@ -226,6 +239,35 @@ static func ornements(imm: Dictionary, graine: int) -> Array:
 				2: liste.append([Vector3(o.x - 0.45 * V, y, o.z + nz * V * 0.5), Vector3(0.9 * V, 0.2 * V, float(nz) * V - V), store])
 				_: liste.append([Vector3(o.x + nx * V + 0.45 * V, y, o.z + nz * V * 0.5), Vector3(0.9 * V, 0.2 * V, float(nz) * V - V), store])
 
+	# Les TOITS EN PENTE : sur la vieille ville et les logements pas trop
+	# larges, un pignon en gradins — des rangs de cubes qui se resserrent vers
+	# le faîte, un demi-cube de haut par rang, dans la couleur des tuiles. Un
+	# toit plat sur une maison de ville, ça se voit d'en haut ; un toit à deux
+	# pans, c'est une ville européenne.
+	var pente: bool = style in [PlanVille.F_VIEUX, PlanVille.F_LOGEMENTS] and not creux and retrait < 0 and min(nx, nz) <= 6 and min(nx, nz) >= 3 and rng.randf() < 0.75
+	if pente:
+		var tuile: Color = imm["couleurs"][(0 * nz + 0) * ny + (ny - 1)]
+		var le_long_x := nx >= nz          # le faîte court le long du côté le plus long
+		var largeur := nz if le_long_x else nx
+		var rangs := largeur / 2
+		var sommet := o.y + float(ny) * V
+		for r in range(1, rangs + 1):
+			var reste := largeur - 2 * r
+			if reste <= 0:
+				break
+			var y := sommet + (float(r) - 0.5) * 0.5 * V
+			var c := tuile.lightened(0.06 * float(r))
+			if le_long_x:
+				liste.append([Vector3(o.x + float(nx) * V * 0.5, y, o.z + float(nz) * V * 0.5), Vector3(float(nx) * V, 0.5 * V, float(reste) * V), c])
+			else:
+				liste.append([Vector3(o.x + float(nx) * V * 0.5, y, o.z + float(nz) * V * 0.5), Vector3(float(reste) * V, 0.5 * V, float(nz) * V), c])
+		# Une lucarne ou deux dans la pente.
+		for l in rng.randi_range(0, 2):
+			var px := o.x + rng.randf_range(1.0, float(nx) - 1.0) * V
+			var pz := o.z + rng.randf_range(1.0, float(nz) - 1.0) * V
+			liste.append([Vector3(px, sommet + 0.6 * V, pz), Vector3(0.7 * V, 0.7 * V, 0.7 * V), tuile.darkened(0.3)])
+			liste.append([Vector3(px, sommet + 0.6 * V, pz) + (Vector3(0, 0, 0.36 * V) if le_long_x else Vector3(0.36 * V, 0, 0)), Vector3(0.5 * V, 0.5 * V, 0.5 * V), Color(0.85, 0.9, 1.0, LUMIERE if rng.randf() < 0.4 else VITRE)])
+
 	# Le toit : ce que la caméra voit le plus. Un parapet sur les immeubles
 	# sans corniche, puis du désordre — climatiseurs, citerne, antenne, cage
 	# d'escalier, cheminées selon le style.
@@ -236,7 +278,7 @@ static func ornements(imm: Dictionary, graine: int) -> Array:
 		liste.append([Vector3(o.x + nx * V * 0.5, y, o.z + nz * V - pe * 0.5), Vector3(float(nx) * V, 0.4 * V, pe), sombre])
 		liste.append([Vector3(o.x + pe * 0.5, y, o.z + nz * V * 0.5), Vector3(pe, 0.4 * V, float(nz) * V), sombre])
 		liste.append([Vector3(o.x + nx * V - pe * 0.5, y, o.z + nz * V * 0.5), Vector3(pe, 0.4 * V, float(nz) * V), sombre])
-	if nx >= 2 and nz >= 2 and style != PlanVille.F_MAISON and not creux:
+	if nx >= 2 and nz >= 2 and style != PlanVille.F_MAISON and not creux and not pente:
 		# Sur un immeuble à retrait, le désordre va sur le toit du haut, plus
 		# petit d'un cube tout autour.
 		var marge := 0.7 if retrait < 0 else 1.7
@@ -263,9 +305,12 @@ static func ornements(imm: Dictionary, graine: int) -> Array:
 				# Une antenne : un mât fin, une traverse.
 				liste.append([ou + Vector3(0, 0.9 * V, 0), Vector3(0.12 * V, 1.8 * V, 0.12 * V), Color(0.35, 0.35, 0.38)])
 				liste.append([ou + Vector3(0, 1.6 * V, 0), Vector3(0.7 * V, 0.08 * V, 0.08 * V), Color(0.35, 0.35, 0.38)])
-	if style in [PlanVille.F_VIEUX, PlanVille.F_MAISON] and rng.randf() < 0.7:
-		var ou := Vector3(o.x + rng.randf_range(0.5, float(nx) - 0.5) * V, haut, o.z + rng.randf_range(0.5, float(nz) - 0.5) * V)
-		liste.append([ou + Vector3(0, 0.5 * V, 0), Vector3(0.4 * V, 1.0 * V, 0.4 * V), Color(0.5, 0.32, 0.26)])
+	if style in [PlanVille.F_VIEUX, PlanVille.F_MAISON, PlanVille.F_LOGEMENTS] and rng.randf() < 0.7:
+		# La cheminée : au bord du toit, elle dépasse le faîte d'un toit en pente.
+		var ou := Vector3(o.x + rng.randf_range(0.5, float(nx) - 0.5) * V, haut, o.z + (0.6 if rng.randf() < 0.5 else float(nz) - 0.6) * V)
+		var h_ch := (1.0 + (0.5 * float(min(nx, nz) / 2) if pente else 0.0)) * V
+		liste.append([ou + Vector3(0, h_ch * 0.5, 0), Vector3(0.4 * V, h_ch, 0.4 * V), Color(0.5, 0.32, 0.26)])
+		liste.append([ou + Vector3(0, h_ch + 0.1 * V, 0), Vector3(0.5 * V, 0.2 * V, 0.5 * V), Color(0.35, 0.3, 0.28)])
 	return liste
 
 static func _part_allumee(style: int) -> float:
@@ -327,32 +372,63 @@ static func mobilier(nom: String, p: Vector2, a: float, s: float, graine: int) -
 	var cote := Vector3(-avant.z, 0.0, avant.x)
 	match nom:
 		"lampadaire", "lampadaire_parc":
+			# Un fût qui s'affine, une embase, un bras coudé, une lanterne à
+			# capot : tout en demi-cubes.
 			var h := 4.8 if nom == "lampadaire" else 3.2
 			var fut := Color(0.22, 0.24, 0.28)
-			var n := int(h / 0.6)
+			cubes.append([base + Vector3(0, 0.2, 0), 0.8, fut.darkened(0.2)])
+			var n := int(h / 0.5)
 			for k in n:
-				cubes.append([base + Vector3(0, 0.3 + 0.6 * k, 0), 0.6, fut])
+				cubes.append([base + Vector3(0, 0.25 + 0.5 * k, 0), 0.5 if k < n / 2 else 0.4, fut.lightened(0.03 * (k % 2))])
 			# Le bras vers la rue (local -X), la lampe au bout.
 			var portee := 1.15 if nom == "lampadaire" else 0.8
-			cubes.append([base - avant * portee * 0.5 + Vector3(0, h - 0.3, 0), 0.6, fut])
-			cubes.append([base - avant * portee + Vector3(0, h - 0.4, 0), 0.7, Color(1.0, 0.9, 0.7, LUMIERE)])
+			for m in 3:
+				cubes.append([base - avant * portee * (float(m) / 3.0) + Vector3(0, h - 0.4 + 0.15 * m, 0), 0.4, fut])
+			cubes.append([base - avant * portee + Vector3(0, h + 0.05, 0), 0.9, fut.darkened(0.1)])      # le capot
+			cubes.append([base - avant * portee + Vector3(0, h - 0.45, 0), 0.7, Color(1.0, 0.9, 0.7, LUMIERE)])
 		"feu":
-			for k in 5:
-				cubes.append([base + Vector3(0, 0.3 + 0.6 * k, 0), 0.6, Color(0.2, 0.2, 0.22)])
-			cubes.append([base + Vector3(0, 3.4, 0), 1.0, Color(0.15, 0.15, 0.17)])
-			var vert := rng.randf() < 0.5
-			cubes.append([base + avant * 0.35 + Vector3(0, 3.4, 0), 0.5,
-				Color(0.2, 0.95, 0.35, LUMIERE) if vert else Color(1.0, 0.25, 0.2, LUMIERE)])
+			for k in 7:
+				cubes.append([base + Vector3(0, 0.25 + 0.5 * k, 0), 0.45, Color(0.2, 0.2, 0.22)])
+			# Le boîtier : trois feux superposés, un seul allumé.
+			var allume := rng.randi_range(0, 2)
+			for f in 3:
+				cubes.append([base + Vector3(0, 2.9 + 0.55 * f, 0), 0.7, Color(0.13, 0.13, 0.15)])
+				var teinte_f: Color = [Color(1.0, 0.25, 0.2), Color(1.0, 0.7, 0.2), Color(0.2, 0.95, 0.35)][2 - f]
+				cubes.append([base + avant * 0.3 + Vector3(0, 2.9 + 0.55 * f, 0), 0.4,
+					Color(teinte_f, LUMIERE) if f == allume else teinte_f.darkened(0.6)])
+			cubes.append([base + Vector3(0, 4.75, 0), 0.8, Color(0.13, 0.13, 0.15)])
 		"borne":
-			cubes.append([base + Vector3(0, 0.45, 0), 0.9, Color(0.85, 0.2, 0.15)])
-			cubes.append([base + Vector3(0, 1.05, 0), 0.5, Color(0.85, 0.2, 0.15)])
+			# Une borne d'incendie : le corps, le chapeau, deux bouches.
+			var rouge := Color(0.85, 0.2, 0.15)
+			for k in 3:
+				cubes.append([base + Vector3(0, 0.25 + 0.5 * k, 0), 0.5, rouge.lightened(0.04 * k)])
+			cubes.append([base + Vector3(0, 1.6, 0), 0.4, rouge.lightened(0.15)])
+			cubes.append([base + cote * 0.35 + Vector3(0, 0.95, 0), 0.35, Color(0.7, 0.7, 0.72)])
+			cubes.append([base - cote * 0.35 + Vector3(0, 0.95, 0), 0.35, Color(0.7, 0.7, 0.72)])
 		"poubelle":
-			cubes.append([base + Vector3(0, 0.5, 0), 1.0, Color(0.62, 0.5, 0.35)])
+			# Un bac en demi-cubes, cerclé, avec son couvercle et un sac qui déborde.
+			var tole := Color(0.3, 0.42, 0.32)
+			for k in 3:
+				for dx in 2:
+					for dz in 2:
+						cubes.append([base + Vector3((dx - 0.5) * 0.5, 0.25 + 0.5 * k, (dz - 0.5) * 0.5), 0.5,
+							tole.darkened(0.15) if k == 1 else tole])
+			cubes.append([base + Vector3(0, 1.6, 0), 1.05, tole.darkened(0.3)])
+			if rng.randf() < 0.5:
+				cubes.append([base + Vector3(0.2, 1.95, -0.1), 0.5, Color(0.15, 0.15, 0.17)])
 		"banc":
+			# Deux pieds en fonte, trois lattes d'assise, deux de dossier.
 			var bois := Color(0.55, 0.38, 0.22)
-			for m in [-1.0, 0.0, 1.0]:
-				cubes.append([base + cote * m * 0.8 + Vector3(0, 0.5, 0), 0.8, bois])
-				cubes.append([base + cote * m * 0.8 + avant * 0.35 + Vector3(0, 1.15, 0), 0.6, bois])
+			var fonte := Color(0.18, 0.18, 0.2)
+			for m in [-1.0, 1.0]:
+				cubes.append([base + cote * m * 0.9 + Vector3(0, 0.25, 0), 0.4, fonte])
+				cubes.append([base + cote * m * 0.9 + avant * 0.4 + Vector3(0, 0.8, 0), 0.4, fonte])
+			for latte in 3:
+				for m in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+					cubes.append([base + cote * m * 0.5 + avant * (0.35 - 0.35 * latte) + Vector3(0, 0.6, 0), 0.4, bois.lightened(0.05 * latte)])
+			for latte in 2:
+				for m in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+					cubes.append([base + cote * m * 0.5 + avant * 0.45 + Vector3(0, 1.0 + 0.45 * latte, 0), 0.4, bois.lightened(0.08)])
 		"benne":
 			var vert_benne := Color(0.2, 0.42, 0.25)
 			for x in 3:
