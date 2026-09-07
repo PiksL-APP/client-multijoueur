@@ -24,7 +24,12 @@ func demarrer() -> void:
 	UI.fond(interface())
 	_construire()
 
-	_canal = Reseau.rejoindre("mj-file-" + _jeu, {"pseudo": Session.pseudo, "id": Session.id, "table": 0})
+	# ⚠ Le banc d'essai fait la queue dans une file À PART. Sans ce suffixe, un
+	# pilote automatique lancé pendant qu'un vrai joueur attend au salon
+	# s'assied à sa table — et le joueur voit débarquer « Banc-0eau », qui lui
+	# vole ses voitures et lui impose son hôte. C'est arrivé.
+	var file := "mj-file-" + _jeu + ("-banc" if Commandes.pilote_automatique else "")
+	_canal = Reseau.rejoindre(file, {"pseudo": Session.pseudo, "id": Session.id, "table": 0})
 	_canal.presences_changees.connect(_sur_presences)
 	_canal.diffusion.connect(_sur_diffusion)
 	if _canal.est_rejoint:
@@ -96,7 +101,7 @@ func _sur_diffusion(evenement: String, charge: Dictionary) -> void:
 func _lancer() -> void:
 	if not _je_suis_hote():
 		return
-	var code := "%d-%d" % [_table, Time.get_ticks_msec() % 100000]
+	var code := "%s%d-%d" % ["banc" if Commandes.pilote_automatique else "", _table, Time.get_ticks_msec() % 100000]
 	_canal.envoyer("go", {"table": _table, "code": code})
 	_partir(code)
 
