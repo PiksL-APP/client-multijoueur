@@ -53,6 +53,20 @@ const PV_AUTO := 100.0
 const SEUIL_ECRASEMENT := 190.0
 const SEUIL_EPERON := 80.0
 
+## La circulation roule à DROITE, à trente-deux pixels de l'axe. Au centre de la
+## chaussée, deux voitures qui se croisent se traversaient ; et sans file, rien
+## ne dit dans quel sens va une rue.
+const FILE := 32.0
+const VITESSE_TRAFIC := 250.0
+const DISTANCE_FREIN := 130.0     ## on s'arrête derrière ce qu'on a devant
+const KLAXON_APRES := 0.7         ## secondes à l'arrêt avant de klaxonner
+
+## L'hélicoptère, à cinq étoiles : il ne se sème pas, il se repeint.
+const VITESSE_HELICO := 430.0
+const DEGAT_HELICO := 13.0
+const CADENCE_HELICO := 0.75
+const PORTEE_HELICO := 420.0
+
 const PORTEE_TIR_PNJ := 640.0
 const CADENCE_TIR_PNJ := 1.15
 const DEGAT_BALLE_PNJ := 9.0
@@ -93,6 +107,7 @@ var gens: Array = []              ## {id,p,d,genre,gang,pv,etat,minuterie,rechar
 var autos: Array = []             ## {id,p,a,d,vitesse,genre,gang,pv,pilote,cible,minuterie}
 var caisses: Array = []           ## {id,p,arme}
 var barrages: Array = []          ## {id,p}
+var helicos: Array = []           ## {id,p,cible,recharge} — un par joueur à cinq étoiles
 var chaleur: Dictionary = {}      ## cle -> points de recherche
 var respect: Dictionary = {}      ## cle -> [respect gang 0, 1, 2]
 var contrats: Dictionary = {}     ## cle -> {genre,employeur,rival,objectif,fait,reste,texte}
@@ -173,6 +188,19 @@ func _ajuster_respect(cle: String, gang: int, perte: float, gain: float) -> void
 	respect[cle] = jauge
 	emettre("resp", {"j": cle, "v": [int(jauge[0]), int(jauge[1]), int(jauge[2])]})
 
+## Un coup de feu, un klaxon : les passants à portée décampent. C'est la moitié
+## de ce qui rend une rue vivante — l'autre moitié, c'est qu'ils y reviennent.
+func paniquer(autour: Vector2, rayon: float, duree: float) -> void:
+	for personne in gens:
+		if int(personne["genre"]) != PIETON:
+			continue
+		var ecart: Vector2 = Vector2(personne["p"]) - autour
+		if ecart.length() > rayon:
+			continue
+		personne["etat"] = 1
+		personne["fuite"] = duree * _rng.randf_range(0.7, 1.3)
+		personne["d"] = ecart.normalized() if ecart != Vector2.ZERO else Vector2.RIGHT.rotated(_rng.randf() * TAU)
+
 # ------------------------------------------------------------ le tour d'horloge
 
 ## `joueurs` : cle -> {p, a, v, pied, vie, arene, seuil, vehicule}
@@ -183,6 +211,7 @@ func simuler(delta: float, temps: float, joueurs: Dictionary) -> void:
 	_animer_les_autos(delta, joueurs)
 	_arbitrer(delta, joueurs)
 	_depecher_la_police(delta, joueurs)
+	_animer_les_helicos(delta, joueurs)
 	_avancer_contrats(delta, joueurs)
 
 func _refroidir(delta: float, joueurs: Dictionary) -> void:
@@ -221,8 +250,19 @@ func _peupler(delta: float, _temps: float, joueurs: Dictionary) -> void:
 		_depuis_autos = 0.0
 		_naitre_auto(joueurs, CIVILE, "")
 
+	# Le butin ne traîne pas : quatorze secondes, puis il disparaît. Sinon la
+	# ville se couvre de caisses et plus aucune n'a de valeur.
+	var gardees: Array = []
+	for c in caisses:
+		if c.has("duree"):
+			c["duree"] = float(c["duree"]) - delta
+			if float(c["duree"]) <= 0.0:
+				continue
+		gardees.append(c)
+	caisses = gardees
+
 	_depuis_caisse += delta
-	if _depuis_caisse >= 7.0 and caisses.size() < CAISSES_MAX:
+	if _depuis_caisse >= 7.0 and _caisses_posees() < CAISSES_MAX:
 		_depuis_caisse = 0.0
 		_poser_caisse(joueurs)
 
@@ -353,11 +393,21 @@ func _poser_caisse(joueurs: Dictionary) -> void:
 	var p := plan.point_de_rue(_rng, _autour_d_un_joueur(joueurs), 260.0, 1200.0)
 	caisses.append({"id": _id(), "p": p, "arme": arme})
 
-func retirer_caisse(id: int) -> String:
+func _caisses_posees() -> int:
+	var total := 0
+	for c in caisses:
+		if not c.has("duree"):
+			total += 1
+	return total
+
+func retirer_caisse(id: int, cle: String = "") -> String:
 	for c in caisses:
 		if int(c["id"]) == id:
 			var arme := String(c["arme"])
+			var ou: Vector2 = c["p"]
 			caisses.erase(c)
+			if arme == "argent" and cle != "":
+				_compter(cle, ou, 40, "argent", false)
 			return arme
 	return ""
 
@@ -402,6 +452,12 @@ func _animer_les_gens(delta: float, joueurs: Dictionary) -> void:
 			vitesse = VITESSE_GANG
 			direction = (Vector2(proche["p"]) - personne["p"]).normalized()
 			_tirer_sur(personne, proche, delta)
+		elif float(personne.get("fuite", 0.0)) > 0.0:
+			# En panique : on court dans la direction qu'on a prise, et on ne
+			# réfléchit plus — c'est `paniquer` qui l'a choisie.
+			personne["fuite"] = float(personne["fuite"]) - delta
+			vitesse = VITESSE_FUITE
+			personne["etat"] = 1
 		elif not proche.is_empty() and not bool(proche["pied"]) \
 				and Vector2(proche["p"]).distance_to(personne["p"]) < 300.0:
 			# Une voiture qui fond sur vous : on court, et on court DROIT
@@ -415,6 +471,12 @@ func _animer_les_gens(delta: float, joueurs: Dictionary) -> void:
 			if float(personne["minuterie"]) <= 0.0:
 				personne["minuterie"] = _rng.randf_range(1.2, 4.0)
 				direction = Vector2.RIGHT.rotated(_rng.randf() * TAU)
+				# Un passant préfère le trottoir : s'il s'apprête à descendre
+				# sur la chaussée, il se ravise deux fois sur trois. Sans ce
+				# réflexe, la moitié de la foule marche au milieu des avenues.
+				if plan.sur_une_rue(Vector2(personne["p"]) + direction * 90.0) \
+						and not plan.sur_une_rue(personne["p"]) and _rng.randf() < 0.66:
+					direction = -direction
 				# Un gars de repaire ne s'éloigne pas de son tag : parti trop
 				# loin, il rentre. Sans ça, les repaires se vident en une minute.
 				if personne.has("attache") and Vector2(personne["p"]).distance_to(personne["attache"]) > PlanVille.RAYON_REPAIRE * 0.8:
@@ -494,16 +556,43 @@ func _animer_les_autos(delta: float, joueurs: Dictionary) -> void:
 		if int(auto["genre"]) == PATROUILLE:
 			_conduire_patrouille(auto, delta, joueurs)
 		else:
-			_conduire_civile(auto, delta)
+			_conduire_civile(auto, delta, joueurs)
 		restantes.append(auto)
 	autos = restantes
 
 ## Une voiture civile suit sa file et tourne aux carrefours. Elle ne cherche
 ## pas d'itinéraire : dans une grille, un tirage au sort à chaque croisement
 ## produit un trafic qui a l'air d'aller quelque part.
-func _conduire_civile(auto: Dictionary, delta: float) -> void:
+func _conduire_civile(auto: Dictionary, delta: float, joueurs: Dictionary = {}) -> void:
 	var direction: Vector2 = auto["d"]
-	auto["vitesse"] = move_toward(float(auto["vitesse"]), 250.0, 320.0 * delta)
+
+	# Freiner derrière ce qu'on a devant : joueur, voiture, passant. Une
+	# circulation qui traverse tout ce qu'elle croise n'est pas une circulation,
+	# c'est un défilement. Et une voiture arrêtée trop longtemps klaxonne — le
+	# klaxon est ce qui fait entendre qu'une rue est pleine.
+	var voulue := VITESSE_TRAFIC
+	if _obstacle_devant(auto, joueurs):
+		voulue = 0.0
+		auto["patience"] = float(auto.get("patience", 0.0)) + delta
+		if float(auto["patience"]) > KLAXON_APRES:
+			auto["patience"] = -_rng.randf_range(1.6, 3.2)
+			emettre("klx", {"x": int(auto["p"].x), "y": int(auto["p"].y)})
+	else:
+		auto["patience"] = min(float(auto.get("patience", 0.0)), 0.0) + delta * 0.5
+	auto["vitesse"] = move_toward(float(auto["vitesse"]), voulue, (320.0 if voulue > 0.0 else 900.0) * delta)
+
+	# Tenir sa file : on glisse vers la droite de l'axe. `carrefour_proche` donne
+	# l'axe de la rue ; la normale à droite du sens de marche donne le côté.
+	var axe := plan.carrefour_proche(auto["p"])
+	var droite := Vector2(-direction.y, direction.x)
+	var ecart_lateral: float
+	if abs(direction.x) > 0.5:
+		ecart_lateral = (axe.y + droite.y * FILE) - float(auto["p"].y)
+		auto["p"] = Vector2(auto["p"].x, float(auto["p"].y) + clamp(ecart_lateral, -60.0 * delta, 60.0 * delta))
+	else:
+		ecart_lateral = (axe.x + droite.x * FILE) - float(auto["p"].x)
+		auto["p"] = Vector2(float(auto["p"].x) + clamp(ecart_lateral, -60.0 * delta, 60.0 * delta), auto["p"].y)
+
 	var suivant: Vector2 = auto["p"] + direction * float(auto["vitesse"]) * delta
 
 	# Devant un mur, on tourne au prochain carrefour plutôt que de s'y écraser.
@@ -515,17 +604,44 @@ func _conduire_civile(auto: Dictionary, delta: float) -> void:
 		suivant = plan.carrefour_proche(auto["p"])
 	elif _rng.randf() < delta * 0.55:
 		# De temps à autre, on prend la perpendiculaire : sans ça, tout le
-		# trafic finit aligné sur deux avenues.
+		# trafic finit aligné sur deux avenues. On ne tourne qu'au carrefour,
+		# et on repart sur la file de droite de la nouvelle rue.
 		var carrefour := plan.carrefour_proche(auto["p"])
-		if Vector2(auto["p"]).distance_to(carrefour) < 46.0:
+		if Vector2(auto["p"]).distance_to(carrefour) < 60.0:
 			direction = Vector2(-direction.y, direction.x) if _rng.randf() < 0.5 \
 				else Vector2(direction.y, -direction.x)
 			auto["d"] = direction
-			suivant = carrefour
+			suivant = carrefour + Vector2(-direction.y, direction.x) * FILE
 
 	var degage := plan.degager(suivant, RAYON_AUTO)
 	auto["p"] = degage[0]
 	auto["a"] = direction.angle()
+
+## Y a-t-il quelque chose dans les cent trente pixels devant ? Le test est un
+## cône étroit, pas un cercle : une voiture garée sur la file d'à côté ne doit
+## pas bloquer la rue.
+func _obstacle_devant(auto: Dictionary, joueurs: Dictionary) -> bool:
+	var ici: Vector2 = auto["p"]
+	var direction: Vector2 = auto["d"]
+	for cle in joueurs:
+		if _dans_le_cone(ici, direction, joueurs[cle]["p"], 34.0):
+			return true
+	for autre in autos:
+		if autre == auto or String(autre["pilote"]) != "":
+			continue
+		if _dans_le_cone(ici, direction, autre["p"], 26.0):
+			return true
+	for personne in gens:
+		if _dans_le_cone(ici, direction, personne["p"], 22.0):
+			return true
+	return false
+
+func _dans_le_cone(ici: Vector2, direction: Vector2, point: Vector2, largeur: float) -> bool:
+	var vers: Vector2 = point - ici
+	var devant: float = vers.dot(direction)
+	if devant < 10.0 or devant > DISTANCE_FREIN:
+		return false
+	return abs(vers.dot(Vector2(-direction.y, direction.x))) < largeur
 
 ## Une patrouille ne suit pas les files : elle coupe. C'est ce qui fait qu'on
 ## ne la sème pas en tournant deux fois à droite.
@@ -590,6 +706,47 @@ func _depecher_la_police(delta: float, joueurs: Dictionary) -> void:
 					libre = false
 			if libre:
 				barrages.append({"id": _id(), "p": carrefour})
+
+## À cinq étoiles, l'hélicoptère. Il survole le joueur avec un temps de retard,
+## tire par rafales, et ne lâche que quand la jauge redescend. C'est la seule
+## menace du jeu qu'on ne sème pas en conduisant : elle oblige à aller au
+## garage, ce qui est exactement ce que cinq étoiles doivent obliger à faire.
+func _animer_les_helicos(delta: float, joueurs: Dictionary) -> void:
+	for cle in joueurs:
+		if etoiles(String(cle)) < 5:
+			continue
+		var deja := false
+		for h in helicos:
+			if String(h["cible"]) == String(cle):
+				deja = true
+		if not deja:
+			var depuis: Vector2 = Vector2(joueurs[cle]["p"]) + Vector2.RIGHT.rotated(_rng.randf() * TAU) * 1400.0
+			helicos.append({"id": _id(), "p": depuis, "cible": String(cle), "recharge": 2.0})
+			emettre("helico", {"j": cle})
+
+	var restants: Array = []
+	for h in helicos:
+		var cle := String(h["cible"])
+		if not joueurs.has(cle) or etoiles(cle) < 5:
+			# Plus recherché à ce point : il rentre à la base. On le laisse
+			# filer plutôt que de le faire disparaître d'un coup.
+			h["p"] = Vector2(h["p"]) + Vector2.RIGHT.rotated(float(h.get("cap", 0.0))) * VITESSE_HELICO * delta
+			h["retrait"] = float(h.get("retrait", 0.0)) + delta
+			if float(h["retrait"]) < 3.0:
+				restants.append(h)
+			continue
+		var vers: Vector2 = Vector2(joueurs[cle]["p"]) - Vector2(h["p"])
+		h["cap"] = vers.angle()
+		if vers.length() > 90.0:
+			h["p"] = Vector2(h["p"]) + vers.normalized() * min(VITESSE_HELICO * delta, vers.length())
+		h["recharge"] = float(h["recharge"]) - delta
+		if float(h["recharge"]) <= 0.0 and vers.length() < PORTEE_HELICO:
+			h["recharge"] = CADENCE_HELICO
+			emettre("tn", {"x": int(h["p"].x), "y": int(h["p"].y), "a": snapped(vers.angle(), 0.01), "h": 1})
+			if _rng.randf() < 0.55:
+				emettre("deg", {"j": cle, "d": int(DEGAT_HELICO), "k": "balle"})
+		restants.append(h)
+	helicos = restants
 
 # ------------------------------------------------------------ l'arbitrage
 
@@ -727,6 +884,25 @@ func _abattre(personne: Dictionary, cle: String, ecrase: bool) -> void:
 		_ajuster_respect(cle, int(personne["gang"]), RESPECT_PERDU, RESPECT_GAGNE)
 		_avancer_nettoyage(cle, int(personne["gang"]))
 	_compter(cle, Vector2(personne["p"]), int(POINTS[quoi]), quoi, ecrase)
+	# Ce qu'il laisse par terre. Un gang armé lâche son arme une fois sur
+	# trois ; un passant, un billet une fois sur six, une trousse une fois sur
+	# quinze. C'est ce qui donne une raison de descendre de voiture.
+	var tirage := _rng.randf()
+	if genre == GANG and tirage < 0.34:
+		_lacher(personne["p"], "mitraillette" if tirage < 0.26 else "roquette")
+	elif genre == FLIC and tirage < 0.5:
+		_lacher(personne["p"], "vie" if tirage < 0.25 else "mitraillette")
+	elif genre == PIETON:
+		if tirage < 0.16:
+			_lacher(personne["p"], "argent")
+		elif tirage < 0.23:
+			_lacher(personne["p"], "vie")
+	# Les voisins ont vu : ils courent.
+	paniquer(Vector2(personne["p"]), 260.0, 2.4)
+
+func _lacher(ou: Vector2, quoi: String) -> void:
+	caisses.append({"id": _id(), "p": Vector2(ou) + Vector2.RIGHT.rotated(_rng.randf() * TAU) * 18.0,
+		"arme": quoi, "duree": 14.0})
 
 func detruire_auto(auto: Dictionary, cle: String) -> void:
 	if int(auto["genre"]) == VOITURE_GANG:
@@ -969,13 +1145,17 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 	for b in barrages:
 		vus_barrages.append([int(b["id"]), int(b["p"].x), int(b["p"].y)])
 
+	var vus_helicos: Array = []
+	for h in helicos:
+		vus_helicos.append([int(h["id"]), int(h["p"].x), int(h["p"].y), int(float(h.get("cap", 0.0)) * 100.0)])
+
 	var etats: Dictionary = {}
 	for cle in joueurs:
 		etats[cle] = [etoiles(String(cle)),
 			int(respect_de(String(cle))[0]), int(respect_de(String(cle))[1]),
 			int(respect_de(String(cle))[2])]
 
-	return {"g": vus_gens, "a": vus_autos, "c": vues_caisses, "b": vus_barrages, "e": etats}
+	return {"g": vus_gens, "a": vus_autos, "c": vues_caisses, "b": vus_barrages, "h": vus_helicos, "e": etats}
 
 func _regarde(point: Vector2, joueurs: Dictionary) -> bool:
 	for cle in joueurs:
@@ -1041,6 +1221,9 @@ func appliquer_instantane(charge: Dictionary) -> void:
 			"arme": String(entree[3])})
 	barrages = _fusionner(barrages, charge.get("b", []), func(entree: Array) -> Dictionary:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2]))})
+	helicos = _fusionner(helicos, charge.get("h", []), func(entree: Array) -> Dictionary:
+		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
+			"cible": "", "recharge": 0.0, "cap": float(entree[3]) / 100.0 if entree.size() > 3 else 0.0})
 
 	var etats = charge.get("e", {})
 	if typeof(etats) == TYPE_DICTIONARY:
@@ -1076,7 +1259,7 @@ func _fusionner(existants: Array, recus, fabrique: Callable) -> Array:
 			# On garde le nœud 3D et on ne déplace que la CIBLE : la position
 			# affichée glisse vers elle image par image, sinon un instantané
 			# à huit par seconde donne une ville qui saute.
-			for champ in ["genre", "gang", "pv", "a", "arme", "garee"]:
+			for champ in ["genre", "gang", "pv", "a", "arme", "garee", "cap"]:
 				if neuf.has(champ):
 					objet[champ] = neuf[champ]
 			objet["cible"] = neuf["p"]
