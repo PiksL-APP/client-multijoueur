@@ -86,6 +86,30 @@ for nom, y in (("carottes", 16), ("radis", 48), ("choux", 80), ("laitues", 112))
     ecrire(case(ferme, 80, y, 16, 16), f"culture_{nom}.png")     # le plant mûr
     ecrire(case(ferme, 160, y, 16, 32), f"cageot_{nom}.png")     # le cageot plein
 ecrire(case(ouvrir("Environment/Structures/Stations/Anvil/Anvil.png"), 0, 32, 64, 48), "forge.png")
+ecrire(case(ouvrir("Environment/Structures/Stations/Furnace/Furnace.png"), 64, 64, 64, 64), "fourneau.png")
+# La rôtissoire est une planche de quatre images de 64 ; copiée telle quelle.
+ecrire(ouvrir("Environment/Structures/Stations/Cooking Station/Grill/Grill_03-Sheet.png"), "rotissoire.png")
+
+
+def en_bande(planche, largeur, hauteur):
+    """Une planche rangée en grille devient une bande horizontale : chaque
+    image est recopiée entière, dans l'ordre de lecture. Le moteur ne lit que
+    des bandes."""
+    colonnes, rangees = planche.width // largeur, planche.height // hauteur
+    images = []
+    for r in range(rangees):
+        for c in range(colonnes):
+            image = case(planche, c * largeur, r * hauteur, largeur, hauteur)
+            if image.getbbox():
+                images.append(image)
+    bande = Image.new("RGBA", (len(images) * largeur, hauteur))
+    for i, image in enumerate(images):
+        bande.alpha_composite(image, (i * largeur, 0))
+    return bande
+
+
+# La scierie : soixante images de 80 × 64 rangées en grille.
+ecrire(en_bande(ouvrir("Environment/Structures/Stations/Sawmill/Level_2-Sheet.png"), 80, 64), "scierie.png")
 
 # ------------------------------------------------------------------ personnages
 # Les planches d'animation sont copiées image par image, sans rien rogner,
@@ -120,6 +144,10 @@ for nom in ("Knight", "Rogue", "Wizzard"):
 ecrire(normaliser(ouvrir(PNJ + "Citizen_F/Peasant_A/Idle/Idle-Sheet.png"), 64, 48), "pnj_paysanne.png")
 ecrire(normaliser(ouvrir(PNJ + "Citizen_F/Tavern_A/Idle_Hold/Idle_Side-Sheet.png"), 64, 48), "pnj_taverniere.png")
 ecrire(normaliser(ouvrir(PNJ + "Citizen_F/Tavern_B/Idle/Idle_Side-Sheet.png"), 64, 48), "pnj_aubergiste.png")
+# Ceux qui marchent ont aussi leur planche de marche.
+ecrire(normaliser(ouvrir(PNJ + "Citizen_F/Peasant_A/Walk/Walk-Sheet.png"), 64, 48), "pnj_paysanne_marche.png")
+ecrire(normaliser(ouvrir(PNJ + "Citizen_F/Tavern_B/Idle_Hold/Idle_Side-Sheet.png"), 64, 48), "pnj_serveuse.png")
+ecrire(normaliser(ouvrir(PNJ + "Citizen_F/Tavern_B/Walk_Hold/Walk_Side-Sheet.png"), 64, 48), "pnj_serveuse_marche.png")
 ecrire(normaliser(ouvrir("Entities/Mobs/Skeleton Crew/Skeleton - Warrior/Idle/Idle-Sheet.png"), 32, 32), "pnj_squelette.png")
 
 # ------------------------------------------------------------------ maisons
@@ -300,6 +328,7 @@ declarer("cloture_v.png", bas(1, 1))
 declarer("jardiniere.png", bas(2, 2))
 declarer("epouvantail.png", bas(2, 3))
 declarer("forge.png", bas(4, 3, 2))
+declarer("fourneau.png", bas(4, 4, 2))
 for nom in ("carottes", "radis", "choux", "laitues"):
     declarer(f"culture_{nom}.png", bas(1, 1))
     declarer(f"cageot_{nom}.png", bas(1, 2))
@@ -361,7 +390,8 @@ poser("caisses.png", 36, 24)
 for i, nom in enumerate(("carottes", "radis", "choux", "laitues")):
     poser(f"cageot_{nom}.png", 37 + i, 23)
 poser("forge.png", 14, 22)         # l'enclume du forgeron, devant l'armurerie
-poser("jardiniere.png", 26, 23)
+poser("fourneau.png", 13, 18)      # et son fourneau, derrière
+poser("jardiniere.png", 27, 23)
 poser("jardiniere.png", 34, 23)
 
 # Le potager de la grange : un enclos, des rangs de cultures, l'épouvantail.
@@ -369,7 +399,7 @@ cloture(49, 27, 58, 34, ouvertures={(51, 27), (52, 27)})
 for i, nom in enumerate(("carottes", "radis", "choux", "laitues")):
     for x in range(50, 57):
         poser(f"culture_{nom}.png", x, 29 + i)
-poser("epouvantail.png", 55, 22)
+poser("epouvantail.png", 47, 29)
 # Le jardin de la maison de l'ouest : des buissons fleuris derrière une clôture.
 cloture(5, 29, 13, 35, ouvertures={(10, 29), (11, 29)})
 for (x, y) in ((6, 30), (9, 30), (6, 32), (9, 32)):
@@ -379,6 +409,19 @@ for image, x, y in (("rocher_grand_0.png", 6, 35), ("rocher_moyen_1.png", 14, 36
                     ("rocher_moyen_0.png", 14, 42), ("rocher_petit_0.png", 8, 43),
                     ("rocher_grand_1.png", 15, 39), ("rocher_petit_1.png", 12, 44)):
     poser(image, x, y)
+
+# Les ateliers animés : le moteur les anime, le plan leur réserve la place.
+ANIMES = [
+    {"image": "rotissoire.png", "cote": 64, "x": 22, "y": 22, "vitesse": 6, "emprise": bas(4, 4, 2)},
+    {"image": "scierie.png", "cote": 80, "x": 54, "y": 20, "vitesse": 10, "emprise": bas(5, 4, 2)},
+]
+for a in ANIMES:
+    TAILLES[a["image"]] = (a["cote"] // T, 4)
+    EMPRISES[a["image"]] = a["emprise"]
+    poser(a["image"], a["x"], a["y"])
+    objets.pop()                    # il n'est pas un objet fixe : il part dans « animes »
+    a["x"] *= T
+    a["y"] *= T
 
 # La clairière : tout ce qui est dehors est forêt, et infranchissable.
 CLAIRIERE = (5, 9, 59, 47)         # x0, y0, x1, y1 exclusif
@@ -450,6 +493,33 @@ for _ in range(260):
     if (x, y) in trou or (x, y) in occupe or not dans_la_clairiere(x, y):
         continue
     sol.alpha_composite(hasard.choice(plantes_sol) if hasard.random() < 0.6 else hasard.choice(fleurs), (x * T, y * T))
+# Les ombres au sol, cuites dans l'image : le pack les dessine comme des
+# ellipses noires à 15 % — on fait pareil, au pied de chaque objet.
+from PIL import ImageDraw
+ombres = Image.new("RGBA", sol.size, (0, 0, 0, 0))
+dessin = ImageDraw.Draw(ombres)
+for o in objets + [{"image": a["image"], "x": a["x"], "y": a["y"]} for a in ANIMES]:
+    l, h = TAILLES[o["image"]]
+    nom = o["image"]
+    pied_x, pied_y = o["x"] + l * T // 2, o["y"] + h * T
+    if nom.startswith(("arbre_", "pin_")):
+        dessin.ellipse((pied_x - 18, pied_y - 9, pied_x + 18, pied_y + 3), fill=(0, 0, 0, 39))
+    elif nom.startswith("buisson_petit"):
+        dessin.ellipse((pied_x - 12, pied_y - 6, pied_x + 12, pied_y + 2), fill=(0, 0, 0, 39))
+    elif nom.startswith("buisson_"):
+        dessin.ellipse((pied_x - 20, pied_y - 8, pied_x + 20, pied_y + 3), fill=(0, 0, 0, 39))
+    elif nom.startswith("rocher_grand"):
+        dessin.ellipse((pied_x - 14, pied_y - 7, pied_x + 14, pied_y + 2), fill=(0, 0, 0, 39))
+    elif nom.startswith("rocher_moyen"):
+        dessin.ellipse((pied_x - 12, pied_y - 6, pied_x + 12, pied_y + 2), fill=(0, 0, 0, 39))
+    elif nom.startswith("maison_"):
+        # Le mur fait 96 de large sous le toit ; l'ombre s'étale à son pied
+        # et déborde à droite, comme celles du pack (plus denses).
+        dessin.rounded_rectangle((o["x"] + 14, pied_y - 6, o["x"] + 122, pied_y + 6), radius=4, fill=(0, 0, 0, 70))
+        dessin.rectangle((o["x"] + 112, o["y"] + 96, o["x"] + 120, pied_y), fill=(0, 0, 0, 50))
+    elif nom in ("banc.png", "forge.png", "caisses.png", "fourneau.png", "epouvantail.png", "rotissoire.png", "scierie.png"):
+        dessin.ellipse((o["x"] + 4, pied_y - 6, o["x"] + l * T - 4, pied_y + 3), fill=(0, 0, 0, 39))
+sol.alpha_composite(ombres)
 ecrire(sol, "sol_village.png")
 
 # Les objets se dessinent du plus haut au plus bas ; le moteur les trie par
@@ -470,6 +540,9 @@ plan = {
         "objets": objets,
         "portes": portes,
         "feu": [32 * T, 30 * T],
+        "animes": ANIMES,
+        # La paysanne fait le tour de la place ; elle s'arrête pour parler.
+        "rondes": {"paysanne": [[352, 416], [672, 416], [672, 528], [352, 528]]},
     },
 }
 
@@ -552,6 +625,8 @@ for nom, lignes in INTERIEURS.items():
         "sortie": rect(sortie),
         "portail": rect(portail),
     }
+# La serveuse fait le tour de la salle par l'allée du bas et celle de droite.
+plan["taverne"]["rondes"] = {"serveuse": [[56, 328], [424, 328], [424, 152], [424, 328]]}
 
 with open(SORTIE / "plan.json", "w", encoding="utf-8") as f:
     json.dump(plan, f, ensure_ascii=False, indent=1)

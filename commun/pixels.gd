@@ -49,7 +49,11 @@ static func heros_de(id: String) -> String:
 	return HEROS[absi(id.hash()) % HEROS.size()]
 
 static func personnage_non_joueur(nom: String) -> SpriteFrames:
-	return animation("repos", "res://modeles/village/pnj_%s.png" % nom, 5.0)
+	var poses := animation("repos", "res://modeles/village/pnj_%s.png" % nom, 5.0)
+	var marche := "res://modeles/village/pnj_%s_marche.png" % nom
+	if ResourceLoader.exists(marche):
+		ajouter(poses, "marche", marche, 10.0)
+	return poses
 
 ## Une seule animation tirée d'une planche : le feu de camp, par exemple.
 static func animation(nom: String, chemin: String, vitesse: float = 8.0, cote: int = 0) -> SpriteFrames:

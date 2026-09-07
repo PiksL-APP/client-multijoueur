@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://uaauil7quj43"
-path="res://.godot/imported/cageot_laitues.png-c01014133a1c4111a873dd2204b6cf42.ctex"
+uid="uid://pnfyufesgv20"
+path="res://.godot/imported/pnj_serveuse_marche.png-6a7d1e196ec86f5b4a097f10c1f5a1b3.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://modeles/village/cageot_laitues.png"
-dest_files=["res://.godot/imported/cageot_laitues.png-c01014133a1c4111a873dd2204b6cf42.ctex"]
+source_file="res://modeles/village/pnj_serveuse_marche.png"
+dest_files=["res://.godot/imported/pnj_serveuse_marche.png-6a7d1e196ec86f5b4a097f10c1f5a1b3.ctex"]
 
 [params]
 

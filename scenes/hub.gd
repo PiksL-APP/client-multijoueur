@@ -36,7 +36,7 @@ const PIEDS := Vector2(0, -32)
 const LIEUX := {
 	"village": {
 		"nom": "Village",
-		"pnj": [{"nom": "paysanne", "position": Vector2(552, 480), "phrases": [
+		"pnj": [{"nom": "paysanne", "position": Vector2(352, 416), "phrases": [
 			"Bienvenue. Trois portes ouvertes : la taverne, l'armurerie, l'auberge.",
 			"La taverne mène au Carnage, l'armurerie à l'Énigme. À l'auberge, on dort.",
 			"La grange et la maison du bout ? Fermées. Leurs habitants sont partis jouer.",
@@ -48,7 +48,10 @@ const LIEUX := {
 		"tableau": Rect2(206, 84, 52, 44),
 		"jeu": "carnage",
 		"titre": "CARNAGE",
-		"pnj": [{"nom": "taverniere", "position": Vector2(72, 240), "phrases": [
+		"pnj": [{"nom": "serveuse", "position": Vector2(56, 328), "phrases": [
+			"Une chope ? Non ? Alors pousse-toi, j'ai des tables.",
+			"Le patron dit que les vainqueurs boivent gratis. Il ment.",
+		]}, {"nom": "taverniere", "position": Vector2(56, 256), "phrases": [
 			"Dehors, la ville est à prendre. Vole une voiture, et ne freine pas.",
 			"Trois bandes tiennent les rues. Saigne-en une et sa rivale t'ouvrira sa porte.",
 			"Cinq étoiles au compteur ? Le garage bleu te repeint, et la police t'oublie.",
@@ -275,6 +278,41 @@ func _batir_village(geometrie: Dictionary) -> void:
 	Pixels.poser(feu, Vector2(float(geometrie["feu"][0]), float(geometrie["feu"][1]) + 1))
 	feu.play("feu")
 	plan().add_child(feu)
+	# Les ateliers animés du plan : rôtissoire, scierie.
+	for anime in geometrie.get("animes", []):
+		var atelier := AnimatedSprite2D.new()
+		var cote := int(anime["cote"])
+		atelier.sprite_frames = Pixels.animation("marche", IMAGES + String(anime["image"]), float(anime["vitesse"]), cote)
+		atelier.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		atelier.offset = Vector2(0, -32)
+		Pixels.poser(atelier, Vector2(float(anime["x"]) + cote * 0.5, float(anime["y"]) + 64.0))
+		atelier.play("marche")
+		plan().add_child(atelier)
+	_semer_les_feuilles()
+
+## Des feuilles qui tombent de la lisière, en points de deux pixels : assez
+## pour que le village respire, pas assez pour qu'on les remarque une à une.
+func _semer_les_feuilles() -> void:
+	var feuilles := CPUParticles2D.new()
+	feuilles.amount = 70
+	feuilles.lifetime = 7.0
+	feuilles.preprocess = 7.0
+	feuilles.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	feuilles.emission_rect_extents = _taille * 0.5
+	feuilles.position = _taille * 0.5
+	feuilles.direction = Vector2(1, 1)
+	feuilles.spread = 25.0
+	feuilles.gravity = Vector2(6, 10)
+	feuilles.initial_velocity_min = 6.0
+	feuilles.initial_velocity_max = 14.0
+	feuilles.scale_amount_min = 2.0
+	feuilles.scale_amount_max = 3.0
+	var teintes := Gradient.new()
+	teintes.set_color(0, Color(0.55, 0.72, 0.22))
+	teintes.set_color(1, Color(0.80, 0.55, 0.18))
+	feuilles.color_ramp = teintes
+	feuilles.z_index = 90
+	plan().add_child(feuilles)
 
 func _batir_interieur(fiche: Dictionary) -> void:
 	if fiche.has("lueur"):
@@ -291,17 +329,67 @@ func _batir_interieur(fiche: Dictionary) -> void:
 		_rafraichir_tableau()
 
 func _poser_pnj(pnj: Dictionary) -> void:
+	var nom := String(pnj["nom"])
 	var sprite := AnimatedSprite2D.new()
-	sprite.sprite_frames = Pixels.personnage_non_joueur(String(pnj["nom"]))
+	sprite.sprite_frames = Pixels.personnage_non_joueur(nom)
 	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	sprite.offset = PIEDS
 	Pixels.poser(sprite, pnj["position"])
 	sprite.play("repos")
 	plan().add_child(sprite)
-	_pnj.append({"position": (pnj["position"] as Vector2).round(), "phrases": pnj["phrases"]})
-	# Le PNJ prend la case sous ses pieds.
-	var pieds: Vector2 = (pnj["position"] as Vector2).round() + Vector2(0, -4)
-	_bloque_aussi[Vector2i(int(pieds.x) / _case, int(pieds.y) / _case)] = true
+	var fiche := {"position": (pnj["position"] as Vector2).round(), "phrases": pnj["phrases"], "noeud": sprite}
+	# Un habitant qui a une ronde dans le plan marche d'un point à l'autre ;
+	# il s'arrête pour parler quand on s'approche. Il ne bloque rien : il
+	# bouge. Les autres prennent la case sous leurs pieds.
+	var rondes: Dictionary = carte()[_lieu].get("rondes", {})
+	if rondes.has(nom):
+		var chemin: Array[Vector2] = []
+		for point in rondes[nom]:
+			chemin.append(Vector2(float(point[0]), float(point[1])))
+		fiche["chemin"] = chemin
+		fiche["etape"] = 1 % chemin.size()
+		fiche["pause"] = 0.0
+	else:
+		var pieds: Vector2 = (pnj["position"] as Vector2).round() + Vector2(0, -4)
+		_bloque_aussi[Vector2i(int(pieds.x) / _case, int(pieds.y) / _case)] = true
+	_pnj.append(fiche)
+
+const PAS_DE_RONDE := 34.0
+
+func _faire_les_rondes(delta: float) -> void:
+	for i in _pnj.size():
+		var pnj: Dictionary = _pnj[i]
+		if not pnj.has("chemin"):
+			continue
+		var noeud: AnimatedSprite2D = pnj["noeud"]
+		var position: Vector2 = pnj["position"]
+		# Face au joueur qui vient parler, on ne bouge plus.
+		if _position.distance_to(position) < 34.0:
+			if noeud.animation != "repos":
+				noeud.play("repos")
+			noeud.flip_h = _position.x < position.x
+			continue
+		if float(pnj["pause"]) > 0.0:
+			pnj["pause"] = float(pnj["pause"]) - delta
+			if noeud.animation != "repos":
+				noeud.play("repos")
+			continue
+		var chemin: Array = pnj["chemin"]
+		var cible: Vector2 = chemin[int(pnj["etape"])]
+		var vers := cible - position
+		var pas := PAS_DE_RONDE * delta
+		if vers.length() <= pas:
+			position = cible
+			pnj["etape"] = (int(pnj["etape"]) + 1) % chemin.size()
+			pnj["pause"] = 1.5
+		else:
+			position += vers.normalized() * pas
+			if absf(vers.x) > 0.5:
+				noeud.flip_h = vers.x < 0.0
+			if noeud.animation != "marche" and noeud.sprite_frames.has_animation("marche"):
+				noeud.play("marche")
+		pnj["position"] = position
+		Pixels.poser(noeud, position)
 
 ## Le classement affiché SUR le mur de la pièce, comme une ardoise de
 ## taverne : un cadre sombre à la taille de la niche, et le texte dedans.
@@ -358,6 +446,7 @@ func _ecriteau(texte: String, taille_police: int) -> Label:
 # ---------------------------------------------------------------- boucle
 
 func _process(delta: float) -> void:
+	_faire_les_rondes(delta)
 	var direction := Commandes.direction()
 	if direction != Vector2.ZERO:
 		var avant := _position

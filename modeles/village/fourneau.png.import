@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://uaauil7quj43"
-path="res://.godot/imported/cageot_laitues.png-c01014133a1c4111a873dd2204b6cf42.ctex"
+uid="uid://b320lrdexyuce"
+path="res://.godot/imported/fourneau.png-a398042a8c2f979ea1188bbf6157b10c.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://modeles/village/cageot_laitues.png"
-dest_files=["res://.godot/imported/cageot_laitues.png-c01014133a1c4111a873dd2204b6cf42.ctex"]
+source_file="res://modeles/village/fourneau.png"
+dest_files=["res://.godot/imported/fourneau.png-a398042a8c2f979ea1188bbf6157b10c.ctex"]
 
 [params]
 
