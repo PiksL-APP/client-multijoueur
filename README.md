@@ -23,11 +23,22 @@ pixel, des jeux en volume — vaut mieux qu'un mélange qui trahirait les deux.
 Le socle (`scenes/ecran.gd`) sait porter l'un ou l'autre : `plan()` pour la 2D,
 `monde()` pour la 3D, jamais les deux dans le même écran.
 
-Le village et ses intérieurs sont **cuits hors moteur** : les découpes,
-l'assemblage des maisons (toit + mur + porte) et le sol du village sont
-produits par un script Python et entrent au dépôt en PNG. Assembler des
-tuiles de seize pixels à l'aveugle dans le moteur, image après image, aurait
-coûté dix fois le temps pour un résultat moins sûr.
+Le village et ses intérieurs sont **préparés hors moteur** par
+`outils/village.py`, qui lit le pack et écrit `modeles/village/*.png`. Règle
+du script : on ne découpe jamais un dessin. Chaque image est un sprite entier
+pris dans sa case de grille (un arbre = sa case de 48 × 96), une pièce entière
+de la maquette de taverne (murs compris, ramenée à l'échelle native — la
+maquette est livrée doublée), ou une planche d'animation recopiée telle quelle.
+Les maisons sont assemblées (un toit entier, un pan de mur entier, une porte
+entière), jamais rognées. Le même script dessine le **plan** du village sur
+une grille de cases de 16 — sol, objets, portes, cases bloquées — et la zone
+de marche de chaque pièce, et écrit le tout dans `modeles/village/plan.json` :
+ce qu'on voit et ce qui arrête le joueur sortent de la même source, donc ne
+divergent jamais (les calques de vérification sortent dans `/tmp/apercu`).
+Une seule échelle partout : la case fait 16 pixels,
+un personnage 30, et la caméra zoome d'un facteur entier ; les planches de
+personnages sont remises au même gabarit (cases de 64, pieds sur le bord bas)
+pour qu'un seul point d'ancrage serve à tous, sans agrandir personne.
 
 **2,5D.** La simulation se fait sur un plan — tout l'état réseau tient en
 `Vector2` — mais le rendu est en vraie 3D : caméra en perspective inclinée,

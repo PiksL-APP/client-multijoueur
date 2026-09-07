@@ -98,7 +98,14 @@ Le **hub** fait exception à la 2,5D : il est en pixel art 2D (pack *Pixel
 Crawler*, dessiné en vue de dessus). Un écran choisit `plan()` ou `monde()`,
 jamais les deux. Les sprites se posent sur un pixel entier (`Pixels.poser`) et
 se filtrent au plus proche voisin — interpolés, ils bavent ; à mi-pixel, ils
-scintillent dès qu'on bouge.
+scintillent dès qu'on bouge. Les images du hub sortent de `outils/village.py`
+et de lui seul : jamais de découpe dans un dessin (une case entière de la
+grille de l'auteur, une pièce entière de la maquette, une planche entière),
+jamais de sprite agrandi ou réduit, un zoom de caméra entier. Un personnage
+fait trente pixels partout, dehors comme dedans. Les collisions du hub ne se
+codent pas à la main dans le moteur : elles viennent de `plan.json`, écrit par
+le même script que les images (grille de cases, `#` bloque). Pour changer le
+village, on change le plan et on relance le script.
 
 **Une seule exception**, et elle est délibérée : `modeles/volvo-242.glb`, la
 carrosserie du jeu Carnage. Un vrai modèle apporte ce qu'aucune boîte ne

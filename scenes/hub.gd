@@ -35,37 +35,20 @@ const PIEDS := Vector2(0, -32)
 ## sont en pixels de l'image du lieu.
 const LIEUX := {
 	"village": {
-		"nom": "Village", "fond": "sol_village.png",
-		"taille": Vector2(768, 544),
-		"depart": Vector2(384, 400),
-		"pnj": [{"nom": "paysanne", "position": Vector2(436, 370), "phrases": [
-			"Bienvenue. Trois maisons, trois portes : entre, on ne mord pas.",
-			"La taverne mène au Carnage, l'armurerie à l'Énigme. L'auberge… on y dort.",
-			"On se retrouve ici entre deux parties. Le feu ne s'éteint jamais.",
+		"nom": "Village",
+		"pnj": [{"nom": "paysanne", "position": Vector2(552, 480), "phrases": [
+			"Bienvenue. Trois portes ouvertes : la taverne, l'armurerie, l'auberge.",
+			"La taverne mène au Carnage, l'armurerie à l'Énigme. À l'auberge, on dort.",
+			"La grange et la maison du bout ? Fermées. Leurs habitants sont partis jouer.",
 		]}],
 	},
 	"taverne": {
-		"nom": "Taverne", "fond": "interieur_taverne.png",
-		"taille": Vector2(456, 337),
-		"marche": [Rect2(8, 142, 432, 184)],
-		"meubles": [
-			Rect2(80, 136, 80, 80),      # le comptoir et ses étagères
-			Rect2(200, 144, 72, 48),     # la table rouge du haut
-			Rect2(208, 212, 64, 40),     # la table du milieu
-			Rect2(324, 168, 60, 124),    # la grande table bleue
-			Rect2(88, 277, 80, 40),      # la table rouge du bas
-			Rect2(208, 277, 64, 40),     # la table bleue du bas
-			Rect2(64, 152, 16, 40), Rect2(176, 152, 16, 40), Rect2(288, 152, 16, 40), Rect2(400, 152, 16, 40),
-			Rect2(64, 240, 16, 40), Rect2(176, 240, 16, 40), Rect2(288, 240, 16, 40), Rect2(400, 240, 16, 40),
-		],
-		"depart": Vector2(30, 315),
-		"sortie": Rect2(8, 314, 44, 12),
-		"portail": Rect2(168, 142, 32, 16),
-		"lueur": {"centre": Vector2(184, 125), "taille": Vector2(28, 36)},
-		"tableau": Rect2(204, 94, 60, 42),
+		"nom": "Taverne",
+		"lueur": {"centre": Vector2(182, 112), "taille": Vector2(34, 44)},
+		"tableau": Rect2(206, 84, 52, 44),
 		"jeu": "carnage",
 		"titre": "CARNAGE",
-		"pnj": [{"nom": "taverniere", "position": Vector2(125, 235), "phrases": [
+		"pnj": [{"nom": "taverniere", "position": Vector2(72, 240), "phrases": [
 			"Dehors, la ville est à prendre. Vole une voiture, et ne freine pas.",
 			"Trois bandes tiennent les rues. Saigne-en une et sa rivale t'ouvrira sa porte.",
 			"Cinq étoiles au compteur ? Le garage bleu te repeint, et la police t'oublie.",
@@ -76,18 +59,12 @@ const LIEUX := {
 		]}],
 	},
 	"armurerie": {
-		"nom": "Armurerie", "fond": "interieur_armurerie.png",
-		"taille": Vector2(640, 84),
-		"marche": [Rect2(20, 40, 600, 30)],
-		"meubles": [Rect2(328, 30, 32, 20), Rect2(456, 30, 32, 20)],
-		"depart": Vector2(200, 56),
-		"sortie": Rect2(178, 40, 44, 10),
-		"portail": Rect2(580, 42, 32, 26),
-		"lueur": {"centre": Vector2(596, 55), "taille": Vector2(24, 22)},
-		"tableau": Rect2(64, 6, 64, 40),
+		"nom": "Armurerie",
+		"lueur": {"centre": Vector2(608, 60), "taille": Vector2(30, 36)},
+		"tableau": Rect2(64, 14, 64, 36),
 		"jeu": "enigme",
 		"titre": "ÉNIGME",
-		"pnj": [{"nom": "squelette", "position": Vector2(430, 60), "phrases": [
+		"pnj": [{"nom": "squelette", "position": Vector2(440, 80), "phrases": [
 			"Trois chambres. Aucune ne s'ouvre à un seul.",
 			"Une dalle ne reste enfoncée que si quelque chose pèse dessus — quelqu'un, ou une caisse.",
 			"Et la sortie n'accepte l'équipe qu'au complet. Personne ne finit seul.",
@@ -95,27 +72,33 @@ const LIEUX := {
 		]}],
 	},
 	"auberge": {
-		"nom": "Auberge", "fond": "interieur_auberge.png",
-		"taille": Vector2(142, 161),
-		"marche": [Rect2(10, 40, 124, 118)],
-		"meubles": [Rect2(8, 44, 30, 68), Rect2(88, 92, 48, 62), Rect2(12, 122, 24, 26)],
-		"depart": Vector2(71, 146),
-		"sortie": Rect2(56, 148, 30, 10),
-		"pnj": [{"nom": "aubergiste", "position": Vector2(112, 62), "phrases": [
+		"nom": "Auberge",
+		"pnj": [{"nom": "aubergiste", "position": Vector2(120, 80), "phrases": [
 			"Chut, il y a des gens qui dorment. Ici on se repose entre deux parties.",
 			"Le troisième jeu se prépare. Repasse.",
 		]}],
 	},
+	"maison": {"nom": "Maison", "ferme": "C'est fermé. Les habitants sont partis jouer au Carnage."},
+	"grange": {"nom": "Grange", "ferme": "La grange est fermée. Ça sent le foin et les radis."},
 }
 
-## Les maisons du village : leur image, la place de leur pied, et le lieu où
-## mène leur porte. La porte fait 32 pixels au milieu de la façade.
-const MAISONS := [
-	{"lieu": "taverne", "image": "maison_taverne.png", "position": Vector2(224, 216), "nom": "TAVERNE"},
-	{"lieu": "armurerie", "image": "maison_armurerie.png", "position": Vector2(384, 216), "nom": "ARMURERIE"},
-	{"lieu": "auberge", "image": "maison_auberge.png", "position": Vector2(544, 216), "nom": "AUBERGE"},
-]
-const PLACE := Rect2(192, 224, 384, 192)   # la place pavée du village
+## Le plan du village et des pièces — sol, objets, cases bloquées, portes,
+## sorties et portails — est écrit par `outils/village.py` dans
+## `plan.json`. Ce qu'on voit et ce qui arrête le joueur sortent du même
+## fichier : c'est ce qui garantit qu'on ne traverse ni mur ni meuble.
+static var _carte: Dictionary = {}
+
+static func carte() -> Dictionary:
+	if _carte.is_empty():
+		var texte := FileAccess.get_file_as_string(IMAGES + "plan.json")
+		_carte = JSON.parse_string(texte) as Dictionary
+	return _carte
+
+static func rect_de(valeur) -> Rect2:
+	if valeur == null:
+		return Rect2()
+	var v: Array = valeur
+	return Rect2(float(v[0]), float(v[1]), float(v[2]), float(v[3]))
 
 var _canal: CanalTempsReel
 var _camera: Camera2D
@@ -124,8 +107,10 @@ var _position := Vector2.ZERO
 var _marche := false
 var _autres: Dictionary = {}       # cle -> {cible, affichee, pseudo, noeud}
 var _corps: AnimatedSprite2D
-var _obstacles: Array[Rect2] = []
-var _marche_dans: Array[Rect2] = []
+var _bloque: PackedStringArray = []   # une ligne par rangée de cases, `#` = bloqué
+var _bloque_aussi: Dictionary = {}    # cases prises à l'exécution (les PNJ)
+var _case := 16
+var _taille := Vector2.ZERO
 var _portes: Array = []            # {rect, lieu, nom}
 var _sortie := Rect2()
 var _portail := Rect2()
@@ -193,45 +178,53 @@ func _entrer_dans(lieu: String, arrivee: Vector2) -> void:
 	_phrase = -1
 	_pnj_proche = -1
 	var fiche: Dictionary = LIEUX[lieu]
-	var taille: Vector2 = fiche["taille"]
+	var geometrie: Dictionary = carte()[lieu]
+	_case = int(carte()["case"])
+	_taille = Vector2(float(geometrie["taille"][0]), float(geometrie["taille"][1]))
 
 	for enfant in plan().get_children():
 		enfant.queue_free()
 	_autres.clear()
 
-	var fond := Pixels.image(IMAGES + String(fiche["fond"]), false)
+	var fond := Pixels.image(IMAGES + ("sol_village.png" if lieu == "village" else "interieur_%s.png" % lieu), false)
 	fond.z_index = -100
 	fond.y_sort_enabled = false
 	plan().add_child(fond)
 
-	_obstacles.clear()
-	_marche_dans.clear()
+	_bloque = PackedStringArray(geometrie["bloque"])
+	_bloque_aussi.clear()
 	_portes.clear()
-	_sortie = Rect2()
-	_portail = Rect2()
-	_jeu_du_lieu = ""
-	_titre_du_lieu = ""
+	_sortie = rect_de(geometrie.get("sortie"))
+	_portail = rect_de(geometrie.get("portail"))
+	_jeu_du_lieu = String(fiche.get("jeu", ""))
+	_titre_du_lieu = String(fiche.get("titre", ""))
 	_pnj = []
 	_tableau = null
 
 	if lieu == "village":
-		_batir_village()
+		_batir_village(geometrie)
 	else:
 		_batir_interieur(fiche)
 	for pnj in fiche.get("pnj", []):
 		_poser_pnj(pnj)
 
-	_position = arrivee if arrivee != Vector2.ZERO else (fiche["depart"] as Vector2)
+	var depart := Vector2.ZERO
+	if geometrie.has("depart"):
+		depart = Vector2(float(geometrie["depart"][0]), float(geometrie["depart"][1]))
+	else:
+		# Dans une pièce, on arrive sur la sortie.
+		depart = _sortie.get_center() + Vector2(0, 2)
+	_position = arrivee if arrivee != Vector2.ZERO else depart
 	_corps = _sprite_de_heros(Session.id)
 	plan().add_child(_corps)
 
 	# Une pièce plus petite que l'écran se centre ; une plus grande fait
 	# glisser la caméra sans jamais montrer au-delà de ses murs.
 	var visible := _vue()
-	_camera.limit_left = 0 if taille.x > visible.x else -100000
-	_camera.limit_right = int(taille.x) if taille.x > visible.x else 100000
-	_camera.limit_top = 0 if taille.y > visible.y else -100000
-	_camera.limit_bottom = int(taille.y) if taille.y > visible.y else 100000
+	_camera.limit_left = 0 if _taille.x > visible.x else -100000
+	_camera.limit_right = int(_taille.x) if _taille.x > visible.x else 100000
+	_camera.limit_top = 0 if _taille.y > visible.y else -100000
+	_camera.limit_bottom = int(_taille.y) if _taille.y > visible.y else 100000
 	_camera.position = _position_camera()
 	_camera.reset_smoothing()
 
@@ -243,11 +236,10 @@ func _vue() -> Vector2:
 	return get_viewport().get_visible_rect().size / float(ZOOM)
 
 func _position_camera() -> Vector2:
-	var taille: Vector2 = LIEUX[_lieu]["taille"]
 	var visible := _vue()
 	return Vector2(
-		_position.x if taille.x > visible.x else taille.x * 0.5,
-		_position.y if taille.y > visible.y else taille.y * 0.5)
+		_position.x if _taille.x > visible.x else _taille.x * 0.5,
+		_position.y if _taille.y > visible.y else _taille.y * 0.5)
 
 func _sprite_de_heros(id: String) -> AnimatedSprite2D:
 	var s := AnimatedSprite2D.new()
@@ -257,142 +249,34 @@ func _sprite_de_heros(id: String) -> AnimatedSprite2D:
 	s.play("repos")
 	return s
 
-func _batir_village() -> void:
-	var graine := RandomNumberGenerator.new()
-	graine.seed = 20260907
-	var taille: Vector2 = LIEUX["village"]["taille"]
-	# Personne ne pousse sur la place, ni juste dessous : une cime de 96
-	# pixels recouvrirait le pavé.
-	var reserves: Array[Rect2] = [Rect2(PLACE.position - Vector2(28, 28), PLACE.size + Vector2(56, 130))]
-
-	for maison in MAISONS:
-		var pied: Vector2 = maison["position"]
-		var sprite := Pixels.image(IMAGES + String(maison["image"]))
-		Pixels.poser(sprite, pied)
+func _batir_village(geometrie: Dictionary) -> void:
+	# Chaque objet du plan est une image entière, posée à sa case ; le
+	# moteur les trie par le bas de leur image, donc par leur pied.
+	for objet in geometrie["objets"]:
+		var sprite := Pixels.image(IMAGES + String(objet["image"]))
+		var largeur := float(sprite.texture.get_width())
+		var hauteur := float(sprite.texture.get_height())
+		Pixels.poser(sprite, Vector2(float(objet["x"]) + largeur * 0.5, float(objet["y"]) + hauteur))
 		plan().add_child(sprite)
-		# Le mur fait 96 de large sous un toit de 128 : on bloque le mur, et
-		# le joueur passe derrière la maison, caché par le toit.
-		_obstacles.append(Rect2(pied + Vector2(-48, -56), Vector2(96, 56)))
-		reserves.append(Rect2(pied + Vector2(-80, -150), Vector2(160, 190)))
-		_portes.append({
-			"rect": Rect2(pied + Vector2(-18, 0), Vector2(36, 22)),
-			"lieu": String(maison["lieu"]),
-			"nom": String(maison["nom"]),
-		})
-		var enseigne := _ecriteau(String(maison["nom"]), 7)
-		enseigne.position = pied + Vector2(-60, -140)
+	for porte in geometrie["portes"]:
+		var rect := Rect2(float(porte["x"]), float(porte["y"]), float(porte["l"]), float(porte["h"]))
+		_portes.append({"rect": rect, "lieu": String(porte["lieu"]), "nom": String(porte["nom"])})
+		var enseigne := _ecriteau(String(porte["nom"]), 7)
+		enseigne.position = rect.get_center() + Vector2(-60, -8 * _case - 12)
 		enseigne.size = Vector2(120, 10)
 		plan().add_child(enseigne)
-
-	# Le feu de camp au milieu de la place, deux bancs, des caisses devant la
-	# taverne : c'est là qu'on se retrouve.
-	var foyer := Pixels.image(IMAGES + "foyer.png")
-	Pixels.poser(foyer, Vector2(384, 336))
-	plan().add_child(foyer)
+	# La flamme du feu de camp, animée, posée dans le foyer du plan.
 	var feu := AnimatedSprite2D.new()
 	feu.sprite_frames = Pixels.animation("feu", IMAGES + "feu.png", 10.0, 32)
 	feu.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	# La flamme (contenu jusqu'à la ligne 33 de sa case de 48) doit reposer
-	# au milieu du foyer, et se dessiner APRÈS lui : d'où ce pivot un pixel
-	# plus bas que le foyer.
+	# Le contenu de la flamme descend jusqu'à la ligne 33 de sa case de 48 :
+	# ce pivot la pose au milieu du foyer et la dessine juste après lui.
 	feu.offset = Vector2(2, -14)
-	Pixels.poser(feu, Vector2(384, 337))
+	Pixels.poser(feu, Vector2(float(geometrie["feu"][0]), float(geometrie["feu"][1]) + 1))
 	feu.play("feu")
 	plan().add_child(feu)
-	_obstacles.append(Rect2(366, 312, 36, 26))
-	for x in [304, 464]:
-		var banc := Pixels.image(IMAGES + "banc.png")
-		Pixels.poser(banc, Vector2(x, 346))
-		plan().add_child(banc)
-		_obstacles.append(Rect2(x - 30, 324, 60, 20))
-	var caisses := Pixels.image(IMAGES + "caisses.png")
-	Pixels.poser(caisses, Vector2(210, 254))
-	plan().add_child(caisses)
-	_obstacles.append(Rect2(196, 232, 28, 20))
-
-	# Une lisière dense d'arbres ferme le village ; quelques-uns, des
-	# buissons et des rochers habitent l'intérieur. Chaque sprite est posé
-	# entier, à sa taille, sans jamais en chevaucher un autre.
-	# La lisière est infranchissable : on y verrait le joueur disparaître
-	# sous les cimes. Quatre bandes d'obstacles ferment la clairière.
-	_obstacles.append(Rect2(0, 0, taille.x, 150))
-	_obstacles.append(Rect2(0, taille.y - 108, taille.x, 108))
-	_obstacles.append(Rect2(0, 0, 100, taille.y))
-	_obstacles.append(Rect2(taille.x - 100, 0, 100, taille.y))
-	var poses: Array[Vector2] = []
-	var essais := 0
-	while poses.size() < 56 and essais < 4000:
-		essais += 1
-		var p := Vector2(graine.randf_range(24, taille.x - 24), graine.randf_range(100, taille.y - 4))
-		# En bas, les arbres ont les pieds tout au bord : leur cime monte de
-		# 96 pixels et ne doit pas couvrir la clairière.
-		var au_bord := p.x < 100 or p.x > taille.x - 100 or p.y < 140 or p.y > taille.y - 26
-		if not au_bord:
-			continue
-		if _libre(p, poses, reserves, 40.0):
-			poses.append(p)
-			_planter(_arbre(graine), p, Rect2(-8, -8, 16, 8))
-	essais = 0
-	var interieurs := 0
-	while interieurs < 12 and essais < 3000:
-		essais += 1
-		var p2 := Vector2(graine.randf_range(110, taille.x - 110), graine.randf_range(150, taille.y - 90))
-		if not _libre(p2, poses, reserves, 48.0):
-			continue
-		poses.append(p2)
-		interieurs += 1
-		# Pas d'arbre dans la clairière : une cime cacherait le joueur qui
-		# passe derrière. Buissons et rochers, eux, ne cachent personne.
-		match graine.randi_range(0, 3):
-			0, 1: _planter("buisson_%d.png" % graine.randi_range(0, 1), p2, Rect2(-16, -10, 32, 10))
-			2: _planter("rocher_grand_%d.png" % graine.randi_range(0, 1), p2, Rect2(-12, -10, 24, 10))
-			_: _planter("rocher_moyen_%d.png" % graine.randi_range(0, 1), p2, Rect2(-10, -8, 20, 8))
-	essais = 0
-	var petits := 0
-	while petits < 18 and essais < 3000:
-		essais += 1
-		var p3 := Vector2(graine.randf_range(50, taille.x - 50), graine.randf_range(120, taille.y - 50))
-		if not _libre(p3, poses, reserves, 30.0):
-			continue
-		poses.append(p3)
-		petits += 1
-		if graine.randf() < 0.6:
-			_planter("buisson_petit_%d.png" % graine.randi_range(0, 1), p3, Rect2(-10, -8, 20, 8))
-		else:
-			_planter("rocher_petit_%d.png" % graine.randi_range(0, 1), p3, Rect2())
-
-func _arbre(graine: RandomNumberGenerator) -> String:
-	return ("arbre_%d.png" if graine.randf() < 0.65 else "pin_%d.png") % graine.randi_range(0, 2)
-
-func _libre(p: Vector2, poses: Array[Vector2], reserves: Array[Rect2], ecart: float) -> bool:
-	for r in reserves:
-		if r.has_point(p):
-			return false
-	for q in poses:
-		if q.distance_to(p) < ecart:
-			return false
-	return true
-
-func _planter(image: String, position: Vector2, blocage: Rect2) -> void:
-	var sprite := Pixels.image(IMAGES + image)
-	Pixels.poser(sprite, position)
-	plan().add_child(sprite)
-	if blocage.size != Vector2.ZERO:
-		_obstacles.append(Rect2(position.round() + blocage.position, blocage.size))
 
 func _batir_interieur(fiche: Dictionary) -> void:
-	# On ne modélise pas les murs : la pièce est une image, et l'on borne la
-	# zone où l'on marche, moins les meubles.
-	for r in fiche.get("marche", []):
-		_marche_dans.append(r)
-	for r in fiche.get("meubles", []):
-		_obstacles.append(r)
-
-	_sortie = fiche.get("sortie", Rect2())
-	_portail = fiche.get("portail", Rect2())
-	_jeu_du_lieu = String(fiche.get("jeu", ""))
-	_titre_du_lieu = String(fiche.get("titre", ""))
-
 	if fiche.has("lueur"):
 		var lueur := Node2D.new()
 		lueur.set_script(preload("res://scenes/lueur_portail.gd"))
@@ -415,7 +299,9 @@ func _poser_pnj(pnj: Dictionary) -> void:
 	sprite.play("repos")
 	plan().add_child(sprite)
 	_pnj.append({"position": (pnj["position"] as Vector2).round(), "phrases": pnj["phrases"]})
-	_obstacles.append(Rect2((pnj["position"] as Vector2).round() + Vector2(-8, -8), Vector2(16, 10)))
+	# Le PNJ prend la case sous ses pieds.
+	var pieds: Vector2 = (pnj["position"] as Vector2).round() + Vector2(0, -4)
+	_bloque_aussi[Vector2i(int(pieds.x) / _case, int(pieds.y) / _case)] = true
 
 ## Le classement affiché SUR le mur de la pièce, comme une ardoise de
 ## taverne : un cadre sombre à la taille de la niche, et le texte dedans.
@@ -522,21 +408,26 @@ func _process(delta: float) -> void:
 ## lieu de s'y coller.
 func _degager(avant: Vector2) -> void:
 	var pieds := Rect2(_position - Vector2(RAYON, 5), Vector2(RAYON * 2.0, 8))
-	for obstacle in _obstacles:
-		if obstacle.intersects(pieds):
-			_position = avant
-			return
-	if _marche_dans.is_empty():
-		return
-	for zone in _marche_dans:
-		if zone.encloses(pieds):
-			return
-	_position = avant
+	if _bloquee(pieds):
+		_position = avant
+
+## Une case est bloquée si le plan le dit, ou si un PNJ s'y tient.
+func _bloquee(pieds: Rect2) -> bool:
+	var x0 := int(floor(pieds.position.x / _case))
+	var y0 := int(floor(pieds.position.y / _case))
+	var x1 := int(floor((pieds.end.x - 0.01) / _case))
+	var y1 := int(floor((pieds.end.y - 0.01) / _case))
+	for y in range(y0, y1 + 1):
+		for x in range(x0, x1 + 1):
+			if y < 0 or y >= _bloque.size() or x < 0 or x >= _bloque[y].length():
+				return true
+			if _bloque[y][x] == "#" or _bloque_aussi.has(Vector2i(x, y)):
+				return true
+	return false
 
 func _borner() -> void:
-	var taille: Vector2 = LIEUX[_lieu]["taille"]
-	_position.x = clamp(_position.x, 12.0, taille.x - 12.0)
-	_position.y = clamp(_position.y, 24.0, taille.y - 8.0)
+	_position.x = clamp(_position.x, 8.0, _taille.x - 8.0)
+	_position.y = clamp(_position.y, 8.0, _taille.y - 4.0)
 
 func _chercher_quoi_faire() -> void:
 	var avant := _invite
@@ -570,14 +461,21 @@ func _agir() -> void:
 	if not is_inside_tree():
 		return
 	if _invite.begins_with("entrer:"):
+		var lieu := _invite.substr(7)
+		if LIEUX[lieu].has("ferme"):
+			# Une maison fermée répond comme un habitant : une phrase.
+			Sons.jouer("clic", 0.8, -16.0)
+			_phrase = 0 if _phrase < 0 else -1
+			_rafraichir_hud()
+			return
 		Sons.jouer("porte", 1.0, -10.0)
-		_entrer_dans(_invite.substr(7), Vector2.ZERO)
+		_entrer_dans(lieu, Vector2.ZERO)
 	elif _invite == "sortir":
 		Sons.jouer("porte", 0.8, -10.0)
-		var retour: Vector2 = LIEUX["village"]["depart"]
-		for maison in MAISONS:
-			if String(maison["lieu"]) == _lieu:
-				retour = (maison["position"] as Vector2) + Vector2(0, 30)
+		var retour := Vector2.ZERO
+		for porte in carte()["village"]["portes"]:
+			if String(porte["lieu"]) == _lieu:
+				retour = Vector2(float(porte["x"]) + float(porte["l"]) * 0.5, float(porte["y"]) + float(porte["h"]) + 6.0)
 		_entrer_dans("village", retour)
 	elif _invite == "portail" and _jeu_du_lieu != "":
 		Sons.jouer("portail", 1.0, -8.0)
@@ -691,7 +589,7 @@ func _rafraichir_hud() -> void:
 	_hud_titre.text = "Village de Piks-l" if _lieu == "village" else ou
 
 	match _invite.split(":")[0]:
-		"entrer": _hud_invite.text = "E — entrer dans " + _article(_invite.substr(7))
+		"entrer": _hud_invite.text = ("E — frapper à " if LIEUX[_invite.substr(7)].has("ferme") else "E — entrer dans ") + _article(_invite.substr(7))
 		"sortir": _hud_invite.text = "E — ressortir"
 		"portail": _hud_invite.text = "E — franchir le portail"
 		"parler": _hud_invite.text = "E — parler"
@@ -699,6 +597,9 @@ func _rafraichir_hud() -> void:
 
 	var parle := _invite == "parler" and _pnj_proche >= 0 and _phrase >= 0 \
 		and _phrase < (_pnj[_pnj_proche]["phrases"] as Array).size()
-	_panneau_dialogue.visible = parle
+	var porte_fermee: bool = _invite.begins_with("entrer:") and _phrase == 0 and LIEUX[_invite.substr(7)].has("ferme")
+	_panneau_dialogue.visible = parle or porte_fermee
 	if parle:
 		_hud_dialogue.text = String(_pnj[_pnj_proche]["phrases"][_phrase])
+	elif porte_fermee:
+		_hud_dialogue.text = String(LIEUX[_invite.substr(7)]["ferme"])
