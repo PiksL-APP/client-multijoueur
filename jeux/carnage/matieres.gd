@@ -282,6 +282,20 @@ void fragment() {
 		rug = 0.95;
 	}
 
+	// Le bitume vécu : des plaques plus sombres (rustines), un regard d'égout
+	// par-ci par-là, et une usure claire sur la voie de roulement.
+	bool bitume_nu = (k <= 3 || k == 15 || k == 16) && spec > 0.3;
+	if (bitume_nu) {
+		float plaque = bruit(posm.xz / 6.0 + vec2(11.0, 7.0));
+		if (plaque > 0.72) col *= 0.82;
+		vec2 gros = floor(posm.xz / 7.0);
+		if (hache(gros + vec2(31.0)) > 0.93) {
+			vec2 centre_g = (gros + 0.5) * 7.0;
+			float dr = length(posm.xz - centre_g);
+			if (dr < 1.0) col = vec3(0.10, 0.10, 0.11);
+			if (dr < 0.75 && mod(floor(dr * 4.0), 2.0) < 1.0) col = vec3(0.18, 0.17, 0.16);
+		}
+	}
 	// La nuit, le bitume est mouillé : des flaques par plaques, où la rue
 	// devient un miroir sombre qui rend le ciel et les enseignes.
 	bool bitume = (k <= 3 || k == 11 || k == 15 || k == 16) && spec > 0.3;
@@ -289,8 +303,10 @@ void fragment() {
 		float fl = smoothstep(0.52, 0.66, bruit(posm.xz / 9.0 + vec2(3.7, 1.3)));
 		float humide = nuit * (0.35 + 0.65 * fl);
 		col *= 1.0 - 0.38 * humide;
-		rug = mix(rug, 0.08, humide);
-		spec = mix(spec, 0.85, humide);
+		// Pas un miroir parfait : la lune y ferait une tache blanche qui suit
+		// la caméra sur trois pâtés.
+		rug = mix(rug, 0.28, humide);
+		spec = mix(spec, 0.6, humide);
 		emission += vec3(0.05, 0.07, 0.12) * fl * nuit;
 	}
 	if (k != 4 && k != 5 && k != 10 && k != 17) joint = 0.0;

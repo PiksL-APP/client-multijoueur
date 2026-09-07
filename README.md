@@ -122,6 +122,21 @@ que l'eau ou la voie touchent deviennent des quais. `TAB` affiche la carte
 entière (un pixel par tuile, peinte par lots pendant les deux premières
 secondes de la manche) avec sa légende et la position de chacun.
 
+**La ville n'est pas un quadrillage.** Une PLACE EN ÉTOILE, un peu au nord du
+centre — un obélisque sur un îlot, un parvis pavé qui rayonne — d'où partent
+six avenues en diagonale jusqu'à la côte ; deux places secondaires à quatre
+avenues ; un BOULEVARD CIRCULAIRE autour de la grande place, et les grands
+boulevards, une seconde ellipse qui ceinture le centre et franchit la rivière
+sur deux ponts. Ces « voies libres » (`PlanVille.voie_libre`) ne suivent pas la
+grille : une tuile qu'elles traversent devient du boulevard quoi qu'en dise la
+grille, le pâté coupé ne garde que des immeubles d'une tuile (`_bordure`), et
+le shader du sol trace la chaussée en espace monde comme il trace la voie
+ferrée. Le trafic les suit par leur tangente et tourne autour des places
+(`voie_libre_en`). Et sur la grille elle-même, le DÉCALAGE : entre deux avenues,
+une transversale sur deux s'arrête en T, comme les briques d'un mur — un
+carrefour en croix est devenu l'exception. La rue décalée devient une cour
+qu'on traverse quand même.
+
 **Le rendu se fait par morceaux de vingt tuiles.** Un morceau se bâtit en
 quelques dizaines de millisecondes quand son bord passe à quinze cents pixels
 du joueur — un par image, du plus proche au plus loin — et se libère au-delà de
@@ -137,10 +152,17 @@ passants et joueurs sont des cubes : un immeuble est une grille d'occupation
 exposées existent, et un morceau de ville tient dans UNE nappe de cubes
 unitaires (`MultiMesh.buffer`, seize flottants par cube). La couleur
 d'instance porte la teinte ; son alpha dit la matière — mur, fenêtre allumée
-qui rayonne la nuit, vitre qui reflète. Le shader biseaute chaque cube par ses
-UV : c'est ce qui sépare un mur de briques d'un aplat. Le sol est quantifié
-sur la même grille (cinq cases par tuile) pour que la rue ait le même grain
-que les murs. **La destruction est arbitrée par l'hôte** : une balle, une
+qui rayonne la nuit, vitre qui reflète. Le shader découpe chaque face en
+SOUS-CUBES d'une unité, chacun avec son arête et son grain : huit fois plus
+de cubes à l'œil, pas un de plus en géométrie. Les voitures sont en voxels de
+un tiers d'unité (capot plongeant, passages de roue, rétroviseurs), les
+passants en quarts d'unité (bras et jambes articulés), les arbres en boules
+de demi-cubes. Le sol est quantifié sur la même grille pour que la rue ait
+le même grain que les murs. Autour de la grille des cubes, les ORNEMENTS
+(`VoxelsCarnage.ornements`) : corniches, balcons, stores, et sur les toits —
+que la caméra voit en premier — climatiseurs, citernes, antennes, cages
+d'escalier, cheminées ; les toits ont leur couleur par style (tuiles,
+gravier, goudron), les façades une palette franche. **La destruction est arbitrée par l'hôte** : une balle, une
 roquette, une explosion ou un choc frontal à plus de trois cent quatre-vingts
 pixels par seconde ôte des cubes (`VilleVivante.impacter/exploser/choquer`,
 trois coups par cube au pistolet), l'événement `casse` — groupé dans le `lot`
@@ -159,9 +181,16 @@ montent en émission quand la nuit tombe, et la rue passe du gris chaud au bleu
 sourd — jamais noire : une nuit noire vue de dessus, c'est un écran vide.
 `--nuit=<0..1>` (`?nuit=` dans l'URL) force l'heure pour photographier.
 
-**Il n'y a pas une seule vraie lumière dans la ville.** Le mode compatibilité
-n'en supporte que huit par objet ; une flaque additive au sol sous chaque
-lampadaire fait le même effet pour rien. ⚠ Une matière additive doit couper le
+**Deux vraies lumières, pas une de plus.** Le mode compatibilité n'en supporte
+que huit par objet ; une flaque additive au sol sous chaque lampadaire fait le
+même effet pour rien. Les deux exceptions sont les phares de VOTRE voiture,
+deux projecteurs qui ne s'allument que la nuit et font surgir les façades dans
+leur faisceau. Le reste de l'ambiance est du shader : l'ombre des nuages qui
+glisse sur la ville, le bitume qui se mouille la nuit, une ombre de contact
+multiplicative au pied de chaque immeuble (sans elle, ils flottent), les
+traces de pneus qu'on laisse en freinant, les étincelles d'une tôle qui racle
+un mur, la poussière d'un cube qui part, et sur l'écran une vignette avec un
+grain léger qui rougit aux chocs. ⚠ Une matière additive doit couper le
 brouillard (`fog_disabled`) : sinon il peint un carré violet là où la flaque
 devait être transparente.
 

@@ -93,12 +93,43 @@ static func immeuble(b: Dictionary, graine: int) -> Dictionary:
 	var toit: Color = toits[rng.randi_range(0, toits.size() - 1)]
 	var interieur := Color(0.42, 0.40, 0.38)
 	var part := _part_allumee(style)
+	# La SILHOUETTE : une tour ou un immeuble de bureaux assez haut se rétrécit
+	# au dernier tiers (un retrait d'un cube tout autour, puis un attique) ; un
+	# immeuble de logements assez large perd un angle sur toute sa hauteur —
+	# une cour, un L. Sans ça, la ville n'est qu'un alignement de boîtes.
+	var retrait := -1
+	if not plat and style in [PlanVille.F_TOUR, PlanVille.F_BUREAUX] and ny >= 8 and nx >= 4 and nz >= 4 and rng.randf() < 0.7:
+		retrait = int(float(ny) * 0.66)
+	var coin_creux := Vector2i(-1, -1)
+	var creux := Vector2i.ZERO
+	if not plat and style in [PlanVille.F_LOGEMENTS, PlanVille.F_VIEUX, PlanVille.F_COMMERCE] and nx >= 5 and nz >= 5 and rng.randf() < 0.45:
+		coin_creux = Vector2i(rng.randi_range(0, 1), rng.randi_range(0, 1))
+		creux = Vector2i(rng.randi_range(2, nx / 2), rng.randi_range(2, nz / 2))
 	for i in nx:
 		for j in nz:
 			for k in ny:
-				var facade := i == 0 or i == nx - 1 or j == 0 or j == nz - 1
+				if retrait >= 0 and k >= retrait and (i == 0 or i == nx - 1 or j == 0 or j == nz - 1):
+					solide[(i * nz + j) * ny + k] = 0
+					continue
+				if coin_creux.x >= 0:
+					var dans_x := (i < creux.x) if coin_creux.x == 0 else (i >= nx - creux.x)
+					var dans_z := (j < creux.y) if coin_creux.y == 0 else (j >= nz - creux.y)
+					if dans_x and dans_z:
+						solide[(i * nz + j) * ny + k] = 0
+						continue
+	for i in nx:
+		for j in nz:
+			for k in ny:
+				if solide[(i * nz + j) * ny + k] == 0:
+					continue
+				# Une façade, c'est un cube dont un voisin horizontal manque —
+				# le bord de la grille ou un creux.
+				var facade := i == 0 or i == nx - 1 or j == 0 or j == nz - 1 \
+					or solide[((i - 1) * nz + j) * ny + k] == 0 or solide[((i + 1) * nz + j) * ny + k] == 0 \
+					or solide[(i * nz + j - 1) * ny + k] == 0 or solide[(i * nz + j + 1) * ny + k] == 0
 				var couleur := teinte
-				if k == ny - 1 and not plat:
+				var dessus := k == ny - 1 or solide[(i * nz + j) * ny + k + 1] == 0
+				if dessus and not plat:
 					# Toute la dernière couche est du toit, intérieur compris :
 					# c'est sa face du dessus qu'on voit. Un grain de deux tons.
 					couleur = toit.lightened(rng.randf_range(-0.05, 0.05))
@@ -118,7 +149,7 @@ static func immeuble(b: Dictionary, graine: int) -> Dictionary:
 				couleurs[(i * nz + j) * ny + k] = couleur
 	return {"nx": nx, "nz": nz, "ny": ny, "origine": origine, "taille": V,
 		"hauteur": float(g["hauteur"]), "solide": solide, "couleurs": couleurs, "style": style,
-		"teinte": teinte, "plat": plat}
+		"teinte": teinte, "plat": plat, "retrait": retrait, "creux": coin_creux.x >= 0}
 
 ## Les ORNEMENTS d'un immeuble : ce qui dépasse de la grille et n'en fait pas
 ## partie — corniche au dernier étage, balcons sous les fenêtres, stores au-
@@ -137,12 +168,16 @@ static func ornements(imm: Dictionary, graine: int) -> Array:
 	var o: Vector3 = imm["origine"]
 	var rng := RandomNumberGenerator.new()
 	rng.seed = graine + 77
-	var haut := o.y + float(ny) * V
+	var retrait := int(imm.get("retrait", -1))
+	var creux := bool(imm.get("creux", false))
+	# Le « haut » de la boîte pleine : le sommet, ou la terrasse du retrait.
+	var haut := o.y + float(ny if retrait < 0 else retrait) * V
 	var clair := teinte.lightened(0.18)
 	var sombre := teinte.darkened(0.25)
 
-	# La corniche : une lame qui court au sommet, en saillie d'un demi-voxel.
-	var corniche := style in [PlanVille.F_VIEUX, PlanVille.F_LOGEMENTS, PlanVille.F_COMMERCE, PlanVille.F_BUREAUX] and ny >= 2
+	# La corniche : une lame qui court au sommet (ou au bord de la terrasse),
+	# en saillie d'un demi-voxel. Pas sur un immeuble en L : elle couperait la cour.
+	var corniche := style in [PlanVille.F_VIEUX, PlanVille.F_LOGEMENTS, PlanVille.F_COMMERCE, PlanVille.F_BUREAUX] and ny >= 2 and not creux
 	if corniche:
 		var e := 0.5 * V
 		var y := haut - 0.3 * V
@@ -155,7 +190,7 @@ static func ornements(imm: Dictionary, graine: int) -> Array:
 
 	# Les balcons : sous une fenêtre sur trois des étages supérieurs, une
 	# dalle qui dépasse et un garde-corps.
-	if style in [PlanVille.F_LOGEMENTS, PlanVille.F_VIEUX] and ny >= 3:
+	if style in [PlanVille.F_LOGEMENTS, PlanVille.F_VIEUX] and ny >= 3 and not creux:
 		for k in range(1, ny - 1):
 			for cote in 4:
 				var le_long := nx if cote < 2 else nz
@@ -194,16 +229,20 @@ static func ornements(imm: Dictionary, graine: int) -> Array:
 	# Le toit : ce que la caméra voit le plus. Un parapet sur les immeubles
 	# sans corniche, puis du désordre — climatiseurs, citerne, antenne, cage
 	# d'escalier, cheminées selon le style.
-	if not corniche and style != PlanVille.F_MAISON and ny >= 2:
+	if not corniche and style != PlanVille.F_MAISON and ny >= 2 and not creux:
 		var y := haut + 0.2 * V
 		var pe := 0.35 * V
 		liste.append([Vector3(o.x + nx * V * 0.5, y, o.z + pe * 0.5), Vector3(float(nx) * V, 0.4 * V, pe), sombre])
 		liste.append([Vector3(o.x + nx * V * 0.5, y, o.z + nz * V - pe * 0.5), Vector3(float(nx) * V, 0.4 * V, pe), sombre])
 		liste.append([Vector3(o.x + pe * 0.5, y, o.z + nz * V * 0.5), Vector3(pe, 0.4 * V, float(nz) * V), sombre])
 		liste.append([Vector3(o.x + nx * V - pe * 0.5, y, o.z + nz * V * 0.5), Vector3(pe, 0.4 * V, float(nz) * V), sombre])
-	if nx >= 2 and nz >= 2 and style != PlanVille.F_MAISON:
+	if nx >= 2 and nz >= 2 and style != PlanVille.F_MAISON and not creux:
+		# Sur un immeuble à retrait, le désordre va sur le toit du haut, plus
+		# petit d'un cube tout autour.
+		var marge := 0.7 if retrait < 0 else 1.7
+		var sommet := o.y + float(ny) * V
 		var libre := func() -> Vector3:
-			return Vector3(o.x + rng.randf_range(0.7, float(nx) - 0.7) * V, haut, o.z + rng.randf_range(0.7, float(nz) - 0.7) * V)
+			return Vector3(o.x + rng.randf_range(marge, float(nx) - marge) * V, sommet, o.z + rng.randf_range(marge, float(nz) - marge) * V)
 		var gris := Color(0.62, 0.63, 0.65)
 		var combien := rng.randi_range(1, 2 if nx * nz < 12 else 4)
 		for c in combien:

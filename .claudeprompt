@@ -75,13 +75,23 @@ rendu et l'interface ; le reste est à côté :
   bord passe à portée du joueur, un par image, libéré au loin. `casser(id,
   locale)` retire un cube et expose ses voisins ; `ville.detruits` est rejoué
   quand un morceau se rebâtit.
+- Les VOIES LIBRES du plan (`voie_libre`, `voie_libre_en`, `_voie_libre_a`) :
+  places en étoile, avenues en diagonale, anneaux — une fonction pure du point,
+  mise en cache par tuile. Une tuile libre l'emporte sur la grille dans `tuile`
+  (après l'eau et le rail) ; un pâté coupé passe par `_bordure`. Le shader du
+  sol reçoit `lignes/origines/anneaux/etoiles` (PackedVector4Array, tailles
+  fixes 7/7/2/3). ⚠ Convention : `s` positif à DROITE de la tangente `d`. Le
+  DÉCALAGE (`DECALAGE`) ferme une transversale sur deux en T ; une rue fermée
+  est une cour traversable.
 - `jeux/carnage/voxels.gd` (`VoxelsCarnage`) — la fabrique de cubes :
   immeubles (grille d'occupation, styles de façade), mobilier, voitures
   (`GABARITS`), personnages animés (`animer`). Deux unités par cube d'immeuble,
   0,5 par cube de voiture, 0,42 par cube de personnage. ⚠ `commun/voxels.gd`
   (`Voxels`) est la fabrique de la FERME, à l'autre session : ne pas confondre.
 - `jeux/carnage/matieres.gd` (`MatieresCarnage`) — les shaders (sol quantifié
-  sur la grille des cubes, voxel biseauté, flaques additives, lumineux) et le
+  sur la grille des cubes, voxel biseauté à SOUS-CUBES d'une unité pour les
+  gros cubes, flaques additives, ombres de contact et traces en `blend_mul`,
+  lumineux, post-traitement vignette/grain via `hint_screen_texture`) et le
   cycle jour/nuit : `nuit()` reprend l'horloge du village (quinze minutes),
   `ambiance()` + `regler_heure()` interpolent ciel, brouillard, soleil et lune
   entre trois heures clés ; `regler_nuit()` pousse l'heure à tous les shaders.
