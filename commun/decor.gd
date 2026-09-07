@@ -265,6 +265,49 @@ static func viser(cam: Camera3D, point: Vector2, inclinaison: float, distance: f
 	var cible := vers3d(point)
 	return cible + Vector3(0, sin(deg_to_rad(inclinaison)) * distance, cos(deg_to_rad(inclinaison)) * distance)
 
+# ------------------------------------------------------------ jauges
+
+## Une barre de vie, posée à plat au-dessus d'un objet.
+##
+## Pas de panneau publicitaire : une jauge orientée vers la caméra doit être
+## réancrée à gauche à chaque image, et l'ancrage se fait alors en espace
+## MONDE — la barre se viderait par le milieu. À la verticale d'une caméra
+## inclinée à septante degrés, un quadrilatère couché se lit très bien, et son
+## remplissage est une simple mise à l'échelle locale.
+static func barre(largeur: float = 3.0, couleur: Color = Palette.BON) -> Node3D:
+	var racine := Node3D.new()
+	racine.add_child(_plaque(largeur + 0.22, 0.62, Color(0, 0, 0, 0.55), "Fond"))
+	var jauge := _plaque(largeur, 0.44, couleur, "Jauge")
+	jauge.position = Vector3(0, 0.02, 0)
+	racine.add_child(jauge)
+	racine.set_meta("largeur", largeur)
+	return racine
+
+static func _plaque(largeur: float, profondeur: float, couleur: Color, nom: String) -> MeshInstance3D:
+	var quad := QuadMesh.new()
+	quad.size = Vector2(largeur, profondeur)
+	var noeud := MeshInstance3D.new()
+	noeud.name = nom
+	noeud.mesh = quad
+	noeud.rotation_degrees = Vector3(-90, 0, 0)   # couché, face au ciel
+	noeud.material_override = matiere_voile(couleur, couleur.a)
+	noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return noeud
+
+## Remplit la jauge de la gauche vers la droite et vire au rouge quand ça
+## devient sérieux — la couleur ne porte jamais seule le sens, la LONGUEUR
+## reste l'information principale.
+static func remplir(barre_noeud: Node3D, part: float) -> void:
+	var jauge := barre_noeud.get_node_or_null("Jauge") as MeshInstance3D
+	if jauge == null:
+		return
+	var largeur: float = barre_noeud.get_meta("largeur", 3.0)
+	var reste: float = clamp(part, 0.0, 1.0)
+	jauge.scale.x = max(reste, 0.001)
+	jauge.position.x = -largeur * 0.5 * (1.0 - reste)
+	var couleur := Palette.BON if reste > 0.55 else (Palette.AVERTISSEMENT if reste > 0.25 else Palette.CRITIQUE)
+	jauge.material_override = matiere_voile(couleur, 0.95)
+
 # ------------------------------------------------------------ étiquettes
 
 static func etiquette(texte: String, couleur: Color = Palette.ENCRE_DOUCE, taille: int = 48) -> Label3D:

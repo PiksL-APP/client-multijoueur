@@ -5,6 +5,12 @@ un jeu de 2 à 4 joueurs avec son score. Le tout tourne dans le navigateur :
 Godot 4.5 exporté en WebAssembly, Supabase Realtime pour le réseau, Vercel pour
 l'hébergement.
 
+**Un mur ne stoppe pas, il fait glisser.** Une collision ne coûte que la part
+de vitesse mise dans la façade, et la voiture se réaligne dessus quand on la
+frôle. Le braquage atteint son plein dès 165 px/s : avant, la voiture ne
+tournait qu'à pleine vitesse, ce qui la rendait inconduisible dans des rues de
+cent quarante pixels.
+
 **La ville se déduit du code de la manche**, jamais du réseau : même code, même
 plan, chez tout le monde et à tout instant. Diffuser le plan aurait coûté
 plusieurs kilo-octets par partie et un cas de plus pour qui rejoint en retard.
@@ -27,7 +33,7 @@ En ligne : **https://multijoueur.piks-l.com**
 | | |
 | --- | --- |
 | **Hub** | Monde partagé. On s'y croise, on lit les meilleurs scores affichés au pied de chaque portail, on entre par `E`. |
-| **CARNAGE** | Une ville ouverte — vingt-deux par seize tuiles, une rue tous les quatre pas, une ceinture de verdure, pas de mur : on est ramené vers le centre si on part dans la friche. Écraser un monstre rapporte, mais seulement lancé : sous 210 px/s c'est le monstre qui gagne l'échange. Les enchaînements en moins de 2,5 s multiplient jusqu'à ×5. Trois armes se ramassent au sol — mitraillette, roquettes, éperon (qui fait écraser presque à l'arrêt). Manche de 2 min 30. |
+| **CARNAGE** | Une ville ouverte — vingt-deux par seize tuiles, une rue tous les quatre pas, une ceinture de verdure, pas de mur : on est ramené vers le centre si on part dans la friche. Écraser un monstre rapporte, mais seulement lancé : sous 210 px/s c'est le monstre qui gagne l'échange. Les enchaînements en moins de 2,5 s multiplient jusqu'à ×5. Trois armes se ramassent au sol — mitraillette, roquettes, éperon (qui fait écraser presque à l'arrêt). Cent points de vie, un monstre en coûte vingt-deux, ça repart tout seul après cinq secondes sans coup ; à zéro on est hors service trois secondes et demie. Manche de 2 min 30. |
 | **ÉNIGME** | Coopératif, trois chambres. Une dalle ne reste enfoncée que si quelqu'un — ou une caisse — pèse dessus, et la sortie d'une chambre n'accepte l'équipe qu'au complet. 3 minutes. |
 
 Les deux portails restants sont éteints : ils marquent la place des jeux
@@ -183,7 +189,10 @@ cassent le chargement de ressources tierces. Pour de la 2D, on n'y perd rien.
 - Deux ressources binaires au dépôt, et pas une de plus : `modeles/volvo-242.glb`
   (décimée de 44 000 à 5 900 triangles depuis un STL de modélisme) et
   `modeles/ville/` — le [kit de ville de Kenney](https://github.com/KenneyNL/Starter-Kit-City-Builder),
-  CC0, quinze tuiles pour 412 Ko. Le reste du décor est fabriqué en code.
+  CC0, quinze tuiles pour 412 Ko — **avec `modeles/ville/Textures/colormap.png`** :
+  les glTF de Kenney référencent leur atlas en fichier EXTERNE, et copier les
+  seuls maillages donne une ville entièrement blanche, sans le moindre message
+  d'erreur. Le reste du décor est fabriqué en code.
   La ville est posée en **nappes** (`MultiMeshInstance3D`) : quatre cents
   tuiles dessinées une par une, c'est quatre cents appels de dessin par image,
   ce qui ne passe pas dans un navigateur en mode compatibilité. Regroupées par
