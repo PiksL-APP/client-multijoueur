@@ -16,6 +16,10 @@ enum { ATTENTE, DECOMPTE, JEU, FIN }
 const DECOMPTE_S := 3.0
 const ATTENTE_MAX := 8.0
 
+## Raccourci de manche, réservé au banc d'essai (`--manche=<secondes>`).
+## Attendre deux minutes par vérification, personne ne le fait deux fois.
+static var duree_forcee := 0.0
+
 var jeu: String = ""
 var titre: String = ""
 var code: String = ""
@@ -31,7 +35,9 @@ var _hud_chrono: Label
 var _hud_scores: Label
 var _hud_message: Label
 var _hud_aide: Label
+var _hud_etat_joueur: Label
 var _hud_etat: HBoxContainer
+var _dernier_bip := 99
 
 # ------------------------------------------------------- à redéfinir
 
@@ -39,6 +45,11 @@ func duree_manche() -> float:
 	return 120.0
 
 func aide() -> String:
+	return ""
+
+## Une ligne d'état propre au jeu : arme en main, chambre en cours… Affichée
+## au-dessus de l'aide, elle change souvent alors que l'aide ne change jamais.
+func etat_joueur() -> String:
 	return ""
 
 func preparer() -> void:
@@ -53,7 +64,10 @@ func simuler_hote(_delta: float) -> void:
 func recevoir(_evenement: String, _charge: Dictionary) -> void:
 	pass
 
-func dessiner_scene() -> void:
+## Appelée chaque image : les écrans de jeu y replacent leurs objets 3D. Le
+## rendu est séparé de la simulation pour que l'interpolation d'affichage
+## n'aille jamais polluer l'état partagé.
+func rafraichir_scene(_delta: float) -> void:
 	pass
 
 func classement_final() -> Array:
@@ -61,7 +75,8 @@ func classement_final() -> Array:
 	for cle in joueurs:
 		var j: Dictionary = joueurs[cle]
 		lignes.append({
-			"joueur_id": cle,
+			# Le score se rattache à l'identité stable, pas à la clé d'onglet.
+			"joueur_id": String(j.get("id", cle)),
 			"pseudo": String(j.get("pseudo", "?")),
 			"score": int(j.get("score", 0)),
 			"place": int(j.get("place", 0)),
@@ -80,12 +95,16 @@ func demarrer() -> void:
 	for membre in equipe:
 		var cle := String(membre.get("cle", ""))
 		if cle != "":
-			joueurs[cle] = {"pseudo": String(membre.get("pseudo", "?")), "place": 0, "score": 0}
+			joueurs[cle] = {
+				"pseudo": String(membre.get("pseudo", "?")),
+				"id": String(membre.get("id", cle)),
+				"place": 0, "score": 0,
+			}
 
 	_construire_hud()
 	preparer()
 
-	canal = Reseau.rejoindre("mj-jeu-%s-%s" % [jeu, code], {"pseudo": Session.pseudo})
+	canal = Reseau.rejoindre("mj-jeu-%s-%s" % [jeu, code], {"pseudo": Session.pseudo, "id": Session.id})
 	canal.presences_changees.connect(_sur_presences)
 	canal.diffusion.connect(_sur_diffusion)
 
@@ -93,11 +112,14 @@ func _exit_tree() -> void:
 	if canal:
 		canal.quitter()
 
+func duree_reelle() -> float:
+	return duree_forcee if duree_forcee > 0.0 else duree_manche()
+
 func est_hote() -> bool:
 	return canal != null and canal.je_suis_hote()
 
 func ma_place() -> int:
-	return int(joueurs.get(Session.id, {}).get("place", 0))
+	return int(joueurs.get(Session.cle, {}).get("place", 0))
 
 func _sur_presences(presences: Dictionary) -> void:
 	var cles := canal.cles_triees()
@@ -106,8 +128,9 @@ func _sur_presences(presences: Dictionary) -> void:
 	# dix secondes de la fin.
 	for cle in presences:
 		if not joueurs.has(cle):
-			joueurs[cle] = {"pseudo": "?", "place": 0, "score": 0}
+			joueurs[cle] = {"pseudo": "?", "id": cle, "place": 0, "score": 0}
 		joueurs[cle]["pseudo"] = String(presences[cle].get("pseudo", "?"))
+		joueurs[cle]["id"] = String(presences[cle].get("id", joueurs[cle].get("id", cle)))
 	for cle in joueurs:
 		var place := cles.find(cle)
 		if place >= 0:
@@ -143,18 +166,24 @@ func _process(delta: float) -> void:
 				_decompte = DECOMPTE_S
 		DECOMPTE:
 			_decompte -= delta
+			var seconde := int(ceil(_decompte))
+			if seconde != _dernier_bip:
+				_dernier_bip = seconde
+				Sons.jouer("bip", 1.0, -10.0)
 			if _decompte <= 0.0:
 				phase = JEU
 				temps = 0.0
+				Sons.jouer("depart", 1.0, -6.0)
+				Sons.demarrer_moteur()
 		JEU:
 			temps += delta
 			simuler_local(delta)
 			if est_hote():
 				simuler_hote(delta)
-				if temps >= duree_manche():
+				if temps >= duree_reelle():
 					terminer("Temps écoulé.")
 	_rafraichir_hud()
-	queue_redraw()
+	rafraichir_scene(delta)
 
 ## Fin de manche : seul l'hôte l'appelle. Il diffuse le classement ET le dépose,
 ## une fois. Quatre clients qui déposent, c'est quatre parties en base pour une
@@ -172,10 +201,12 @@ func terminer(note: String) -> void:
 			"pseudo": ligne["pseudo"],
 			"score": ligne["score"],
 		})
-	Scores.deposer(jeu, code, int(min(temps, duree_manche())), resultats)
+	Scores.deposer(jeu, code, int(max(5.0, min(temps, duree_manche()))), resultats)
 	_afficher_resultats(lignes, note)
 
 func _afficher_resultats(lignes, note: String) -> void:
+	Sons.arreter_moteur()
+	Sons.jouer("fin", 1.0, -6.0)
 	await get_tree().create_timer(1.2).timeout
 	if not is_inside_tree():
 		return
@@ -195,9 +226,13 @@ func ajouter_score(cle: String, points: int) -> void:
 
 # ------------------------------------------------------- interface
 
+func _unhandled_input(evenement: InputEvent) -> void:
+	if evenement is InputEventKey and evenement.pressed and not evenement.echo and evenement.keycode == KEY_M:
+		Sons.basculer()
+		_rafraichir_hud()
+
 func _construire_hud() -> void:
-	var couche := CanvasLayer.new()
-	add_child(couche)
+	var couche := interface()
 
 	var haut := HBoxContainer.new()
 	haut.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -214,6 +249,9 @@ func _construire_hud() -> void:
 	haut.add_child(_hud_scores)
 	_hud_etat = UI.etat_reseau()
 	haut.add_child(_hud_etat)
+	var son := UI.texte("", 13, Palette.ENCRE_FAIBLE)
+	son.name = "Son"
+	haut.add_child(son)
 
 	var bas := VBoxContainer.new()
 	bas.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
@@ -222,6 +260,8 @@ func _construire_hud() -> void:
 	bas.offset_top = -70
 	bas.offset_bottom = -18
 	couche.add_child(bas)
+	_hud_etat_joueur = UI.texte("", 16, Palette.ENCRE)
+	bas.add_child(_hud_etat_joueur)
 	_hud_aide = UI.texte(aide(), 14, Palette.ENCRE_FAIBLE)
 	bas.add_child(_hud_aide)
 
@@ -237,7 +277,10 @@ func _rafraichir_hud() -> void:
 	if _hud_chrono == null:
 		return
 	UI.rafraichir_etat_reseau(_hud_etat)
-	var restant := max(0.0, duree_manche() - temps)
+	var son := _hud_etat.get_parent().get_node_or_null("Son") as Label
+	if son:
+		son.text = "M : son " + ("actif" if Sons.actif else "coupé")
+	var restant: float = max(0.0, duree_reelle() - temps)
 	_hud_chrono.text = "%d:%02d" % [int(restant) / 60, int(restant) % 60]
 	_hud_chrono.add_theme_color_override("font_color",
 		Palette.CRITIQUE if restant <= 15.0 and phase == JEU else Palette.ENCRE)
@@ -247,9 +290,11 @@ func _rafraichir_hud() -> void:
 	cles.sort_custom(func(a, b): return int(joueurs[a]["place"]) < int(joueurs[b]["place"]))
 	for cle in cles:
 		var j: Dictionary = joueurs[cle]
-		var marque := "▸ " if cle == Session.id else ""
+		var marque := "▸ " if cle == Session.cle else ""
 		morceaux.append("%s%s %d" % [marque, String(j["pseudo"]), int(j["score"])])
 	_hud_scores.text = "     ".join(morceaux)
+
+	_hud_etat_joueur.text = etat_joueur()
 
 	match phase:
 		ATTENTE:
@@ -260,6 +305,3 @@ func _rafraichir_hud() -> void:
 			_hud_message.text = "Terminé"
 		_:
 			_hud_message.text = ""
-
-func _draw() -> void:
-	dessiner_scene()

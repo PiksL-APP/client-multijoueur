@@ -16,3 +16,7 @@ sortie/index.wasm.part*
 # trois `.import` dans le dossier d'export, et l'export suivant embarque ses
 # propres icônes dans le pack.
 sortie/*.import
+
+# Ce que `device_bash` ne peut pas effacer : le pont du poste n'a pas le droit
+# de supprimer, on déplace ici et on vide à la main.
+_to_delete/

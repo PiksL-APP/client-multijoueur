@@ -10,6 +10,15 @@ signal etat_change(nouvel_etat: int)
 
 enum { HORS_LIGNE, CONNEXION, EN_LIGNE }
 
+## Le serveur n'envoie PAS l'état de présence à celui qui arrive : il ne
+## diffuse que les différences qui SUIVENT la jonction. Vérifié au fil : un
+## second client rejoint un canal peuplé et reçoit son propre `presence_diff`,
+## rien d'autre — il se croit seul, et les autres le voient sans qu'il les
+## voie. On règle ça par une salutation : en arrivant on se signale, et
+## quiconque ne nous connaissait pas encore répond une fois. Trois messages,
+## et tout le monde a la même liste.
+const EVENEMENT_ICI := "__ici"
+
 const DELAI_BATTEMENT := 25.0          ## le serveur coupe à 60 s de silence
 const DELAIS_RECONNEXION := [1.0, 2.0, 4.0, 8.0, 15.0]
 
@@ -85,7 +94,7 @@ func rejoindre(nom: String, meta: Dictionary = {}) -> CanalTempsReel:
 	var canal := CanalTempsReel.new()
 	canal.nom = nom
 	canal.topic = topic
-	canal.cle = Session.id
+	canal.cle = Session.cle
 	canal.meta = meta
 	_canaux[topic] = canal
 
@@ -121,9 +130,28 @@ func diffuser(canal: CanalTempsReel, evenement: String, charge: Dictionary) -> v
 		"ref": _ref(),
 	})
 
+## Se signaler aux autres. La présence côté serveur reste la source de vérité
+## pour les DÉPARTS (elle seule voit une connexion tomber) ; la salutation ne
+## sert qu'aux arrivées.
+func _saluer(canal: CanalTempsReel) -> void:
+	diffuser(canal, EVENEMENT_ICI, canal.meta)
+
+func _accueillir(canal: CanalTempsReel, meta: Dictionary) -> void:
+	var cle := String(meta.get("cle", ""))
+	if cle == "" or cle == canal.cle:
+		return
+	var inconnu := not canal.presences.has(cle)
+	canal.presences[cle] = meta.duplicate()
+	canal.presences_changees.emit(canal.presences)
+	# On ne répond qu'à qui ne nous connaissait pas : sans ce test, deux
+	# clients se saluent en boucle jusqu'à saturer le canal.
+	if inconnu:
+		_saluer(canal)
+
 func suivre_presence(canal: CanalTempsReel) -> void:
 	if etat != EN_LIGNE or not canal.est_rejoint:
 		return
+	_saluer(canal)
 	_envoyer({
 		"topic": canal.topic,
 		"event": "presence",
@@ -177,11 +205,18 @@ func _recevoir(texte: String) -> void:
 					canal.rejoint.emit()
 					if not canal.meta.is_empty():
 						suivre_presence(canal)
+						_saluer(canal)
 				else:
 					push_warning("Jonction refusée sur %s : %s" % [topic, JSON.stringify(charge)])
 		"broadcast":
 			var interne = charge.get("payload", {})
-			canal.diffusion.emit(String(charge.get("event", "")), interne if typeof(interne) == TYPE_DICTIONARY else {})
+			if typeof(interne) != TYPE_DICTIONARY:
+				interne = {}
+			var nom_evenement := String(charge.get("event", ""))
+			if nom_evenement == EVENEMENT_ICI:
+				_accueillir(canal, interne)
+			else:
+				canal.diffusion.emit(nom_evenement, interne)
 		"presence_state":
 			canal.presences.clear()
 			for cle in charge.keys():

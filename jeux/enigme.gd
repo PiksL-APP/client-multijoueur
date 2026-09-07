@@ -20,6 +20,12 @@ const PORTEE_DALLE := 46.0
 const CADENCE_ENVOI := 1.0 / 12.0
 const CADENCE_ETAT := 1.0 / 9.0
 
+const TUILE := 64.0                          ## pas de la trame, en pixels de jeu
+const PAVE := "res://modeles/ville/pavement.glb"
+const MUR := "res://modeles/creatures/wall-high.glb"
+const TEINTE_SOL := Color(0.55, 0.60, 0.72)
+const TEINTE_MUR := Color(0.62, 0.66, 0.78)
+
 var _chambre := 0
 var _position := Vector2(140, 448)
 var _autres: Dictionary = {}       # cle -> {p, cible}
@@ -32,23 +38,68 @@ var _depuis_etat := 0.0
 var _chambres_faites := 0
 var _score_equipe := 0
 var _message := ""
-var _camera: Camera2D
+var _camera: Camera3D
+var _corps: Node3D
+var _decor_chambre: Node3D
+var _noeuds_dalles: Dictionary = {}
+var _noeuds_caisses: Dictionary = {}
+var _noeud_porte: Node3D
 
 func duree_manche() -> float:
 	return DUREE
 
+func etat_joueur() -> String:
+	return _message
+
 func aide() -> String:
 	return "Z Q S D ou les flèches · marcher dans une caisse la pousse · une dalle ne compte que si quelque chose pèse dessus · la sortie n'accepte l'équipe qu'au complet."
 
+const INCLINAISON := 55.0
+const DISTANCE := 124.0
+
 func preparer() -> void:
-	_camera = Camera2D.new()
-	_camera.zoom = Vector2(0.8, 0.8)
-	_camera.position = MONDE.get_center()
-	add_child(_camera)
+	Tactile.mode = Tactile.MARCHE
+	poser_ambiance(true, 1.0)
+	_camera = Decor.camera(INCLINAISON, DISTANCE, 50.0)
+	_camera.position = Decor.viser(_camera, MONDE.get_center() + Vector2(0, 40), INCLINAISON, DISTANCE)
+	monde().add_child(_camera)
 	_camera.make_current()
+
+	_corps = _batir_marcheur(Palette.couleur_joueur(ma_place()), Session.pseudo)
+	monde().add_child(_corps)
+
 	_charger_chambre(0)
 
-# ------------------------------------------------------- les chambres
+func _batir_marcheur(couleur: Color, pseudo: String) -> Node3D:
+	var racine := Node3D.new()
+	var halo := Decor.anneau(RAYON * Decor.ECHELLE * 1.5, 0.18, couleur, 0.95)
+	halo.rotation_degrees = Vector3(90, 0, 0)
+	halo.position = Vector3(0, 0.06, 0)
+	racine.add_child(halo)
+
+	var corps := Decor.personnage(couleur, 3.2)
+	corps.name = "Silhouette"
+	racine.add_child(corps)
+
+	if pseudo != "":
+		var nom := Decor.etiquette(pseudo, Palette.ENCRE_DOUCE, 30)
+		nom.name = "Nom"
+		nom.position = Vector3(0, 5.2, 0)
+		racine.add_child(nom)
+	return racine
+
+## La démarche suit le déplacement réel, pas la touche : c'est ce qui fait
+## qu'un joueur bloqué contre un mur cesse de mouliner des jambes.
+func _animer(porteur: Node3D, pas: Vector2, delta: float) -> void:
+	var silhouette := porteur.get_node_or_null("Silhouette") as Node3D
+	if silhouette == null:
+		return
+	if pas.length() > 6.0:
+		silhouette.rotation.y = lerp_angle(silhouette.rotation.y,
+			atan2(pas.x, pas.y), clamp(delta * 12.0, 0, 1))
+		Decor.demarche(silhouette, "walk")
+	else:
+		Decor.demarche(silhouette, "idle")
 
 func _plan(indice: int) -> Dictionary:
 	match indice:
@@ -81,8 +132,8 @@ func _plan(indice: int) -> Dictionary:
 				"portes": [{"id": 1, "dalles": [1, 2, 3], "verrou": true}],
 			}
 
-func _murs() -> Array:
-	return [
+func _murs() -> Array[Rect2]:
+	var liste: Array[Rect2] = [
 		Rect2(0, 0, MONDE.size.x, 32),
 		Rect2(0, MONDE.size.y - 32, MONDE.size.x, 32),
 		Rect2(0, 0, 32, MONDE.size.y),
@@ -90,6 +141,7 @@ func _murs() -> Array:
 		Rect2(832, 32, 32, 288),
 		Rect2(832, 576, 32, 288),
 	]
+	return liste
 
 func _rect_porte() -> Rect2:
 	return Rect2(832, 320, 32, 256)
@@ -105,7 +157,8 @@ func _charger_chambre(indice: int) -> void:
 	for p in plan["portes"]:
 		_portes.append({"id": int(p["id"]), "dalles": p["dalles"], "verrou": bool(p["verrou"]), "ouverte": false})
 	_pressees = {}
-	_message = "Chambre %d — %s\n%s" % [indice + 1, String(plan["nom"]), String(plan["consigne"])]
+	_message = "Chambre %d — %s   ·   %s" % [indice + 1, String(plan["nom"]), String(plan["consigne"])]
+	_batir_chambre()
 	# Les joueurs repartent en colonne à gauche : personne ne se réveille de
 	# l'autre côté d'une porte qu'il n'a pas ouverte.
 	_position = Vector2(120, 340 + ma_place() * 72)
@@ -113,16 +166,96 @@ func _charger_chambre(indice: int) -> void:
 		_autres[cle]["p"] = Vector2(120, 340)
 		_autres[cle]["cible"] = _autres[cle]["p"]
 
+## Le décor d'une chambre est reconstruit d'un bloc. Recycler les maillages
+## d'une chambre à l'autre économiserait quelques allocations et coûterait un
+## suivi d'état à chaque élément — pour trois chambres, ça ne vaut pas le
+## risque d'en laisser un dans l'état de la précédente.
+func _batir_chambre() -> void:
+	if _decor_chambre:
+		_decor_chambre.queue_free()
+	_noeuds_dalles.clear()
+	_noeuds_caisses.clear()
+	_decor_chambre = Node3D.new()
+	monde().add_child(_decor_chambre)
+
+	# Un dallage plutôt qu'un plan nu : la chambre a une trame, donc une
+	# échelle, et on voit qu'on avance. Le plan uni ne le donnait pas.
+	var dalles: Array = []
+	var cote := TUILE * Decor.ECHELLE
+	var colonnes := int(MONDE.size.x / TUILE)
+	var rangees := int(MONDE.size.y / TUILE)
+	for c in colonnes:
+		for r in rangees:
+			var centre := Vector2(c + 0.5, r + 0.5) * TUILE
+			dalles.append(Transform3D(Basis().scaled(Vector3.ONE * cote), Decor.vers3d(centre)))
+	_decor_chambre.add_child(Decor.nappe(PAVE, dalles, false, TEINTE_SOL))
+
+	# Les murs sont pavés du même kit : un parallélépipède gris n'a ni
+	# épaisseur lisible ni ombre franche, et la chambre paraissait plate.
+	var pans: Array = []
+	for mur: Rect2 in _murs():
+		var longueur: float = max(mur.size.x, mur.size.y)
+		var horizontal: bool = mur.size.x >= mur.size.y
+		var nombre: int = max(1, int(round(longueur / TUILE)))
+		for i in nombre:
+			var glissement := (float(i) + 0.5) / float(nombre)
+			var centre: Vector2 = mur.position + (Vector2(mur.size.x, 0) if horizontal else Vector2(0, mur.size.y)) * glissement
+			centre += Vector2(0, mur.size.y * 0.5) if horizontal else Vector2(mur.size.x * 0.5, 0)
+			var base := Basis(Vector3.UP, 0.0 if horizontal else PI * 0.5)
+			# Le pan fait 1,5 de large pour 1,7 de haut : on l'étire sur le
+			# pas de la trame et on garde la hauteur du kit.
+			base = base.scaled(Vector3(cote / 1.5, 3.4, cote / 1.5))
+			pans.append(Transform3D(base, Decor.vers3d(centre)))
+	_decor_chambre.add_child(Decor.nappe(MUR, pans, true, TEINTE_MUR))
+
+	var rect := _rect_porte()
+	_noeud_porte = Decor.boite(
+		Vector3(rect.size.x * Decor.ECHELLE, 5.6, rect.size.y * Decor.ECHELLE),
+		Palette.SERIEUX.darkened(0.2))
+	_noeud_porte.material_override = Decor.matiere_lumineuse(Palette.SERIEUX, 0.75)
+	_noeud_porte.position = Decor.vers3d(rect.get_center(), 2.8)
+	_decor_chambre.add_child(_noeud_porte)
+
+	for dalle in _dalles:
+		var support := Node3D.new()
+		support.position = Decor.vers3d(dalle["p"])
+		var disque := Decor.cylindre(PORTEE_DALLE * Decor.ECHELLE, 0.35, Palette.AVERTISSEMENT.darkened(0.5), false)
+		disque.position = Vector3(0, 0.18, 0)
+		disque.name = "Disque"
+		support.add_child(disque)
+		var cercle := Decor.anneau(PORTEE_DALLE * Decor.ECHELLE, 0.22, Palette.AVERTISSEMENT, 0.9)
+		cercle.rotation_degrees = Vector3(90, 0, 0)
+		cercle.position = Vector3(0, 0.4, 0)
+		cercle.name = "Cercle"
+		support.add_child(cercle)
+		_decor_chambre.add_child(support)
+		_noeuds_dalles[int(dalle["id"])] = support
+
+	for caisse in _caisses:
+		var cote_caisse := DEMI_CAISSE * 2.0 * Decor.ECHELLE
+		var boite := Decor.boite(Vector3(cote_caisse, cote_caisse, cote_caisse), Color("#8a6a41"))
+		boite.position = Decor.vers3d(caisse["p"], cote_caisse * 0.5)
+		_decor_chambre.add_child(boite)
+		var cerclage := Decor.boite(Vector3(cote_caisse * 1.06, cote_caisse * 0.16, cote_caisse * 1.06), Color("#c9a266"))
+		cerclage.position = Vector3(0, 0, 0)
+		boite.add_child(cerclage)
+		_noeuds_caisses[int(caisse["id"])] = boite
+
+	var sortie := Decor.boite(
+		Vector3(SORTIE.size.x * Decor.ECHELLE, 0.2, SORTIE.size.y * Decor.ECHELLE), Palette.BON)
+	sortie.material_override = Decor.matiere_lumineuse(Palette.BON, 0.6, 0.4)
+	sortie.position = Decor.vers3d(SORTIE.get_center(), 0.12)
+	_decor_chambre.add_child(sortie)
+	var mention := Decor.etiquette("SORTIE — tous ensemble", Palette.BON, 52)
+	mention.position = Decor.vers3d(SORTIE.get_center(), 5.5)
+	_decor_chambre.add_child(mention)
+
 # ------------------------------------------------------- simulation locale
 
 func simuler_local(delta: float) -> void:
-	var direction := Vector2.ZERO
-	if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): direction.y -= 1
-	if Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): direction.y += 1
-	if Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT): direction.x -= 1
-	if Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): direction.x += 1
+	var direction := Commandes.direction()
 	if direction != Vector2.ZERO:
-		_position += direction.normalized() * VITESSE * delta
+		_position += direction * VITESSE * delta
 		_degager()
 
 	for cle in _autres:
@@ -263,7 +396,7 @@ func _evaluer_sortie(positions: Array) -> void:
 		for cle in joueurs:
 			joueurs[cle]["score"] = _score_equipe
 			canal.envoyer("score", {"j": cle, "s": _score_equipe})
-		terminer("Les trois chambres, à %d secondes de la fin." % int(duree_manche() - temps))
+		terminer("Les trois chambres, à %d secondes de la fin." % int(duree_reelle() - temps))
 	else:
 		canal.envoyer("chambre", {"c": _chambre + 1})
 		_charger_chambre(_chambre + 1)
@@ -279,7 +412,7 @@ func _annoncer_progression() -> void:
 ## assez pour récompenser une équipe qui parle, pas assez pour transformer
 ## l'énigme en course.
 func _calculer_score() -> int:
-	return _chambres_faites * 300 + int(max(0.0, duree_manche() - temps) * 4.0)
+	return _chambres_faites * 300 + int(max(0.0, duree_reelle() - temps) * 4.0)
 
 # ------------------------------------------------------- réception
 
@@ -287,7 +420,7 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 	match evenement:
 		"p":
 			var cle := String(charge.get("cle", ""))
-			if cle == "" or cle == Session.id:
+			if cle == "" or cle == Session.cle:
 				return
 			var cible := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
 			if not _autres.has(cle):
@@ -324,72 +457,52 @@ func _appliquer_etat(charge: Dictionary) -> void:
 
 # ------------------------------------------------------- rendu
 
-func dessiner_scene() -> void:
-	draw_rect(MONDE, Color("#111110"), true)
-	var pas := 64
-	var x := 0
-	while x <= int(MONDE.size.x):
-		draw_line(Vector2(x, 0), Vector2(x, MONDE.size.y), Color(1, 1, 1, 0.03), 1.0)
-		x += pas
-	var y := 0
-	while y <= int(MONDE.size.y):
-		draw_line(Vector2(0, y), Vector2(MONDE.size.x, y), Color(1, 1, 1, 0.03), 1.0)
-		y += pas
-
-	# La sortie : hachurée tant que l'équipe n'est pas au complet dedans.
-	draw_rect(SORTIE, Color(Palette.BON, 0.10), true)
-	draw_rect(SORTIE, Palette.BON, false, 2.0)
-	var police := Palette.police()
-	draw_string(police, SORTIE.position + Vector2(24, -14), "SORTIE — tous ensemble",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Palette.BON)
-
-	for mur in _murs():
-		draw_rect(mur, Palette.SURFACE, true)
-		draw_rect(mur, Color(1, 1, 1, 0.10), false, 1.0)
-
-	for porte in _portes:
-		var rect := _rect_porte()
-		if porte["ouverte"]:
-			draw_rect(rect, Color(Palette.BON, 0.12), true)
-			draw_rect(rect, Color(Palette.BON, 0.55), false, 2.0)
-		else:
-			draw_rect(rect, Palette.SERIEUX.darkened(0.45), true)
-			draw_rect(rect, Palette.SERIEUX, false, 2.0)
-			for i in 5:
-				var yy := rect.position.y + 24 + i * 52
-				draw_line(Vector2(rect.position.x + 4, yy), Vector2(rect.end.x - 4, yy), Color(Palette.SERIEUX, 0.7), 2.0)
-
-	for dalle in _dalles:
-		var centre: Vector2 = dalle["p"]
-		var active := _pressees.has(int(dalle["id"]))
-		var couleur := Palette.BON if active else Palette.AVERTISSEMENT
-		draw_circle(centre, PORTEE_DALLE, Color(couleur, 0.10 if not active else 0.22))
-		draw_arc(centre, PORTEE_DALLE, 0, TAU, 32, Color(couleur, 0.9), 3.0, true)
-		draw_circle(centre, 8.0, couleur)
+func rafraichir_scene(delta: float) -> void:
+	var pas_local := _position - Vector2(_corps.position.x, _corps.position.z) / Decor.ECHELLE
+	_corps.position = Decor.vers3d(_position)
+	_animer(_corps, pas_local / max(delta, 0.001) * 0.016, delta)
+	for cle in _autres:
+		var a: Dictionary = _autres[cle]
+		var noeud = a.get("noeud")
+		if noeud == null:
+			noeud = _batir_marcheur(
+				Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 1))),
+				String(joueurs.get(cle, {}).get("pseudo", "")))
+			monde().add_child(noeud)
+			a["noeud"] = noeud
+		var avant := Vector2((noeud as Node3D).position.x, (noeud as Node3D).position.z) / Decor.ECHELLE
+		(noeud as Node3D).position = Decor.vers3d(a["p"])
+		_animer(noeud as Node3D, ((a["p"] as Vector2) - avant) / max(delta, 0.001) * 0.016, delta)
 
 	for caisse in _caisses:
-		var p: Vector2 = caisse["p"]
-		draw_rect(Rect2(p - Vector2(DEMI_CAISSE, DEMI_CAISSE) + Vector2(0, 5), Vector2(DEMI_CAISSE, DEMI_CAISSE) * 2.0), Color(0, 0, 0, 0.35), true)
-		draw_rect(Rect2(p - Vector2(DEMI_CAISSE, DEMI_CAISSE), Vector2(DEMI_CAISSE, DEMI_CAISSE) * 2.0), Palette.ENCRE_FAIBLE.darkened(0.25), true)
-		draw_rect(Rect2(p - Vector2(DEMI_CAISSE, DEMI_CAISSE), Vector2(DEMI_CAISSE, DEMI_CAISSE) * 2.0), Palette.ENCRE_DOUCE, false, 2.0)
-		draw_line(p - Vector2(DEMI_CAISSE, DEMI_CAISSE), p + Vector2(DEMI_CAISSE, DEMI_CAISSE), Color(1, 1, 1, 0.18), 2.0)
+		var boite = _noeuds_caisses.get(int(caisse["id"]))
+		if boite:
+			var cote := DEMI_CAISSE * 2.0 * Decor.ECHELLE
+			(boite as Node3D).position = Decor.vers3d(caisse["p"], cote * 0.5)
 
-	for cle in _autres:
-		_dessiner_marcheur(_autres[cle]["p"],
-			Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 1))),
-			String(joueurs.get(cle, {}).get("pseudo", "")))
-	_dessiner_marcheur(_position, Palette.couleur_joueur(ma_place()), Session.pseudo)
+	# Une dalle enfoncée s'enfonce vraiment, et s'allume : la couleur seule ne
+	# suffirait pas à distinguer les deux états d'un coup d'œil en perspective.
+	for dalle in _dalles:
+		var id := int(dalle["id"])
+		var support = _noeuds_dalles.get(id)
+		if support == null:
+			continue
+		var active := _pressees.has(id)
+		var disque := (support as Node3D).get_node_or_null("Disque") as MeshInstance3D
+		var cercle := (support as Node3D).get_node_or_null("Cercle") as MeshInstance3D
+		if disque:
+			disque.position.y = lerp(disque.position.y, 0.06 if active else 0.18, clamp(delta * 10.0, 0, 1))
+			disque.material_override = Decor.matiere(
+				(Palette.BON if active else Palette.AVERTISSEMENT).darkened(0.45))
+		if cercle:
+			cercle.material_override = Decor.matiere_lumineuse(
+				Palette.BON if active else Palette.AVERTISSEMENT, 1.25 if active else 0.7)
 
-	if _message != "":
-		draw_string(police, Vector2(40, MONDE.size.y + 46), _message.replace("\n", "   —   "),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Palette.ENCRE_DOUCE)
-
-func _dessiner_marcheur(position: Vector2, couleur: Color, pseudo: String) -> void:
-	draw_circle(position + Vector2(0, 6), RAYON * 0.9, Color(0, 0, 0, 0.35))
-	draw_circle(position, RAYON, couleur)
-	draw_arc(position, RAYON + 3.0, 0, TAU, 28, Palette.FOND, 3.0, true)
-	if pseudo != "":
-		var police := Palette.police()
-		var largeur := police.get_string_size(pseudo, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-		draw_string(police, position + Vector2(-largeur * 0.5, -RAYON - 10), pseudo,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Palette.ENCRE_DOUCE)
+	if _noeud_porte:
+		var ouverte := false
+		for porte in _portes:
+			if porte["ouverte"]:
+				ouverte = true
+		var hauteur: float = 2.8 if not ouverte else -3.2
+		_noeud_porte.position.y = lerp(_noeud_porte.position.y, hauteur, clamp(delta * 4.0, 0, 1))
+		_noeud_porte.visible = _noeud_porte.position.y > -3.0

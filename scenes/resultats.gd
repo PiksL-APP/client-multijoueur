@@ -3,7 +3,7 @@ extends Ecran
 ## écran ne fait que montrer, sinon quatre clients déposeraient quatre fois.
 
 func demarrer() -> void:
-	UI.fond(self)
+	UI.fond(interface())
 	var titre := String(donnees.get("titre", "Manche terminée"))
 	var lignes: Array = donnees.get("classement", [])
 	var jeu := String(donnees.get("jeu", "carnage"))
@@ -11,7 +11,7 @@ func demarrer() -> void:
 
 	var centre := CenterContainer.new()
 	centre.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(centre)
+	interface().add_child(centre)
 
 	var panneau := UI.panneau()
 	centre.add_child(panneau)
