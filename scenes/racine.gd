@@ -20,6 +20,10 @@ func _ready() -> void:
 	if "--banc" in arguments:
 		_banc_d_essai()
 		return
+	var dossier_photos := _argument(arguments, "--photo")
+	if dossier_photos != "":
+		_photographier(dossier_photos)
+
 	var jeu := _argument(arguments, "--banc-jeu")
 	if jeu != "":
 		_banc_partie(jeu, float(_argument(arguments, "--manche", "25")))
@@ -47,6 +51,19 @@ func _banc_d_essai() -> void:
 			vus = hub.nombre_de_joueurs()
 		print("[banc] t=%ds reseau=%s joueurs_vus=%d" % [i + 1, Reseau.libelle_etat(), vus])
 	get_tree().quit()
+
+## Photographies périodiques de l'écran, pour contrôler le rendu d'un jeu sans
+## y jouer à la main : `godot --path . --photo=/tmp/vues`, sous un serveur X
+## virtuel au besoin. Un export qui compile ne prouve rien sur ce qui s'affiche.
+func _photographier(dossier: String) -> void:
+	DirAccess.make_dir_recursive_absolute(dossier)
+	var numero := 0
+	while numero < 40:
+		await get_tree().create_timer(5.0).timeout
+		await RenderingServer.frame_post_draw
+		var image := get_viewport().get_texture().get_image()
+		image.save_png("%s/%02d.png" % [dossier, numero])
+		numero += 1
 
 ## Banc de partie : `godot --headless -- --banc-jeu=carnage --manche=25`.
 ##

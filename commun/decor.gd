@@ -96,9 +96,12 @@ static func _instance(maillage: Mesh, matiere_appliquee: Material, ombre: bool) 
 ## Sol quadrillé. La trame est une texture générée, pas des milliers de traits :
 ## un damier de lignes en 128×128 répété par les coordonnées de texture. Sans
 ## repère au sol, un déplacement en perspective ne se sent pas.
-static func sol(taille: Vector2, pas_en_pixels: float = 100.0, teinte: Color = Color("#111110")) -> MeshInstance3D:
+## `debord` élargit le plan au-delà du terrain : une caméra inclinée regarde
+## toujours un peu plus loin que l'enceinte, et sans débord elle tombe sur du
+## vide noir qui coupe l'image en deux.
+static func sol(taille: Vector2, pas_en_pixels: float = 100.0, teinte: Color = Color("#111110"), debord: float = 1400.0) -> MeshInstance3D:
 	var plan := PlaneMesh.new()
-	plan.size = Vector2(taille.x * ECHELLE, taille.y * ECHELLE)
+	plan.size = Vector2((taille.x + debord) * ECHELLE, (taille.y + debord) * ECHELLE)
 	plan.subdivide_width = 4
 	plan.subdivide_depth = 4
 
@@ -107,7 +110,7 @@ static func sol(taille: Vector2, pas_en_pixels: float = 100.0, teinte: Color = C
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color.WHITE
 	m.albedo_texture = _texture_trame(teinte)
-	m.uv1_scale = Vector3(taille.x / pas_en_pixels, taille.y / pas_en_pixels, 1.0)
+	m.uv1_scale = Vector3((taille.x + debord) / pas_en_pixels, (taille.y + debord) / pas_en_pixels, 1.0)
 	m.roughness = 0.9
 	m.metallic = 0.0
 	noeud.material_override = m
@@ -118,12 +121,12 @@ static func _texture_trame(teinte: Color) -> ImageTexture:
 	var cote := 128
 	var image := Image.create(cote, cote, false, Image.FORMAT_RGBA8)
 	image.fill(teinte)
-	var ligne := teinte.lightened(0.12)
+	var ligne := teinte.lightened(0.28)
 	for i in cote:
 		image.set_pixel(i, 0, ligne)
 		image.set_pixel(0, i, ligne)
-		image.set_pixel(i, 1, teinte.lightened(0.05))
-		image.set_pixel(1, i, teinte.lightened(0.05))
+		image.set_pixel(i, 1, teinte.lightened(0.10))
+		image.set_pixel(1, i, teinte.lightened(0.10))
 	return ImageTexture.create_from_image(image)
 
 # ------------------------------------------------------------ ambiance
@@ -137,7 +140,7 @@ static func ambiance(fond: Color = Palette.FOND, brouillard: bool = true) -> Wor
 	# éclaircit le sol jusqu'à un gris bleu qui n'est plus le #0d0d0d de la
 	# palette, et toute la maison se reconnaît à ce noir-là.
 	environnement.ambient_light_color = Color("#1a212b")
-	environnement.ambient_light_energy = 0.22
+	environnement.ambient_light_energy = 0.34
 	if brouillard:
 		# Le brouillard sert la profondeur : sans lui, le fond du terrain a
 		# exactement le même contraste que le premier plan et la perspective
@@ -152,7 +155,7 @@ static func ambiance(fond: Color = Palette.FOND, brouillard: bool = true) -> Wor
 static func lumiere() -> DirectionalLight3D:
 	var soleil := DirectionalLight3D.new()
 	soleil.light_color = Color("#e8ecf5")
-	soleil.light_energy = 1.05
+	soleil.light_energy = 1.30
 	soleil.rotation_degrees = Vector3(-52, -38, 0)
 	soleil.shadow_enabled = true
 	soleil.directional_shadow_max_distance = 260.0
@@ -164,7 +167,7 @@ static func lumiere() -> DirectionalLight3D:
 static func contre_jour() -> DirectionalLight3D:
 	var lueur := DirectionalLight3D.new()
 	lueur.light_color = Palette.SERIE
-	lueur.light_energy = 0.22
+	lueur.light_energy = 0.30
 	lueur.rotation_degrees = Vector3(-24, 145, 0)
 	lueur.shadow_enabled = false
 	return lueur

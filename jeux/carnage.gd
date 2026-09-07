@@ -20,12 +20,12 @@ const BRAQUAGE := 2.9
 const RAYON_VOITURE := 26.0
 
 const INCLINAISON := 52.0
-const DISTANCE := 88.0
+const DISTANCE := 46.0
 
 const SEUIL_ECRASEMENT := 210.0    ## en dessous, on pousse le monstre sans l'écraser
 const CADENCE_VOITURE := 1.0 / 12.0
 const CADENCE_MONSTRES := 1.0 / 9.0
-const MONSTRES_MAX := 48
+const MONSTRES_MAX := 60
 const COMBO_FENETRE := 2.5
 
 var _position := Vector2.ZERO
@@ -46,6 +46,7 @@ var _camera: Camera3D
 var _corps: Node3D                 # notre voiture
 var _rng := RandomNumberGenerator.new()
 var _secousse := 0.0
+var _amorce := false
 
 func duree_manche() -> float:
 	return DUREE
@@ -130,7 +131,7 @@ func _batir_voiture(couleur: Color, pseudo: String) -> Node3D:
 
 func _batir_monstre(type: int) -> Node3D:
 	var racine := Node3D.new()
-	var rayon: float = 2.0 if type == 0 else (3.2 if type == 1 else 1.6)
+	var rayon: float = 2.6 if type == 0 else (4.2 if type == 1 else 2.0)
 	var couleur := Palette.BON if type == 0 else (Palette.SERIEUX if type == 1 else Palette.AVERTISSEMENT)
 	var corps := Decor.sphere(rayon, couleur.darkened(0.25))
 	corps.position = Vector3(0, rayon * 0.85, 0)
@@ -223,8 +224,14 @@ func _conduire(delta: float) -> void:
 
 func simuler_hote(delta: float) -> void:
 	var vague := int(temps / 20.0) + 1
+	# Une bouffée au coup d'envoi : sans elle, les vingt premières secondes se
+	# passent à chercher un monstre à l'écran, et la manche commence mollement.
+	if not _amorce:
+		_amorce = true
+		for i in 10:
+			_faire_apparaitre(vague)
 	_depuis_apparition += delta
-	var intervalle: float = max(0.28, 1.4 - vague * 0.16)
+	var intervalle: float = max(0.14, 0.62 - vague * 0.07)
 	if _depuis_apparition >= intervalle and _monstres.size() < MONSTRES_MAX:
 		_depuis_apparition = 0.0
 		_faire_apparaitre(vague)
@@ -271,13 +278,17 @@ func _faire_apparaitre(vague: int) -> void:
 		type = 1                      # gros : lent, encaisse, rapporte
 	elif vague >= 2 and tirage < 0.42:
 		type = 2                      # rapide : nerveux, fragile
-	var bord := _rng.randi_range(0, 3)
-	var p := Vector2.ZERO
-	match bord:
-		0: p = Vector2(_rng.randf_range(ARENE.position.x, ARENE.end.x), ARENE.position.y + 10)
-		1: p = Vector2(_rng.randf_range(ARENE.position.x, ARENE.end.x), ARENE.end.y - 10)
-		2: p = Vector2(ARENE.position.x + 10, _rng.randf_range(ARENE.position.y, ARENE.end.y))
-		_: p = Vector2(ARENE.end.x - 10, _rng.randf_range(ARENE.position.y, ARENE.end.y))
+	# Ils surgissent en couronne autour d'une voiture, hors de vue mais à
+	# portée de marche. Les faire naître aux bords de l'arène — ce qu'on
+	# faisait d'abord — les obligeait à traverser douze cents pixels avant
+	# d'être menaçants : le joueur ne croisait presque personne.
+	var autour := _position
+	if not _autres.is_empty() and _rng.randf() < 0.5:
+		var cles := _autres.keys()
+		autour = _autres[cles[_rng.randi_range(0, cles.size() - 1)]]["p"]
+	var p: Vector2 = autour + Vector2.RIGHT.rotated(_rng.randf() * TAU) * _rng.randf_range(520.0, 820.0)
+	p.x = clamp(p.x, ARENE.position.x + 30.0, ARENE.end.x - 30.0)
+	p.y = clamp(p.y, ARENE.position.y + 30.0, ARENE.end.y - 30.0)
 	var vitesse := 78.0 + vague * 5.0
 	if type == 1:
 		vitesse *= 0.62
@@ -428,7 +439,9 @@ func _effet_ecrasement(position: Vector2, points: int, facteur: int, cle: String
 	# Une flaque au sol : la trace de ce qui vient d'être écrasé. Le nombre en
 	# est borné — sans plafond, une manche pleine finit par empiler des
 	# centaines de maillages et le rendu s'effondre en fin de partie.
-	var flaque := Decor.cylindre(_rng.randf_range(1.6, 2.8), 0.08, Palette.BON.darkened(0.55), false)
+	# Bien plus sombres que les monstres : à la même teinte, une flaque au sol
+	# se lit comme une cible et on fonce dessus pour rien.
+	var flaque := Decor.cylindre(_rng.randf_range(1.1, 1.9), 0.08, Palette.BON.darkened(0.78), false)
 	flaque.position = Decor.vers3d(position, 0.05)
 	flaque.rotation.y = _rng.randf() * TAU
 	monde().add_child(flaque)

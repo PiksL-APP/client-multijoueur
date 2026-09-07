@@ -133,6 +133,19 @@ ailleurs. Sans ce passage obligé, la seule façon de vérifier une partie de
 bout en bout serait de la jouer à la main — et personne ne le fait avant
 chaque livraison.
 
+### Photographier un jeu sans y jouer
+
+```bash
+xvfb-run -s "-screen 0 1280x720x24" godot --path . \
+  --rendering-driver opengl3 --resolution 1280x720 \
+  --banc-jeu=carnage --manche=30 --photo=/tmp/vues
+```
+
+Une image toutes les cinq secondes dans `/tmp/vues`. C'est ce contrôle qui a
+montré ce qu'aucun test ne disait : les monstres apparaissaient aux bords de
+l'arène et mettaient douze cents pixels à devenir menaçants — à l'écran, on
+n'en croisait aucun.
+
 `--manche` raccourcit la manche : attendre deux minutes par vérification,
 personne ne le fait deux fois.
 

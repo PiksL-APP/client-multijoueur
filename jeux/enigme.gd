@@ -46,13 +46,13 @@ func duree_manche() -> float:
 func aide() -> String:
 	return "Z Q S D ou les flèches · marcher dans une caisse la pousse · une dalle ne compte que si quelque chose pèse dessus · la sortie n'accepte l'équipe qu'au complet."
 
-const INCLINAISON := 58.0
-const DISTANCE := 132.0
+const INCLINAISON := 55.0
+const DISTANCE := 124.0
 
 func preparer() -> void:
 	poser_ambiance()
 	_camera = Decor.camera(INCLINAISON, DISTANCE, 50.0)
-	_camera.position = Decor.viser(_camera, MONDE.get_center(), INCLINAISON, DISTANCE)
+	_camera.position = Decor.viser(_camera, MONDE.get_center() + Vector2(0, 40), INCLINAISON, DISTANCE)
 	monde().add_child(_camera)
 	_camera.make_current()
 
@@ -71,19 +71,19 @@ func preparer() -> void:
 
 func _batir_marcheur(couleur: Color, pseudo: String) -> Node3D:
 	var racine := Node3D.new()
-	var jambes := Decor.cylindre(RAYON * Decor.ECHELLE, 1.5, couleur.darkened(0.35))
-	jambes.position = Vector3(0, 0.75, 0)
+	var jambes := Decor.cylindre(RAYON * Decor.ECHELLE * 1.5, 2.2, couleur.darkened(0.35))
+	jambes.position = Vector3(0, 1.1, 0)
 	racine.add_child(jambes)
-	var buste := Decor.cylindre(RAYON * Decor.ECHELLE * 0.86, 1.7, couleur)
-	buste.position = Vector3(0, 2.35, 0)
+	var buste := Decor.cylindre(RAYON * Decor.ECHELLE * 1.3, 2.5, couleur)
+	buste.position = Vector3(0, 3.5, 0)
 	racine.add_child(buste)
-	var tete := Decor.sphere(RAYON * Decor.ECHELLE * 0.72, couleur.lightened(0.25))
-	tete.position = Vector3(0, 3.9, 0)
+	var tete := Decor.sphere(RAYON * Decor.ECHELLE * 1.1, couleur.lightened(0.25))
+	tete.position = Vector3(0, 5.7, 0)
 	racine.add_child(tete)
 	if pseudo != "":
 		var nom := Decor.etiquette(pseudo, Palette.ENCRE_DOUCE, 30)
 		nom.name = "Nom"
-		nom.position = Vector3(0, 5.7, 0)
+		nom.position = Vector3(0, 8.0, 0)
 		racine.add_child(nom)
 	return racine
 
@@ -212,8 +212,8 @@ func _batir_chambre() -> void:
 	sortie.material_override = Decor.matiere_lumineuse(Palette.BON, 0.6, 0.4)
 	sortie.position = Decor.vers3d(SORTIE.get_center(), 0.12)
 	_decor_chambre.add_child(sortie)
-	var mention := Decor.etiquette("SORTIE — tous ensemble", Palette.BON, 30)
-	mention.position = Decor.vers3d(SORTIE.get_center(), 4.0)
+	var mention := Decor.etiquette("SORTIE — tous ensemble", Palette.BON, 52)
+	mention.position = Decor.vers3d(SORTIE.get_center(), 5.5)
 	_decor_chambre.add_child(mention)
 
 # ------------------------------------------------------- simulation locale

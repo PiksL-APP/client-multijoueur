@@ -76,7 +76,10 @@ automatique cesse alors de couvrir ce jeu.
 2. Les deux bancs, en deux instances chacune, avec des `HOME` distincts :
    `--banc` (présence et diffusion) puis `--banc-jeu=<jeu> --manche=30`
    (manche complète jusqu'au dépôt du score).
-3. `./outils/exporter.sh` — et **ouvrir la page**, pas seulement constater que
+3. `--photo=<dossier>` sous `xvfb-run` : une image toutes les cinq secondes.
+   Le rendu se REGARDE. C'est ainsi qu'on a vu que les monstres, nés aux bords
+   de l'arène, n'entraient jamais dans le champ de la caméra.
+4. `./outils/exporter.sh` — et **ouvrir la page**, pas seulement constater que
    l'export a réussi. Trois défauts de ce projet ont passé le build sans un
    avertissement : `config.cfg` absent du .pck, l'autoretour à la ligne qui
    affichait les étiquettes à la verticale, et un cache immuable sur un nom de
