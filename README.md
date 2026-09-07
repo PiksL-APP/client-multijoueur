@@ -57,7 +57,7 @@ En ligne : **https://multijoueur.piks-l.com**
 
 | | |
 | --- | --- |
-| **Hub** | Un village en **pixel art vu de dessus** : on s'y croise, et on ENTRE dans les maisons. La taverne, l'armurerie et l'atelier ont chacune leur intérieur, son classement au mur, son habitant qui explique le jeu, et — pour deux d'entre elles — le portail au fond de la pièce. |
+| **Hub** | Un village en **pixel art vu de dessus** : on s'y croise, et on ENTRE dans les maisons. Une esplanade pavée, cinq maisons, un potager, une mare, la forêt autour. La taverne, l'armurerie et l'auberge se visitent (une pièce entière de la maquette du pack chacune), avec leurs habitants qui parlent — et, pour les deux premières, le classement au mur et le portail qui lance la partie. |
 | **CARNAGE** | Un GTA 2. Une ville PROCÉDURALE de quarante-huit par trente-six tuiles, tirée du code de la manche : un centre d'affaires neutre et ses tours, et autour trois territoires qui ne se ressemblent pas — la zone industrielle des Braises, les rues commerçantes de La Fonte, la banlieue pavillonnaire du Lierre — plus des parcs. Quatre kits Kenney (CC0) : trois cents voitures dorment le long des rues et se volent toutes, les taxis roulent au centre, les fourgons dans la zone. On conduit, on **descend** (E), on court, on tire. Les passants rapportent, les gangs plus, les flics encore plus — et tout cela fait monter les **étoiles de recherche**. Chaque gang a ses **repaires** tagués au sol, un **garage** qui efface le casier, une **cabine** qui donne des contrats ; deux **arènes** sur les frontières sont les seuls endroits où les joueurs peuvent se blesser. Manche de 4 minutes, plan de la ville en haut à droite. |
 | **ÉNIGME** | Coopératif, trois chambres. Une dalle ne reste enfoncée que si quelqu'un — ou une caisse — pèse dessus, et la sortie d'une chambre n'accepte l'équipe qu'au complet. 3 minutes. |
 
@@ -118,6 +118,25 @@ quartier) ; l'hôte leur donne un identifiant et un point de vie au coup
 d'envoi. Elles ne sont ni simulées ni diffusées tant que personne n'est à
 portée — et on ne les DESSINE qu'à mille pixels : à seize cents, un navigateur
 en mode compatibilité tombait à dix images par seconde.
+
+**La circulation roule à droite, freine et klaxonne.** Chaque voiture tient sa
+file (trente-deux pixels à droite de l'axe), s'arrête derrière ce qu'elle a
+devant — joueur, voiture, passant — et klaxonne au bout de sept dixièmes de
+seconde à l'arrêt. Le klaxon (le vôtre aussi, `H`) fait décamper les passants,
+comme un coup de feu. Ils préfèrent le trottoir et crient quand on les fauche.
+
+**Le butin.** Un gang abattu lâche son arme une fois sur trois, un flic une
+trousse ou une mitraillette une fois sur deux, un passant un billet une fois
+sur six. Tout disparaît au bout de quatorze secondes, sinon la ville se couvre
+de caisses et plus aucune ne vaut le détour.
+
+**Les voitures ne se conduisent pas pareil.** Sportive qui file (×1,2) mais
+tôle fine ; camion lourd (×0,78) qui encaisse presque le double ; police qui
+pousse. C'est ce qui fait qu'on vole une voiture pour autre chose que sa couleur.
+
+**À cinq étoiles, l'hélicoptère.** Il survole avec un temps de retard, tire par
+rafales, et ne se sème pas : il fait du surplace quand on est à terre, et ne
+rentre à la base que quand la jauge redescend. La seule sortie est le garage.
 
 **Le plan, en haut à droite.** La ville fait vingt-six par vingt tuiles et la
 caméra n'en montre que trois. Sans plan, on ne retrouve ni le garage quand on

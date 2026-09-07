@@ -8,6 +8,7 @@ const ECRANS := {
 	"carnage": "res://jeux/carnage.gd",
 	"enigme": "res://jeux/enigme.gd",
 	"resultats": "res://scenes/resultats.gd",
+	"ferme": "res://scenes/ferme.gd",
 }
 
 var _ecran: Ecran = null
@@ -22,6 +23,13 @@ func _ready() -> void:
 	var dossier_photos := _argument(arguments, "--photo")
 	if dossier_photos != "":
 		_photographier(dossier_photos)
+	# `--ecran=ferme` ouvre un écran directement, sans passer par l'accueil ni
+	# par les clés Supabase : c'est ce qui permet de photographier un écran
+	# solo au banc, comme `--lieu=` le fait pour les pièces du hub.
+	var ecran := _argument(arguments, "--ecran")
+	if ecran != "" and ECRANS.has(ecran):
+		aller_a(ecran, {})
+		return
 	if "--banc" in arguments:
 		_banc_d_essai()
 		return

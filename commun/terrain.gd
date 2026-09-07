@@ -13,80 +13,113 @@ extends RefCounted
 ## Le grain est de quatre pixels, mesuré sur l'image d'origine. En un pixel le
 ## bruit grésille, en huit il fait des taches.
 
-const BLOC := 4
-const SILLON := 8                  ## pas des sillons d'une parcelle labourée
+## Grain du bruit du sol. UN pixel, pas quatre.
+##
+## ⚠ Mesuré sur `sol_village.png` : l'herbe du pack n'a que TROIS verts, tous
+## très proches, tirés pixel par pixel. Ma première version en prenait cinq —
+## dont deux nettement plus sombres — par blocs de quatre : ça faisait des
+## taches, et la ferme jurait à côté du village alors que la palette était
+## censée être la même. Trois teintes voisines à un pixel de grain sont
+## indiscernables de l'original.
+const BLOC := 1
 
 const HERBE: Array[Color] = [
 	Color8(0x33, 0x79, 0x03), Color8(0x32, 0x74, 0x04), Color8(0x33, 0x76, 0x04),
-	Color8(0x2e, 0x6d, 0x03), Color8(0x26, 0x5a, 0x02),
 ]
-const PIERRE: Array[Color] = [
-	Color8(0x92, 0x7e, 0x65), Color8(0x84, 0x70, 0x56),
-]
-## Les bruns du bois du pack : c'est la seule terre dont il dispose.
+
+## Les tons de la terre retournée, relevés dans le bois du pack (`caisses`,
+## `banc`) : c'est la seule terre dont il dispose. Le contour est presque noir,
+## comme tous les sprites du pack — c'est ce cerne qui fait qu'un champ
+## appartient au dessin au lieu de flotter dessus.
 const TERRE: Array[Color] = [
-	Color8(0x7d, 0x4c, 0x28), Color8(0x6b, 0x42, 0x23), Color8(0x5a, 0x36, 0x1e),
+	Color8(0x5a, 0x36, 0x1e), Color8(0x4e, 0x2f, 0x1a), Color8(0x66, 0x3e, 0x22),
 ]
+const MOTTE_CLAIRE := Color8(0x7d, 0x4c, 0x28)
+const MOTTE_SOMBRE := Color8(0x40, 0x26, 0x14)
+const CONTOUR := Color8(0x1a, 0x0f, 0x08)
+
+## Les brins d'herbe, champignons et fleurs du pack, repérés dans
+## `sol_village.png` — ce sont de vrais pixels du pack, pas des dessins de mon
+## cru. Sans eux, une prairie fabriquée est une surface unie de six cents
+## pixels de côté, et l'œil n'a rien où se poser.
+const DETAILS: Array[Rect2i] = [
+	Rect2i(564, 149, 10, 8), Rect2i(134, 150, 5, 7), Rect2i(805, 164, 7, 9),
+	Rect2i(837, 181, 7, 6), Rect2i(468, 197, 8, 7), Rect2i(693, 197, 6, 6),
+	Rect2i(917, 197, 7, 6), Rect2i(341, 229, 7, 6), Rect2i(389, 229, 7, 6),
+	Rect2i(740, 229, 8, 7), Rect2i(244, 309, 8, 7), Rect2i(847, 320, 9, 6),
+]
+const SOL_VILLAGE := "res://modeles/village/sol_village.png"
 
 static var _cache: Dictionary = {}
 
-## Une grande nappe de sol, en un seul sprite.
+## Une grande nappe d'herbe, en un seul sprite.
 ##
 ## Une image entière plutôt qu'une tuile répétée : le bruit ne se répète alors
-## jamais, et surtout le sol coûte UN appel de dessin. En tuiles de trente-deux
-## pixels, une ferme entière en demanderait des centaines par image, ce qui ne
-## passe pas dans un navigateur en mode compatibilité.
+## jamais, et surtout le sol coûte UN appel de dessin.
 static func nappe(largeur: int, hauteur: int, palette: Array[Color], graine: int) -> Sprite2D:
 	var cle := "nappe:%d:%d:%d:%d" % [largeur, hauteur, palette[0].to_rgba32(), graine]
 	if not _cache.has(cle):
 		var tirage := RandomNumberGenerator.new()
 		tirage.seed = graine
 		var toile := Image.create(largeur, hauteur, false, Image.FORMAT_RGBA8)
-		for by in range(0, hauteur, BLOC):
-			for bx in range(0, largeur, BLOC):
-				toile.fill_rect(Rect2i(bx, by, BLOC, BLOC),
-					palette[tirage.randi_range(0, palette.size() - 1)])
+		for y in hauteur:
+			for x in largeur:
+				toile.set_pixel(x, y, palette[tirage.randi_range(0, palette.size() - 1)])
 		_cache[cle] = ImageTexture.create_from_image(toile)
 	return _sprite(_cache[cle])
 
-## Une parcelle labourée. `arrosee` l'assombrit : c'est ainsi qu'on voit d'un
-## coup d'œil ce qui a soif, sans avoir à survoler chaque case.
-static func parcelle(cote: int, graine: int, arrosee: bool) -> Sprite2D:
-	var cle := "parcelle:%d:%d:%s" % [cote, graine, arrosee]
+## Un brin d'herbe ou une fleur du pack, à semer sur la prairie.
+static func detail(indice: int) -> Sprite2D:
+	var region: Rect2i = DETAILS[posmod(indice, DETAILS.size())]
+	var sprite := _sprite(_planche(SOL_VILLAGE))
+	sprite.region_enabled = true
+	sprite.region_rect = Rect2(region)
+	sprite.offset = Vector2(-region.size.x * 0.5, -region.size.y)
+	return sprite
+
+## Une parcelle labourée.
+##
+## `bords` porte les quatre voisines déjà retournées (1 haut, 2 bas, 4 gauche,
+## 8 droite) : le cerne noir n'est tracé que du côté OUVERT. Sans ça, chaque
+## case garde son cadre et le champ ressemble à un damier de tuiles au lieu
+## d'une seule terre travaillée — c'était le défaut le plus visible de la
+## première version.
+##
+## La texture est faite de PIQUETÉ et de courts tirets, jamais de lignes
+## continues : des sillons pleins d'un bord à l'autre donnent un parquet.
+static func parcelle(cote: int, graine: int, arrosee: bool, bords: int) -> Sprite2D:
+	var cle := "parcelle:%d:%d:%s:%d" % [cote, graine, arrosee, bords]
 	if not _cache.has(cle):
 		var tirage := RandomNumberGenerator.new()
 		tirage.seed = graine
 		var toile := Image.create(cote, cote, false, Image.FORMAT_RGBA8)
-		var mouille := 0.72 if arrosee else 1.0
-		for by in range(0, cote, BLOC):
-			for bx in range(0, cote, BLOC):
-				toile.fill_rect(Rect2i(bx, by, BLOC, BLOC), _assombrir(
-					TERRE[tirage.randi_range(0, TERRE.size() - 1)], mouille))
-		# Les sillons sont HACHÉS, pas continus : une ligne pleine d'un bord à
-		# l'autre donne un joint de plancher, et vingt parcelles alignées font
-		# un parquet. Une motte sur cinq laissée intacte casse le trait.
 		for y in cote:
-			var reste := y % SILLON
-			var facteur := 0.0
-			if reste <= 1:
-				facteur = 0.80
-			elif reste == 4 or reste == 5:
-				facteur = 1.14
-			else:
-				continue
 			for x in cote:
-				if tirage.randf() < 0.22:
-					continue
-				toile.set_pixel(x, y, _assombrir(toile.get_pixel(x, y), facteur))
-		# Un liseré sombre sur le pourtour : sans lui, vingt parcelles côte à
-		# côte forment une seule dalle brune et on ne voit plus la case qu'on
-		# travaille.
-		for x in cote:
-			toile.set_pixel(x, 0, _assombrir(toile.get_pixel(x, 0), 0.78))
-			toile.set_pixel(x, cote - 1, _assombrir(toile.get_pixel(x, cote - 1), 0.78))
-		for y in cote:
-			toile.set_pixel(0, y, _assombrir(toile.get_pixel(0, y), 0.78))
-			toile.set_pixel(cote - 1, y, _assombrir(toile.get_pixel(cote - 1, y), 0.78))
+				toile.set_pixel(x, y, TERRE[tirage.randi_range(0, TERRE.size() - 1)])
+		for i in int(cote * cote / 14.0):
+			var x := tirage.randi_range(0, cote - 1)
+			var y := tirage.randi_range(0, cote - 1)
+			var teinte := MOTTE_CLAIRE if tirage.randf() < 0.45 else MOTTE_SOMBRE
+			for k in tirage.randi_range(2, 4):
+				if x + k < cote:
+					toile.set_pixel(x + k, y, teinte)
+		if arrosee:
+			for y in cote:
+				for x in cote:
+					var p := toile.get_pixel(x, y)
+					toile.set_pixel(x, y, Color(p.r * 0.62, p.g * 0.60, p.b * 0.66, 1.0))
+		if not (bords & 1):
+			for x in cote:
+				toile.set_pixel(x, 0, CONTOUR)
+		if not (bords & 2):
+			for x in cote:
+				toile.set_pixel(x, cote - 1, CONTOUR)
+		if not (bords & 4):
+			for y in cote:
+				toile.set_pixel(0, y, CONTOUR)
+		if not (bords & 8):
+			for y in cote:
+				toile.set_pixel(cote - 1, y, CONTOUR)
 		_cache[cle] = ImageTexture.create_from_image(toile)
 	return _sprite(_cache[cle])
 
@@ -132,29 +165,36 @@ static func _sprite(texture: Texture2D) -> Sprite2D:
 
 # ------------------------------------------------------------------ cultures
 #
-# Les plants sont des BUISSONS DU PACK, pas un dessin de mon cru : le fichier
-# `buisson_petit_*.png` fait trente-deux pixels, exactement la taille d'une
-# parcelle, et il est dessiné par la même main que le reste.
+# Les plants sont les VRAIS légumes du pack — `culture_radis.png` et ses
+# voisins, seize pixels de côté, la moitié d'une parcelle une fois doublés.
 #
-# Le stade de croissance est une BANDE prise par le BAS du buisson. Le procédé
-# marche parce que ces buissons sont éclairés d'en haut : la base est sombre et
-# touffue, la cime est claire. Une bande basse donne donc une touffe sombre qui
-# sort à peine de la terre, et la coupe franche ne se voit pas — elle tombe là
-# où le feuillage est déjà dense. Réduire le buisson à l'échelle aurait donné
-# de la bouillie : on ne redimensionne pas du pixel art.
+# ⚠ Le stade de croissance est une tranche prise par le HAUT, posée au ras du
+# sol. C'est contre-intuitif et c'est pourtant le bon sens du dessin : ces
+# sprites ont le feuillage en haut et le légume en bas. Une tranche haute ne
+# montre donc QUE les feuilles — exactement ce qu'on voit d'un plant jeune —
+# et le radis ne gonfle qu'au dernier stade, quand la tranche atteint le bas
+# de l'image. Pris par le bas, on verrait le légume avant les feuilles : la
+# plante pousserait à l'envers.
 #
-# Les quatre variantes du pack sont SAISONNIÈRES (vert, vert-jaune, jaune,
-# roux). Elles serviront de saisons le jour où le calendrier existera ; en
-# attendant, `saison` permet déjà de distinguer deux cultures à l'œil.
+# Réduire le sprite à l'échelle aurait donné de la bouillie : on ne
+# redimensionne pas du pixel art.
 
-## Hauteur de la bande visible, par stade. Mesurée à l'image : sous huit
-## pixels on ne voit rien pousser, au-delà de vingt-six le plant déborde sur
-## la rangée voisine et le champ devient illisible.
-const STADES := [9, 16, 26]
+## Les quatre cultures du pack. L'ordre est celui du semoir.
+const CULTURES := ["radis", "carottes", "laitues", "choux"]
 
-## Le plant à un stade donné, ancré à ses pieds au bas de la parcelle.
-static func plant(stade: int, saison: int = 0) -> Sprite2D:
-	var chemin := "res://modeles/village/buisson_petit_%d.png" % clampi(saison, 0, 3)
+## Hauteur de la tranche visible, par stade. Mesurée à l'image : sous cinq
+## pixels un chou ne se voit pas, et le dernier stade est le sprite entier.
+const STADES := [5, 8, 12, 16]
+
+static func nom_culture(culture: int) -> String:
+	return String(CULTURES[posmod(culture, CULTURES.size())])
+
+static func dernier_stade() -> int:
+	return STADES.size() - 1
+
+## Le plant, ancré à ses pieds au bas de la parcelle.
+static func plant(culture: int, stade: int) -> Sprite2D:
+	var chemin := "res://modeles/village/culture_%s.png" % nom_culture(culture)
 	var texture := _planche(chemin)
 	if texture == null:
 		return _sprite(null)
@@ -162,9 +202,40 @@ static func plant(stade: int, saison: int = 0) -> Sprite2D:
 	var largeur := texture.get_width()
 	var sprite := _sprite(texture)
 	sprite.region_enabled = true
-	sprite.region_rect = Rect2(0, texture.get_height() - hauteur, largeur, hauteur)
+	sprite.region_rect = Rect2(0, 0, largeur, hauteur)
+	sprite.scale = Vector2(2, 2)
 	sprite.offset = Vector2(-largeur * 0.5, -hauteur)
 	return sprite
+
+## Le cageot d'une récolte, pour le tas devant la grange.
+static func cageot(culture: int) -> Sprite2D:
+	var texture := _planche("res://modeles/village/cageot_%s.png" % nom_culture(culture))
+	var sprite := _sprite(texture)
+	if texture:
+		sprite.offset = Vector2(-texture.get_width() * 0.5, -texture.get_height())
+	return sprite
+
+## Le cadre de la case visée.
+##
+## Sans lui, on ne sait pas OÙ la houe va tomber : l'action porte sur la case
+## sous les pieds, et le personnage en chevauche deux la moitié du temps. Le
+## défaut ne se voit pas sur une capture, seulement à la manette — on laboure
+## systématiquement la rangée d'à côté.
+static func curseur(cote: int) -> Sprite2D:
+	var cle := "curseur:%d" % cote
+	if not _cache.has(cle):
+		var toile := Image.create(cote, cote, false, Image.FORMAT_RGBA8)
+		toile.fill(Color(0, 0, 0, 0))
+		var blanc := Color(1, 1, 1, 0.85)
+		# Quatre équerres plutôt qu'un cadre plein : un cadre continu se
+		# confond avec le liseré des parcelles labourées.
+		for i in 6:
+			for point in [Vector2i(i, 0), Vector2i(0, i), Vector2i(cote - 1 - i, 0),
+					Vector2i(cote - 1, i), Vector2i(i, cote - 1), Vector2i(0, cote - 1 - i),
+					Vector2i(cote - 1 - i, cote - 1), Vector2i(cote - 1, cote - 1 - i)]:
+				toile.set_pixel(point.x, point.y, blanc)
+		_cache[cle] = ImageTexture.create_from_image(toile)
+	return _sprite(_cache[cle])
 
 static func _planche(chemin: String) -> Texture2D:
 	if not _cache.has(chemin):

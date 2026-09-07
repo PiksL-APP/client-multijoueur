@@ -1,71 +1,108 @@
 extends Ecran
 ## LA FERME — prototype du jalon J0 de la nouvelle ÉNIGME.
 ##
-## On laboure, on sème, on arrose, ça pousse. Rien d'autre pour l'instant : ni
-## réseau, ni persistance, ni chambres de test. Cette étape répond à une seule
-## question, celle qu'aucun document ne tranche — est-ce que cette boucle est
-## agréable à la manette ? Y brancher Supabase avant de le savoir, ce serait
-## payer la persistance d'un jeu qu'on jetterait.
+## On laboure, on sème, on arrose, on dort, ça pousse. Rien d'autre pour
+## l'instant : ni réseau, ni persistance, ni chambres de test. Cette étape
+## répond à une seule question, celle qu'aucun document ne tranche — est-ce que
+## cette boucle est agréable à la manette ? Y brancher Supabase avant de le
+## savoir, ce serait payer la persistance d'un jeu qu'on jetterait.
 ##
-## Tout le décor sort du pack du village et le sol de couleurs relevées dans
-## ses fichiers (`commun/terrain.gd`) : la ferme et le hub doivent se
-## ressembler, on passe de l'un à l'autre par une porte.
+## ⚠ RIEN NE POUSSE PENDANT LA JOURNÉE. Un plant n'avance que dans la nuit,
+## et seulement si sa terre était arrosée le soir. C'est ce qui donne son
+## rythme au genre : la journée est un budget qu'on dépense, la nuit est
+## l'arbitre. Une pousse au chronomètre ferait de l'arrosoir une décoration.
+##
+## Tout le décor sort du pack du village, et le sol de couleurs relevées dans
+## ses fichiers (`commun/terrain.gd`) : on passe du village à la ferme par une
+## porte, les deux doivent se ressembler.
 
 const MONDE := Vector2(768, 544)
-const CASE := 32                          ## côté d'une parcelle, en pixels
-const CHAMP := Rect2i(5, 5, 14, 7)        ## la zone cultivable, en cases
+const CASE := 32
+const CHAMP := Rect2i(9, 6, 12, 7)        ## la zone cultivable, en cases — à droite de la grange
 const VITESSE := 96.0
 const RAYON := 6.0
-const ZOOM := 3                           ## entier, comme au hub
+const ZOOM := 3
 const IMAGES := "res://modeles/village/"
 const PIEDS := Vector2(0, -32)
 const GRAINE := 20260907
 
-## Combien de secondes pour passer d'un stade au suivant. Court, parce qu'on
-## teste une sensation, pas un calendrier : le vrai rythme sera en jours et se
-## réglera quand la persistance existera.
-const POUSSE_S := 10.0
-
-## La journée. Trois minutes par jour au prototype ; `--jour=<secondes>` la
-## raccourcit au banc, sur le modèle de `--manche=` pour les manches. Attendre
-## trois minutes pour vérifier une couleur de crépuscule, personne ne le fait
-## deux fois.
+## La journée. `--jour=<secondes>` la raccourcit au banc, sur le modèle de
+## `--manche=`. Attendre trois minutes pour vérifier une couleur de crépuscule,
+## personne ne le fait deux fois.
 const JOUR_S := 180.0
-const LEVER := 0.22       ## fraction de la journée où le soleil se lève
+const LEVER := 0.22
 const COUCHER := 0.78
 
-## Les teintes de la journée, du plus sombre au plus clair. Le fond n'est
-## jamais noir : une nuit noire dans un jeu vu de dessus, c'est un écran vide
-## et un joueur qui arrête de jouer. On descend à un bleu sourd, assez pour
-## que la nuit se sente, assez clair pour qu'on voie encore ses rangs.
 const NUIT := Color(0.42, 0.48, 0.78)
 const AUBE := Color(0.92, 0.72, 0.62)
 const PLEIN_JOUR := Color(1.0, 1.0, 1.0)
 const CREPUSCULE := Color(1.0, 0.72, 0.52)
 
+## L'énergie : le vrai frein du genre. Sans elle on laboure le champ entier le
+## premier jour et il ne reste plus rien à faire. Les coûts sont réglés pour
+## qu'une journée pleine tienne en une trentaine de gestes.
+const ENERGIE_MAX := 100
+const COUT := {"labour": 6, "semis": 2, "arrosage": 3, "recolte": 2}
+
+## La grange : on y dort. Le seuil est DEVANT la porte, pas dans le bâtiment —
+## le sprite est un bloc plein, et se tenir « dedans » consisterait à marcher
+## sur ses murs.
+const GRANGE := Vector2(112, 240)
+const LIT := Rect2(70, 242, 84, 26)
+
 enum { FRICHE, LABOUREE, SEMEE }
 enum { HOUE, GRAINES, ARROSOIR }
 const OUTILS := ["Houe", "Graines", "Arrosoir"]
 
-var _position := Vector2(304, 300)
+var _position := Vector2(420, 300)
 var _corps: AnimatedSprite2D
 var _camera: Camera2D
+var _teinte: CanvasModulate
+var _curseur: Sprite2D
 var _outil := HOUE
+var _culture := 0
 var _obstacles: Array[Rect2] = []
 var _parcelles: Dictionary = {}
 var _recoltes := 0
+var _brins: Dictionary = {}               ## case -> brins d'herbe posés dessus
+var _cageots: int = 0                     ## cageots posés devant la grange
+var _voile: ColorRect                     ## le noir du sommeil
+var _voile_texte: Label
+var _endormi := false
+
+## Les couleurs des éclats de chaque geste, prises dans le pack : terre du
+## bois, eau de la mare du village, or des récoltes.
+const ECLAT := {
+	"labour": [Color8(0x7d, 0x4c, 0x28), Color8(0x5a, 0x36, 0x1e)],
+	"semis": [Color8(0x95, 0xc5, 0x14), Color8(0x49, 0x82, 0x11)],
+	"arrosage": [Color8(0x5a, 0xa8, 0xe0), Color8(0xbf, 0xe6, 0xff)],
+	"recolte": [Color8(0xfa, 0xb2, 0x19), Color8(0xff, 0xf3, 0xc0)],
+}
+## Où s'empilent les cageots : à droite de la grange, quatre par rangée.
+const CAGEOTS := Vector2(184, 236)
+const CAGEOTS_PAR_RANG := 4
+const CAGEOTS_MAX := 12
 var _marche := false
-var _heure := 0.30                        ## position dans la journée, de 0 à 1
+var _energie := ENERGIE_MAX
+var _heure := 0.26
 var _duree_jour := JOUR_S
-var _teinte: CanvasModulate
 var _jour := 1
+var _message := ""
+var _depuis_message := 0.0
 
 var _hud_outil: Label
 var _hud_compte: Label
 var _hud_heure: Label
+var _hud_energie: Label
+var _hud_jauge: ColorRect
 var _hud_aide: Label
+var _hud_message: Label
 
 func demarrer() -> void:
+	for a in OS.get_cmdline_args():
+		if a.begins_with("--jour="):
+			_duree_jour = maxf(4.0, float(a.substr(7)))
+
 	_camera = Camera2D.new()
 	_camera.zoom = Vector2(ZOOM, ZOOM)
 	_camera.position_smoothing_enabled = true
@@ -77,10 +114,6 @@ func demarrer() -> void:
 	add_child(_camera)
 	_camera.make_current()
 
-	for a in OS.get_cmdline_args():
-		if a.begins_with("--jour="):
-			_duree_jour = maxf(4.0, float(a.substr(7)))
-
 	# La teinte du jour s'applique au PLAN, pas à l'écran : l'interface vit
 	# dans une CanvasLayer et doit rester lisible à minuit comme à midi.
 	_teinte = CanvasModulate.new()
@@ -91,7 +124,12 @@ func demarrer() -> void:
 	sol.y_sort_enabled = false
 	plan().add_child(sol)
 
-	_planter_le_tour()
+	_curseur = Terrain.curseur(CASE)
+	_curseur.z_index = -40
+	_curseur.y_sort_enabled = false
+	plan().add_child(_curseur)
+
+	_batir_la_ferme()
 	_semer_les_premiers_rangs()
 
 	_corps = AnimatedSprite2D.new()
@@ -107,6 +145,42 @@ func demarrer() -> void:
 	_construire_hud()
 	_camera.position = _position
 	_camera.reset_smoothing()
+	if "--demo" in OS.get_cmdline_args():
+		_jouer_la_demo()
+
+## Une journée jouée toute seule, pour le banc : `--ecran=ferme --demo
+## --photo=<dossier>`. Elle laboure, sème, arrose, récolte, puis va dormir.
+## C'est le seul moyen de voir les éclats, la pile de cageots et le voile de
+## nuit sans tenir la manette — et donc le seul moyen de les vérifier avant
+## une livraison. Le personnage est TÉLÉPORTÉ d'une étape à l'autre : on
+## vérifie les gestes, pas la marche, qui l'est déjà par le hub.
+func _jouer_la_demo() -> void:
+	Commandes.pilote_automatique = true
+	var libre := Vector2i(CHAMP.position.x + 2, CHAMP.position.y + 4)
+	await _teleporter(libre)
+	_changer_outil(HOUE)
+	_agir()
+	await get_tree().create_timer(1.4).timeout
+	_changer_outil(GRAINES)
+	_agir()
+	await get_tree().create_timer(1.4).timeout
+	_changer_outil(ARROSOIR)
+	_agir()
+	await get_tree().create_timer(1.6).timeout
+	for case in _parcelles.keys():
+		var fiche: Dictionary = _parcelles[case]
+		if int(fiche["etat"]) == SEMEE and int(fiche["stade"]) >= Terrain.dernier_stade():
+			await _teleporter(case)
+			_agir()
+			await get_tree().create_timer(1.1).timeout
+	await get_tree().create_timer(1.0).timeout
+	_position = LIT.get_center()
+	await get_tree().create_timer(0.8).timeout
+	_agir()
+
+func _teleporter(case: Vector2i) -> void:
+	_position = Vector2(case) * CASE + Vector2(CASE * 0.5, CASE * 0.75)
+	await get_tree().create_timer(0.7).timeout
 
 func _exit_tree() -> void:
 	if Tactile.action.is_connected(_agir):
@@ -114,23 +188,93 @@ func _exit_tree() -> void:
 
 # ----------------------------------------------------------------- le décor
 
-## Une lisière d'arbres et de rochers ferme la ferme. Comme au village : un mur
-## invisible arrête sans expliquer, une rangée d'arbres se comprend.
-func _planter_le_tour() -> void:
+func _batir_la_ferme() -> void:
 	var tirage := RandomNumberGenerator.new()
 	tirage.seed = GRAINE
-	var champ := Rect2(Vector2(CHAMP.position) * CASE, Vector2(CHAMP.size) * CASE).grow(24.0)
-	for i in 150:
-		var p := Vector2(tirage.randf_range(8, MONDE.x - 8), tirage.randf_range(48, MONDE.y - 8))
-		var au_bord := p.x < 90.0 or p.x > MONDE.x - 90.0 or p.y < 110.0 or p.y > MONDE.y - 60.0
-		if champ.has_point(p) or not au_bord:
+	var champ := Rect2(Vector2(CHAMP.position) * CASE, Vector2(CHAMP.size) * CASE)
+
+	_poser("maison_grange.png", GRANGE, Rect2(-52, -26, 104, 26))
+	# Un feu devant la grange : la seule chose qui bouge quand le joueur ne
+	# bouge pas. Un monde immobile paraît en pause.
+	var foyer := Pixels.image(IMAGES + "foyer.png")
+	Pixels.poser(foyer, GRANGE + Vector2(44, 54))
+	plan().add_child(foyer)
+	_obstacles.append(Rect2(GRANGE + Vector2(34, 44), Vector2(20, 10)))
+	var feu := AnimatedSprite2D.new()
+	feu.sprite_frames = Pixels.animation("feu", IMAGES + "feu.png", 10.0, 32)
+	feu.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	feu.offset = Vector2(0, -24)
+	feu.play("feu")
+	Pixels.poser(feu, GRANGE + Vector2(44, 55))
+	plan().add_child(feu)
+
+	_poser("epouvantail.png", champ.position + Vector2(champ.size.x + 22, 18), Rect2())
+
+	# La clôture court sur les quatre côtés du champ, avec une ouverture au
+	# milieu du bas : sans passage, on saute la barrière sans s'en apercevoir
+	# et la clôture ne veut plus rien dire.
+	var gauche := int(champ.position.x) - 8
+	var droite := int(champ.end.x) + 8
+	var haut := int(champ.position.y) - 8
+	var bas := int(champ.end.y) + 8
+	var passage := int(champ.get_center().x)
+	for x in range(gauche, droite + 1, 16):
+		_poser("cloture_h.png", Vector2(x, haut), Rect2(-8, -4, 16, 5))
+		if absi(x - passage) > 24:
+			_poser("cloture_h.png", Vector2(x, bas), Rect2(-8, -4, 16, 5))
+	# ⚠ Les montants gauche et droit sont bâtis avec `cloture_h`, pas avec
+	# `cloture_v`. Ce dernier est la clôture vue par la TRANCHE : un trait noir
+	# de deux pixels, juste, mais à l'écran on croit à un défaut de rendu. Comme
+	# la plupart des jeux vus de dessus, on présente toutes les clôtures de
+	# face — on perd la rigueur de la perspective, on gagne une clôture qu'on
+	# reconnaît.
+	for y in range(haut, bas + 1, 16):
+		_poser("cloture_h.png", Vector2(gauche, y), Rect2(-8, -4, 16, 5))
+		_poser("cloture_h.png", Vector2(droite, y), Rect2(-8, -4, 16, 5))
+
+	# Les brins d'herbe et les fleurs du pack, semés partout sauf dans le champ :
+	# une prairie fabriquée est sinon une surface unie où l'œil n'a rien où se
+	# poser, et c'est ce qui trahissait le plus le sol fait à la main.
+	# Ils sont posés PARTOUT, y compris dans le champ : une friche est de
+	# l'herbe, elle a le droit d'avoir des fleurs. Chaque brin est retenu par
+	# sa case, et le coup de houe l'arrache — sinon il flotterait sur la terre
+	# retournée.
+	# Semés en TOUFFES, pas un par un : une fleur tous les vingt pixels, à
+	# intervalle régulier, se lit comme un motif de papier peint. Trois ou
+	# quatre autour d'un même point, et c'est un pré.
+	for i in 46:
+		var centre := Vector2(tirage.randf_range(20, MONDE.x - 20),
+			tirage.randf_range(60, MONDE.y - 20))
+		var espece := tirage.randi_range(0, Terrain.DETAILS.size() - 1)
+		for k in tirage.randi_range(1, 4):
+			var d := centre + Vector2(tirage.randf_range(-22, 22), tirage.randf_range(-16, 16))
+			if LIT.grow(16.0).has_point(d) or not Rect2(Vector2(8, 56),
+					MONDE - Vector2(16, 68)).has_point(d):
+				continue
+			var brin := Terrain.detail(espece if tirage.randf() < 0.7 else
+				tirage.randi_range(0, Terrain.DETAILS.size() - 1))
+			Pixels.poser(brin, d)
+			plan().add_child(brin)
+			var case := Vector2i(int(floor(d.x / CASE)), int(floor(d.y / CASE)))
+			if not _brins.has(case):
+				_brins[case] = []
+			(_brins[case] as Array).append(brin)
+
+	# Une lisière d'arbres ferme la ferme. Comme au village : un mur invisible
+	# arrête sans expliquer, une rangée d'arbres se comprend.
+	var interdit := champ.grow(40.0)
+	for i in 160:
+		var p := Vector2(tirage.randf_range(8, MONDE.x - 8), tirage.randf_range(52, MONDE.y - 8))
+		if interdit.has_point(p) or LIT.grow(40.0).has_point(p):
+			continue
+		if not (p.x < 96.0 or p.x > MONDE.x - 80.0 or p.y < 108.0 or p.y > MONDE.y - 56.0):
 			continue
 		var tir := tirage.randf()
-		if tir < 0.40:
+		if tir < 0.34:
 			_poser("arbre_%d.png" % tirage.randi_range(0, 2), p, Rect2(-8, -6, 16, 8))
-		elif tir < 0.62:
+		elif tir < 0.58:
 			_poser("pin_%d.png" % tirage.randi_range(0, 2), p, Rect2(-8, -6, 16, 8))
-		elif tir < 0.80:
+		elif tir < 0.78:
 			_poser("buisson_%d.png" % tirage.randi_range(0, 3), p, Rect2())
 		elif tir < 0.90:
 			_poser("buisson_petit_%d.png" % tirage.randi_range(0, 3), p, Rect2())
@@ -146,102 +290,198 @@ func _poser(image: String, position: Vector2, blocage: Rect2) -> void:
 	if blocage.size != Vector2.ZERO:
 		_obstacles.append(Rect2(position.round() + blocage.position, blocage.size))
 
-## La ferme n'est pas vierge : trois rangs sont déjà en terre. Un champ nu ne
-## montre rien de la boucle à qui arrive, et n'apprend pas à quoi ressemble
+## La ferme n'est pas vierge : deux rangs sont déjà en terre. Un champ nu
+## n'apprend rien de la boucle à qui arrive, et ne montre pas à quoi ressemble
 ## une parcelle qui a soif.
 func _semer_les_premiers_rangs() -> void:
-	for x in range(CHAMP.position.x, CHAMP.position.x + 9):
-		for y in range(CHAMP.position.y, CHAMP.position.y + 3):
+	for x in range(CHAMP.position.x, CHAMP.position.x + 8):
+		for y in range(CHAMP.position.y, CHAMP.position.y + 2):
 			var case := Vector2i(x, y)
-			_travailler(case, LABOUREE)
-			if x % 3 != 2:
-				_semer(case)
-				_parcelles[case]["stade"] = (x + y) % 3
-				_parcelles[case]["arrosee"] = y != CHAMP.position.y + 1
-				_redessiner(case)
+			_etat_de(case)["etat"] = LABOUREE
+			if x % 4 != 3:
+				var fiche := _etat_de(case)
+				fiche["etat"] = SEMEE
+				fiche["culture"] = (x / 4) % Terrain.CULTURES.size()
+				fiche["stade"] = mini((x + y) % 4, Terrain.dernier_stade())
+				fiche["arrosee"] = y == CHAMP.position.y
+			_redessiner(case)
 
 # --------------------------------------------------------------- les gestes
 
 func _case_sous_les_pieds() -> Vector2i:
 	return Vector2i(int(floor(_position.x / CASE)), int(floor(_position.y / CASE)))
 
+func _etat_de(case: Vector2i) -> Dictionary:
+	if not _parcelles.has(case):
+		_parcelles[case] = {"etat": FRICHE, "arrosee": false, "stade": 0, "culture": 0,
+			"sol": null, "plante": null}
+	return _parcelles[case]
+
 func _agir() -> void:
+	if LIT.has_point(_position):
+		_dormir()
+		return
 	var case := _case_sous_les_pieds()
 	if not CHAMP.has_point(case):
+		_dire("Rien à faire ici. Le champ est derrière la clôture.")
 		return
-	var fiche: Dictionary = _parcelles.get(case, {})
-	var etat: int = int(fiche.get("etat", FRICHE))
+	var fiche := _etat_de(case)
+	var etat: int = int(fiche["etat"])
+
+	# Récolter passe avant l'outil en main : un plant mûr se cueille, on ne
+	# demande pas au joueur de reposer son arrosoir d'abord.
+	if etat == SEMEE and int(fiche["stade"]) >= Terrain.dernier_stade():
+		if _depenser("recolte"):
+			fiche["etat"] = LABOUREE
+			fiche["arrosee"] = false
+			_recoltes += 1
+			Sons.jouer("depart", 1.3, -14.0)
+			_dire("%s récolté." % Terrain.nom_culture(int(fiche["culture"])).capitalize())
+			_redessiner(case)
+			_eclater(case, "recolte")
+			_empiler(int(fiche["culture"]))
+		return
+
 	match _outil:
 		HOUE:
-			if etat == FRICHE:
-				_travailler(case, LABOUREE)
+			if etat != FRICHE:
+				_dire("Déjà retourné.")
+			elif _depenser("labour"):
+				fiche["etat"] = LABOUREE
 				Sons.jouer("clic", 0.8, -14.0)
-			elif etat == SEMEE and int(fiche.get("stade", 0)) >= 2:
-				_recolter(case)
-		GRAINES:
-			if etat == LABOUREE:
-				_semer(case)
-				Sons.jouer("clic", 1.4, -16.0)
-		ARROSOIR:
-			if etat != FRICHE and not bool(fiche.get("arrosee", false)):
-				fiche["arrosee"] = true
 				_redessiner(case)
+				_eclater(case, "labour")
+		GRAINES:
+			if etat != LABOUREE:
+				_dire("Il faut d'abord passer la houe.")
+			elif _depenser("semis"):
+				fiche["etat"] = SEMEE
+				fiche["stade"] = 0
+				fiche["culture"] = _culture
+				Sons.jouer("clic", 1.4, -16.0)
+				_dire("%s semé." % Terrain.nom_culture(_culture).capitalize())
+				_redessiner(case)
+				_eclater(case, "semis")
+		ARROSOIR:
+			if etat == FRICHE:
+				_dire("Rien à arroser sur une friche.")
+			elif bool(fiche["arrosee"]):
+				_dire("Déjà arrosé.")
+			elif _depenser("arrosage"):
+				fiche["arrosee"] = true
 				Sons.jouer("bip", 0.7, -18.0)
+				_redessiner(case)
+				_eclater(case, "arrosage")
 	_rafraichir_hud()
 
-func _travailler(case: Vector2i, etat: int) -> void:
-	if not _parcelles.has(case):
-		_parcelles[case] = {"etat": FRICHE, "arrosee": false, "stade": 0, "seve": 0.0,
-			"sol": null, "plante": null}
-	_parcelles[case]["etat"] = etat
-	_redessiner(case)
+func _depenser(geste: String) -> bool:
+	var cout: int = int(COUT[geste])
+	if _energie < cout:
+		_dire("Plus d'énergie. Il faut dormir.")
+		return false
+	_energie -= cout
+	return true
 
-func _semer(case: Vector2i) -> void:
-	var fiche: Dictionary = _parcelles[case]
-	fiche["etat"] = SEMEE
-	fiche["stade"] = 0
-	fiche["seve"] = 0.0
-	_redessiner(case)
-
-## Récolter rend la parcelle labourée, pas en friche : on ne repasse pas la
-## houe entre deux saisons, et enchaîner deux récoltes doit rester fluide.
-func _recolter(case: Vector2i) -> void:
-	var fiche: Dictionary = _parcelles[case]
-	fiche["etat"] = LABOUREE
-	fiche["arrosee"] = false
-	_recoltes += 1
-	Sons.jouer("depart", 1.3, -14.0)
-	_redessiner(case)
-
-## Un plant n'avance que sur une terre arrosée, et boit son eau en poussant.
-## C'est ce qui fait revenir le joueur sur ses rangs au lieu de semer partout
-## et d'attendre.
-func _faire_pousser(delta: float) -> void:
+## Dormir : l'arbitre de la journée. C'est ici, et nulle part ailleurs, que
+## les plants avancent — et seulement ceux dont la terre était arrosée. La
+## terre sèche au passage : l'arrosage se refait chaque jour.
+func _dormir() -> void:
+	if _endormi:
+		return
+	_endormi = true
+	# Le noir tombe AVANT que l'état change, et se relève après : un jour qui
+	# passe en un seul cadre, sans transition, se lit comme un bug d'affichage.
+	var tombe := create_tween()
+	tombe.tween_property(_voile, "modulate:a", 1.0, 0.45)
+	await tombe.finished
+	var pousses := 0
 	for case in _parcelles:
 		var fiche: Dictionary = _parcelles[case]
-		if int(fiche["etat"]) != SEMEE or not bool(fiche["arrosee"]):
-			continue
-		if int(fiche["stade"]) >= 2:
-			continue
-		fiche["seve"] = float(fiche["seve"]) + delta
-		if float(fiche["seve"]) >= POUSSE_S:
-			fiche["seve"] = 0.0
+		if int(fiche["etat"]) == SEMEE and bool(fiche["arrosee"]) \
+				and int(fiche["stade"]) < Terrain.dernier_stade():
 			fiche["stade"] = int(fiche["stade"]) + 1
-			fiche["arrosee"] = false
-			_redessiner(case)
+			pousses += 1
+		fiche["arrosee"] = false
+		_redessiner(case)
+	_jour += 1
+	_heure = LEVER
+	_energie = ENERGIE_MAX
+	Sons.jouer("portail", 0.7, -12.0)
+	_voile_texte.text = "Jour %d" % _jour
+	_dire("Jour %d. %d plants ont poussé cette nuit." % [_jour, pousses])
+	_rafraichir_hud()
+	await get_tree().create_timer(0.9).timeout
+	var leve := create_tween()
+	leve.tween_property(_voile, "modulate:a", 0.0, 0.6)
+	await leve.finished
+	_voile_texte.text = ""
+	_endormi = false
+
+## Un petit éclat de matière à l'endroit du geste, et le personnage qui
+## marque le coup. Sans ça, une case qui change d'état d'un cadre à l'autre
+## ne se ressent pas — on ne sait pas si on a agi ou si le jeu a hoqueté.
+func _eclater(case: Vector2i, geste: String) -> void:
+	var eclats := CPUParticles2D.new()
+	eclats.one_shot = true
+	eclats.emitting = true
+	eclats.amount = 10
+	eclats.lifetime = 0.45
+	eclats.explosiveness = 1.0
+	eclats.direction = Vector2(0, -1)
+	eclats.spread = 70.0
+	eclats.initial_velocity_min = 28.0
+	eclats.initial_velocity_max = 60.0
+	eclats.gravity = Vector2(0, 140)
+	eclats.scale_amount_min = 1.0
+	eclats.scale_amount_max = 2.0
+	var teintes: Array = ECLAT[geste]
+	eclats.color = teintes[0]
+	var degrade := Gradient.new()
+	degrade.set_color(0, teintes[0])
+	degrade.set_color(1, teintes[1])
+	eclats.color_ramp = degrade
+	eclats.position = Vector2(case) * CASE + Vector2(CASE * 0.5, CASE * 0.6)
+	eclats.z_index = 20
+	plan().add_child(eclats)
+	get_tree().create_timer(1.2).timeout.connect(eclats.queue_free)
+
+	var saut := create_tween()
+	saut.tween_property(_corps, "offset:y", PIEDS.y - 5.0, 0.07)
+	saut.tween_property(_corps, "offset:y", PIEDS.y, 0.1)
+
+## La récolte va quelque part : un cageot de plus devant la grange. C'est la
+## seule progression qui se VOIT depuis le champ — un compteur en haut de
+## l'écran ne fait pas une ferme qui prospère.
+func _empiler(culture: int) -> void:
+	if _cageots >= CAGEOTS_MAX:
+		return
+	var cageot := Terrain.cageot(culture)
+	var colonne := _cageots % CAGEOTS_PAR_RANG
+	var rang := _cageots / CAGEOTS_PAR_RANG
+	Pixels.poser(cageot, CAGEOTS + Vector2(colonne * 18, rang * 12))
+	plan().add_child(cageot)
+	_cageots += 1
+
+func _dire(texte: String) -> void:
+	_message = texte
+	_depuis_message = 0.0
 
 # ----------------------------------------------------------------- le rendu
 
-func _redessiner(case: Vector2i) -> void:
-	var fiche: Dictionary = _parcelles[case]
+## `avec_voisines` évite la récursion : quand une case change d'état, les
+## quatre voisines doivent refaire leur cerne — celui-ci ne dépend pas que
+## d'elles — mais elles n'ont pas à propager plus loin.
+func _redessiner(case: Vector2i, avec_voisines: bool = true) -> void:
+	var fiche := _etat_de(case)
 	var coin := Vector2(case) * CASE
 	var sol = fiche.get("sol")
 	if sol:
 		(sol as Node).queue_free()
 		fiche["sol"] = null
 	if int(fiche["etat"]) != FRICHE:
+		_arracher(case)
 		var terre := Terrain.parcelle(CASE, GRAINE + case.x * 31 + case.y * 17,
-			bool(fiche["arrosee"]))
+			bool(fiche["arrosee"]), _voisines(case))
 		terre.position = coin
 		# Le sol reste sous tout le monde : à plat, il n'a pas à entrer dans le
 		# tri par profondeur, sinon il passe devant un joueur situé plus haut.
@@ -254,15 +494,39 @@ func _redessiner(case: Vector2i) -> void:
 		(plante as Node).queue_free()
 		fiche["plante"] = null
 	if int(fiche["etat"]) == SEMEE:
-		var pousse := Terrain.plant(int(fiche["stade"]))
+		var pousse := Terrain.plant(int(fiche["culture"]), int(fiche["stade"]))
 		# Ancré au bas de la case : le plant est trié en profondeur comme un
 		# personnage, donc on passe devant les rangs du bas et derrière ceux
 		# du haut.
-		Pixels.poser(pousse, coin + Vector2(CASE * 0.5, CASE - 2))
+		Pixels.poser(pousse, coin + Vector2(CASE * 0.5, CASE - 4))
 		plan().add_child(pousse)
 		fiche["plante"] = pousse
+	if avec_voisines:
+		for pas in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]:
+			if _parcelles.has(case + pas):
+				_redessiner(case + pas, false)
+
+## La houe arrache ce qui poussait là. Les brins sont libérés pour de bon : une
+## parcelle ne redevient jamais friche dans cette version, et les garder
+## coûterait un suivi d'état pour rien.
+func _arracher(case: Vector2i) -> void:
+	for brin in _brins.get(case, []):
+		(brin as Node).queue_free()
+	_brins.erase(case)
+
+## Le masque des voisines déjà retournées : 1 haut, 2 bas, 4 gauche, 8 droite.
+func _voisines(case: Vector2i) -> int:
+	var masque := 0
+	for entree in [[Vector2i(0, -1), 1], [Vector2i(0, 1), 2],
+			[Vector2i(-1, 0), 4], [Vector2i(1, 0), 8]]:
+		var voisine: Vector2i = case + (entree[0] as Vector2i)
+		if _parcelles.has(voisine) and int(_parcelles[voisine]["etat"]) != FRICHE:
+			masque |= int(entree[1])
+	return masque
 
 func _process(delta: float) -> void:
+	if Commandes.action_declenchee():
+		_agir()
 	var direction := Commandes.direction()
 	if direction != Vector2.ZERO:
 		var avant := _position
@@ -272,7 +536,7 @@ func _process(delta: float) -> void:
 		_position.y += direction.y * VITESSE * delta
 		_degager(avant)
 		_position.x = clampf(_position.x, 16.0, MONDE.x - 16.0)
-		_position.y = clampf(_position.y, 48.0, MONDE.y - 16.0)
+		_position.y = clampf(_position.y, 52.0, MONDE.y - 16.0)
 		# Les héros du pack sont dessinés de profil : on ne retourne le sprite
 		# que sur un pas horizontal.
 		if direction.x != 0.0:
@@ -286,9 +550,33 @@ func _process(delta: float) -> void:
 		_corps.play(animation)
 	Pixels.poser(_corps, _position)
 	_camera.position = _position
-	_faire_pousser(delta)
+	_placer_curseur()
 	_avancer_l_heure(delta)
+	_depuis_message += delta
 	_rafraichir_hud()
+
+## Le cadre suit la case sous les pieds et s'éteint hors du champ. Il porte
+## aussi l'information « ce geste est possible » : vert si l'outil en main a
+## quelque chose à faire ici, blanc sinon. La couleur ne dit jamais rien
+## toute seule — le bandeau du bas écrit ce qui manque.
+func _placer_curseur() -> void:
+	var case := _case_sous_les_pieds()
+	if not CHAMP.has_point(case):
+		_curseur.visible = false
+		return
+	_curseur.visible = true
+	_curseur.position = Vector2(case) * CASE
+	var fiche := _etat_de(case)
+	var etat: int = int(fiche["etat"])
+	var possible := false
+	if etat == SEMEE and int(fiche["stade"]) >= Terrain.dernier_stade():
+		possible = true
+	else:
+		match _outil:
+			HOUE: possible = etat == FRICHE
+			GRAINES: possible = etat == LABOUREE
+			ARROSOIR: possible = etat != FRICHE and not bool(fiche["arrosee"])
+	_curseur.modulate = Palette.BON.lerp(Color.WHITE, 0.3) if possible else Color(1, 1, 1, 0.45)
 
 ## Le temps passe, la lumière tourne. Quatre teintes suffisent : la nuit,
 ## l'aube, le plein jour, le crépuscule — interpolées, elles donnent une
@@ -326,50 +614,101 @@ func _unhandled_input(evenement: InputEvent) -> void:
 	if not (evenement is InputEventKey and evenement.pressed and not evenement.echo):
 		return
 	match (evenement as InputEventKey).keycode:
-		KEY_E: _agir()
 		KEY_TAB: _changer_outil((_outil + 1) % OUTILS.size())
 		KEY_1: _changer_outil(HOUE)
 		KEY_2: _changer_outil(GRAINES)
 		KEY_3: _changer_outil(ARROSOIR)
+		KEY_A: _changer_culture()
 		KEY_ESCAPE: demande_ecran.emit("hub", {})
 
 func _changer_outil(outil: int) -> void:
+	# Reprendre le semoir alors qu'on l'a déjà en main fait tourner la graine :
+	# une touche de moins à apprendre, et on change de culture là où on y pense.
+	if outil == GRAINES and _outil == GRAINES:
+		_changer_culture()
+		return
 	_outil = outil
 	Sons.jouer("clic", 1.0, -20.0)
 	_rafraichir_hud()
 
+func _changer_culture() -> void:
+	_culture = (_culture + 1) % Terrain.CULTURES.size()
+	_outil = GRAINES
+	Sons.jouer("clic", 1.2, -20.0)
+	_dire("Sachet de %s." % Terrain.nom_culture(_culture))
+	_rafraichir_hud()
+
 func _construire_hud() -> void:
 	var couche := interface()
+	# L'interface est POSÉE SUR DES PANNEAUX, pas écrite à même le monde : du
+	# texte clair sur une prairie claire se lit une fois sur deux, et la ligne
+	# d'aide tombait pile sur la clôture. C'est la même boîte que le hub.
+	var cadre_haut := UI.panneau()
+	cadre_haut.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	cadre_haut.position = Vector2(18, 14)
+	couche.add_child(cadre_haut)
 	var haut := HBoxContainer.new()
-	haut.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	haut.offset_left = 20
-	haut.offset_right = -20
-	haut.offset_top = 16
-	haut.add_theme_constant_override("separation", 24)
-	couche.add_child(haut)
+	haut.add_theme_constant_override("separation", 20)
+	cadre_haut.add_child(haut)
 	_hud_outil = UI.titre("", 20)
 	haut.add_child(_hud_outil)
+	_hud_energie = UI.texte("", 15, Palette.ENCRE_DOUCE)
+	haut.add_child(_hud_energie)
+	var fond := ColorRect.new()
+	fond.color = Palette.FILET
+	fond.custom_minimum_size = Vector2(120, 10)
+	fond.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	haut.add_child(fond)
+	_hud_jauge = ColorRect.new()
+	_hud_jauge.color = Palette.BON
+	_hud_jauge.position = Vector2.ZERO
+	_hud_jauge.size = Vector2(120, 10)
+	fond.add_child(_hud_jauge)
 	_hud_compte = UI.texte("", 15, Palette.ENCRE_DOUCE)
-	_hud_compte.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	haut.add_child(_hud_compte)
 	_hud_heure = UI.texte("", 15, Palette.ENCRE)
 	haut.add_child(_hud_heure)
 
+	var cadre_bas := UI.panneau()
+	cadre_bas.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	cadre_bas.position = Vector2(18, -18)
+	cadre_bas.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	couche.add_child(cadre_bas)
 	var bas := VBoxContainer.new()
-	bas.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	bas.offset_left = 20
-	bas.offset_right = -20
-	bas.offset_top = -56
-	bas.offset_bottom = -18
-	couche.add_child(bas)
+	bas.add_theme_constant_override("separation", 4)
+	cadre_bas.add_child(bas)
+	_hud_message = UI.texte("", 16, Palette.SERIE)
+	bas.add_child(_hud_message)
 	_hud_aide = UI.texte("", 14, Palette.ENCRE_FAIBLE)
 	bas.add_child(_hud_aide)
+
+	# Le voile du sommeil est ajouté EN DERNIER : dans une CanvasLayer, l'ordre
+	# des enfants est l'ordre de dessin, et un voile ajouté avant les panneaux
+	# passerait dessous — on verrait l'interface flotter sur le noir.
+	_voile = ColorRect.new()
+	_voile.color = Palette.FOND
+	_voile.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_voile.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_voile.modulate.a = 0.0
+	couche.add_child(_voile)
+	_voile_texte = UI.titre("", 40)
+	_voile_texte.set_anchors_preset(Control.PRESET_CENTER)
+	_voile_texte.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_voile_texte.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_voile.add_child(_voile_texte)
 	_rafraichir_hud()
 
 func _rafraichir_hud() -> void:
 	if _hud_outil == null:
 		return
-	_hud_outil.text = "En main : " + String(OUTILS[_outil])
+	_hud_outil.text = "En main : " + (("Graines de " + Terrain.nom_culture(_culture))
+		if _outil == GRAINES else String(OUTILS[_outil]))
+	_hud_energie.text = "Énergie %d" % _energie
+	_hud_jauge.size = Vector2(120.0 * float(_energie) / float(ENERGIE_MAX), 10)
+	# La couleur ne porte jamais seule le sens : le chiffre est écrit à côté.
+	_hud_jauge.color = Palette.BON if _energie > 30 else (
+		Palette.AVERTISSEMENT if _energie > 10 else Palette.CRITIQUE)
+
 	var semees := 0
 	var seches := 0
 	var mures := 0
@@ -378,15 +717,14 @@ func _rafraichir_hud() -> void:
 		if int(fiche["etat"]) != SEMEE:
 			continue
 		semees += 1
-		if int(fiche["stade"]) >= 2:
+		if int(fiche["stade"]) >= Terrain.dernier_stade():
 			mures += 1
 		elif not bool(fiche["arrosee"]):
 			seches += 1
-	# La couleur ne porte jamais seule le sens : on écrit le compte.
-	_hud_compte.text = "%d plants  ·  %d à arroser  ·  %d mûrs  ·  %d récoltés" % [
+	_hud_compte.text = "%d plants · %d à arroser · %d mûrs · %d récoltés" % [
 		semees, seches, mures, _recoltes]
-	# L'heure du jeu, pas celle de la machine : minuit est au tiers de la
-	# journée, et le lever à 6 h par convention.
+
 	var minutes := int(_heure * 1440.0)
-	_hud_heure.text = "Jour %d  ·  %02dh%02d" % [_jour, (minutes / 60) % 24, minutes % 60]
-	_hud_aide.text = "Z Q S D pour marcher · 1 houe, 2 graines, 3 arrosoir (ou Tab) · E agit sur la case sous vos pieds · Échap revient au village."
+	_hud_heure.text = "Jour %d · %02dh%02d" % [_jour, (minutes / 60) % 24, minutes % 60]
+	_hud_message.text = _message if _depuis_message < 3.5 else ""
+	_hud_aide.text = "Z Q S D marcher · 1 houe, 2 graines (A change la culture), 3 arrosoir · E agit sur la case encadrée · E devant la grange pour dormir · Échap revient au village."
