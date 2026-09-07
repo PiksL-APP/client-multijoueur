@@ -136,6 +136,7 @@ const ID_VOITURE_DEPART := 10000
 
 var carte: PlanVille
 var ville: VilleVivante
+var _ambiance: Array = []            ## [WorldEnvironment, soleil, lune], réglés à l'heure du village
 var _morceaux: Dictionary = {}       ## Vector2i -> MorceauVille, les morceaux bâtis ou en chantier
 var _chantier: MorceauVille = null   ## le morceau en cours de construction, une étape par image
 var _cachees: Dictionary = {}        ## id dormante -> vrai : déjà effacée de sa nappe
@@ -167,7 +168,7 @@ var _depuis_sirene := 0.0
 var _depuis_klaxon := 0.0
 var _depuis_battement := 0.0
 var _cible_contrat: Dictionary = {}
-var _hud_contrat: Label
+var _contrat_duree := 0.0            ## durée initiale du contrat en main, pour le sablier du HUD
 var _radar: Control
 var _plan_image: Image                ## la carte entière, un pixel par tuile, peinte par lots
 var _plan_texture: ImageTexture
@@ -246,25 +247,15 @@ func preparer() -> void:
 	_corps_pied.visible = false
 	monde().add_child(_corps_pied)
 
-	# Le contrat a sa propre ligne, au-dessus de celle du socle : glissé dans
-	# l'état du joueur, il se perdait au milieu de sept autres mentions alors
-	# qu'il décide de la minute qui vient.
 	# La bannière : le nom du quartier et de qui le tient, quand on y entre.
 	# Le sol change de teinte, mais une teinte ne se nomme pas toute seule.
-	_hud_banniere = UI.titre("", 24)
+	# Elle se pose sous les étoiles du HUD, qui occupent le haut du milieu.
+	_hud_banniere = UI.titre("", 16)
 	_hud_banniere.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	_hud_banniere.offset_top = 52
-	_hud_banniere.offset_bottom = 88
+	_hud_banniere.offset_top = 64
+	_hud_banniere.offset_bottom = 90
 	_hud_banniere.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	interface().add_child(_hud_banniere)
-
-	_hud_contrat = UI.titre("", 20)
-	_hud_contrat.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_hud_contrat.offset_left = 20
-	_hud_contrat.offset_right = -20
-	_hud_contrat.offset_top = -106
-	_hud_contrat.offset_bottom = -76
-	interface().add_child(_hud_contrat)
 
 	# Le plan, en haut à droite : sous le bandeau du socle, et à l'opposé des
 	# boutons tactiles, qui vivent en bas à droite.
@@ -346,7 +337,13 @@ func _ma_couleur() -> Color:
 ## autour du joueur, dans `_diffuser_la_ville`. Les lieux (repaires, garages,
 ## cabines, arènes) vivent dans le morceau qui porte leur pâté.
 func _planter_decor() -> void:
-	for noeud in MatieresCarnage.crepuscule():
+	# `--nuit=0.8` (ou `?nuit=0.8` dans l'adresse) : photographier la nuit sans
+	# attendre que le village y passe.
+	for argument in OS.get_cmdline_args():
+		if String(argument).begins_with("--nuit="):
+			MatieresCarnage.nuit_forcee = clamp(float(String(argument).substr(7)), 0.0, 1.0)
+	_ambiance = MatieresCarnage.ambiance()
+	for noeud in _ambiance:
 		monde().add_child(noeud)
 	# La voie ferrée est une droite de la ville : le shader du sol la trace en
 	# espace monde, il lui faut ses paramètres.
@@ -384,9 +381,9 @@ func _diffuser_la_ville(entiers: int = 0) -> void:
 		monde().add_child(morceau)
 		_morceaux[cle] = morceau
 		if entiers > 0:
-			morceau.batir(carte, cle, ville.reveillees)
+			morceau.batir(carte, cle, ville.reveillees, ville.detruits)
 		else:
-			morceau.commencer(carte, cle, ville.reveillees)
+			morceau.commencer(carte, cle, ville.reveillees, ville.detruits)
 			_chantier = morceau
 	# On ne libère qu'un morceau par image aussi : libérer neuf nœuds de mille
 	# instances d'un coup se sent autant que les bâtir.
@@ -460,6 +457,47 @@ func _dessiner_le_plan() -> void:
 		_plan_vue.draw_circle(Vector2(x, y - 5.0), 4.0, entree[1])
 		_plan_vue.draw_string(police, Vector2(x + 9.0, y), String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Palette.ENCRE_DOUCE)
 		x += 12.0 + police.get_string_size(String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 16.0
+
+## Un cube d'immeuble part du décor, s'il est bâti : le morceau retire
+## l'instance, dévoile l'intérieur, et on jette quelques débris de sa couleur.
+func _casser_dans_le_decor(id: int, locale: int) -> void:
+	var tuile := MorceauVille.tuile_d_immeuble(id)
+	var cle_morceau := Vector2i(tuile.x / PlanVille.MORCEAU, tuile.y / PlanVille.MORCEAU)
+	if not _morceaux.has(cle_morceau):
+		return
+	var morceau: MorceauVille = _morceaux[cle_morceau]
+	if not morceau.fini():
+		return
+	var parti := morceau.casser(id, locale)
+	if parti.is_empty():
+		return
+	if (parti["p"] as Vector3).distance_to(Decor.vers3d(_position)) > 120.0:
+		return
+	var couleur: Color = parti["c"]
+	for i in 5:
+		var debris := FormesCarnage.cubes([[Vector3.ZERO, float(parti["taille"]) * _rng.randf_range(0.2, 0.45), Color(couleur.r, couleur.g, couleur.b, 1.0)]])
+		debris.position = parti["p"]
+		monde().add_child(debris)
+		var v := Vector3(_rng.randf_range(-1, 1), _rng.randf_range(0.5, 1.6), _rng.randf_range(-1, 1)) * _rng.randf_range(5, 11)
+		_eclats.append({"noeud": debris, "v": v, "t": 1.4, "t0": 1.4})
+	Sons.jouer("choc", _rng.randf_range(0.6, 0.9), -14.0)
+
+## Un immeuble dont le rez-de-chaussée est parti aux deux tiers ne tient plus
+## personne dehors : on ouvre ses tuiles, on roule dans la ruine.
+func _verifier_la_ruine(id: int) -> void:
+	var tuile := MorceauVille.tuile_d_immeuble(id)
+	var fiche := carte.tuile(tuile.x, tuile.y)
+	var rang := posmod(id, 8)
+	if rang >= (fiche["batis"] as Array).size():
+		return
+	var g := VoxelsCarnage.grille(fiche["batis"][rang])
+	var sol_total := int(g["nx"]) * int(g["nz"])
+	var partis := 0
+	for locale in ville.detruits.get(id, []):
+		if posmod(int(locale), 32) == 0:
+			partis += 1
+	if float(sol_total - partis) / float(max(1, sol_total)) < 0.4:
+		carte.eventrer(id)
 
 ## Une voiture dormante s'est réveillée : on l'efface de la nappe du morceau
 ## qui la porte. Le nœud ordinaire de `_placer_les_autos` prend le relais.
@@ -767,6 +805,14 @@ func _heurter_les_murs() -> void:
 	if frontal > 0.62 and abs(_vitesse) > 330.0:
 		Sons.jouer("choc", 0.8, -10.0)
 		_secousse = max(_secousse, 0.28)
+		# Une façade prise de face à cette vitesse perd des cubes : l'hôte
+		# tranche lesquels, comme pour les balles.
+		var impact := _position + direction * RAYON_VOITURE
+		if est_hote():
+			ville.choquer(impact, direction, abs(_vitesse))
+			_vider_les_evenements()
+		else:
+			canal.envoyer("choc", {"x": int(impact.x), "y": int(impact.y), "a": snapped(direction.angle(), 0.01), "v": int(abs(_vitesse))})
 		# La tôle s'abîme : une voiture qu'on maltraite finit par exploser,
 		# et c'est ce qui donne un sens au garage.
 		_pv_vehicule = max(0.0, _pv_vehicule - abs(_vitesse) * 0.012 / _solidite())
@@ -910,7 +956,13 @@ func _avancer_projectiles(delta: float) -> void:
 		var pas: Vector2 = (tir["v"] as Vector2) * delta
 		tir["p"] = (tir["p"] as Vector2) + pas
 		tir["restant"] = float(tir["restant"]) - pas.length()
-		var mort: bool = float(tir["restant"]) <= 0.0 or carte.dans_un_batiment(tir["p"])
+		var dans_un_mur := carte.dans_un_batiment(tir["p"])
+		var mort: bool = float(tir["restant"]) <= 0.0 or dans_un_mur
+		if est_hote() and dans_un_mur:
+			# La balle écaille le mur, la roquette le creuse : l'hôte décide
+			# quels cubes partent, et le dit à tous.
+			ville.impacter(tir["p"], String(tir["arme"]))
+			_vider_les_evenements()
 		if est_hote() and not mort:
 			mort = _resoudre_impact(tir)
 		if mort:
@@ -1127,6 +1179,11 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 				if arme != "":
 					_accorder(String(charge.get("cle", "")), arme)
 				_vider_les_evenements()
+		"choc":
+			if est_hote():
+				ville.choquer(Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
+					Vector2.RIGHT.rotated(float(charge.get("a", 0.0))), float(charge.get("v", 0)))
+				_vider_les_evenements()
 		"lot":
 			for entree in charge.get("l", []):
 				if typeof(entree) == TYPE_ARRAY and (entree as Array).size() == 2 and typeof(entree[1]) == TYPE_DICTIONARY:
@@ -1169,7 +1226,31 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 				int(charge.get("p", 0)), int(charge.get("f", 1)), tueur,
 				String(charge.get("q", "")))
 		"boum":
-			_effet_explosion(Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))))
+			var ou_boum := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
+			_effet_explosion(ou_boum)
+			if est_hote():
+				ville.exploser(ou_boum)
+				_vider_les_evenements()
+		"casse":
+			# Des cubes d'immeuble s'en vont : chez tout le monde, dans le décor
+			# et dans la mémoire de la manche (un morceau rebâti plus tard doit
+			# montrer la même ruine).
+			var touches: Dictionary = {}
+			for entree in charge.get("v", []):
+				if typeof(entree) != TYPE_ARRAY or (entree as Array).size() != 2:
+					continue
+				var id := int(entree[0])
+				var locale := int(entree[1])
+				if not ville.detruits.has(id):
+					ville.detruits[id] = []
+				if not (locale in (ville.detruits[id] as Array)):
+					ville.detruits[id].append(locale)
+				touches[id] = true
+				_casser_dans_le_decor(id, locale)
+			for id in touches:
+				_verifier_la_ruine(int(id))
+			if Commandes.pilote_automatique:
+				print("[banc] casse : %d cube(s) dans %d immeuble(s)" % [(charge.get("v", []) as Array).size(), touches.size()])
 		"etoiles":
 			ville.chaleur[String(charge.get("j", ""))] = ville.chaleur_pour(int(charge.get("r", 0)))
 			if Commandes.pilote_automatique and String(charge.get("j", "")) == Session.cle:
@@ -1196,6 +1277,7 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 			else:
 				_contrat = {"t": String(charge.get("t", "")), "n": int(charge.get("n", 0)),
 					"a": int(charge.get("a", 0)), "r": float(charge.get("r", 0))}
+				_contrat_duree = max(_contrat_duree if int(charge.get("a", 0)) > 0 else 0.0, float(charge.get("r", 0)))
 				_cible_contrat = {"k": String(charge.get("k", "")), "g": int(charge.get("g", -1))}
 				if etat == "pris":
 					Sons.jouer("portail", 1.3, -9.0)
@@ -1462,6 +1544,9 @@ func rafraichir_scene(delta: float) -> void:
 	_batisses = 0
 	_diffuser_la_ville()
 	_peindre_le_plan()
+	# L'heure du village, à chaque image : le jour tombe pendant la manche.
+	if _ambiance.size() == 3:
+		MatieresCarnage.regler_heure(_ambiance[0], _ambiance[1], _ambiance[2], MatieresCarnage.nuit())
 	_placer_le_joueur(delta)
 	_placer_les_autres()
 	_placer_la_foule()
@@ -1556,20 +1641,25 @@ func _faire_hurler_la_police(delta: float) -> void:
 	_depuis_sirene = max(0.7, 1.6 - 0.18 * float(niveau))
 	Sons.jouer("sirene", 1.0 + 0.06 * float(niveau), -16.0)
 
+## Le sablier du contrat descend chez chacun entre deux nouvelles de l'hôte ;
+## l'affichage lui-même est dans la fiche (`fiche_joueur`).
 func _rafraichir_contrat(delta: float) -> void:
-	if _hud_contrat == null:
-		return
 	if _contrat.is_empty():
-		_hud_contrat.text = ""
 		return
 	_contrat["r"] = max(0.0, float(_contrat["r"]) - delta)
+
+func _alerte_contrat() -> Dictionary:
+	if _contrat.is_empty():
+		return {}
 	var avance := ""
 	if int(_contrat["n"]) > 1:
 		avance = "  %d/%d" % [int(_contrat["a"]), int(_contrat["n"])]
-	_hud_contrat.text = "CONTRAT — %s%s   ·   %d s" % [
-		String(_contrat["t"]), avance, int(ceil(float(_contrat["r"])))]
-	_hud_contrat.add_theme_color_override("font_color",
-		Palette.CRITIQUE if float(_contrat["r"]) <= 8.0 else Palette.AVERTISSEMENT)
+	var restant := float(_contrat["r"])
+	return {
+		"texte": "CONTRAT  %s%s   %ds" % [String(_contrat["t"]).to_upper(), avance, int(ceil(restant))],
+		"couleur": Palette.CRITIQUE if restant <= 8.0 else Palette.AVERTISSEMENT,
+		"part": restant / _contrat_duree if _contrat_duree > 0.0 else -1.0,
+	}
 
 func _placer_le_joueur(delta: float) -> void:
 	_corps_auto.visible = not _pied and _hors_service <= 0.0
@@ -1601,7 +1691,7 @@ func _placer_le_joueur(delta: float) -> void:
 
 	if _corps_pied.visible:
 		_corps_pied.position = Decor.vers3d(_position, 0.0)
-		_corps_pied.rotation.y = -_angle + PI * 0.5
+		_corps_pied.rotation.y = -_angle
 		_demarche(_corps_pied, "walk" if abs(_vitesse) > 1.0 else "idle")
 		_regler_jauge(_corps_pied, _vie / VIE_MAX)
 
@@ -1626,7 +1716,7 @@ func _placer_les_autres() -> void:
 			_regler_jauge(auto, float(a["vie"]) / VIE_MAX)
 		if a_pied:
 			pieton.position = Decor.vers3d(a["p"])
-			pieton.rotation.y = -float(a["a"]) + PI * 0.5
+			pieton.rotation.y = -float(a["a"])
 			_demarche(pieton, "walk" if abs(float(a.get("v", 0.0))) > 1.0 else "idle")
 			_regler_jauge(pieton, float(a["vie"]) / VIE_MAX)
 
@@ -1640,16 +1730,14 @@ func _placer_la_foule() -> void:
 			noeud = FormesCarnage.pieton(_couleur_de(personne), int(personne["genre"]) == VilleVivante.GANG)
 			monde().add_child(noeud)
 			personne["noeud"] = noeud
-			# La foule marche du début à la fin : la démarche se lance une
-			# fois, à la naissance. Appelée à chaque image, elle coûterait
-			# quarante-six parcours d'arbre par trame pour ne rien changer.
-			Decor.demarche(noeud, "walk")
 		var corps: Node3D = noeud
 		corps.visible = (personne["p"] as Vector2).distance_to(_position) <= PORTEE_RENDU
 		if not corps.visible:
 			continue
 		corps.position = Decor.vers3d(personne["p"])
-		corps.rotation.y = -float(personne.get("a", 0.0)) + PI * 0.5
+		# Le personnage en cubes regarde +X, comme les voitures.
+		corps.rotation.y = -float(personne.get("a", 0.0))
+		_demarche(corps, "walk")
 		_regler_jauge(corps, float(int(personne["pv"])) / float(_pv_max_de(personne)))
 
 func _couleur_de(personne: Dictionary) -> Color:
@@ -1740,16 +1828,12 @@ func _placer_les_objets() -> void:
 		if gyro:
 			gyro.visible = fmod(temps, 0.7) > 0.35
 
-## Change la démarche d'un porteur en retenant celle qui tourne : sans cette
-## mémoire, il faut parcourir l'arbre du personnage à chaque image pour
-## retrouver son lecteur d'animation.
-var _demarches: Dictionary = {}
-
+## La démarche d'un personnage en cubes : ses jambes pivotent quand il marche.
+## Deux rotations par image et par personnage, rien de plus.
 func _demarche(porteur: Node3D, nom: String) -> void:
-	if String(_demarches.get(porteur.get_instance_id(), "")) == nom:
-		return
-	_demarches[porteur.get_instance_id()] = nom
-	Decor.demarche(porteur, nom)
+	var silhouette := porteur.get_node_or_null("Silhouette") as Node3D
+	if silhouette:
+		VoxelsCarnage.animer(silhouette, nom == "walk", temps + float(porteur.get_instance_id() % 97))
 
 ## L'hélicoptère : il glisse vers sa dernière position connue, son rotor tourne,
 ## et on entend ses pales quand il est proche — c'est ce qui dit qu'il est là
@@ -1808,43 +1892,53 @@ func _placer_camera(delta: float) -> void:
 
 # ------------------------------------------------------- état affiché
 
-## La ligne du bas : ce qui change souvent. Les étoiles d'abord — c'est ce qui
-## décide de la minute qui vient.
-func etat_joueur() -> String:
-	if _hors_service > 0.0:
-		return "À TERRE — vous vous relevez dans %d s" % int(ceil(_hors_service))
-	var morceaux: Array = []
-
-	var niveau := ville.etoiles(Session.cle)
-	if niveau > 0:
-		morceaux.append("RECHERCHÉ %s (%d)" % ["★".repeat(niveau), niveau])
-	morceaux.append("Vie %d%%" % int(_vie))
+## La fiche du HUD : les étoiles d'abord — c'est ce qui décide de la minute qui
+## vient — puis les jauges, l'arme, et l'humeur du quartier en puces. La ligne
+## de texte d'autrefois mettait sept mentions bout à bout ; on ne lisait rien
+## en conduisant.
+func fiche_joueur() -> Dictionary:
+	var fiche := {"etoiles": ville.etoiles(Session.cle)}
+	var jauges: Array = []
+	jauges.append({"nom": "VIE", "part": _vie / 100.0, "couleur": Palette.BON, "valeur": "%d" % int(_vie)})
 	if not _pied:
-		morceaux.append("Tôle %d%%" % int(_pv_vehicule))
-	morceaux.append("%s%s" % [String(ARMES[_arme]["nom"]),
-		"" if _munitions < 0 else " %d" % _munitions])
+		jauges.append({"nom": "TÔLE", "part": _pv_vehicule / PV_VOITURE,
+			"couleur": Palette.SERIE, "valeur": "%d" % int(_pv_vehicule)})
+	fiche["jauges"] = jauges
+	fiche["arme"] = {"nom": String(ARMES[_arme]["nom"]), "munitions": "" if _munitions < 0 else "%d" % _munitions}
+
+	var puces: Array = []
+	if _hors_service > 0.0:
+		puces.append({"texte": "à terre — %d s" % int(ceil(_hors_service)), "couleur": Palette.CRITIQUE})
 	if _eperon > 0.0:
-		morceaux.append("Éperon %ds" % int(ceil(_eperon)))
-
+		puces.append({"texte": "éperon %ds" % int(ceil(_eperon)), "couleur": Palette.SERIEUX})
 	var territoire := carte.territoire(_position)
-	var jauge := ville.respect_de(Session.cle)
-	var humeur := "neutre"
-	if ville.gang_hostile(Session.cle, territoire):
-		humeur = "vous chasse"
-	elif ville.gang_ami(Session.cle, territoire):
-		humeur = "vous laisse"
 	if territoire >= 0:
-		morceaux.append("%s : %s (%d)" % [carte.nom_du_gang(territoire), humeur, int(jauge[territoire])])
+		var humeur := "neutre"
+		var couleur := carte.couleur_du_gang(territoire)
+		if ville.gang_hostile(Session.cle, territoire):
+			humeur = "vous chasse"
+			couleur = Palette.CRITIQUE
+		elif ville.gang_ami(Session.cle, territoire):
+			humeur = "vous laisse"
+		puces.append({"texte": "%s : %s" % [carte.nom_du_gang(territoire), humeur], "couleur": couleur})
 	else:
-		morceaux.append("centre — terrain neutre")
-
+		puces.append({"texte": "terrain neutre", "couleur": Palette.ENCRE_FAIBLE})
 	if carte.arene_de(_position) >= 0:
-		morceaux.append("ARÈNE — TIR AMI ACTIF")
+		puces.append({"texte": "ARÈNE — tir ami", "couleur": Palette.CRITIQUE})
 	if carte.garage_de(_position) >= 0:
-		morceaux.append("GARAGE — repeint")
+		puces.append({"texte": "garage", "couleur": Palette.SERIE})
 	if _pied:
 		var auto := ville.vehicule_proche(_position, PORTEE_ENTREE)
-		morceaux.append("E : monter" if not auto.is_empty() else "à pied")
+		puces.append({"texte": "E : monter" if not auto.is_empty() else "à pied", "couleur": Palette.AVERTISSEMENT if not auto.is_empty() else Palette.ENCRE_DOUCE})
 	if _hors_ville > 0.2:
-		morceaux.append("VOUS QUITTEZ LA VILLE")
-	return "   ·   ".join(morceaux)
+		puces.append({"texte": "VOUS QUITTEZ LA VILLE", "couleur": Palette.CRITIQUE})
+	fiche["puces"] = puces
+	fiche["accent"] = _ma_couleur()
+	var alerte := _alerte_contrat()
+	if not alerte.is_empty():
+		fiche["alerte"] = alerte
+	return fiche
+
+func aide_touches() -> Array:
+	return [["Z S", "avancer, freiner"], ["Q D", "tourner"], ["ESPACE", "tirer"],
+		["E", "monter, descendre"], ["H", "klaxon"], ["TAB", "carte"]]

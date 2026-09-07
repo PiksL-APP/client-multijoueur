@@ -1,31 +1,19 @@
 class_name FormesCarnage
 extends RefCounted
-## Les volumes de CARNAGE. Rien n'est importé : tout se monte à partir de
-## `commun/decor.gd`, sauf la carrosserie et le kit de ville, qui sont les deux
-## seules ressources binaires que ce dépôt s'autorise.
+## Les volumes de CARNAGE. Depuis la v5, TOUT est en voxels : les voitures,
+## les personnages, le butin, les barrages sortent de `jeux/carnage/voxels.gd`
+## en cubes colorés ; plus un seul modèle importé ne roule dans la ville.
 ##
 ## Pourquoi un fichier à part : depuis que le jeu compte des piétons, des
 ## gangs, des flics, des voitures de patrouille, des barrages, des cabines et
 ## des garages, la fabrique pesait plus lourd que la partie. Séparée, elle se
 ## relit sans traverser la simulation.
 
-const MODELES_ARMES := {
-	"pistolet": "res://modeles/creatures/blaster.glb",
-	"mitraillette": "res://modeles/creatures/blaster-repeater.glb",
-	"roquette": "res://modeles/creatures/blaster.glb",
-	"eperon": "res://modeles/personnages/coin.glb",
-	"vie": "res://modeles/personnages/coin.glb",
-	"argent": "res://modeles/personnages/coin.glb",
-}
-const MUR_BAS := "res://modeles/creatures/wall-low.glb"
-const MUR_HAUT := "res://modeles/creatures/wall-high.glb"
-
-## Le parc automobile : le kit de voitures de Kenney (CC0). L'indice est ce qui
-## circule sur le réseau — un joueur qui vole un taxi doit être vu dans un
-## taxi par les trois autres, pas dans une berline générique.
-const VOITURES := "res://modeles/voitures/"
-const MODELES_VOITURES := ["sedan", "sedan-sports", "hatchback-sports", "suv", "suv-luxury",
-	"taxi", "van", "delivery", "truck", "police"]
+## Le parc automobile : dix gabarits de voitures en voxels (`VoxelsCarnage`).
+## L'indice est ce qui circule sur le réseau — un joueur qui vole un taxi doit
+## être vu dans un taxi par les trois autres, pas dans une berline générique.
+const MODELES_VOITURES := ["berline", "berline sport", "compacte", "4x4", "4x4 de luxe",
+	"taxi", "fourgon", "camion de livraison", "camion", "police"]
 const MODELE_POLICE := 9
 ## Ce que chaque quartier gare et fait rouler. Le centre roule en taxi, la zone
 ## industrielle en fourgon, la banlieue en break : c'est ce qui fait qu'on sait
@@ -43,63 +31,15 @@ const VOITURES_PAR_QUARTIER := {
 	PlanVille.EAU: [0],
 }
 
-## Les carrosseries FUSIONNÉES : le kit livre chaque voiture en cinq maillages
-## (la caisse et quatre roues). Une nappe ne prend qu'un maillage par
-## instance ; on recolle donc les cinq en un seul, une fois, par modèle. C'est
-## ce qui permet de peindre cent cinquante voitures dormantes d'un morceau en
-## dix appels de dessin au lieu de sept cent cinquante.
-static var _fusionnees: Dictionary = {}
-static var _matieres_teintees: Dictionary = {}
+## Les carrosseries en voxels, un maillage par gabarit, mis en cache : la
+## nappe des dormantes et les nœuds des voitures qui roulent lisent le même.
+static var _carrosseries: Dictionary = {}
 
 static func maillage_voiture(indice: int) -> Mesh:
-	var nom := String(MODELES_VOITURES[clamp(indice, 0, MODELES_VOITURES.size() - 1)])
-	return maillage_fusionne(VOITURES + nom + ".glb")
-
-## Un glTF entier CUIT en un seul maillage, transformations de nœuds comprises.
-## ⚠ `Decor.maillage` ne prend que le premier maillage et ignore l'échelle de
-## son nœud : le conteneur du kit industriel est modélisé trois fois trop grand
-## et ramené par son nœud à 0,27 — pris brut, il faisait vingt-cinq mètres.
-static func maillage_fusionne(chemin: String) -> Mesh:
-	if _fusionnees.has(chemin):
-		return _fusionnees[chemin]
-	var scene := (load(chemin) as PackedScene).instantiate()
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var matiere: Material = null
-	var pile: Array = [[scene, Transform3D()]]
-	while not pile.is_empty():
-		var entree: Array = pile.pop_back()
-		var noeud: Node = entree[0]
-		var t: Transform3D = entree[1]
-		if noeud is Node3D:
-			t = t * (noeud as Node3D).transform
-		if noeud is MeshInstance3D:
-			var m := (noeud as MeshInstance3D).mesh
-			for s in m.get_surface_count():
-				st.append_from(m, s, t)
-				if matiere == null:
-					matiere = m.surface_get_material(s)
-		for enfant in noeud.get_children():
-			pile.append([enfant, t])
-	var fusion := st.commit()
-	if matiere != null and fusion.get_surface_count() > 0:
-		fusion.surface_set_material(0, matiere)
-	scene.free()
-	_fusionnees[chemin] = fusion
-	return fusion
-
-## La matière du kit, qui accepte la couleur d'instance : c'est elle qui fait
-## qu'une voiture de gang dans une nappe porte ses couleurs.
-static func matiere_voiture_teintee(indice: int) -> Material:
-	var nom := String(MODELES_VOITURES[clamp(indice, 0, MODELES_VOITURES.size() - 1)])
-	if _matieres_teintees.has(nom):
-		return _matieres_teintees[nom]
-	var origine := maillage_voiture(indice).surface_get_material(0)
-	var copie: BaseMaterial3D = (origine as BaseMaterial3D).duplicate() if origine is BaseMaterial3D else StandardMaterial3D.new()
-	copie.vertex_color_use_as_albedo = true
-	copie.roughness = 0.55
-	_matieres_teintees[nom] = copie
-	return copie
+	var i: int = clamp(indice, 0, MODELES_VOITURES.size() - 1)
+	if not _carrosseries.has(i):
+		_carrosseries[i] = VoxelsCarnage.voiture(i)
+	return _carrosseries[i]
 
 ## Les phares d'une voiture conduite : deux flaques chaudes devant, une lueur
 ## rouge derrière. Au crépuscule, c'est ce qui dit dans quel sens on roule et
@@ -115,19 +55,6 @@ static func phares(racine: Node3D, avant: float, arriere: float) -> void:
 	noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	noeud.name = "Phares"
 	racine.add_child(noeud)
-	# Les optiques elles-mêmes : deux points chauds à l'avant, deux rouges à l'arrière.
-	var lum := SurfaceTool.new()
-	lum.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for cote in [-0.75, 0.75]:
-		_flaque(lum, Vector3(avant, 0.95, cote), Vector3(0.2, 0, 0), Vector3(0, 0, 0.3), Color(1.0, 0.95, 0.8, 1.0))
-		_flaque(lum, Vector3(arriere, 0.9, cote), Vector3(0.15, 0, 0), Vector3(0, 0, 0.28), Color(1.0, 0.2, 0.15, 1.0))
-	var optiques := MeshInstance3D.new()
-	optiques.mesh = lum.commit()
-	optiques.material_override = MatieresCarnage.lumineux()
-	optiques.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	optiques.name = "Optiques"
-	racine.add_child(optiques)
-
 static func _flaque(st: SurfaceTool, centre: Vector3, dx: Vector3, dz: Vector3, couleur: Color) -> void:
 	var p := [centre - dx - dz, centre + dx - dz, centre + dx + dz, centre - dx + dz]
 	var uvs := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
@@ -136,14 +63,6 @@ static func _flaque(st: SurfaceTool, centre: Vector3, dx: Vector3, dz: Vector3, 
 		st.set_uv(uvs[k])
 		st.set_normal(Vector3.UP)
 		st.add_vertex(p[k])
-## Le kit de Kenney fait ses berlines en 2,55 unités de long ; la Volvo du
-## joueur en fait 4,5. Sans cette mise à l'échelle, on volerait des voitures
-## deux fois plus petites que la sienne.
-const ECHELLE_VOITURE := 1.75
-## ⚠ Le kit regarde vers +Z ; le jeu roule vers +X. Un pivot intermédiaire
-## porte la correction, et lui seul : la corriger sur la racine casserait le
-## halo et la jauge, qui ne doivent pas tourner avec.
-const ROTATION_KIT := PI * 0.5
 
 ## Une nappe d'instances d'un même modèle, avec UNE COULEUR PAR INSTANCE.
 ##
@@ -178,98 +97,19 @@ static func nappe(chemin: String, transformations: Array, couleurs: Array,
 
 # ------------------------------------------------------------ véhicules
 
-## Une voiture. `halo` marque celles que quelqu'un conduit — sans lui, dans
-## l'ombre d'un immeuble la carrosserie devient noire et on ne se retrouve
-## plus. `gyrophare` ajoute la rampe des voitures de police, qui doit se voir
-## AVANT d'entendre la sirène.
+## Une voiture en voxels. `halo` marque celles que quelqu'un conduit — sans
+## lui, dans l'ombre d'un immeuble la carrosserie devient noire et on ne se
+## retrouve plus. `couleur` peint la caisse (roues et vitres restent sombres) ;
+## à blanc, la peinture d'usine du gabarit. La rampe de la police vient avec le
+## gabarit 9. L'avant regarde +X, comme le jeu roule.
 static func voiture(couleur: Color, pseudo: String = "", halo: bool = true,
-		gyrophare: bool = false) -> Node3D:
-	var racine := Node3D.new()
+		_gyrophare: bool = false) -> Node3D:
+	return voiture_kit(0, couleur if couleur != Color.WHITE else VoxelsCarnage.peinture(0, 1), couleur, pseudo, halo)
 
-	if halo:
-		var anneau := Decor.anneau(2.7, 0.22, couleur, 0.95)
-		anneau.rotation_degrees = Vector3(90, 0, 0)
-		anneau.position = Vector3(0, 0.04, 0)
-		anneau.name = "Halo"
-		racine.add_child(anneau)
-
-	var carrosserie := Decor.carrosserie(couleur)
-	# La coque de modélisme n'a pas de garde au sol : on la soulève de la
-	# hauteur des roues, sinon la voiture rase le bitume et les roues
-	# dépassent par-dessus les ailes.
-	carrosserie.position = Vector3(0, 0.42, 0)
-	carrosserie.name = "Coque"
-	racine.add_child(carrosserie)
-
-	# La coque est creuse et ses vitres sont ouvertes : vu de dessus, on
-	# voyait la route à travers l'habitacle. Un bloc sombre glissé dedans
-	# referme la voiture sans coûter de géométrie.
-	var habitacle := Decor.boite(Vector3(4.2, 0.55, 1.7), Palette.FOND.lightened(0.06))
-	habitacle.position = Vector3(-0.15, 0.78, 0)
-	habitacle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	racine.add_child(habitacle)
-
-	for cote in [-1.0, 1.0]:
-		for avant in [-1.0, 1.0]:
-			var roue := Decor.cylindre(0.62, 0.42, Color("#0b0b0b"))
-			roue.rotation_degrees = Vector3(90, 0, 0)
-			roue.position = Vector3(avant * 1.95, 0.62, cote * 1.02)
-			racine.add_child(roue)
-			var jante := Decor.cylindre(0.34, 0.46, Palette.ENCRE_FAIBLE)
-			jante.rotation_degrees = Vector3(90, 0, 0)
-			jante.position = Vector3(avant * 1.95, 0.62, cote * 1.02)
-			racine.add_child(jante)
-
-	# Deux phares : ils disent dans quel sens la voiture regarde, ce qu'une
-	# silhouette vue de haut ne montre pas.
-	for cote in [-1.0, 1.0]:
-		var phare := Decor.sphere(0.22, Palette.AVERTISSEMENT)
-		phare.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 1.2)
-		phare.position = Vector3(2.85, 1.0, cote * 0.72)
-		racine.add_child(phare)
-
-	if gyrophare:
-		var rampe := Node3D.new()
-		rampe.name = "Gyrophare"
-		for cote in [-1.0, 1.0]:
-			var feu := Decor.boite(Vector3(0.5, 0.3, 0.55), Palette.SERIE, false)
-			feu.material_override = Decor.matiere_lumineuse(Palette.SERIE, 1.5)
-			feu.position = Vector3(-0.2, 1.35, cote * 0.42)
-			rampe.add_child(feu)
-		racine.add_child(rampe)
-
-	# Le pare-buffle n'apparaît qu'avec l'éperon : il devient ainsi le signe
-	# visible du bonus, au lieu d'un accessoire permanent qui alourdit la
-	# silhouette d'une berline.
-	var pare_buffle := Decor.boite(Vector3(0.3, 0.85, 2.2), Palette.SERIE)
-	pare_buffle.material_override = Decor.matiere_lumineuse(Palette.SERIE, 1.1)
-	pare_buffle.position = Vector3(3.05, 0.75, 0)
-	pare_buffle.name = "Buffle"
-	pare_buffle.visible = false
-	racine.add_child(pare_buffle)
-
-	phares(racine, 2.85, -2.3)
-
-	var jauge := Decor.barre(3.4)
-	jauge.name = "Vie"
-	jauge.position = Vector3(0, 2.9, 0)
-	racine.add_child(jauge)
-
-	if pseudo != "":
-		var nom := Decor.etiquette(pseudo, Palette.ENCRE_DOUCE, 32)
-		nom.name = "Nom"
-		nom.position = Vector3(0, 4.2, 0)
-		racine.add_child(nom)
-	return racine
-
-## Une voiture du kit de Kenney. `halo` et `pseudo` la marquent comme conduite
-## par un joueur ; `couleur` à blanc garde la peinture d'usine (un taxi reste
-## jaune), sinon la teinte descend sur toute la carrosserie — c'est ainsi que
-## les voitures d'un gang portent ses couleurs.
 static func voiture_kit(indice: int, couleur: Color = Color.WHITE, halo_couleur: Color = Color.WHITE,
 		pseudo: String = "", halo: bool = false) -> Node3D:
 	var racine := Node3D.new()
-	var nom := String(MODELES_VOITURES[clamp(indice, 0, MODELES_VOITURES.size() - 1)])
+	var i: int = clamp(indice, 0, MODELES_VOITURES.size() - 1)
 
 	if halo:
 		var anneau := Decor.anneau(2.7, 0.22, halo_couleur, 0.95)
@@ -278,32 +118,38 @@ static func voiture_kit(indice: int, couleur: Color = Color.WHITE, halo_couleur:
 		anneau.name = "Halo"
 		racine.add_child(anneau)
 
-	var pivot := Node3D.new()
-	pivot.name = "Coque"
-	pivot.rotation.y = ROTATION_KIT
-	var corps := Decor.instance(VOITURES + nom + ".glb", couleur, 0.45)
-	corps.scale = Vector3.ONE * ECHELLE_VOITURE
-	pivot.add_child(corps)
-	racine.add_child(pivot)
+	var coque := MeshInstance3D.new()
+	coque.name = "Coque"
+	coque.mesh = maillage_voiture(i)
+	var peinture := couleur if couleur != Color.WHITE else VoxelsCarnage.peinture(i, 7)
+	coque.material_override = MatieresCarnage.voxel_teinte(peinture)
+	coque.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	racine.add_child(coque)
 
-	if indice == MODELE_POLICE:
+	# Les cubes bleus et rouges d'un toit de police clignotent : on les monte
+	# sous un nœud à part pour pouvoir les cacher.
+	if i == MODELE_POLICE:
 		var rampe := Node3D.new()
 		rampe.name = "Gyrophare"
 		for cote in [-1.0, 1.0]:
-			var feu := Decor.boite(Vector3(0.5, 0.3, 0.55), Palette.SERIE, false)
-			feu.material_override = Decor.matiere_lumineuse(Palette.SERIE, 1.5)
-			feu.position = Vector3(-0.2, 2.6, cote * 0.5)
+			var feu := Decor.boite(Vector3(0.5, 0.3, 0.5), Palette.SERIE, false)
+			feu.material_override = Decor.matiere_lumineuse(Palette.SERIE if cote < 0.0 else Palette.CRITIQUE, 1.5)
+			feu.position = Vector3(-0.2, 2.75, cote * 0.55)
 			rampe.add_child(feu)
 		racine.add_child(rampe)
 
+	# Le pare-buffle n'apparaît qu'avec l'éperon : il devient ainsi le signe
+	# visible du bonus, au lieu d'un accessoire permanent qui alourdit la
+	# silhouette d'une berline.
+	var longueur := float(VoxelsCarnage.GABARITS.get(i, VoxelsCarnage.GABARITS[0])["l"]) * VoxelsCarnage.VOXEL_VOITURE
 	var pare_buffle := Decor.boite(Vector3(0.3, 0.85, 2.2), Palette.SERIE)
 	pare_buffle.material_override = Decor.matiere_lumineuse(Palette.SERIE, 1.1)
-	pare_buffle.position = Vector3(2.6, 0.75, 0)
+	pare_buffle.position = Vector3(longueur * 0.5 + 0.2, 0.75, 0)
 	pare_buffle.name = "Buffle"
 	pare_buffle.visible = false
 	racine.add_child(pare_buffle)
 
-	phares(racine, 2.25, -2.2)
+	phares(racine, longueur * 0.5, -longueur * 0.5)
 
 	var jauge := Decor.barre(3.4)
 	jauge.name = "Vie"
@@ -336,31 +182,34 @@ static func tag_de_gang(couleur: Color, nom: String) -> Node3D:
 	racine.add_child(mot)
 	return racine
 
-## Une épave : la même coque, éteinte, penchée, avec de la fumée. Elle reste au
+## Une épave : une berline noircie, penchée, avec de la braise. Elle reste au
 ## sol quelques secondes — une voiture qui disparaît d'un coup laisse croire à
 ## un défaut d'affichage.
 static func epave() -> Node3D:
 	var racine := Node3D.new()
-	var coque := Decor.carrosserie(Color("#141414"))
-	coque.position = Vector3(0, 0.35, 0)
+	var coque := MeshInstance3D.new()
+	coque.mesh = maillage_voiture(0)
+	coque.material_override = MatieresCarnage.voxel_teinte(Color("#141414"))
 	coque.rotation_degrees = Vector3(0, 0, 6)
 	racine.add_child(coque)
 	var braise := Decor.sphere(0.9, Palette.SERIEUX, false)
 	braise.material_override = Decor.matiere_lumineuse(Palette.SERIEUX, 1.4)
-	braise.position = Vector3(0, 0.9, 0)
+	braise.position = Vector3(0, 1.4, 0)
 	braise.name = "Braise"
 	racine.add_child(braise)
 	return racine
 
 # ------------------------------------------------------------ personnages
 
-## Un piéton, un membre de gang, un flic ou un joueur à pied. Le fanion est ce
-## qui distingue un membre de gang d'un passant : la couleur seule ne suffit
-## pas, une silhouette de trois pixels dans une rue sombre ne se lit pas.
+## Un piéton, un membre de gang, un flic ou un joueur à pied : un personnage en
+## cubes, le torse à la couleur donnée. Le fanion est ce qui distingue un membre
+## de gang d'un passant : la couleur seule ne suffit pas, une silhouette de
+## trois pixels dans une rue sombre ne se lit pas. La marche se fait par
+## `VoxelsCarnage.animer` (les jambes pivotent à la hanche).
 static func pieton(couleur: Color, fanion: bool = false, pseudo: String = "",
 		halo: bool = false) -> Node3D:
 	var racine := Node3D.new()
-	var corps := Decor.personnage(couleur, 2.6)
+	var corps := VoxelsCarnage.personnage(couleur)
 	corps.name = "Silhouette"
 	racine.add_child(corps)
 
@@ -373,22 +222,22 @@ static func pieton(couleur: Color, fanion: bool = false, pseudo: String = "",
 
 	if fanion:
 		var hampe := Decor.boite(Vector3(0.1, 1.1, 0.1), Palette.ENCRE_FAIBLE, false)
-		hampe.position = Vector3(-0.5, 2.6, 0)
+		hampe.position = Vector3(-0.5, 3.4, 0)
 		racine.add_child(hampe)
 		var etoffe := Decor.boite(Vector3(0.08, 0.5, 0.7), couleur, false)
 		etoffe.material_override = Decor.matiere_lumineuse(couleur, 1.0)
-		etoffe.position = Vector3(-0.5, 2.9, 0.35)
+		etoffe.position = Vector3(-0.5, 3.7, 0.35)
 		racine.add_child(etoffe)
 
 	var jauge := Decor.barre(1.6)
 	jauge.name = "Vie"
-	jauge.position = Vector3(0, 3.4, 0)
+	jauge.position = Vector3(0, 4.2, 0)
 	racine.add_child(jauge)
 
 	if pseudo != "":
 		var nom := Decor.etiquette(pseudo, Palette.ENCRE_DOUCE, 28)
 		nom.name = "Nom"
-		nom.position = Vector3(0, 4.4, 0)
+		nom.position = Vector3(0, 5.2, 0)
 		racine.add_child(nom)
 	return racine
 
@@ -418,10 +267,9 @@ static func cercle_arene(numero: int) -> Node3D:
 	racine.add_child(racine_anneau(rayon * 0.62, Palette.CRITIQUE, 0.14))
 	for i in 4:
 		var angle := TAU * float(i) / 4.0 + PI * 0.25
-		var borne := Decor.instance(MUR_BAS, Palette.CRITIQUE, 0.5)
-		borne.scale = Vector3.ONE * 2.4
+		var borne := cubes([[Vector3(0, 0.6, 0), 1.2, Color(Palette.CRITIQUE.darkened(0.3), VoxelsCarnage.MUR)],
+			[Vector3(0, 1.6, 0), 0.8, Color(Palette.CRITIQUE, VoxelsCarnage.LUMIERE)]])
 		borne.position = Vector3(cos(angle) * rayon, 0.0, sin(angle) * rayon)
-		borne.rotation.y = -angle
 		racine.add_child(borne)
 	var mot := Decor.etiquette("ARÈNE %d — TIR AMI" % (numero + 1), Palette.CRITIQUE, 34)
 	mot.position = Vector3(0, 4.0, 0)
@@ -457,8 +305,13 @@ static func cabine(numero: int) -> Node3D:
 static func barrage() -> Node3D:
 	var racine := Node3D.new()
 	for cote in [-1.0, 1.0]:
-		var bloc := Decor.instance(MUR_HAUT, Palette.SERIE, 0.55)
-		bloc.scale = Vector3.ONE * 3.0
+		var liste: Array = []
+		for x in 2:
+			for y in 2:
+				for z in 3:
+					liste.append([Vector3(x - 0.5, 0.5 + y, (z - 1.0)), 1.0,
+						Color(Palette.SERIE.lerp(Color.WHITE, 0.5) if (x + y + z) % 2 == 0 else Palette.SERIE, VoxelsCarnage.MUR)])
+		var bloc := cubes(liste)
 		bloc.position = Vector3(0, 0, cote * 2.6)
 		racine.add_child(bloc)
 	var gyro := Decor.sphere(0.4, Palette.SERIE, false)
@@ -525,12 +378,26 @@ static func caisse(arme: String, couleur: Color) -> Node3D:
 	racine.add_child(socle)
 	racine.add_child(racine_anneau(2.1, couleur, 0.16))
 
-	var objet := Decor.instance(String(MODELES_ARMES.get(arme, MODELES_ARMES["pistolet"])), couleur, 0.5)
-	objet.scale = Vector3.ONE * (4.2 if arme == "eperon" else 2.0)
+	# L'objet : un cube lumineux de la couleur du butin, et un second plus
+	# sombre en son cœur — une caisse, pas une balle.
+	var objet := cubes([[Vector3.ZERO, 1.3, Color(couleur.darkened(0.35), VoxelsCarnage.MUR)],
+		[Vector3.ZERO, 0.9, Color(couleur.lerp(Color.WHITE, 0.2), VoxelsCarnage.LUMIERE)],
+		[Vector3(0, 0.75, 0), 0.5, Color(couleur, VoxelsCarnage.LUMIERE)]])
 	objet.name = "Objet"
 	objet.position = Vector3(0, 1.6, 0)
 	racine.add_child(objet)
 	return racine
+
+## Un petit maillage de cubes : [centre, côté, couleur] chacun, en un nœud.
+static func cubes(liste: Array) -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for cube in liste:
+		VoxelsCarnage._cube(st, cube[0], float(cube[1]), cube[2])
+	var noeud := MeshInstance3D.new()
+	noeud.mesh = st.commit()
+	noeud.material_override = MatieresCarnage.voxel()
+	return noeud
 
 ## La fumée d'un pot d'échappement, ou d'un moteur qui souffre : un émetteur
 ## de particules processeur, ce que le mode compatibilité fait de mieux. Il ne

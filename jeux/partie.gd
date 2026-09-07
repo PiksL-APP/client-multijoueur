@@ -31,12 +31,7 @@ var _attente: float = 0.0
 var _decompte: float = DECOMPTE_S
 var _attendus: int = 1
 
-var _hud_chrono: Label
-var _hud_scores: Label
-var _hud_message: Label
-var _hud_aide: Label
-var _hud_etat_joueur: Label
-var _hud_etat: HBoxContainer
+var _hud: Control                  ## `ui/hud.gd` : tout l'affichage tête haute
 var _dernier_bip := 99
 
 # ------------------------------------------------------- à redéfinir
@@ -49,8 +44,27 @@ func aide() -> String:
 
 ## Une ligne d'état propre au jeu : arme en main, chambre en cours… Affichée
 ## au-dessus de l'aide, elle change souvent alors que l'aide ne change jamais.
+## Les jeux qui ont plus à dire qu'une phrase renvoient une fiche à la place.
 func etat_joueur() -> String:
 	return ""
+
+## La fiche structurée du joueur, pour le HUD : `{etoiles: int, jauges:
+## [{nom, part, couleur, valeur}], arme: {nom, munitions}, puces: [{texte,
+## couleur}], alerte: {texte, couleur, part}, accent: Color}`. Toutes les
+## rubriques sont facultatives ; une fiche vide laisse la place à `etat_joueur`.
+func fiche_joueur() -> Dictionary:
+	return {}
+
+## Les touches, en paires `[touche, action]`, pour la ligne de cabochons. Par
+## défaut on découpe `aide()` — « Z/S : avancer · Q/D : tourner » — ce qui
+## suffit aux jeux qui n'ont pas encore de liste propre.
+func aide_touches() -> Array:
+	var paires: Array = []
+	for morceau in aide().split("·"):
+		var parties := String(morceau).strip_edges().split(":", true, 1)
+		if parties.size() == 2:
+			paires.append([parties[0].strip_edges(), parties[1].strip_edges()])
+	return paires
 
 func preparer() -> void:
 	pass
@@ -232,76 +246,51 @@ func _unhandled_input(evenement: InputEvent) -> void:
 		_rafraichir_hud()
 
 func _construire_hud() -> void:
-	var couche := interface()
-
-	var haut := HBoxContainer.new()
-	haut.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	haut.offset_left = 20
-	haut.offset_right = -20
-	haut.offset_top = 14
-	haut.add_theme_constant_override("separation", 24)
-	couche.add_child(haut)
-
-	_hud_chrono = UI.titre("", 26)
-	haut.add_child(_hud_chrono)
-	_hud_scores = UI.texte("", 16, Palette.ENCRE_DOUCE)
-	_hud_scores.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	haut.add_child(_hud_scores)
-	_hud_etat = UI.etat_reseau()
-	haut.add_child(_hud_etat)
-	var son := UI.texte("", 13, Palette.ENCRE_FAIBLE)
-	son.name = "Son"
-	haut.add_child(son)
-
-	var bas := VBoxContainer.new()
-	bas.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	bas.offset_left = 20
-	bas.offset_right = -20
-	bas.offset_top = -70
-	bas.offset_bottom = -18
-	couche.add_child(bas)
-	_hud_etat_joueur = UI.texte("", 16, Palette.ENCRE)
-	bas.add_child(_hud_etat_joueur)
-	_hud_aide = UI.texte(aide(), 14, Palette.ENCRE_FAIBLE)
-	bas.add_child(_hud_aide)
-
-	var centre := CenterContainer.new()
-	centre.set_anchors_preset(Control.PRESET_FULL_RECT)
-	centre.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	couche.add_child(centre)
-	_hud_message = UI.titre("", 58)
-	_hud_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	centre.add_child(_hud_message)
+	_hud = Control.new()
+	_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.set_script(load("res://ui/hud.gd"))
+	_hud.aide = aide_touches()
+	interface().add_child(_hud)
 
 func _rafraichir_hud() -> void:
-	if _hud_chrono == null:
+	if _hud == null:
 		return
-	UI.rafraichir_etat_reseau(_hud_etat)
-	var son := _hud_etat.get_parent().get_node_or_null("Son") as Label
-	if son:
-		son.text = "M : son " + ("actif" if Sons.actif else "coupé")
+	var couleur_reseau := Palette.ENCRE_FAIBLE
+	match Reseau.etat:
+		Reseau.EN_LIGNE: couleur_reseau = Palette.BON
+		Reseau.CONNEXION: couleur_reseau = Palette.AVERTISSEMENT
+		_: couleur_reseau = Palette.CRITIQUE
+	_hud.reseau_libelle = Reseau.libelle_etat()
+	_hud.reseau_couleur = couleur_reseau
+	_hud.son_actif = Sons.actif
 	var restant: float = max(0.0, duree_reelle() - temps)
-	_hud_chrono.text = "%d:%02d" % [int(restant) / 60, int(restant) % 60]
-	_hud_chrono.add_theme_color_override("font_color",
-		Palette.CRITIQUE if restant <= 15.0 and phase == JEU else Palette.ENCRE)
+	_hud.chrono = restant
+	_hud.chrono_critique = restant <= 15.0 and phase == JEU
+	_hud.temps = Time.get_ticks_msec() / 1000.0
 
-	var morceaux: Array = []
+	var lignes: Array = []
 	var cles := joueurs.keys()
 	cles.sort_custom(func(a, b): return int(joueurs[a]["place"]) < int(joueurs[b]["place"]))
 	for cle in cles:
 		var j: Dictionary = joueurs[cle]
-		var marque := "▸ " if cle == Session.cle else ""
-		morceaux.append("%s%s %d" % [marque, String(j["pseudo"]), int(j["score"])])
-	_hud_scores.text = "     ".join(morceaux)
+		lignes.append({"pseudo": String(j["pseudo"]), "score": int(j["score"]),
+			"couleur": Palette.couleur_joueur(int(j["place"])), "moi": cle == Session.cle})
+	_hud.scores = lignes
 
-	_hud_etat_joueur.text = etat_joueur()
+	_hud.fiche = fiche_joueur()
+	_hud.etat_texte = etat_joueur()
+	# Les touches s'estompent quinze secondes après le départ : on les a lues
+	# pendant le décompte, elles n'ont plus qu'à rester trouvables.
+	_hud.aide_visible = 1.0 if phase != JEU or temps < 15.0 else clampf(1.0 - (temps - 15.0) / 3.0, 0.45, 1.0)
 
 	match phase:
 		ATTENTE:
-			_hud_message.text = "En attente des joueurs…"
+			_hud.message = "EN ATTENTE DES JOUEURS"
 		DECOMPTE:
-			_hud_message.text = str(int(ceil(_decompte)))
+			_hud.message = str(int(ceil(_decompte)))
 		FIN:
-			_hud_message.text = "Terminé"
+			_hud.message = "TERMINE"
 		_:
-			_hud_message.text = ""
+			_hud.message = ""
+	_hud.queue_redraw()

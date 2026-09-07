@@ -667,7 +667,10 @@ func _dans_le_cone(ici: Vector2, direction: Vector2, point: Vector2, largeur: fl
 ## Une patrouille ne suit pas les files : elle coupe. C'est ce qui fait qu'on
 ## ne la sème pas en tournant deux fois à droite.
 func _conduire_patrouille(auto: Dictionary, delta: float, joueurs: Dictionary) -> void:
-	var cible := String(auto["cible"])
+	# Chez un client devenu hôte en cours de manche, « cible » porte encore la
+	# position visée par le lissage (un Vector2) : la patrouille redevient
+	# civile plutôt que de planter la simulation.
+	var cible := String(auto["cible"]) if typeof(auto["cible"]) == TYPE_STRING else ""
 	if not joueurs.has(cible) or etoiles(cible) <= 0:
 		# Plus recherché : la patrouille reprend une conduite ordinaire et
 		# finira par se faire oublier.
@@ -705,7 +708,7 @@ func _depecher_la_police(delta: float, joueurs: Dictionary) -> void:
 
 		var patrouilles := 0
 		for auto in autos:
-			if int(auto["genre"]) == PATROUILLE and String(auto["cible"]) == cle:
+			if int(auto["genre"]) == PATROUILLE and typeof(auto["cible"]) == TYPE_STRING and String(auto["cible"]) == cle:
 				patrouilles += 1
 		if patrouilles < niveau and _rng.randf() < delta * 1.2:
 			_naitre_auto(joueurs, PATROUILLE, String(cle))
@@ -1073,6 +1076,84 @@ func _avancer_livraison(cle: String) -> void:
 	if c.is_empty() or String(c["genre"]) != "livraison":
 		return
 	_solder_contrat(cle, true)
+
+# ------------------------------------------------------------ la casse
+
+## Ce que la manche a cassé : id d'immeuble -> clés locales de voxels partis.
+## Partagé avec l'écran (les morceaux le lisent en se bâtissant) et rempli chez
+## tout le monde par l'événement `casse`. Ici aussi, l'hôte décide : deux
+## clients qui casseraient chacun de leur côté verraient deux ruines différentes.
+var detruits: Dictionary = {}
+var _coups_voxel: Dictionary = {}   ## clé globale -> balles reçues
+const COUPS_PAR_VOXEL := 3
+const RAYON_ROQUETTE := 2.6         ## unités 3D
+const RAYON_EXPLOSION := 2.4
+const RAYON_CHOC := 1.3
+
+## Une balle ou une roquette dans un mur. Le pistolet écaille (trois balles par
+## cube), la roquette creuse une sphère.
+func impacter(point: Vector2, arme: String, hauteur: float = 1.4) -> void:
+	var trouve := plan.immeuble_a(point)
+	if trouve.is_empty():
+		return
+	var id := int(trouve["id"])
+	var b: Dictionary = trouve["b"]
+	var p3 := Decor.vers3d(point, hauteur)
+	if arme == "roquette":
+		_casser(id, VoxelsCarnage.voxels_autour_de(b, p3, RAYON_ROQUETTE))
+		return
+	var locale := VoxelsCarnage.voxel_proche_de(b, p3)
+	if _deja_casse(id, locale):
+		return
+	var cle := id * 8192 + locale
+	_coups_voxel[cle] = int(_coups_voxel.get(cle, 0)) + 1
+	if int(_coups_voxel[cle]) >= COUPS_PAR_VOXEL:
+		_casser(id, [locale])
+
+## Une voiture qui explose : tout ce qui est à portée, dans tous les immeubles
+## qui bordent le point.
+func exploser(point: Vector2) -> void:
+	var vus: Dictionary = {}
+	for angle in 8:
+		var sonde := point + Vector2.RIGHT.rotated(TAU * float(angle) / 8.0) * RAYON_EXPLOSION * 10.0
+		var trouve := plan.immeuble_a(sonde, 4.0)
+		if trouve.is_empty() or vus.has(int(trouve["id"])):
+			continue
+		vus[int(trouve["id"])] = true
+		_casser(int(trouve["id"]), VoxelsCarnage.voxels_autour_de(trouve["b"], Decor.vers3d(point, 1.2), RAYON_EXPLOSION))
+
+## Un pare-chocs dans une façade, à pleine vitesse : un ou deux cubes du
+## rez-de-chaussée sautent.
+func choquer(point: Vector2, direction: Vector2, vitesse: float) -> void:
+	if vitesse < 380.0:
+		return
+	var trouve := plan.immeuble_a(point + direction * 18.0, 10.0)
+	if trouve.is_empty():
+		return
+	var rayon := RAYON_CHOC * (1.6 if vitesse > 600.0 else 1.0)
+	var liste: Array = []
+	for locale in VoxelsCarnage.voxels_autour_de(trouve["b"], Decor.vers3d(point + direction * 18.0, 1.0), rayon):
+		if posmod(int(locale), 32) == 0:      # le rez-de-chaussée seulement
+			liste.append(locale)
+	_casser(int(trouve["id"]), liste)
+
+func _deja_casse(id: int, locale: int) -> bool:
+	return detruits.has(id) and (detruits[id] as Array).has(locale)
+
+func _casser(id: int, locales: Array) -> void:
+	var neufs: Array = []
+	for locale in locales:
+		if not _deja_casse(id, int(locale)):
+			neufs.append(int(locale))
+			if not detruits.has(id):
+				detruits[id] = []
+			detruits[id].append(int(locale))
+	if neufs.is_empty():
+		return
+	var charge: Array = []
+	for locale in neufs:
+		charge.append([id, locale])
+	emettre("casse", {"v": charge})
 
 # ------------------------------------------------------------ les véhicules
 

@@ -169,10 +169,9 @@ func _construire() -> void:
 	var ligne_titre := HBoxContainer.new()
 	ligne_titre.add_theme_constant_override("separation", 16)
 	colonne.add_child(ligne_titre)
-	ligne_titre.add_child(UI.titre("Salon — " + _titre, 30))
-	var pousse := Control.new()
-	pousse.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ligne_titre.add_child(pousse)
+	var entete := UI.entete("Salon  " + _titre, "")
+	entete.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ligne_titre.add_child(entete)
 	_etat = UI.etat_reseau()
 	ligne_titre.add_child(_etat)
 
@@ -217,15 +216,26 @@ func _rafraichir() -> void:
 		var membres: Array = groupes[t]
 		var boite := VBoxContainer.new()
 		boite.add_theme_constant_override("separation", 2)
-		var entete := "Table %d — %d/%d joueur%s" % [t, membres.size(), PAR_TABLE, "s" if membres.size() > 1 else ""]
+		var entete := UI.titre("TABLE %d   %d/%d" % [t, membres.size(), PAR_TABLE], 16)
+		entete.add_theme_color_override("font_color", Palette.ENCRE if t == _table else Palette.ENCRE_FAIBLE)
+		boite.add_child(entete)
 		if t == _table:
-			entete += "   ← vous"
-		boite.add_child(UI.texte(entete, 17, Palette.ENCRE if t == _table else Palette.ENCRE_DOUCE))
+			boite.add_child(UI.texte("votre table", 13, Palette.SERIE))
 		var place := 0
 		for meta in membres:
-			var nom := String(meta.get("pseudo", "?"))
-			var suffixe := "  (hôte)" if place == 0 else ""
-			boite.add_child(UI.texte("   ● " + nom + suffixe, 14, Palette.couleur_joueur(place)))
+			var ligne := HBoxContainer.new()
+			ligne.add_theme_constant_override("separation", 10)
+			# Le carré de couleur est celui que le joueur portera dans la manche :
+			# on sait avant de partir qui est qui.
+			var carre := ColorRect.new()
+			carre.color = Palette.couleur_joueur(place)
+			carre.custom_minimum_size = Vector2(14, 14)
+			carre.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			ligne.add_child(carre)
+			ligne.add_child(UI.texte(String(meta.get("pseudo", "?")), 22, Palette.ENCRE if t == _table else Palette.ENCRE_DOUCE))
+			if place == 0:
+				ligne.add_child(UI.texte("hôte", 13, Palette.AVERTISSEMENT))
+			boite.add_child(ligne)
 			place += 1
 		_liste.add_child(boite)
 

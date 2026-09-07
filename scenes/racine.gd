@@ -63,6 +63,7 @@ static func _arguments_depuis_url(arguments: PackedStringArray) -> PackedStringA
 			"manche": copie.append("--manche=" + String(paire[1]))
 			"etoiles": copie.append("--banc-etoiles=" + String(paire[1]))
 			"position": copie.append("--banc-position=" + String(paire[1]))
+			"nuit": copie.append("--nuit=" + String(paire[1]))
 	return copie
 
 static func _argument(arguments: PackedStringArray, nom: String, defaut: String = "") -> String:

@@ -30,7 +30,7 @@ func _draw() -> void:
 		return
 	var cadre := Rect2(Vector2(MARGE, MARGE), Vector2(COTE, COTE))
 	var centre := cadre.get_center()
-	draw_rect(cadre, Color(Palette.FOND, 0.88), true)
+	UI.cartouche(self, cadre, Color(0, 0, 0, 0), Color(Palette.FOND, 0.88))
 	var rayon_vue := COTE * 0.5 / ECHELLE     # en pixels de jeu, la moitié du cadre
 
 	# Les pâtés : un aplat par territoire, plus fort pour les parcs et l'eau,
@@ -132,10 +132,10 @@ func _draw() -> void:
 				draw_colored_polygon(PackedVector2Array([bord + direction * 7.0,
 					bord - direction * 4.0 + cote * 5.0, bord - direction * 4.0 - cote * 5.0]),
 					Palette.AVERTISSEMENT if clignote else Palette.AVERTISSEMENT.darkened(0.3))
-				var police := Palette.police()
+				var police: Font = UI.TITRE_POLICE
 				var distance := int(Vector2(visee["p"]).distance_to(moi) / PlanVille.PAS)
 				draw_string(police, bord - direction * 16.0 - Vector2(10, -4), "%d" % distance,
-					HORIZONTAL_ALIGNMENT_CENTER, 20, 10, Palette.AVERTISSEMENT)
+					HORIZONTAL_ALIGNMENT_CENTER, 20, 8, Palette.AVERTISSEMENT)
 
 	for p: Vector2 in patrouilles:
 		var ou := _vers_radar(p, centre)
@@ -158,11 +158,11 @@ func _draw() -> void:
 		centre + avant * 7.0, centre - avant * 4.0 + cote_m * 4.0,
 		centre - avant * 4.0 - cote_m * 4.0]), ma_couleur)
 
-	draw_rect(cadre, Palette.FILET, false, 1.0)
+	draw_rect(cadre.grow(-UI.BORDURE * 0.5), UI.CADRE, false, UI.BORDURE)
 
 	# La couleur ne porte jamais seule le sens : chaque pastille est nommée à
 	# côté d'elle, sous le cadre.
-	var police := Palette.police()
+	var police: Font = UI.TEXTE_POLICE
 	var x := MARGE + 4.0
 	var y := MARGE + COTE + 14.0
 	for entree in [["garage", Palette.SERIE], ["cabine", Palette.AVERTISSEMENT],

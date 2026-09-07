@@ -22,6 +22,7 @@ static var _sol: ShaderMaterial
 static var _facade: ShaderMaterial
 static var _flaque: ShaderMaterial
 static var _lumineux: ShaderMaterial
+static var _voxel: ShaderMaterial
 
 # ------------------------------------------------------------ le sol
 
@@ -39,6 +40,7 @@ varying vec3 teinte;
 varying vec3 posm;
 // La voie ferrée : ax + bz = c en unités monde (PlanVille.rail()).
 uniform vec3 rail = vec3(0.0, 1.0, -100000.0);
+uniform float nuit : hint_range(0.0, 1.0) = 0.5;
 
 void vertex() {
 	uvl = UV;
@@ -67,14 +69,23 @@ float bruit(vec2 p) {
 const float T = 0.2; // le trottoir : vingt pixels sur cent
 
 vec3 trottoir_dalle(vec2 uv, vec3 base) {
-	// Des dalles : un joint tous les dixièmes.
-	vec2 j = abs(fract(uv * 10.0) - 0.5);
-	float joint = step(0.46, max(j.x, j.y));
-	return mix(base, base * 0.86, joint);
+	// Des dalles : une par cellule, un joint sombre entre elles.
+	vec2 j = abs(fract(uv * 5.0) - 0.5);
+	float joint = step(0.44, max(j.x, j.y));
+	return mix(base, base * 0.82, joint);
 }
+
+// Le sol est en VOXELS aussi : cinq cellules par tuile (deux unités), et
+// tout ce qu'on dessine — bandes, passages, dalles, herbe — se décide par
+// cellule, jamais entre deux. C'est ce qui accorde le sol aux cubes posés
+// dessus.
+const float CELLULES = 5.0;
 
 void fragment() {
 	int k = int(sol + 0.5);
+	vec2 cel = floor(uvl * CELLULES);
+	vec2 uvq = (cel + 0.5) / CELLULES;
+	vec2 celm = floor(posm.xz / 2.0);
 	vec3 asphalte = vec3(0.13, 0.14, 0.16);
 	vec3 trottoir = vec3(0.40, 0.39, 0.36);
 	vec3 bordure = vec3(0.22, 0.22, 0.21);
@@ -83,88 +94,87 @@ void fragment() {
 	vec3 col = trottoir;
 	float rug = 0.85;
 	float spec = 0.15;
-	float grain = (bruit(posm.xz * 2.3) - 0.5) * 0.18 + (bruit(posm.xz * 9.0) - 0.5) * 0.08;
+	// Le grain se tire par cellule : deux tons de bitume, jamais un dégradé.
+	float grain = (hache(celm) - 0.5) * 0.10;
 	vec3 emission = vec3(0.0);
+	// Le joint entre deux cellules, un peu plus sombre : c'est lui qui fait
+	// lire le sol comme un carrelage de cubes.
+	vec2 jc = abs(fract(uvl * CELLULES) - 0.5);
+	float joint = step(0.46, max(jc.x, jc.y)) * 0.08;
 
 	if (k <= 2) {
-		// ROUTE / PASSAGE_A / PASSAGE_B : trottoir à gauche (u < T), axe à droite.
-		if (uvl.x < T) {
-			col = trottoir_dalle(uvl, trottoir);
-			if (uvl.x > T - 0.03) col = bordure;
+		// ROUTE / PASSAGE_A / PASSAGE_B : trottoir à gauche (une cellule), axe à droite.
+		if (cel.x < 0.5) {
+			col = trottoir;
+			if (fract(uvl.x * CELLULES) > 0.8) col = bordure;
 		} else {
 			col = asphalte;
 			rug = 0.55;
 			spec = 0.35;
-			// L'axe : une bande jaune pointillée, une moitié sur chaque tuile ;
-			// sur une avenue (graine ≥ 0,5), une double ligne continue.
+			// L'axe : une cellule jaune sur deux, une moitié sur chaque tuile ;
+			// sur une avenue (graine ≥ 0,5), une bande continue plus claire.
+			bool axe = uvl.x > 0.94;
 			if (graine >= 0.5) {
-				if (uvl.x > 0.985 || (uvl.x > 0.955 && uvl.x < 0.97)) col = jaune;
+				if (axe) col = jaune;
 				col *= 1.06;
-			} else if (uvl.x > 0.975 && fract(uvl.y * 2.0 + 0.25) < 0.55) col = jaune;
-			// Le passage piéton, au bout qui touche le carrefour.
-			bool zebra = (k == 1 && uvl.y > 0.05 && uvl.y < 0.21) || (k == 2 && uvl.y > 0.79 && uvl.y < 0.95);
-			if (zebra && fract((uvl.x - T) * 7.0) < 0.5) col = mix(col, blanc, 0.55);
-			// Usure : deux traces de roues plus sombres sur la voie.
-			col *= 1.0 - 0.10 * (1.0 - smoothstep(0.0, 0.06, abs(uvl.x - 0.62))) - 0.10 * (1.0 - smoothstep(0.0, 0.06, abs(uvl.x - 0.88)));
+			} else if (axe && mod(cel.y, 2.0) < 0.5) col = jaune;
+			// Le passage piéton : la première (ou dernière) rangée de cellules,
+			// une cellule sur deux.
+			bool zebra = (k == 1 && cel.y < 0.5) || (k == 2 && cel.y > CELLULES - 1.5);
+			if (zebra && mod(cel.x, 2.0) < 0.5) col = mix(col, blanc, 0.6);
+			// Usure : la voie de roulement (cellules 3 et 4) un peu plus sombre.
+			if (cel.x > 2.5) col *= 0.9;
 		}
 	} else if (k == 3) {
-		// CARREFOUR : un quart de trottoir dans l'angle (u < T, v < T).
+		// CARREFOUR : la cellule d'angle est du trottoir.
 		col = asphalte;
 		rug = 0.55;
 		spec = 0.35;
-		if (uvl.x < T && uvl.y < T) {
-			col = trottoir_dalle(uvl, trottoir);
-			if (uvl.x > T - 0.03 || uvl.y > T - 0.03) col = bordure;
+		if (cel.x < 0.5 && cel.y < 0.5) {
+			col = trottoir;
+			if (fract(uvl.x * CELLULES) > 0.8 || fract(uvl.y * CELLULES) > 0.8) col = bordure;
 		}
 	} else if (k == 4) {
-		col = trottoir_dalle(uvl, trottoir);
+		col = trottoir;
 	} else if (k == 5) {
-		// PAVÉS : petits carreaux, joints clairs, deux tons.
-		vec2 c = floor(uvl * 8.0);
-		float ton = hache(c + floor(posm.xz / 10.0) * 7.0);
-		col = mix(vec3(0.36, 0.34, 0.33), vec3(0.46, 0.43, 0.40), ton);
-		vec2 j = abs(fract(uvl * 8.0) - 0.5);
-		col = mix(col, vec3(0.27, 0.26, 0.25), step(0.44, max(j.x, j.y)));
+		// PAVÉS : deux tons par cellule.
+		float ton = hache(celm + vec2(3.0));
+		col = mix(vec3(0.36, 0.34, 0.33), vec3(0.46, 0.43, 0.40), step(0.5, ton));
 	} else if (k == 6 || k == 7 || k == 8 || k == 9) {
-		// HERBE, et les allées d'un parc : une bande de sable au milieu.
-		float h = bruit(posm.xz * 4.0);
-		col = mix(vec3(0.17, 0.33, 0.14), vec3(0.28, 0.45, 0.18), h);
+		// HERBE, et les allées d'un parc : une bande de sable d'une cellule.
+		float h = hache(celm + vec2(7.0));
+		col = mix(vec3(0.17, 0.33, 0.14), vec3(0.28, 0.45, 0.18), step(0.5, h));
 		rug = 0.95;
 		spec = 0.05;
-		bool allee = (k == 7 && abs(uvl.x - 0.5) < 0.17) || (k == 8 && abs(uvl.y - 0.5) < 0.17)
-			|| (k == 9 && (abs(uvl.x - 0.5) < 0.17 || abs(uvl.y - 0.5) < 0.17));
+		bool allee = (k == 7 && abs(cel.x - 2.0) < 0.5) || (k == 8 && abs(cel.y - 2.0) < 0.5)
+			|| (k == 9 && (abs(cel.x - 2.0) < 0.5 || abs(cel.y - 2.0) < 0.5));
 		if (allee) {
-			col = mix(vec3(0.55, 0.48, 0.36), vec3(0.62, 0.55, 0.42), h);
+			col = mix(vec3(0.55, 0.48, 0.36), vec3(0.62, 0.55, 0.42), step(0.5, h));
 			rug = 0.8;
 		}
 	} else if (k == 10) {
-		// BÉTON : des dalles larges, tachées.
-		col = vec3(0.33, 0.33, 0.32) * (0.85 + 0.3 * bruit(posm.xz * 0.7));
-		vec2 j = abs(fract(uvl * 2.0) - 0.5);
-		col = mix(col, col * 0.8, step(0.47, max(j.x, j.y)));
-		// Une flaque d'huile de temps en temps.
-		float tache = bruit(posm.xz * 1.3 + graine * 40.0);
-		col = mix(col, col * 0.55, smoothstep(0.62, 0.75, tache));
+		// BÉTON : des dalles claires, une tache par-ci par-là.
+		col = vec3(0.33, 0.33, 0.32) * (0.9 + 0.2 * hache(celm + vec2(11.0)));
+		if (hache(celm + vec2(13.0)) > 0.9) col *= 0.6;
 	} else if (k == 11) {
-		// PARKING : du bitume et des places peintes en travers.
+		// PARKING : du bitume et des places peintes en travers (une cellule sur deux).
 		col = asphalte * 1.15;
 		rug = 0.6;
 		spec = 0.3;
-		float trait = step(0.97, fract(uvl.x * 2.2 + 0.05)) + step(0.97, 1.0 - fract(uvl.x * 2.2 + 0.05));
-		if (trait > 0.0 && uvl.y > 0.1 && uvl.y < 0.9) col = mix(col, blanc, 0.6);
-		if (abs(uvl.y - 0.1) < 0.012 && fract(uvl.x * 2.2 + 0.05) > 0.03) col = mix(col, blanc, 0.6);
+		if (mod(cel.x, 2.0) < 0.5 && cel.y > 0.5 && fract(uvl.x * CELLULES) < 0.2) col = mix(col, blanc, 0.6);
+		if (cel.y < 0.5 && fract(uvl.y * CELLULES) > 0.8) col = mix(col, blanc, 0.6);
 	} else if (k == 12) {
-		// EAU : sombre, une houle lente, un reflet du ciel qui bouge.
-		float t = TIME * 0.6;
-		float v = bruit(posm.xz * 0.35 + vec2(t * 0.3, t * 0.2)) * 0.6 + bruit(posm.xz * 1.1 - vec2(t * 0.2, t * 0.35)) * 0.4;
-		col = mix(vec3(0.03, 0.09, 0.14), vec3(0.08, 0.20, 0.26), v);
-		emission = vec3(0.10, 0.22, 0.30) * smoothstep(0.55, 0.85, v) * 0.6;
+		// EAU : sombre, des cellules qui scintillent lentement.
+		float t = floor(TIME * 1.5);
+		float v = hache(celm + vec2(t, -t * 0.5));
+		col = mix(vec3(0.03, 0.09, 0.14), vec3(0.08, 0.20, 0.26), step(0.55, v));
+		emission = vec3(0.10, 0.22, 0.30) * step(0.85, v) * 0.6;
 		rug = 0.12;
 		spec = 0.7;
 		grain = 0.0;
 	} else if (k == 14) {
 		// RAIL : du ballast, des traverses en travers de la ligne, deux rails.
-		col = mix(vec3(0.24, 0.22, 0.20), vec3(0.32, 0.30, 0.27), bruit(posm.xz * 6.0));
+		col = mix(vec3(0.24, 0.22, 0.20), vec3(0.32, 0.30, 0.27), hache(celm + vec2(17.0)));
 		rug = 0.95;
 		float d = rail.x * posm.x + rail.y * posm.z - rail.z;       // distance signée à l'axe
 		float le_long = -rail.y * posm.x + rail.x * posm.z;         // abscisse le long de la voie
@@ -172,11 +182,11 @@ void fragment() {
 		if (abs(abs(d) - 0.75) < 0.07) { col = vec3(0.55, 0.55, 0.58); rug = 0.3; spec = 0.6; }
 	} else {
 		// TERRE
-		col = mix(vec3(0.30, 0.24, 0.17), vec3(0.38, 0.31, 0.22), bruit(posm.xz * 2.0));
+		col = mix(vec3(0.30, 0.24, 0.17), vec3(0.38, 0.31, 0.22), hache(celm + vec2(19.0)));
 		rug = 0.95;
 	}
 
-	ALBEDO = col * teinte * (1.0 + grain);
+	ALBEDO = col * teinte * (1.0 + grain - joint);
 	ROUGHNESS = rug;
 	SPECULAR = spec;
 	EMISSION = emission;
@@ -328,6 +338,44 @@ void fragment() {
 }
 """
 
+# ------------------------------------------------------------ les voxels
+
+## Le cube. Tout ce qui est bâti ou posé passe par ce shader : la nappe
+## d'instances d'un morceau (couleur d'instance) comme les maillages à couleurs
+## de sommet (voitures, personnages). L'alpha de la couleur dit la matière :
+## 1 = mur, 0,5 = lumière (émissif, plus fort la nuit), 0,1 = vitre éteinte.
+## Le BISEAU : les arêtes du cube sont assombries d'après les UV de la face,
+## c'est ce qui fait lire chaque cube comme un cube et non une surface plate.
+const VOXEL := """
+shader_type spatial;
+render_mode cull_back, diffuse_lambert, specular_schlick_ggx;
+
+uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+// La peinture d'un maillage à couleurs de sommet (une voiture) : elle
+// multiplie les cubes de mur, pas les lumières ni les vitres.
+uniform vec4 teinte : source_color = vec4(1.0);
+
+varying vec4 c;
+varying vec2 uvl;
+
+void vertex() {
+	c = COLOR;
+	uvl = UV;
+}
+
+void fragment() {
+	vec2 d = abs(uvl - vec2(0.5)) * 2.0;
+	float bord = smoothstep(0.86, 0.99, max(d.x, d.y));
+	float lumiere = step(0.25, c.a) * step(c.a, 0.75);
+	float vitre = step(c.a, 0.25);
+	vec3 col = c.rgb * mix(teinte.rgb, vec3(1.0), max(lumiere, vitre)) * (1.0 - 0.20 * bord * (1.0 - lumiere));
+	ALBEDO = col;
+	ROUGHNESS = mix(0.85, 0.2, vitre);
+	SPECULAR = mix(0.15, 0.7, vitre);
+	EMISSION = c.rgb * lumiere * (0.25 + 1.15 * nuit);
+}
+"""
+
 # ------------------------------------------------------------ les lumières
 
 ## Une flaque de lumière au sol : un quadrilatère additif à dégradé radial. La
@@ -341,6 +389,8 @@ shader_type spatial;
 // devait être transparente. On l'a vu sur l'eau avant de comprendre.
 render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;
 
+uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+
 varying vec4 c;
 varying vec2 uvl;
 
@@ -352,7 +402,8 @@ void vertex() {
 void fragment() {
 	float d = length(uvl - vec2(0.5)) * 2.0;
 	float a = pow(clamp(1.0 - d, 0.0, 1.0), 1.7) * c.a;
-	ALBEDO = c.rgb * a;
+	// En plein jour, une flaque de lampadaire ne se voit pas ; les phares un peu.
+	ALBEDO = c.rgb * a * (0.15 + 0.85 * nuit);
 	ALPHA = 1.0;
 }
 """
@@ -363,6 +414,8 @@ const LUMINEUX := """
 shader_type spatial;
 render_mode unshaded, cull_disabled, shadows_disabled;
 
+uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+
 varying vec4 c;
 
 void vertex() {
@@ -370,8 +423,8 @@ void vertex() {
 }
 
 void fragment() {
-	ALBEDO = c.rgb;
-	EMISSION = c.rgb * 0.6;
+	ALBEDO = c.rgb * (0.7 + 0.3 * nuit);
+	EMISSION = c.rgb * 0.6 * nuit;
 }
 """
 
@@ -402,21 +455,101 @@ static func lumineux() -> ShaderMaterial:
 		_lumineux = _materiau(LUMINEUX)
 	return _lumineux
 
+static func voxel() -> ShaderMaterial:
+	if _voxel == null:
+		_voxel = _materiau(VOXEL)
+	return _voxel
+
+## La matière voxel peinte d'une couleur, une par couleur (mise en cache : les
+## peintures sont peu nombreuses, et chaque matière doit recevoir la nuit).
+static var _voxels_teintes: Dictionary = {}
+
+static func voxel_teinte(couleur: Color) -> ShaderMaterial:
+	var cle := couleur.to_html(false)
+	if not _voxels_teintes.has(cle):
+		var m := _materiau(VOXEL)
+		m.set_shader_parameter("teinte", couleur)
+		m.set_shader_parameter("nuit", _nuit_courante)
+		_voxels_teintes[cle] = m
+	return _voxels_teintes[cle]
+
+## La nuit, de 0 à 1, poussée à tous les shaders : fenêtres, lampes, flaques,
+## enseignes s'allument avec elle.
+static var _nuit_courante := 0.5
+
+static func regler_nuit(valeur: float) -> void:
+	_nuit_courante = valeur
+	for m in [sol(), facade(), flaque(), lumineux(), voxel()]:
+		m.set_shader_parameter("nuit", valeur)
+	for cle in _voxels_teintes:
+		(_voxels_teintes[cle] as ShaderMaterial).set_shader_parameter("nuit", valeur)
+
 # ------------------------------------------------------------ l'ambiance
 
-## L'heure bleue. Un ciel qui vire du bleu profond à l'orange à l'horizon, un
-## soleil bas et chaud qui allonge les ombres, une ambiante bleue qui garde
-## les façades lisibles, et le halo qui fait rayonner fenêtres, enseignes et
-## lampadaires. GTA 2 se jouait la nuit ; une ville s'impose au crépuscule,
-## quand ses lumières s'allument et qu'on lit encore la rue.
-static func crepuscule() -> Array:
+## L'heure de la ville est celle du VILLAGE : un cycle de quinze minutes calé
+## sur l'heure universelle (`scenes/hub.gd`, CYCLE), neuf minutes de jour, une
+## de crépuscule, quatre de nuit, une d'aube. On entre en ville à l'heure qu'il
+## est au village, et tous les joueurs voient la même. `nuit_forcee` sert au
+## banc (`--nuit=0.5` photographie le crépuscule).
+const CYCLE := 900.0
+static var nuit_forcee := -1.0
+
+## De 0 (plein jour) à 1 (pleine nuit), continue.
+static func nuit() -> float:
+	if nuit_forcee >= 0.0:
+		return nuit_forcee
+	var t := fmod(Time.get_unix_time_from_system(), CYCLE)
+	if t < 540.0:
+		return 0.0
+	if t < 600.0:
+		return (t - 540.0) / 60.0
+	if t < 840.0:
+		return 1.0
+	return 1.0 - (t - 840.0) / 60.0
+
+## Les trois heures de référence — jour, heure bleue, nuit — entre lesquelles
+## tout s'interpole : ciel, soleil, ambiante, brouillard, halo.
+const HEURES := [
+	{"haut": Color("#3b7bd8"), "horizon": Color("#cfe2f5"), "sol_h": Color("#8fa0b0"), "sol_b": Color("#3a4450"),
+		"soleil_x": -62.0, "soleil_y": -40.0, "soleil_c": Color("#fff0d8"), "soleil_e": 1.35,
+		"ambiante": Color("#8fa4c4"), "ambiante_e": 1.0, "brume": Color("#9fb4cc"), "brume_d": 0.0012,
+		"halo": 0.4, "seuil": 0.95, "lune": 0.1},
+	{"haut": Color("#0a1030"), "horizon": Color("#c85a3a"), "sol_h": Color("#3a2430"), "sol_b": Color("#06070c"),
+		"soleil_x": -42.0, "soleil_y": -52.0, "soleil_c": Color("#ffb27a"), "soleil_e": 1.25,
+		"ambiante": Color("#3c4a7a"), "ambiante_e": 1.05, "brume": Color("#1c2036"), "brume_d": 0.0022,
+		"halo": 0.9, "seuil": 0.72, "lune": 0.42},
+	{"haut": Color("#03050e"), "horizon": Color("#101a30"), "sol_h": Color("#0b1020"), "sol_b": Color("#030408"),
+		"soleil_x": -36.0, "soleil_y": -70.0, "soleil_c": Color("#5a6cc0"), "soleil_e": 0.28,
+		"ambiante": Color("#1a2340"), "ambiante_e": 0.8, "brume": Color("#0a0e1c"), "brume_d": 0.0026,
+		"halo": 1.0, "seuil": 0.6, "lune": 0.25},
+]
+
+static func _valeur(cle: String, n: float):
+	var a: Dictionary
+	var b: Dictionary
+	var t: float
+	if n < 0.5:
+		a = HEURES[0]
+		b = HEURES[1]
+		t = n * 2.0
+	else:
+		a = HEURES[1]
+		b = HEURES[2]
+		t = (n - 0.5) * 2.0
+	var va = a[cle]
+	var vb = b[cle]
+	if va is Color:
+		return (va as Color).lerp(vb, t)
+	return lerpf(float(va), float(vb), t)
+
+## Le ciel, le soleil et son contre-jour, prêts à être réglés à l'heure. Il n'y
+## a pas une seule vraie lumière dans la ville en dehors de ces deux-là : le
+## mode compatibilité n'en supporte que huit par objet, et une flaque additive
+## au sol fait le même effet pour rien.
+static func ambiance() -> Array:
 	var environnement := Environment.new()
 	var ciel := ProceduralSkyMaterial.new()
-	ciel.sky_top_color = Color("#0a1030")
-	ciel.sky_horizon_color = Color("#c85a3a")
 	ciel.sky_curve = 0.10
-	ciel.ground_bottom_color = Color("#06070c")
-	ciel.ground_horizon_color = Color("#3a2430")
 	ciel.sun_angle_max = 30.0
 	ciel.sun_curve = 0.12
 	var voute := Sky.new()
@@ -424,17 +557,11 @@ static func crepuscule() -> Array:
 	environnement.background_mode = Environment.BG_SKY
 	environnement.sky = voute
 	environnement.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environnement.ambient_light_color = Color("#3c4a7a")
-	environnement.ambient_light_energy = 1.05
 	environnement.fog_enabled = true
-	environnement.fog_light_color = Color("#1c2036")
-	environnement.fog_density = 0.0022
 	environnement.fog_sky_affect = 0.35
 	environnement.glow_enabled = true
-	environnement.glow_intensity = 0.9
 	environnement.glow_strength = 1.0
 	environnement.glow_bloom = 0.12
-	environnement.glow_hdr_threshold = 0.72
 	environnement.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
 	environnement.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	environnement.tonemap_exposure = 1.05
@@ -443,12 +570,6 @@ static func crepuscule() -> Array:
 	monde.environment = environnement
 
 	var soleil := DirectionalLight3D.new()
-	soleil.light_color = Color("#ffb27a")
-	soleil.light_energy = 1.25
-	# Bas, mais pas rasant : à vingt degrés, une tour projette une ombre de
-	# trois pâtés et le joueur y disparaît. À quarante-deux, l'ombre dit le
-	# volume et la rue reste lisible.
-	soleil.rotation_degrees = Vector3(-42, -52, 0)
 	soleil.shadow_enabled = true
 	soleil.directional_shadow_max_distance = 220.0
 	soleil.shadow_bias = 0.05
@@ -456,7 +577,30 @@ static func crepuscule() -> Array:
 
 	var lune := DirectionalLight3D.new()
 	lune.light_color = Color("#5a72c8")
-	lune.light_energy = 0.42
 	lune.rotation_degrees = Vector3(-50, 135, 0)
 	lune.shadow_enabled = false
+	regler_heure(monde, soleil, lune, nuit())
 	return [monde, soleil, lune]
+
+## Règle le ciel et les lumières à l'heure `n` (0 jour, 1 nuit), et pousse la
+## nuit aux shaders. À appeler à chaque image : c'est une poignée de nombres.
+static func regler_heure(monde: WorldEnvironment, soleil: DirectionalLight3D, lune: DirectionalLight3D, n: float) -> void:
+	var env := monde.environment
+	var ciel := (env.sky.sky_material as ProceduralSkyMaterial)
+	ciel.sky_top_color = _valeur("haut", n)
+	ciel.sky_horizon_color = _valeur("horizon", n)
+	ciel.ground_horizon_color = _valeur("sol_h", n)
+	ciel.ground_bottom_color = _valeur("sol_b", n)
+	env.ambient_light_color = _valeur("ambiante", n)
+	env.ambient_light_energy = _valeur("ambiante_e", n)
+	env.fog_light_color = _valeur("brume", n)
+	env.fog_density = _valeur("brume_d", n)
+	env.glow_intensity = _valeur("halo", n)
+	env.glow_hdr_threshold = _valeur("seuil", n)
+	soleil.light_color = _valeur("soleil_c", n)
+	soleil.light_energy = _valeur("soleil_e", n)
+	# Bas mais pas rasant : à vingt degrés, une tour projette une ombre de
+	# trois pâtés et le joueur y disparaît.
+	soleil.rotation_degrees = Vector3(_valeur("soleil_x", n), _valeur("soleil_y", n), 0)
+	lune.light_energy = _valeur("lune", n)
+	regler_nuit(n)

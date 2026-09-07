@@ -69,13 +69,34 @@ rendu et l'interface ; le reste est à côté :
   Murs indexés PAR TUILE (une fiche, un rectangle) : ne jamais revenir à un
   balayage d'une liste de rectangles.
 - `jeux/carnage/morceau.gd` (`MorceauVille`) — un morceau rendu de vingt tuiles
-  : sol en un maillage, immeubles en une nappe de boîtes, mobilier et voitures
-  dormantes en nappes par modèle, enseignes et flaques de lumière. Bâti quand
-  son bord passe à portée du joueur, un par image, libéré au loin.
-- `jeux/carnage/matieres.gd` (`MatieresCarnage`) — les shaders (sol, façades,
-  flaques additives, lumineux) et l'ambiance de l'heure bleue. ⚠ Une matière
-  additive coupe le brouillard (`fog_disabled`), sinon il peint un carré. ⚠ Pas
-  de `return` dans `fragment()` : le compilateur de shaders le refuse.
+  : sol en un maillage, TOUT le bâti en une nappe de cubes unitaires
+  (`MultiMesh.buffer`, seize flottants par cube, alpha d'instance = matière),
+  voitures dormantes en nappes par modèle, flaques de lumière. Bâti quand son
+  bord passe à portée du joueur, un par image, libéré au loin. `casser(id,
+  locale)` retire un cube et expose ses voisins ; `ville.detruits` est rejoué
+  quand un morceau se rebâtit.
+- `jeux/carnage/voxels.gd` (`VoxelsCarnage`) — la fabrique de cubes :
+  immeubles (grille d'occupation, styles de façade), mobilier, voitures
+  (`GABARITS`), personnages animés (`animer`). Deux unités par cube d'immeuble,
+  0,5 par cube de voiture, 0,42 par cube de personnage. ⚠ `commun/voxels.gd`
+  (`Voxels`) est la fabrique de la FERME, à l'autre session : ne pas confondre.
+- `jeux/carnage/matieres.gd` (`MatieresCarnage`) — les shaders (sol quantifié
+  sur la grille des cubes, voxel biseauté, flaques additives, lumineux) et le
+  cycle jour/nuit : `nuit()` reprend l'horloge du village (quinze minutes),
+  `ambiance()` + `regler_heure()` interpolent ciel, brouillard, soleil et lune
+  entre trois heures clés ; `regler_nuit()` pousse l'heure à tous les shaders.
+  `--nuit=` / `?nuit=` force l'heure. ⚠ Une matière additive coupe le
+  brouillard (`fog_disabled`), sinon il peint un carré. ⚠ Pas de `return` dans
+  `fragment()` : le compilateur de shaders le refuse.
+- La DESTRUCTION est arbitrée par l'hôte (`VilleVivante.impacter/exploser/
+  choquer` → événement `casse`, groupé dans le `lot`) ; le client ne demande
+  qu'un `choc`. Un immeuble à moins de quarante pour cent de rez-de-chaussée
+  est éventré (`PlanVille.eventrer`) : on le traverse.
+- L'interface passe TOUTE par `ui/fabrique.gd` (charte arcade : angles droits,
+  bordures de deux pixels, barre d'accent, polices pixel à taille native) et,
+  en manche, par `ui/hud.gd`, que `Partie` nourrit d'une fiche
+  (`fiche_joueur()`, `aide_touches()`). Un écran qui pose un Label à la main
+  hors de la fabrique casse la charte.
 - Les voitures GARÉES n'existent pas chez l'hôte : ce sont des fiches du plan
   (`id_dormante` se déduit de la tuile et du côté). L'hôte les RÉVEILLE quand
   on les vole, les percute ou les tire (`VilleVivante.reveiller`), et chaque
@@ -105,18 +126,12 @@ Un plafond oublié, c'est un classement à sept chiffres au premier curieux.
 
 ## Les kits, et leurs échelles
 
-Carnage pose des kits Kenney et KayKit (CC0), un dossier par kit sous
-`modeles/`, avec sa licence et sa texture. Les immeubles, eux, sont
-procéduraux (des boîtes + le shader de façades) : les kits ne servent plus
-qu'au mobilier, aux détails industriels, aux arbres et aux voitures. ⚠ Les kits
-n'ont PAS la même unité : les échelles vivent dans `MorceauVille.MODELES` et
-`FormesCarnage.ECHELLE_VOITURE` ; un modèle ajouté se mesure d'abord. ⚠ Certains
-glb portent leur échelle sur le NŒUD, pas dans le maillage (le conteneur du
-kit industriel est modélisé trois fois trop grand et ramené à 0,27) : passer
-par `FormesCarnage.maillage_fusionne`, qui cuit les transformations, jamais par
-`Decor.maillage` pour une nappe. ⚠ Le kit de voitures
-regarde vers +Z, le jeu roule vers +X : la correction est sur un pivot
-intermédiaire (`ROTATION_KIT`), jamais sur la racine.
+Carnage ne pose plus de kit : immeubles, mobilier, voitures et personnages
+sont des cubes fabriqués par `VoxelsCarnage`. Les kits Kenney et KayKit (CC0)
+restent sous `modeles/` avec leur licence pour les autres écrans ; un modèle
+glb ajouté se mesure d'abord (certains portent leur échelle sur le NŒUD, pas
+dans le maillage). Les figures de voxels regardent vers +X, comme le jeu roule :
+aucune rotation de correction.
 
 ## Du binaire au dépôt : seulement des œuvres tierces, sous licence libre
 

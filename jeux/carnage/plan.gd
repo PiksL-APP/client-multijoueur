@@ -1518,6 +1518,47 @@ func depart(place: int, rng: RandomNumberGenerator) -> Dictionary:
 	var p := point_de_rue(rng, centre() + Vector2.RIGHT.rotated(angle) * 420.0, 0.0, 240.0)
 	return {"p": p, "a": angle + PI}
 
+# ------------------------------------------------------------ la casse
+
+## L'immeuble qui contient (ou frôle) un point : {id, b} ou vide. Les immeubles
+## de plusieurs tuiles sont ancrés sur une seule ; on regarde donc les tuiles
+## voisines aussi. Rare (un impact), donc pas mis en cache.
+func immeuble_a(point: Vector2, marge: float = 8.0) -> Dictionary:
+	var c0 := int(floor(point.x / PAS))
+	var l0 := int(floor(point.y / PAS))
+	for l in range(l0 - 2, l0 + 1):
+		for c in range(c0 - 2, c0 + 1):
+			if c < 0 or l < 0 or c >= COLONNES or l >= LIGNES:
+				continue
+			var fiche := tuile(c, l)
+			var rang := 0
+			for b in fiche["batis"]:
+				var rect := Rect2(Vector2(b["p"]) - Vector2(float(b["w"]), float(b["d"])) * 0.5, Vector2(float(b["w"]), float(b["d"])))
+				if float(b["h"]) >= 1.0 and rect.grow(marge).has_point(point):
+					return {"id": (c * LIGNES + l) * 8 + rang, "b": b, "c": c, "l": l}
+				rang += 1
+	return {}
+
+## Un immeuble éventré (son rez-de-chaussée est parti) ne bloque plus : on
+## traverse la ruine. Toutes les tuiles que son emprise couvre s'ouvrent.
+func eventrer(id: int) -> void:
+	var tuile_ancre := id / 8
+	var c := tuile_ancre / LIGNES
+	var l := posmod(tuile_ancre, LIGNES)
+	var rang := posmod(id, 8)
+	var fiche := tuile(c, l)
+	if rang >= (fiche["batis"] as Array).size():
+		return
+	var b: Dictionary = fiche["batis"][rang]
+	var rect := Rect2(Vector2(b["p"]) - Vector2(float(b["w"]), float(b["d"])) * 0.5, Vector2(float(b["w"]), float(b["d"])))
+	for ll in range(int(floor(rect.position.y / PAS)), int(floor((rect.end.y - 1.0) / PAS)) + 1):
+		for cc in range(int(floor(rect.position.x / PAS)), int(floor((rect.end.x - 1.0) / PAS)) + 1):
+			if cc < 0 or ll < 0 or cc >= COLONNES or ll >= LIGNES:
+				continue
+			var f := tuile(cc, ll)
+			f["bloc"] = false
+			f["rect"] = null
+
 # ------------------------------------------------------------ la carte
 
 ## Peint un pâté et ses deux rues (ouest et nord) sur l'image de la carte : un

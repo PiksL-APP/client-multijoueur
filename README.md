@@ -134,18 +134,39 @@ voiture dormante, un maillage d'enseignes, un de flaques de lumière. L'ancienne
 ville dessinait chaque voiture garée en cinq appels ; celle-ci en dessine cent
 cinquante par morceau en dix.
 
-**Les immeubles sont des boîtes, le shader fait le reste.** Une boîte unitaire
-par volume, mise à l'échelle ; la couleur d'instance porte la teinte du mur et,
-dans son alpha, le style de façade (bureaux, logements, commerce, vieille
-ville, hangar, maison, plein, tour). Le shader pose les étages et les
-fenêtres en espace monde, allume les fenêtres d'après un hachage (part variable
-selon le style, chaudes ou froides), dessine les vitrines et leurs stores au
-rez-de-chaussée, et sur les toits — ce qu'on voit le plus, la caméra est
-presque à la verticale — une margelle, des blocs de climatisation, des bouches
-d'aération et une croix d'hélistation sur les grandes tours. Le sol est un
-shader aussi : bitume, trottoirs à dalles, bande jaune pointillée sur l'axe,
-passages piétons au bout des rues, pavés, herbe, allées, béton taché, places
-de parking, eau qui ondule. Pas un octet de texture, et net à toute distance.
+**Tout est en voxels — et ça se casse.** Immeubles, mobilier, voitures,
+passants et joueurs sont des cubes : un immeuble est une grille d'occupation
+(`VoxelsCarnage.immeuble`, deux unités par cube) dont seules les faces
+exposées existent, et un morceau de ville tient dans UNE nappe de cubes
+unitaires (`MultiMesh.buffer`, seize flottants par cube). La couleur
+d'instance porte la teinte ; son alpha dit la matière — mur, fenêtre allumée
+qui rayonne la nuit, vitre qui reflète. Le shader biseaute chaque cube par ses
+UV : c'est ce qui sépare un mur de briques d'un aplat. Le sol est quantifié
+sur la même grille (cinq cases par tuile) pour que la rue ait le même grain
+que les murs. **La destruction est arbitrée par l'hôte** : une balle, une
+roquette, une explosion ou un choc frontal à plus de trois cent quatre-vingts
+pixels par seconde ôte des cubes (`VilleVivante.impacter/exploser/choquer`,
+trois coups par cube au pistolet), l'événement `casse` — groupé dans le `lot`
+de l'image — les retire chez tout le monde, expose les cubes de l'intérieur
+qu'ils cachaient et lâche des débris. Quand il reste moins de quarante pour
+cent du rez-de-chaussée, l'immeuble est ÉVENTRÉ : sa fiche perd son bloc et on
+le traverse en voiture. Les cubes détruits sont gardés par identifiant
+(immeuble = tuile et rang, cube = trois indices) : c'est ce qui permet à un
+morceau libéré puis rebâti de rester en ruine.
+
+**Le jour et la nuit.** La même horloge que le village : un cycle de quinze
+minutes (`MatieresCarnage.nuit()`), neuf de jour, une de crépuscule, quatre de
+nuit, une d'aube. Le ciel, le brouillard, le soleil et la lune s'interpolent
+entre trois heures clés (`HEURES`) ; les fenêtres, enseignes et lampadaires
+montent en émission quand la nuit tombe, et la rue passe du gris chaud au bleu
+sourd — jamais noire : une nuit noire vue de dessus, c'est un écran vide.
+`--nuit=<0..1>` (`?nuit=` dans l'URL) force l'heure pour photographier.
+
+**Il n'y a pas une seule vraie lumière dans la ville.** Le mode compatibilité
+n'en supporte que huit par objet ; une flaque additive au sol sous chaque
+lampadaire fait le même effet pour rien. ⚠ Une matière additive doit couper le
+brouillard (`fog_disabled`) : sinon il peint un carré violet là où la flaque
+devait être transparente.
 
 **Les rues font deux tuiles de large.** Trottoir, file de stationnement, voie
 de circulation, de chaque côté d'un axe. Une rue d'une tuile ne laissait pas la
@@ -160,17 +181,6 @@ tirée — et la retire alors de sa nappe chez tout le monde (`pris`, instantan�
 ou la position du conducteur pour qui arrive en retard). Une ville de cent
 mille voitures garées ne peut pas vivre dans une liste qu'on parcourt à chaque
 image.
-
-**L'heure bleue.** Un ciel du bleu profond à l'orange, un soleil bas et chaud
-qui allonge les ombres sans noyer la rue (quarante-deux degrés : à vingt, le
-joueur disparaissait dans l'ombre d'une tour), une ambiante bleue, le halo qui
-fait rayonner fenêtres, enseignes et lampadaires. Les lampadaires posent une
-flaque de lumière au sol ; les voitures conduites ont des phares et des feux ;
-les enseignes des boutiques empruntent les couleurs de la palette. Il n'y a
-pas une seule vraie lumière dans la ville : le mode compatibilité n'en
-supporte que huit par objet, et une flaque additive au sol fait le même effet
-pour rien. ⚠ Une matière additive doit couper le brouillard (`fog_disabled`) :
-sinon il peint un carré violet là où la flaque devait être transparente.
 
 **La circulation roule à droite, freine et klaxonne.** Chaque voiture tient sa
 file (vingt-cinq pixels à droite de l'axe), s'arrête derrière ce qu'elle a
@@ -190,6 +200,19 @@ pousse. C'est ce qui fait qu'on vole une voiture pour autre chose que sa couleur
 **À cinq étoiles, l'hélicoptère.** Il survole avec un temps de retard, tire par
 rafales, et ne se sème pas : il fait du surplace quand on est à terre, et ne
 rentre à la base que quand la jauge redescend. La seule sortie est le garage.
+
+**L'interface est celle d'une borne d'arcade, du premier écran au dernier.**
+Angles droits, cadres de deux pixels, polices pixel à leur taille native, une
+barre d'accent à gauche de chaque panneau (`ui/fabrique.gd`) — l'accueil, le
+village, le salon, la manche et les résultats partagent la même main. En
+manche, `ui/hud.gd` peint tout en un `_draw` : chrono et scores en cartouche
+(une barre de course sous chaque nom), les cinq étoiles de recherche toujours
+visibles au milieu, la fiche du joueur en bas à gauche — jauges de vie et de
+tôle, arme et munitions, puces d'état (qui vous chasse, arène, garage) —, le
+contrat en bas au milieu avec son sablier, et les touches en cabochons sur la
+dernière ligne, qui s'estompent quinze secondes après le départ. Le jeu ne
+donne au HUD qu'une fiche (`Partie.fiche_joueur`) : l'énigme et Carnage ont
+le même habillage avec leurs propres rubriques.
 
 **Le radar, en haut à droite.** Centré sur soi, le nord en haut : la ville
 fait six cent quatre-vingts tuiles, un plan entier n'y montrerait plus rien.
