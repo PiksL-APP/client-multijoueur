@@ -1020,7 +1020,17 @@ func simuler_hote(delta: float) -> void:
 	_depuis_instantane += delta
 	if _depuis_instantane >= CADENCE_INSTANTANE:
 		_depuis_instantane = 0.0
-		canal.envoyer("n", ville.instantane(etats))
+		# L'instantané se cadre sur TOUS les joueurs, morts compris : `etats`
+		# exclut ceux qui sont à terre (pour qu'on ne les touche pas), et quand
+		# tout le monde était à terre en même temps, l'instantané partait vide
+		# et la ville disparaissait chez les clients le temps de se relever.
+		var regards := etats.duplicate()
+		if not regards.has(Session.cle):
+			regards[Session.cle] = {"p": _position}
+		for cle in _autres:
+			if not regards.has(cle):
+				regards[cle] = {"p": _autres[cle]["p"]}
+		canal.envoyer("n", ville.instantane(regards))
 
 ## Ce que l'hôte sait de chacun. Il ne le déduit jamais : chaque client annonce
 ## sa position, et l'hôte s'en contente. Le contraire — un hôte qui replacerait
@@ -1049,16 +1059,26 @@ func _etats_des_joueurs() -> Dictionary:
 
 ## Les décisions de l'hôte partent sur le réseau ET s'appliquent chez lui :
 ## `broadcast.self` est à faux, il ne recevra pas ses propres messages.
+## ⚠ Les événements d'une même image partent en UN seul message (`lot`). Le
+## serveur temps réel limite le nombre de messages par seconde sur un canal ;
+## à trois étoiles, chaque coup de feu de flic (`tn`), chaque dégât, chaque
+## point faisaient un message, et l'hôte dépassait la limite : le serveur
+## fermait le socket (code 1000), l'écran passait « hors ligne » et la ville
+## se figeait chez les autres. Vu dans le navigateur, jamais au banc natif.
 func _vider_les_evenements() -> void:
 	if ville.sortants.is_empty():
 		return
 	var lot: Array = ville.sortants.duplicate()
 	ville.sortants.clear()
+	if lot.size() == 1:
+		canal.envoyer(String(lot[0]["e"]), lot[0]["c"])
+	else:
+		var paquet: Array = []
+		for evenement in lot:
+			paquet.append([String(evenement["e"]), evenement["c"]])
+		canal.envoyer("lot", {"l": paquet})
 	for evenement in lot:
-		var nom := String(evenement["e"])
-		var charge: Dictionary = evenement["c"]
-		canal.envoyer(nom, charge)
-		_appliquer(nom, charge)
+		_appliquer(String(evenement["e"]), evenement["c"])
 
 # ------------------------------------------------------- réception
 
@@ -1107,6 +1127,10 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 				if arme != "":
 					_accorder(String(charge.get("cle", "")), arme)
 				_vider_les_evenements()
+		"lot":
+			for entree in charge.get("l", []):
+				if typeof(entree) == TYPE_ARRAY and (entree as Array).size() == 2 and typeof(entree[1]) == TYPE_DICTIONARY:
+					_appliquer(String(entree[0]), entree[1])
 		_:
 			_appliquer(evenement, charge)
 
