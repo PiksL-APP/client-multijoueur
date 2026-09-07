@@ -11,3 +11,8 @@ config.cfg
 
 # Morceaux de transfert du wasm, jamais versionnés.
 sortie/index.wasm.part*
+# ⚠ `sortie/` contient ses propres icônes PNG : sans le `.gdignore` posé à
+# côté, chaque `--import` les réimporte COMME DES RESSOURCES DU PROJET, pose
+# trois `.import` dans le dossier d'export, et l'export suivant embarque ses
+# propres icônes dans le pack.
+sortie/*.import
