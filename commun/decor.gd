@@ -146,6 +146,82 @@ static func nappe(chemin: String, transformations: Array, ombre: bool = true,
 		else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return noeud
 
+const PERSONNAGE := "res://modeles/personnages/character.glb"
+const CREATURE := "res://modeles/creatures/enemy-flying.glb"
+const PIECE := "res://modeles/personnages/coin.glb"
+
+## Un modèle du kit, teinté sans perdre sa peinture.
+##
+## La teinte MULTIPLIE l'atlas : à pleine saturation elle noie les détails du
+## personnage dans un aplat, donc on la ramène vers le blanc. On garde le
+## modèle reconnaissable ET la couleur d'équipe lisible d'un coup d'œil.
+static func modele(chemin: String, couleur: Color = Color.WHITE, force: float = 0.35) -> MeshInstance3D:
+	var noeud := MeshInstance3D.new()
+	noeud.mesh = maillage(chemin)
+	if couleur != Color.WHITE:
+		var origine := noeud.mesh.surface_get_material(0)
+		if origine is BaseMaterial3D:
+			var copie := (origine as BaseMaterial3D).duplicate() as BaseMaterial3D
+			copie.albedo_color = couleur.lerp(Color.WHITE, force)
+			noeud.material_override = copie
+	return noeud
+
+## Instancie un modèle ENTIER, avec toutes ses parties et son animation.
+##
+## `modele()` ne rend que le premier maillage : pour une tuile de ville, qui
+## n'en a qu'un, c'est parfait et c'est ce qui permet de les grouper en nappes.
+## Un personnage, lui, est fait de jambes, d'un torse, de bras et d'une
+## antenne — on n'affichait qu'une jambe. Le teintage descend sur chaque
+## partie, sinon seule la première change de couleur.
+static func instance(chemin: String, couleur: Color = Color.WHITE, force: float = 0.35) -> Node3D:
+	var racine := ((load(chemin) as PackedScene).instantiate()) as Node3D
+	if couleur != Color.WHITE:
+		_teinter(racine, couleur.lerp(Color.WHITE, force))
+	return racine
+
+static func _teinter(noeud: Node, teinte: Color) -> void:
+	if noeud is MeshInstance3D:
+		var mi := noeud as MeshInstance3D
+		if mi.mesh != null and mi.mesh.get_surface_count() > 0:
+			var origine := mi.mesh.surface_get_material(0)
+			if origine is BaseMaterial3D:
+				var copie := (origine as BaseMaterial3D).duplicate() as BaseMaterial3D
+				copie.albedo_color = teinte
+				mi.material_override = copie
+	for enfant in noeud.get_children():
+		_teinter(enfant, teinte)
+
+static func animateur(noeud: Node) -> AnimationPlayer:
+	if noeud is AnimationPlayer:
+		return noeud as AnimationPlayer
+	for enfant in noeud.get_children():
+		var trouve := animateur(enfant)
+		if trouve != null:
+			return trouve
+	return null
+
+static func personnage(couleur: Color, taille: float = 3.2) -> Node3D:
+	var pivot := Node3D.new()
+	var corps := instance(PERSONNAGE, couleur)
+	corps.scale = Vector3.ONE * taille
+	corps.name = "Corps"
+	pivot.add_child(corps)
+	var lecteur := animateur(corps)
+	if lecteur:
+		lecteur.name = "Animateur"
+		# Les pistes du kit ne bouclent pas d'origine : sans ça, le
+		# personnage fait un pas puis se fige pour toujours.
+		for nom in lecteur.get_animation_list():
+			lecteur.get_animation(nom).loop_mode = Animation.LOOP_LINEAR
+		lecteur.play("idle")
+	return pivot
+
+## Change la démarche sans relancer la même piste à chaque image.
+static func demarche(porteur: Node3D, nom: String) -> void:
+	var lecteur := animateur(porteur)
+	if lecteur and lecteur.current_animation != nom:
+		lecteur.play(nom, 0.2)
+
 static func carrosserie(couleur: Color) -> MeshInstance3D:
 	var noeud := MeshInstance3D.new()
 	noeud.mesh = maillage(CARROSSERIE)
@@ -207,23 +283,62 @@ static func _texture_trame(teinte: Color) -> ImageTexture:
 
 # ------------------------------------------------------------ ambiance
 
-static func ambiance(fond: Color = Palette.FOND, brouillard: bool = true, ambiante: float = 0.34) -> WorldEnvironment:
+## L'ambiance : ciel, brume, exposition.
+##
+## Un fond de couleur unie donne un horizon plat et une lumière d'ambiance
+## fausse — tout ce qui n'est pas face au soleil tombe dans le même gris. Un
+## ciel dégradé coûte le même prix à l'affichage et fournit en plus l'ambiante,
+## donc des ombres bleutées et des hauts de mur chauds.
+static func ambiance(fond: Color = Palette.FOND, brouillard: bool = true, ambiante: float = 0.34,
+		ciel: bool = true, halo: bool = true) -> WorldEnvironment:
 	var environnement := Environment.new()
-	environnement.background_mode = Environment.BG_COLOR
-	environnement.background_color = fond
-	environnement.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	# L'ambiante reste basse et à peine bleutée : montée trop haut, elle
-	# éclaircit le sol jusqu'à un gris bleu qui n'est plus le #0d0d0d de la
-	# palette, et toute la maison se reconnaît à ce noir-là.
-	environnement.ambient_light_color = Color("#1a212b")
-	environnement.ambient_light_energy = ambiante
+
+	if ciel:
+		var matiere_ciel := ProceduralSkyMaterial.new()
+		matiere_ciel.sky_top_color = Color("#0a1020")
+		matiere_ciel.sky_horizon_color = Color("#25334a")
+		matiere_ciel.sky_curve = 0.18
+		matiere_ciel.ground_bottom_color = Color("#07090c")
+		matiere_ciel.ground_horizon_color = Color("#1b2230")
+		matiere_ciel.sun_angle_max = 24.0
+		matiere_ciel.sun_curve = 0.08
+		var voute := Sky.new()
+		voute.sky_material = matiere_ciel
+		environnement.background_mode = Environment.BG_SKY
+		environnement.sky = voute
+		environnement.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+		environnement.ambient_light_sky_contribution = 1.0
+		environnement.ambient_light_energy = ambiante * 2.4
+	else:
+		environnement.background_mode = Environment.BG_COLOR
+		environnement.background_color = fond
+		environnement.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		environnement.ambient_light_color = Color("#1a212b")
+		environnement.ambient_light_energy = ambiante
+
 	if brouillard:
 		# Le brouillard sert la profondeur : sans lui, le fond du terrain a
 		# exactement le même contraste que le premier plan et la perspective
 		# se lit mal.
 		environnement.fog_enabled = true
-		environnement.fog_light_color = fond
-		environnement.fog_density = 0.012
+		environnement.fog_light_color = Color("#131a26")
+		environnement.fog_density = 0.010
+
+	if halo:
+		# Le halo ne sert pas à « faire joli » : il rend les émissifs
+		# reconnaissables du premier coup d'œil — portails, phares, dalles
+		# actives — là où un aplat de couleur se confond avec un mur clair.
+		environnement.glow_enabled = true
+		environnement.glow_intensity = 0.55
+		environnement.glow_bloom = 0.08
+		environnement.glow_hdr_threshold = 1.0
+		environnement.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
+
+	# Sans courbe de rendu, les blancs du kit de ville s'écrasent en aplats.
+	environnement.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	environnement.tonemap_exposure = 1.0
+	environnement.tonemap_white = 4.0
+
 	var noeud := WorldEnvironment.new()
 	noeud.environment = environnement
 	return noeud

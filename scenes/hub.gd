@@ -8,6 +8,10 @@ extends Ecran
 ## tout le monde ET une écriture d'état côté serveur.
 
 const CANAL := "mj-hub"
+const TUILE := 7.0                           ## côté d'une tuile, en unités 3D
+const PAS := TUILE / Decor.ECHELLE           ## le même, en pixels de jeu
+const VILLE := "res://modeles/ville/"
+const TEINTE_DALLAGE := Color(0.50, 0.54, 0.64)
 const MONDE := Rect2(0, 0, 2600, 1600)
 const VITESSE := 340.0
 const CADENCE_ENVOI := 1.0 / 8.0
@@ -84,11 +88,9 @@ func _exit_tree() -> void:
 # ---------------------------------------------------------------- décor
 
 func _batir_monde() -> void:
-	poser_ambiance()
+	poser_ambiance(true, 0.85)
 
-	var sol := Decor.sol(MONDE.size, 100.0)
-	sol.position = Decor.vers3d(MONDE.get_center())
-	monde().add_child(sol)
+	_paver()
 
 	# Murs d'enceinte : ils cadrent le terrain et, surtout, portent une ombre
 	# qui donne son épaisseur au sol.
@@ -108,6 +110,51 @@ func _batir_monde() -> void:
 	_camera = Decor.camera(INCLINAISON, DISTANCE, 50.0)
 	monde().add_child(_camera)
 	_camera.make_current()
+
+## Le hub est une esplanade dallée, pas un plan quadrillé : on y reconnaît le
+## même vocabulaire que dans Carnage, et surtout on VOIT qu'on avance. Un
+## damier de points ne donne ni échelle ni matière.
+func _paver() -> void:
+	var graine := RandomNumberGenerator.new()
+	graine.seed = 20260907          # fixe : le hub est le même pour tout le monde
+	var nappes: Dictionary = {}
+	var colonnes := int(ceil(MONDE.size.x / PAS))
+	var rangees := int(ceil(MONDE.size.y / PAS))
+
+	# Un parc traversé d'allées, pas une esplanade uniforme : à quatorze
+	# unités la tuile de trottoir devient un papier peint, et rien ne dit où
+	# aller. Les allées mènent aux portails, l'herbe fait le reste.
+	var centre_monde := MONDE.get_center()
+	for c in range(-2, colonnes + 2):
+		for r in range(-2, rangees + 2):
+			var centre := Vector2(c + 0.5, r + 0.5) * PAS
+			var sur_allee := absf(centre.x - centre_monde.x) < 110.0 or absf(centre.y - centre_monde.y) < 110.0
+			var tuile := "grass"
+			if _sous_un_portail(centre) or sur_allee:
+				tuile = "pavement"
+			else:
+				var t := graine.randf()
+				if t < 0.015:
+					tuile = "pavement-fountain"
+				elif t < 0.20:
+					tuile = "grass-trees"
+				elif t < 0.27:
+					tuile = "grass-trees-tall"
+			if not nappes.has(tuile):
+				nappes[tuile] = []
+			nappes[tuile].append(Transform3D(Basis().scaled(Vector3.ONE * TUILE), Decor.vers3d(centre)))
+
+	for tuile in nappes:
+		var plat := String(tuile) in ["pavement", "grass"]
+		monde().add_child(Decor.nappe(VILLE + String(tuile) + ".glb", nappes[tuile], not plat, TEINTE_DALLAGE))
+
+## Rien ne pousse au pied d'un portail : il faut pouvoir s'en approcher sans
+## se cogner à un arbre, et le socle doit rester lisible.
+func _sous_un_portail(point: Vector2) -> bool:
+	for portail in PORTAILS:
+		if point.distance_to(portail["position"]) < 200.0:
+			return true
+	return false
 
 func _mur(centre: Vector2, taille: Vector2) -> void:
 	var hauteur := 5.0
@@ -160,17 +207,21 @@ func _batir_portail(portail: Dictionary) -> void:
 
 func _batir_avatar(couleur: Color, pseudo: String) -> Node3D:
 	var racine := Node3D.new()
-	var jambes := Decor.cylindre(RAYON * Decor.ECHELLE * 1.5, 2.4, couleur.darkened(0.35))
-	jambes.position = Vector3(0, 1.2, 0)
-	racine.add_child(jambes)
-	var buste := Decor.cylindre(RAYON * Decor.ECHELLE * 1.3, 2.7, couleur)
-	buste.position = Vector3(0, 3.8, 0)
-	racine.add_child(buste)
-	var tete := Decor.sphere(RAYON * Decor.ECHELLE * 1.1, couleur.lightened(0.25))
-	tete.position = Vector3(0, 6.2, 0)
-	racine.add_child(tete)
+
+	# Un anneau au sol à la couleur du joueur : c'est lui qui distingue quatre
+	# personnages du même modèle, et il reste lisible quand le corps passe
+	# dans l'ombre d'un portail.
+	var halo := Decor.anneau(2.2, 0.2, couleur, 0.95)
+	halo.rotation_degrees = Vector3(90, 0, 0)
+	halo.position = Vector3(0, 0.05, 0)
+	racine.add_child(halo)
+
+	var corps := Decor.personnage(couleur, 3.4)
+	corps.name = "Silhouette"
+	racine.add_child(corps)
+
 	var nom := Decor.etiquette(pseudo, Palette.ENCRE_DOUCE, 34)
-	nom.position = Vector3(0, 8.6, 0)
+	nom.position = Vector3(0, 5.6, 0)
 	nom.name = "Nom"
 	racine.add_child(nom)
 	return racine
@@ -186,21 +237,16 @@ func _process(delta: float) -> void:
 		_position.y = clamp(_position.y, MONDE.position.y + RAYON, MONDE.end.y - RAYON)
 
 	_corps.position = Decor.vers3d(_position)
-	# Un pas se voit : le corps se penche dans le sens de la marche et
-	# rebondit légèrement. Sans ça, un cylindre qui glisse ne marche pas.
-	if direction != Vector2.ZERO:
-		_corps.rotation.y = atan2(-direction.x, -direction.y)
-		_corps.position.y = abs(sin(_t * 11.0)) * 0.5
-		_corps.rotation.x = deg_to_rad(6.0)
-	else:
-		_corps.rotation.x = lerp(_corps.rotation.x, 0.0, delta * 8.0)
+	_animer(_corps, direction, delta)
 
 	for cle in _autres:
 		var a: Dictionary = _autres[cle]
 		a["affichee"] = (a["affichee"] as Vector2).lerp(a["cible"], clamp(delta * 12.0, 0, 1))
 		var noeud: Node3D = a["noeud"]
 		var avant: Vector2 = a["affichee"]
+		var pas: Vector2 = (a["cible"] as Vector2) - avant
 		noeud.position = Decor.vers3d(avant)
+		_animer(noeud, pas.normalized() if pas.length() > 3.0 else Vector2.ZERO, delta)
 
 	for anneau in _anneaux:
 		var pivot: Node3D = anneau["pivot"]
@@ -217,6 +263,20 @@ func _process(delta: float) -> void:
 		_canal.envoyer("p", {"x": int(_position.x), "y": int(_position.y)})
 
 	_chercher_portail()
+
+## Un pas se voit : la silhouette se tourne vers sa marche, rebondit et se
+## penche un peu. Sans ça, un personnage qui glisse ne marche pas — il flotte.
+## Seule la silhouette tourne, pas l'anneau ni le pseudo.
+func _animer(porteur: Node3D, direction: Vector2, delta: float) -> void:
+	var silhouette := porteur.get_node_or_null("Silhouette") as Node3D
+	if silhouette == null:
+		return
+	if direction != Vector2.ZERO:
+		silhouette.rotation.y = lerp_angle(silhouette.rotation.y,
+			atan2(direction.x, direction.y), clamp(delta * 12.0, 0, 1))
+		Decor.demarche(silhouette, "walk")
+	else:
+		Decor.demarche(silhouette, "idle")
 
 func _placer_camera(delta: float) -> void:
 	var vise := Decor.viser(_camera, _position, INCLINAISON, DISTANCE)

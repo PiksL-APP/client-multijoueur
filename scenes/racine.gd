@@ -17,12 +17,14 @@ func _ready() -> void:
 	get_window().min_size = Vector2i(960, 600)
 	Reseau.connecter()
 	var arguments := OS.get_cmdline_args()
-	if "--banc" in arguments:
-		_banc_d_essai()
-		return
+	# Les photos démarrent AVANT le choix du banc : sinon `--banc --photo`
+	# repart en haut de la fonction et on ne photographie jamais le hub.
 	var dossier_photos := _argument(arguments, "--photo")
 	if dossier_photos != "":
 		_photographier(dossier_photos)
+	if "--banc" in arguments:
+		_banc_d_essai()
+		return
 
 	var jeu := _argument(arguments, "--banc-jeu")
 	if jeu != "":

@@ -343,37 +343,58 @@ func _batir_voiture(couleur: Color, pseudo: String) -> Node3D:
 
 func _batir_monstre(type: int) -> Node3D:
 	var racine := Node3D.new()
-	var rayon: float = 2.6 if type == 0 else (4.2 if type == 1 else 2.0)
+	var rayon := _rayon_monstre(type) * Decor.ECHELLE
 	var couleur := Palette.BON if type == 0 else (Palette.SERIEUX if type == 1 else Palette.AVERTISSEMENT)
-	var corps := Decor.sphere(rayon, couleur.darkened(0.25))
-	corps.position = Vector3(0, rayon * 0.85, 0)
+
+	var corps := Decor.instance(Decor.CREATURE, couleur, 0.62)
+	# Le modèle fait 1,2 de large : on l'échelonne sur le rayon de collision,
+	# pour que ce qu'on voit soit exactement ce qui écrase.
+	corps.scale = Vector3.ONE * (rayon * 2.0 / 1.2)
 	corps.name = "Corps"
 	racine.add_child(corps)
-	for cote in [-1.0, 1.0]:
-		var oeil := Decor.sphere(rayon * 0.22, Palette.FOND, false)
-		oeil.position = Vector3(rayon * 0.62, rayon * 1.15, cote * rayon * 0.42)
-		racine.add_child(oeil)
-	var crete := Decor.boite(Vector3(rayon * 0.4, rayon * 0.9, rayon * 0.3), couleur.lightened(0.3))
-	crete.position = Vector3(-rayon * 0.4, rayon * 1.5, 0)
-	racine.add_child(crete)
+
+	# Une ombre portée simple sous la créature : elle vole, et sans marque au
+	# sol on ne sait pas où elle est vraiment quand on fonce dessus.
+	var marque := Decor.cylindre(rayon * 0.8, 0.05, Color(0, 0, 0, 0.5), false)
+	marque.material_override = Decor.matiere_voile(Color.BLACK, 0.35)
+	marque.position = Vector3(0, 0.04, 0)
+	marque.name = "Ombre"
+	racine.add_child(marque)
+
 	if type == 1:
-		var jauge := Decor.barre(rayon * 1.5)
+		var jauge := Decor.barre(rayon * 1.6)
 		jauge.name = "Vie"
-		jauge.position = Vector3(0, rayon * 2.3, 0)
+		jauge.position = Vector3(0, rayon * 2.6, 0)
 		racine.add_child(jauge)
 	return racine
+
+const MODELES_ARMES := {
+	"mitraillette": "res://modeles/creatures/blaster-repeater.glb",
+	"roquette": "res://modeles/creatures/blaster.glb",
+	"eperon": "res://modeles/personnages/coin.glb",
+}
 
 func _batir_caisse(arme: String) -> Node3D:
 	var couleur: Color = ARMES[arme]["couleur"]
 	var racine := Node3D.new()
-	var boite := Decor.boite(Vector3(2.6, 2.6, 2.6), couleur.lightened(0.15))
-	boite.position = Vector3(0, 1.4, 0)
-	boite.name = "Boite"
-	racine.add_child(boite)
-	var liseret := Decor.anneau(2.4, 0.24, couleur, 1.1)
-	liseret.rotation_degrees = Vector3(90, 0, 0)
-	liseret.position = Vector3(0, 0.25, 0)
-	racine.add_child(liseret)
+
+	# Un socle lumineux au sol, l'objet qui flotte au-dessus : c'est la
+	# grammaire habituelle du ramassage, et elle se repère de loin dans une
+	# rue encombrée là où une caisse posée se confond avec le mobilier.
+	var socle := Decor.cylindre(1.9, 0.12, couleur, false)
+	socle.material_override = Decor.matiere_lumineuse(couleur, 0.75, 0.5)
+	socle.position = Vector3(0, 0.08, 0)
+	racine.add_child(socle)
+	var couronne := Decor.anneau(2.1, 0.16, couleur, 1.15)
+	couronne.rotation_degrees = Vector3(90, 0, 0)
+	couronne.position = Vector3(0, 0.2, 0)
+	racine.add_child(couronne)
+
+	var objet := Decor.instance(String(MODELES_ARMES[arme]), couleur, 0.5)
+	objet.scale = Vector3.ONE * (4.2 if arme == "eperon" else 2.0)
+	objet.name = "Objet"
+	objet.position = Vector3(0, 1.6, 0)
+	racine.add_child(objet)
 	return racine
 
 # ------------------------------------------------------- simulation locale
@@ -1047,7 +1068,8 @@ func rafraichir_scene(delta: float) -> void:
 		(noeud_m as Node3D).position = Decor.vers3d(m["p"])
 		var corps := (noeud_m as Node3D).get_node_or_null("Corps") as Node3D
 		if corps:
-			corps.position.y = abs(sin(temps * 7.0 + float(int(m["id"])) * 1.3)) * 0.7 + 1.4
+			corps.position.y = 1.7 + sin(temps * 3.4 + float(int(m["id"])) * 1.3) * 0.45
+			corps.rotation.z = sin(temps * 3.0 + float(int(m["id"]))) * 0.12
 		_regler_jauge(noeud_m, float(int(m.get("pv", 1))) / float(max(1, int(m.get("pv_max", 1)))))
 
 	for c in _caisses:
@@ -1056,8 +1078,11 @@ func rafraichir_scene(delta: float) -> void:
 			noeud_c = _batir_caisse(String(c["arme"]))
 			monde().add_child(noeud_c)
 			c["noeud"] = noeud_c
-		(noeud_c as Node3D).position = Decor.vers3d(c["p"], sin(temps * 2.0 + float(int(c["id"]))) * 0.3)
-		(noeud_c as Node3D).rotation.y = temps * 0.9
+		(noeud_c as Node3D).position = Decor.vers3d(c["p"])
+		var objet := (noeud_c as Node3D).get_node_or_null("Objet") as Node3D
+		if objet:
+			objet.rotation.y = temps * 1.3
+			objet.position.y = 1.6 + sin(temps * 2.2 + float(int(c["id"]))) * 0.28
 
 	_animer_effets(delta)
 	_placer_camera(delta)

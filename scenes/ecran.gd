@@ -37,8 +37,8 @@ func monde() -> Node3D:
 ## `jour` module l'heure : à 1 on est en plein soleil, à 0,5 au crépuscule.
 ## Le kit de ville est d'un blanc éclatant — laissé en plein jour, il écrase
 ## la palette sombre de la maison et rend les voitures illisibles.
-func poser_ambiance(brouillard: bool = true, jour: float = 1.0) -> void:
-	monde().add_child(Decor.ambiance(Palette.FOND, brouillard, 0.34 * jour))
+func poser_ambiance(brouillard: bool = true, jour: float = 1.0, ciel: bool = true) -> void:
+	monde().add_child(Decor.ambiance(Palette.FOND, brouillard, 0.34 * jour, ciel))
 	monde().add_child(Decor.lumiere(1.12 * jour))
 	monde().add_child(Decor.contre_jour())
 
