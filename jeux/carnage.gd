@@ -58,7 +58,7 @@ const CADENCE_INSTANTANE := 1.0 / 8.0
 ## cachait entièrement. À 76° et des tours de trente unités, la façade d'une
 ## tour en bas d'écran couvrait encore un quart de l'image. GTA 2 se joue de
 ## dessus ; on recule un peu pour garder la rue entière.
-const INCLINAISON := 79.0
+const INCLINAISON := 72.0
 const DISTANCE_AUTO := 64.0
 const DISTANCE_PIED := 40.0
 
@@ -180,6 +180,10 @@ var _banniere_reste := 0.0
 var _territoire_vu := -99
 var _quartier_vu := -99
 
+var _traces: MultiMesh                ## les traces de pneus, en anneau
+var _trace_suivante := 0
+var _depuis_trace := 0.0
+const TRACES_MAX := 320
 var _autres: Dictionary = {}       ## cle -> état distant + nœuds 3D
 var _projectiles: Array = []
 var _eclats: Array = []
@@ -237,12 +241,46 @@ func preparer() -> void:
 				if xy.size() == 2:
 					_position = carte.point_de_rue(_rng,
 						Vector2(float(xy[0]), float(xy[1])) * PlanVille.PAS, 0.0, 160.0)
+				elif String(argument).ends_with("etoile"):
+					# `--banc-position=etoile` : partir près de la grande place, dont
+					# la position dépend du code de la manche.
+					_position = carte.point_de_rue(_rng, carte.place_etoile(), 320.0, 480.0)
 	_vehicule = ID_VOITURE_DEPART + place
 	_pied = false
 
 	_corps_auto = FormesCarnage.voiture(_ma_couleur(), Session.pseudo)
 	_corps_auto.add_child(FormesCarnage.echappement(-2.4))
+	FormesCarnage.projecteurs(_corps_auto, 2.2)
 	monde().add_child(_corps_auto)
+
+	# Le post-traitement (vignette, grain) : premier enfant de la couche, donc
+	# SOUS l'interface — le HUD ne doit pas prendre le grain.
+	var post := ColorRect.new()
+	post.name = "Post"
+	post.set_anchors_preset(Control.PRESET_FULL_RECT)
+	post.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	post.material = MatieresCarnage.post()
+	interface().add_child(post)
+	interface().move_child(post, 0)
+
+	# Les traces de pneus : une nappe d'instances qu'on réutilise en anneau.
+	# Un rectangle par roue et par pas de temps, qui pâlit avec l'âge.
+	_traces = MultiMesh.new()
+	_traces.transform_format = MultiMesh.TRANSFORM_3D
+	_traces.use_colors = true
+	var dalle := QuadMesh.new()
+	dalle.size = Vector2(1.0, 1.0)
+	dalle.orientation = PlaneMesh.FACE_Y
+	_traces.mesh = dalle
+	_traces.instance_count = TRACES_MAX
+	for i in TRACES_MAX:
+		_traces.set_instance_transform(i, Transform3D(Basis().scaled(Vector3(0.001, 0.001, 0.001)), Vector3(0, -50, 0)))
+		_traces.set_instance_color(i, Color(0, 0, 0, 0))
+	var noeud_t := MultiMeshInstance3D.new()
+	noeud_t.multimesh = _traces
+	noeud_t.material_override = MatieresCarnage.trace()
+	noeud_t.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	monde().add_child(noeud_t)
 	_corps_pied = FormesCarnage.pieton(_ma_couleur(), false, Session.pseudo, true)
 	_corps_pied.visible = false
 	monde().add_child(_corps_pied)
@@ -317,6 +355,7 @@ func _rebatir_ma_voiture() -> void:
 	if _corps_auto != null:
 		_corps_auto.queue_free()
 	_corps_auto = _batir_voiture_de(_modele_vehicule, _ma_couleur(), Session.pseudo)
+	FormesCarnage.projecteurs(_corps_auto, 2.2)
 	_corps_auto.add_child(FormesCarnage.echappement(-2.4 if _modele_vehicule < 0 else -2.2))
 	monde().add_child(_corps_auto)
 
@@ -348,6 +387,11 @@ func _planter_decor() -> void:
 	# La voie ferrée est une droite de la ville : le shader du sol la trace en
 	# espace monde, il lui faut ses paramètres.
 	MatieresCarnage.sol().set_shader_parameter("rail", carte.rail())
+	# Les voies libres : le shader du sol trace leurs chaussées en espace monde.
+	MatieresCarnage.sol().set_shader_parameter("lignes", carte.lignes_libres())
+	MatieresCarnage.sol().set_shader_parameter("origines", carte.origines_libres())
+	MatieresCarnage.sol().set_shader_parameter("anneaux", carte.anneaux_libres())
+	MatieresCarnage.sol().set_shader_parameter("etoiles", carte.etoiles_libres())
 
 ## Les morceaux dont le bord passe à portée du joueur sont bâtis, du plus proche
 ## au plus loin, une ÉTAPE de chantier par image ; ceux qui sont partis loin
@@ -449,14 +493,17 @@ func _dessiner_le_plan() -> void:
 	_plan_vue.draw_colored_polygon(PackedVector2Array([moi + avant * 10.0, moi - avant * 6.0 + cote * 6.0,
 		moi - avant * 6.0 - cote * 6.0]), _ma_couleur())
 	_plan_vue.draw_arc(moi, 14.0, 0, TAU, 24, _ma_couleur(), 2.0)
-	var police := Palette.police()
+	# La légende, dans la police de la charte (la police de secours ne se
+	# dessinait plus une fois le post-traitement posé dans la même couche).
+	var police: Font = UI.TEXTE_POLICE
 	var x := cadre.position.x
 	var y := cadre.end.y + 24.0
 	for entree in [["garage", Palette.SERIE], ["cabine", Palette.AVERTISSEMENT], ["arène", Palette.CRITIQUE],
-			["repaire", Palette.ENCRE], ["parc", Color("#50a050")], ["eau", Color("#3a6a9c")], ["voie ferrée", Color("#404040")]]:
-		_plan_vue.draw_circle(Vector2(x, y - 5.0), 4.0, entree[1])
-		_plan_vue.draw_string(police, Vector2(x + 9.0, y), String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Palette.ENCRE_DOUCE)
-		x += 12.0 + police.get_string_size(String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 16.0
+			["repaire", Palette.ENCRE], ["parc", Color("#50a050")], ["eau", Color("#3a6a9c")], ["voie ferrée", Color("#404040")],
+			["boulevard", Color("#8a8a90")]]:
+		_plan_vue.draw_rect(Rect2(Vector2(x - 4.0, y - 9.0), Vector2(8, 8)), entree[1], true)
+		_plan_vue.draw_string(police, Vector2(x + 9.0, y), String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_DOUCE)
+		x += 12.0 + police.get_string_size(String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 16.0
 
 ## Un cube d'immeuble part du décor, s'il est bâti : le morceau retire
 ## l'instance, dévoile l'intérieur, et on jette quelques débris de sa couleur.
@@ -479,7 +526,12 @@ func _casser_dans_le_decor(id: int, locale: int) -> void:
 		debris.position = parti["p"]
 		monde().add_child(debris)
 		var v := Vector3(_rng.randf_range(-1, 1), _rng.randf_range(0.5, 1.6), _rng.randf_range(-1, 1)) * _rng.randf_range(5, 11)
-		_eclats.append({"noeud": debris, "v": v, "t": 1.4, "t0": 1.4})
+		_eclats.append({"noeud": debris, "v": v, "t": 1.4, "t0": 1.4,
+			"tourne": Vector3(_rng.randf_range(-6, 6), _rng.randf_range(-6, 6), _rng.randf_range(-6, 6))})
+	var poussiere := FormesCarnage.poussiere(couleur)
+	poussiere.position = parti["p"]
+	monde().add_child(poussiere)
+	_eclats.append({"noeud": poussiere, "v": Vector3.ZERO, "t": 1.2, "t0": 1.2, "lumiere": true})
 	Sons.jouer("choc", _rng.randf_range(0.6, 0.9), -14.0)
 
 ## Un immeuble dont le rez-de-chaussée est parti aux deux tiers ne tient plus
@@ -571,8 +623,11 @@ func _piloter_pour_le_banc() -> void:
 	_depuis_rapport += get_process_delta_time()
 	if _depuis_rapport >= 5.0:
 		_depuis_rapport = 0.0
-		print("[banc] t=%ds fps=%d gens=%d autos=%d morceaux=%d fiches=%d noeuds=%d %s" % [int(temps),
-			Engine.get_frames_per_second(), ville.gens.size(), ville.autos.size(), _morceaux.size(),
+		var cubes := 0
+		for cle in _morceaux:
+			cubes += (_morceaux[cle] as MorceauVille).cubes_poses()
+		print("[banc] t=%ds fps=%d gens=%d autos=%d morceaux=%d cubes=%d fiches=%d noeuds=%d %s" % [int(temps),
+			Engine.get_frames_per_second(), ville.gens.size(), ville.autos.size(), _morceaux.size(), cubes,
 			carte.fiches_en_cache(), get_tree().get_node_count(), "hôte" if est_hote() else "client"])
 	# ⚠ L'action se PULSE. Maintenue, elle ne produit qu'un seul front : le
 	# pilote descendait de voiture et ne remontait jamais, et la moitié du jeu
@@ -767,6 +822,7 @@ func _conduire(delta: float) -> void:
 		_angle += commande.x * BRAQUAGE * delta * prise * tenue
 
 	_position += Vector2.RIGHT.rotated(_angle) * _vitesse * delta
+	_marquer_le_bitume(delta)
 	_heurter_les_murs()
 	_heurter_les_voitures()
 	_surveiller_la_friche(delta)
@@ -775,6 +831,35 @@ func _conduire(delta: float) -> void:
 ## Le klaxon fait fuir les passants — c'est son seul effet, et c'est déjà
 ## beaucoup : c'est le moyen de traverser une foule sans l'écraser, ou de la
 ## rabattre vers un coéquipier.
+## Les traces de pneus : quand on freine fort ou qu'on braque à pleine vitesse,
+## chaque roue arrière laisse un rectangle sombre sur le bitume. Elles vieillissent
+## toutes d'un cran à chaque nouvelle : au bout de l'anneau, la plus vieille
+## s'efface.
+func _marquer_le_bitume(delta: float) -> void:
+	_depuis_trace -= delta
+	if _traces == null or _depuis_trace > 0.0 or abs(_vitesse) < 200.0:
+		return
+	var commande := Commandes.conduite()
+	var derape: bool = (commande.y < -0.1 and _vitesse > 260.0) or (abs(commande.x) > 0.6 and abs(_vitesse) > 420.0) or _sonne > 0.0
+	if not derape or not carte.sur_une_rue(_position, 20.0):
+		return
+	_depuis_trace = 0.04
+	var direction := Vector2.RIGHT.rotated(_angle)
+	var cote := Vector2(-direction.y, direction.x)
+	for signe in [-1.0, 1.0]:
+		var roue: Vector2 = _position - direction * 16.0 + cote * signe * 12.0
+		var ou := Decor.vers3d(roue, 0.02)
+		var base := Basis(Vector3.UP, -_angle).scaled(Vector3(abs(_vitesse) * 0.045 * Decor.ECHELLE + 0.3, 1.0, 0.55))
+		_traces.set_instance_transform(_trace_suivante, Transform3D(base, ou))
+		_traces.set_instance_color(_trace_suivante, Color(0, 0, 0, 0.85))
+		_trace_suivante = (_trace_suivante + 1) % TRACES_MAX
+	# Les autres pâlissent : une trace a une demi-vie d'une centaine de coups.
+	if _trace_suivante % 8 == 0:
+		for i in TRACES_MAX:
+			var c := _traces.get_instance_color(i)
+			if c.a > 0.0:
+				_traces.set_instance_color(i, Color(0, 0, 0, maxf(0.0, c.a - 0.02)))
+
 func _klaxonner(delta: float) -> void:
 	_depuis_klaxon -= delta
 	if _hors_service > 0.0 or not Commandes.klaxon() or _depuis_klaxon > 0.0:
@@ -808,6 +893,10 @@ func _heurter_les_murs() -> void:
 		# Une façade prise de face à cette vitesse perd des cubes : l'hôte
 		# tranche lesquels, comme pour les balles.
 		var impact := _position + direction * RAYON_VOITURE
+		var gerbe := FormesCarnage.etincelles()
+		gerbe.position = Decor.vers3d(impact, 1.0)
+		monde().add_child(gerbe)
+		_eclats.append({"noeud": gerbe, "v": Vector3.ZERO, "t": 0.8, "t0": 0.8, "lumiere": true})
 		if est_hote():
 			ville.choquer(impact, direction, abs(_vitesse))
 			_vider_les_evenements()
@@ -1520,6 +1609,12 @@ func _animer_effets(delta: float) -> void:
 			continue
 		var v: Vector3 = e["v"]
 		noeud.position += v * delta
+		if e.has("tourne"):
+			# Un débris tourne sur lui-même en vol, et s'arrête au sol.
+			var w: Vector3 = e["tourne"]
+			noeud.rotation += w * delta
+			if noeud.position.y <= 0.13:
+				e["tourne"] = w * 0.6
 		if not e.has("texte") and not e.has("lumiere"):
 			v.y -= 26.0 * delta          # les éclats retombent
 			e["v"] = v
@@ -1531,6 +1626,8 @@ func _animer_effets(delta: float) -> void:
 			(noeud as Label3D).modulate.a = reste
 		elif noeud is OmniLight3D:
 			(noeud as OmniLight3D).light_energy = 4.0 * reste
+		elif noeud is CPUParticles3D:
+			pass
 		else:
 			noeud.scale = Vector3.ONE * max(0.05, reste)
 		restants.append(e)
@@ -1547,6 +1644,11 @@ func rafraichir_scene(delta: float) -> void:
 	# L'heure du village, à chaque image : le jour tombe pendant la manche.
 	if _ambiance.size() == 3:
 		MatieresCarnage.regler_heure(_ambiance[0], _ambiance[1], _ambiance[2], MatieresCarnage.nuit())
+	# Les vrais phares ne s'allument que la nuit, et les bords de l'écran
+	# rougissent le temps d'une secousse.
+	if _corps_auto != null:
+		FormesCarnage.regler_projecteurs(_corps_auto, MatieresCarnage.nuit())
+	MatieresCarnage.post().set_shader_parameter("secousse", clampf(_secousse, 0.0, 1.0))
 	_placer_le_joueur(delta)
 	_placer_les_autres()
 	_placer_la_foule()

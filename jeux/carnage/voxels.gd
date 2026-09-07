@@ -84,28 +84,150 @@ static func immeuble(b: Dictionary, graine: int) -> Dictionary:
 	solide.fill(1)
 	var couleurs := PackedColorArray()
 	couleurs.resize(nx * nz * ny)
-	var toit := teinte.lerp(Color(0.25, 0.25, 0.27), 0.6)
-	var interieur := Color(0.42, 0.40, 0.38)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = graine
+	# Le toit : sa couleur vient du style, pas du mur — une façade ocre sous
+	# un toit de tuiles, un bureau clair sous du gravier. La caméra voit les
+	# toits avant les façades : c'est eux qui colorent la ville vue d'en haut.
+	var toits: Array = PlanVille.TOITS_PAR_STYLE.get(style, PlanVille.TOITS_PAR_STYLE[PlanVille.F_PLEIN])
+	var toit: Color = toits[rng.randi_range(0, toits.size() - 1)]
+	var interieur := Color(0.42, 0.40, 0.38)
 	var part := _part_allumee(style)
 	for i in nx:
 		for j in nz:
 			for k in ny:
 				var facade := i == 0 or i == nx - 1 or j == 0 or j == nz - 1
 				var couleur := teinte
-				if not facade:
+				if k == ny - 1 and not plat:
+					# Toute la dernière couche est du toit, intérieur compris :
+					# c'est sa face du dessus qu'on voit. Un grain de deux tons.
+					couleur = toit.lightened(rng.randf_range(-0.05, 0.05))
+					if not facade and rng.randf() < 0.12:
+						couleur = toit.darkened(0.2)
+				elif not facade:
 					couleur = interieur
-				elif k == ny - 1 and not plat:
-					couleur = toit
 				elif plat:
 					couleur = teinte
 				else:
 					couleur = _facade(style, teinte, i, j, k, nx, nz, ny, part, rng)
+					# La crasse du bas : une façade est plus sombre au ras du
+					# trottoir qu'au dernier étage. Sur les murs seulement — une
+					# fenêtre allumée ne se salit pas.
+					if couleur.a > 0.75 and ny > 1:
+						couleur = couleur.darkened(0.16 * (1.0 - float(k) / float(ny - 1)))
 				couleurs[(i * nz + j) * ny + k] = couleur
 	return {"nx": nx, "nz": nz, "ny": ny, "origine": origine, "taille": V,
 		"hauteur": float(g["hauteur"]), "solide": solide, "couleurs": couleurs, "style": style,
 		"teinte": teinte, "plat": plat}
+
+## Les ORNEMENTS d'un immeuble : ce qui dépasse de la grille et n'en fait pas
+## partie — corniche au dernier étage, balcons sous les fenêtres, stores au-
+## dessus des vitrines, et sur le toit : climatiseurs, citerne, antenne, cage
+## d'escalier, cheminées. Liste de [centre, taille (Vector3), couleur]. Ce
+## n'est pas cassable : une balle ne vise pas une corniche.
+static func ornements(imm: Dictionary, graine: int) -> Array:
+	var liste: Array = []
+	if bool(imm["plat"]):
+		return liste
+	var nx := int(imm["nx"])
+	var nz := int(imm["nz"])
+	var ny := int(imm["ny"])
+	var style := int(imm["style"])
+	var teinte: Color = imm["teinte"]
+	var o: Vector3 = imm["origine"]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = graine + 77
+	var haut := o.y + float(ny) * V
+	var clair := teinte.lightened(0.18)
+	var sombre := teinte.darkened(0.25)
+
+	# La corniche : une lame qui court au sommet, en saillie d'un demi-voxel.
+	var corniche := style in [PlanVille.F_VIEUX, PlanVille.F_LOGEMENTS, PlanVille.F_COMMERCE, PlanVille.F_BUREAUX] and ny >= 2
+	if corniche:
+		var e := 0.5 * V
+		var y := haut - 0.3 * V
+		var lx := float(nx) * V + 2.0 * e
+		var lz := float(nz) * V + 2.0 * e
+		liste.append([Vector3(o.x + float(nx) * V * 0.5, y, o.z - e * 0.5), Vector3(lx, 0.6 * V, e), clair])
+		liste.append([Vector3(o.x + float(nx) * V * 0.5, y, o.z + float(nz) * V + e * 0.5), Vector3(lx, 0.6 * V, e), clair])
+		liste.append([Vector3(o.x - e * 0.5, y, o.z + float(nz) * V * 0.5), Vector3(e, 0.6 * V, lz), clair])
+		liste.append([Vector3(o.x + float(nx) * V + e * 0.5, y, o.z + float(nz) * V * 0.5), Vector3(e, 0.6 * V, lz), clair])
+
+	# Les balcons : sous une fenêtre sur trois des étages supérieurs, une
+	# dalle qui dépasse et un garde-corps.
+	if style in [PlanVille.F_LOGEMENTS, PlanVille.F_VIEUX] and ny >= 3:
+		for k in range(1, ny - 1):
+			for cote in 4:
+				var le_long := nx if cote < 2 else nz
+				for m in le_long:
+					if posmod(m, 2) != 1 or rng.randf() > 0.3:
+						continue
+					var centre: Vector3
+					var taille: Vector3
+					match cote:
+						0: centre = Vector3(o.x + (m + 0.5) * V, o.y + k * V + 0.15 * V, o.z - 0.3 * V); taille = Vector3(V, 0.3 * V, 0.6 * V)
+						1: centre = Vector3(o.x + (m + 0.5) * V, o.y + k * V + 0.15 * V, o.z + nz * V + 0.3 * V); taille = Vector3(V, 0.3 * V, 0.6 * V)
+						2: centre = Vector3(o.x - 0.3 * V, o.y + k * V + 0.15 * V, o.z + (m + 0.5) * V); taille = Vector3(0.6 * V, 0.3 * V, V)
+						_: centre = Vector3(o.x + nx * V + 0.3 * V, o.y + k * V + 0.15 * V, o.z + (m + 0.5) * V); taille = Vector3(0.6 * V, 0.3 * V, V)
+					liste.append([centre, taille, sombre])
+					# Le garde-corps : une lame fine au bord extérieur.
+					var dehors := (centre - Vector3(o.x + nx * V * 0.5, 0, o.z + nz * V * 0.5))
+					dehors.y = 0.0
+					var n := Vector3(signf(dehors.x), 0, 0) if cote >= 2 else Vector3(0, 0, signf(dehors.z))
+					liste.append([centre + n * 0.25 * V + Vector3(0, 0.45 * V, 0),
+						Vector3(0.1 * V, 0.6 * V, V) if cote >= 2 else Vector3(V, 0.6 * V, 0.1 * V), Color(0.15, 0.15, 0.17)])
+
+	# Les stores des vitrines : une lame de couleur au-dessus du rez-de-chaussée.
+	if style == PlanVille.F_COMMERCE and ny >= 2:
+		var store: Color = PlanVille.NEONS[rng.randi_range(0, PlanVille.NEONS.size() - 1)]
+		store = store.lerp(Color(0.9, 0.9, 0.85), 0.35)
+		var y := o.y + 1.0 * V - 0.1 * V
+		for cote in 4:
+			if rng.randf() > 0.7:
+				continue
+			match cote:
+				0: liste.append([Vector3(o.x + nx * V * 0.5, y, o.z - 0.45 * V), Vector3(float(nx) * V - V, 0.2 * V, 0.9 * V), store])
+				1: liste.append([Vector3(o.x + nx * V * 0.5, y, o.z + nz * V + 0.45 * V), Vector3(float(nx) * V - V, 0.2 * V, 0.9 * V), store])
+				2: liste.append([Vector3(o.x - 0.45 * V, y, o.z + nz * V * 0.5), Vector3(0.9 * V, 0.2 * V, float(nz) * V - V), store])
+				_: liste.append([Vector3(o.x + nx * V + 0.45 * V, y, o.z + nz * V * 0.5), Vector3(0.9 * V, 0.2 * V, float(nz) * V - V), store])
+
+	# Le toit : ce que la caméra voit le plus. Un parapet sur les immeubles
+	# sans corniche, puis du désordre — climatiseurs, citerne, antenne, cage
+	# d'escalier, cheminées selon le style.
+	if not corniche and style != PlanVille.F_MAISON and ny >= 2:
+		var y := haut + 0.2 * V
+		var pe := 0.35 * V
+		liste.append([Vector3(o.x + nx * V * 0.5, y, o.z + pe * 0.5), Vector3(float(nx) * V, 0.4 * V, pe), sombre])
+		liste.append([Vector3(o.x + nx * V * 0.5, y, o.z + nz * V - pe * 0.5), Vector3(float(nx) * V, 0.4 * V, pe), sombre])
+		liste.append([Vector3(o.x + pe * 0.5, y, o.z + nz * V * 0.5), Vector3(pe, 0.4 * V, float(nz) * V), sombre])
+		liste.append([Vector3(o.x + nx * V - pe * 0.5, y, o.z + nz * V * 0.5), Vector3(pe, 0.4 * V, float(nz) * V), sombre])
+	if nx >= 2 and nz >= 2 and style != PlanVille.F_MAISON:
+		var libre := func() -> Vector3:
+			return Vector3(o.x + rng.randf_range(0.7, float(nx) - 0.7) * V, haut, o.z + rng.randf_range(0.7, float(nz) - 0.7) * V)
+		var gris := Color(0.62, 0.63, 0.65)
+		var combien := rng.randi_range(1, 2 if nx * nz < 12 else 4)
+		for c in combien:
+			var t := rng.randf()
+			var ou: Vector3 = libre.call()
+			if t < 0.4:
+				# Un climatiseur : une boîte claire, une grille sombre dessus.
+				liste.append([ou + Vector3(0, 0.3 * V, 0), Vector3(0.9 * V, 0.6 * V, 0.9 * V), gris])
+				liste.append([ou + Vector3(0, 0.62 * V, 0), Vector3(0.7 * V, 0.06 * V, 0.7 * V), Color(0.2, 0.2, 0.22)])
+			elif t < 0.6 and ny >= 4:
+				# Une citerne sur ses pieds.
+				liste.append([ou + Vector3(0, 0.3 * V, 0), Vector3(0.5 * V, 0.6 * V, 0.5 * V), Color(0.3, 0.3, 0.33)])
+				liste.append([ou + Vector3(0, 1.1 * V, 0), Vector3(1.1 * V, 1.0 * V, 1.1 * V), Color(0.55, 0.42, 0.32)])
+			elif t < 0.8:
+				# La cage d'escalier, dans la teinte du mur, avec sa porte.
+				liste.append([ou + Vector3(0, 0.55 * V, 0), Vector3(1.4 * V, 1.1 * V, 1.1 * V), teinte.darkened(0.08)])
+			else:
+				# Une antenne : un mât fin, une traverse.
+				liste.append([ou + Vector3(0, 0.9 * V, 0), Vector3(0.12 * V, 1.8 * V, 0.12 * V), Color(0.35, 0.35, 0.38)])
+				liste.append([ou + Vector3(0, 1.6 * V, 0), Vector3(0.7 * V, 0.08 * V, 0.08 * V), Color(0.35, 0.35, 0.38)])
+	if style in [PlanVille.F_VIEUX, PlanVille.F_MAISON] and rng.randf() < 0.7:
+		var ou := Vector3(o.x + rng.randf_range(0.5, float(nx) - 0.5) * V, haut, o.z + rng.randf_range(0.5, float(nz) - 0.5) * V)
+		liste.append([ou + Vector3(0, 0.5 * V, 0), Vector3(0.4 * V, 1.0 * V, 0.4 * V), Color(0.5, 0.32, 0.26)])
+	return liste
 
 static func _part_allumee(style: int) -> float:
 	match style:
@@ -206,30 +328,40 @@ static func mobilier(nom: String, p: Vector2, a: float, s: float, graine: int) -
 					cubes.append([base + Vector3(x - 0.5, 0.45, z - 0.5) * 0.9 * s, 0.9 * s, feuille.lightened(rng.randf_range(-0.08, 0.08))])
 			cubes.append([base + Vector3(0, 1.2 * s, 0), 0.8 * s, feuille.lightened(0.1)])
 		"arbre", "arbre_petit":
+			# Un arbre en cubes fins (un demi-voxel) : un tronc de quatre cubes de
+			# section, une couronne en boule irrégulière où un cube sur six manque
+			# et où deux verts se mêlent, plus claire vers le haut. Une boîte de
+			# feuilles se lit comme une boîte ; une boule trouée se lit comme un
+			# arbre — et il y a dix fois plus de cubes.
 			var grand := nom == "arbre"
+			var r := 0.55 * s
 			var tronc := Color(0.4, 0.28, 0.16)
 			var feuille := Color(0.18, 0.45, 0.16).lightened(rng.randf_range(-0.05, 0.1))
-			var ht := 3 if grand else 2
-			for k in ht:
-				cubes.append([base + Vector3(0, (0.35 + 0.7 * k) * s, 0), 0.7 * s, tronc])
-			var y0 := (0.7 * ht + 0.5) * s
-			if grand:
-				# Une couronne de trois sur trois sur deux, sans les angles du haut,
-				# et un cube au sommet : une boule de feuilles, pas une boîte.
-				for x in range(-1, 2):
-					for z in range(-1, 2):
-						for y in 2:
-							if y == 1 and abs(x) == 1 and abs(z) == 1:
-								continue
-							cubes.append([base + Vector3(x * s, y0 + y * s, z * s), 1.0 * s,
-								feuille.lightened(0.12 * y + rng.randf_range(-0.04, 0.04))])
-				cubes.append([base + Vector3(0, y0 + 2.0 * s, 0), 1.0 * s, feuille.lightened(0.25)])
-			else:
-				for x in [-0.5, 0.5]:
-					for z in [-0.5, 0.5]:
-						for y in 2:
-							cubes.append([base + Vector3(x * s, y0 + y * s, z * s), 1.0 * s,
-								feuille.lightened(0.12 * y + rng.randf_range(-0.04, 0.04))])
+			var feuille2 := feuille.lerp(Color(0.34, 0.54, 0.14), 0.6)
+			var h_tronc := (2.4 if grand else 1.6) * s
+			var n_tronc := int(ceil(h_tronc / r))
+			for k in n_tronc:
+				for dx in 2:
+					for dz in 2:
+						cubes.append([base + Vector3((dx - 0.5) * r, (k + 0.5) * r, (dz - 0.5) * r), r, tronc.lightened(0.05 * (k % 2))])
+			var rayon := (1.8 if grand else 1.2) * s
+			var y0 := h_tronc + rayon * 0.9
+			var n_c := int(ceil(rayon / r))
+			for y in range(-n_c, n_c + 1):
+				for x in range(-n_c, n_c + 1):
+					for z in range(-n_c, n_c + 1):
+						var d := Vector3(x, y * 1.15, z).length() * r
+						if d > rayon + r * 0.3:
+							continue
+						# On ne garde que l'écorce de la boule : l'intérieur ne se voit
+						# jamais et coûterait deux fois plus.
+						if d < rayon - r * 1.4:
+							continue
+						if rng.randf() < 0.16:
+							continue
+						var vert := feuille if rng.randf() < 0.6 else feuille2
+						cubes.append([base + Vector3(x * r, y0 + y * r, z * r), r,
+							vert.lightened(0.12 * float(y) / float(n_c) + rng.randf_range(-0.05, 0.05))])
 		"conteneur_a", "conteneur_b":
 			var teintes := [Color(0.8, 0.35, 0.15), Color(0.2, 0.4, 0.7), Color(0.25, 0.55, 0.3), Color(0.6, 0.15, 0.15), Color(0.7, 0.7, 0.72)]
 			var c: Color = teintes[rng.randi_range(0, teintes.size() - 1)]
@@ -268,6 +400,24 @@ static func mobilier(nom: String, p: Vector2, a: float, s: float, graine: int) -
 					for y in 2:
 						cubes.append([base + Vector3(x * 1.2, 4.2 + y * 1.2, z * 1.2), 1.2, Color(0.5, 0.52, 0.55)])
 			cubes.append([base + Vector3(0, 6.8, 0), 1.0, Color(0.3, 0.3, 0.33)])
+		"monument":
+			# L'obélisque de la place en étoile : trois marches de pierre, un
+			# fût qui s'affine, une pointe dorée qui prend la lumière la nuit.
+			var pierre_m := Color(0.62, 0.60, 0.56)
+			for marche in 3:
+				var demi := 3 - marche
+				for x in range(-demi, demi + 1):
+					for z in range(-demi, demi + 1):
+						cubes.append([base + Vector3(x, 0.5 + marche, z), 1.0, pierre_m.lightened(0.04 * marche)])
+			var fut_m := Color(0.70, 0.68, 0.62)
+			for y in 14:
+				var cote_f := 1.6 if y < 4 else (1.3 if y < 9 else 1.0)
+				cubes.append([base + Vector3(0, 3.5 + y * 0.9, 0), cote_f, fut_m.lightened(-0.02 * y)])
+			cubes.append([base + Vector3(0, 16.2, 0), 0.8, Color(0.95, 0.8, 0.35, LUMIERE)])
+			for x in [-2.5, 2.5]:
+				for z in [-2.5, 2.5]:
+					cubes.append([base + Vector3(x, 3.6, z), 0.6, Color(0.22, 0.24, 0.28)])
+					cubes.append([base + Vector3(x, 4.3, z), 0.7, Color(1.0, 0.9, 0.7, LUMIERE)])
 		"fontaine":
 			var pierre := Color(0.6, 0.58, 0.55)
 			for x in range(-2, 3):
@@ -285,27 +435,30 @@ static func mobilier(nom: String, p: Vector2, a: float, s: float, graine: int) -
 
 # ------------------------------------------------------------ les voitures
 
-const VOXEL_VOITURE := 0.5
+const VOXEL_VOITURE := 0.34
 
-## Les gabarits : longueur, largeur, hauteur de caisse (en voxels), et où va
-## l'habitacle (début, fin, hauteur). Le kit de Kenney a servi de mesure : une
-## berline fait neuf voxels de long, quatre de large.
+## Les gabarits, en voxels FINS (trois par unité) : longueur, largeur, hauteur
+## de caisse, l'habitacle (début, fin), et la forme du capot (« sport » =
+## capot plongeant, « haut » = fourgon carré). Une berline fait quatorze
+## voxels de long, six de large : à peu près une Volvo vue de dessus.
 const GABARITS := {
-	0: {"l": 9, "w": 4, "hc": 2, "cab": [2, 7, 1]},      # berline
-	1: {"l": 9, "w": 4, "hc": 2, "cab": [3, 7, 1]},      # berline sport
-	2: {"l": 8, "w": 4, "hc": 2, "cab": [2, 6, 1]},      # compacte
-	3: {"l": 9, "w": 4, "hc": 3, "cab": [2, 8, 1]},      # 4x4
-	4: {"l": 10, "w": 4, "hc": 3, "cab": [2, 9, 1]},     # 4x4 de luxe
-	5: {"l": 9, "w": 4, "hc": 2, "cab": [2, 7, 1]},      # taxi
-	6: {"l": 10, "w": 4, "hc": 3, "cab": [1, 10, 1]},    # fourgon
-	7: {"l": 11, "w": 4, "hc": 3, "cab": [3, 11, 1]},    # camion de livraison
-	8: {"l": 12, "w": 4, "hc": 3, "cab": [4, 12, 1]},    # camion
-	9: {"l": 9, "w": 4, "hc": 2, "cab": [2, 7, 1]},      # police
+	0: {"l": 14, "w": 6, "hc": 3, "cab": [4, 11], "forme": "berline"},
+	1: {"l": 14, "w": 6, "hc": 3, "cab": [5, 11], "forme": "sport"},
+	2: {"l": 12, "w": 6, "hc": 3, "cab": [3, 10], "forme": "berline"},
+	3: {"l": 14, "w": 6, "hc": 4, "cab": [3, 12], "forme": "haut"},
+	4: {"l": 15, "w": 6, "hc": 4, "cab": [3, 13], "forme": "haut"},
+	5: {"l": 14, "w": 6, "hc": 3, "cab": [4, 11], "forme": "berline"},
+	6: {"l": 15, "w": 6, "hc": 4, "cab": [2, 15], "forme": "fourgon"},
+	7: {"l": 17, "w": 6, "hc": 4, "cab": [4, 17], "forme": "camion"},
+	8: {"l": 18, "w": 6, "hc": 4, "cab": [5, 18], "forme": "camion"},
+	9: {"l": 14, "w": 6, "hc": 3, "cab": [4, 11], "forme": "berline"},
 }
 
 ## Le maillage voxel d'une voiture, en couleurs de sommet. La caisse est
-## BLANCHE : c'est la couleur d'instance (ou la matière) qui la peint, roues et
-## vitres restent sombres quelle que soit la peinture. L'avant regarde +X.
+## BLANCHE : c'est la couleur d'instance (ou la matière) qui la peint, roues,
+## vitres et pare-chocs restent sombres quelle que soit la peinture. L'avant
+## regarde +X. Un capot qui plonge, des passages de roue, des rétroviseurs,
+## des pare-chocs : c'est ce qui sépare une voiture d'un pain de savon.
 static func voiture(indice: int) -> ArrayMesh:
 	var g: Dictionary = GABARITS.get(indice, GABARITS[0])
 	var st := SurfaceTool.new()
@@ -314,51 +467,94 @@ static func voiture(indice: int) -> ArrayMesh:
 	var W := int(g["w"])
 	var HC := int(g["hc"])
 	var cab: Array = g["cab"]
+	var forme := String(g["forme"])
 	var v := VOXEL_VOITURE
 	var blanc := Color(1, 1, 1, MUR)
-	var vitre := Color(0.12, 0.15, 0.2, VITRE)
+	var vitre := Color(0.10, 0.13, 0.18, VITRE)
 	var noir := Color(0.05, 0.05, 0.06, MUR)
+	var chrome := Color(0.75, 0.76, 0.78, MUR)
 	var x0 := -float(L) * 0.5 * v
 	var z0 := -float(W) * 0.5 * v
-	# La caisse.
+	var y_sol := 0.42                    # le dessous de la caisse
+	var pose := func(x: int, y: int, z: int, c: Color) -> void:
+		_cube(st, Vector3(x0 + (x + 0.5) * v, y_sol + (y + 0.5) * v, z0 + (z + 0.5) * v), v, c)
+	var roues_x := [2, L - 3]            # centre des roues (deux voxels de large)
 	for x in L:
 		for z in W:
 			for y in HC:
 				var c := blanc
-				if indice == 9 and y == HC - 1 and (x == 3 or x == 4 or x == 5):
+				# Le capot plonge : la rangée du haut disparaît sur les trois
+				# derniers voxels à l'avant (et deux à l'arrière pour une sportive).
+				var avant := L - 1 - x
+				if forme == "berline" and y == HC - 1 and (avant < 3):
+					continue
+				if forme == "sport" and y == HC - 1 and (avant < 4 or x < 2):
+					continue
+				if forme == "berline" and y == HC - 1 and x < 1:
+					continue
+				# Les passages de roue : rien au ras du sol autour des roues.
+				if y == 0 and (z == 0 or z == W - 1) and (abs(x - roues_x[0]) <= 1 or abs(x - roues_x[1]) <= 1):
+					continue
+				# Les pare-chocs : la rangée du bas, aux deux bouts, en sombre.
+				if y == 0 and (x == 0 or x == L - 1):
+					c = Color(0.16, 0.16, 0.18, MUR)
+				if indice == 9 and y == HC - 1 and x >= 4 and x <= 9:
 					c = Color(0.2, 0.35, 0.85, MUR)            # la bande de la police
 				if indice == 7 and x >= int(cab[0]) and y >= 1:
 					c = Color(0.92, 0.92, 0.9, MUR)             # la caisse de livraison
-				_cube(st, Vector3(x0 + (x + 0.5) * v, 0.5 * v + y * v + 0.45, z0 + (z + 0.5) * v), v, c)
-	# L'habitacle : une rangée de plus, en verre sur les côtés, en tôle au milieu.
+				if indice == 5 and y == HC - 1 and posmod(x + z, 2) == 0 and x > 2 and x < L - 3:
+					c = Color(0.1, 0.1, 0.1, MUR)               # le damier du taxi
+				pose.call(x, y, z, c)
+	# L'habitacle : deux rangées de plus, en verre sur les côtés et aux bouts,
+	# les montants en tôle. Les camions : une cabine courte et la caisse.
 	var y_cab := HC
+	var hauteur_cab := 2 if forme != "haut" else 2
 	for x in range(int(cab[0]), int(cab[1])):
 		for z in W:
-			var bord := z == 0 or z == W - 1 or x == int(cab[0]) or x == int(cab[1]) - 1
-			var c := vitre if bord else blanc
-			if indice == 7 or indice == 8:
-				if x >= int(cab[0]) + 1:
-					c = Color(0.92, 0.92, 0.9, MUR) if indice == 7 else Color(0.85, 0.35, 0.25, MUR)
-			_cube(st, Vector3(x0 + (x + 0.5) * v, 0.5 * v + y_cab * v + 0.45, z0 + (z + 0.5) * v), v, c)
-	# Le toit sur l'habitacle.
-	if indice != 7 and indice != 8:
-		for x in range(int(cab[0]) + 1, int(cab[1]) - 1):
-			for z in range(1, W - 1):
-				_cube(st, Vector3(x0 + (x + 0.5) * v, 0.5 * v + (y_cab + 1) * v + 0.45, z0 + (z + 0.5) * v), v, blanc)
-	# Quatre roues, qui dépassent sous la caisse.
-	for x in [1, L - 2]:
-		for z in [-0.35, W - 0.65]:
-			_cube(st, Vector3(x0 + (x + 0.5) * v, 0.45, z0 + (z + 0.5) * v), v * 1.1, noir)
-			_cube(st, Vector3(x0 + (x + 0.5) * v, 0.45, z0 + (z + 0.5) * v + (0.3 if z < 0.0 else -0.3)), v * 0.6, Color(0.6, 0.6, 0.62, MUR))
-	# Phares et feux : des cubes lumineux aux quatre coins.
+			for y in range(y_cab, y_cab + hauteur_cab):
+				var bord := z == 0 or z == W - 1 or x == int(cab[0]) or x == int(cab[1]) - 1
+				var montant := (x == int(cab[0]) or x == int(cab[1]) - 1) and (z == 0 or z == W - 1)
+				var c := vitre if (bord and not montant) else blanc
+				if forme == "camion":
+					var caisse := x >= int(cab[0]) + 3
+					if caisse:
+						c = Color(0.92, 0.92, 0.9, MUR) if indice == 7 else Color(0.85, 0.35, 0.25, MUR)
+				elif forme == "fourgon" and x >= int(cab[0]) + 3:
+					c = blanc
+				pose.call(x, y, z, c)
+	# Le toit.
+	var toit_y := y_cab + hauteur_cab
+	for x in range(int(cab[0]) + (0 if forme in ["camion", "fourgon"] else 1), int(cab[1]) - (0 if forme in ["camion", "fourgon"] else 1)):
+		for z in range(1, W - 1):
+			pose.call(x, toit_y, z, blanc)
+	# Une caisse de camion plus haute encore.
+	if forme == "camion":
+		for x in range(int(cab[0]) + 3, int(cab[1])):
+			for z in range(0, W):
+				pose.call(x, toit_y, z, Color(0.92, 0.92, 0.9, MUR) if indice == 7 else Color(0.85, 0.35, 0.25, MUR))
+	# Les rétroviseurs.
+	pose.call(int(cab[1]) - 1, y_cab, -1, noir)
+	pose.call(int(cab[1]) - 1, y_cab, W, noir)
+	# Les roues : deux voxels de large, une jante claire au milieu.
+	for x in roues_x:
+		for z in [-1, W]:
+			for dx in [-1, 0, 1]:
+				for dy in [0, 1]:
+					if abs(dx) == 1 and dy == 1:
+						continue
+					_cube(st, Vector3(x0 + (x + dx + 0.5) * v, 0.16 + (dy + 0.5) * v, z0 + (z + 0.5) * v), v, noir)
+			_cube(st, Vector3(x0 + (x + 0.5) * v, 0.16 + 0.5 * v, z0 + (z + 0.5) * v + (0.12 if z < 0 else -0.12)), v * 0.6, chrome)
+	# Phares et feux : deux cubes lumineux à chaque bout, une calandre chromée.
 	for z in [0, W - 1]:
-		_cube(st, Vector3(x0 + L * v + 0.05, 0.5 * v + 0.45, z0 + (z + 0.5) * v), v * 0.6, Color(1.0, 0.95, 0.75, LUMIERE))
-		_cube(st, Vector3(x0 - 0.05, 0.5 * v + 0.45, z0 + (z + 0.5) * v), v * 0.6, Color(1.0, 0.2, 0.15, LUMIERE))
+		_cube(st, Vector3(x0 + L * v + 0.03, y_sol + 1.5 * v, z0 + (z + 0.5) * v), v * 0.8, Color(1.0, 0.95, 0.75, LUMIERE))
+		_cube(st, Vector3(x0 - 0.03, y_sol + 1.5 * v, z0 + (z + 0.5) * v), v * 0.8, Color(1.0, 0.2, 0.15, LUMIERE))
+	for z in range(1, W - 1):
+		_cube(st, Vector3(x0 + L * v + 0.02, y_sol + 1.5 * v, z0 + (z + 0.5) * v), v * 0.7, chrome.darkened(0.3))
 	if indice == 5:
-		_cube(st, Vector3(x0 + (int(cab[0]) + 1.5) * v, 0.5 * v + (y_cab + 2) * v + 0.4, 0.0), v * 1.2, Color(1.0, 0.85, 0.3, LUMIERE))
+		_cube(st, Vector3(x0 + (int(cab[0]) + 2.0) * v, y_sol + (toit_y + 1.4) * v, 0.0), v * 1.6, Color(1.0, 0.85, 0.3, LUMIERE))
 	if indice == 9:
-		_cube(st, Vector3(x0 + (int(cab[0]) + 1.5) * v, 0.5 * v + (y_cab + 2) * v + 0.35, -0.45), v * 0.8, Color(0.3, 0.5, 1.0, LUMIERE))
-		_cube(st, Vector3(x0 + (int(cab[0]) + 1.5) * v, 0.5 * v + (y_cab + 2) * v + 0.35, 0.45), v * 0.8, Color(1.0, 0.25, 0.25, LUMIERE))
+		_cube(st, Vector3(x0 + (int(cab[0]) + 2.0) * v, y_sol + (toit_y + 1.3) * v, -0.4), v * 1.2, Color(0.3, 0.5, 1.0, LUMIERE))
+		_cube(st, Vector3(x0 + (int(cab[0]) + 2.0) * v, y_sol + (toit_y + 1.3) * v, 0.4), v * 1.2, Color(1.0, 0.25, 0.25, LUMIERE))
 	var maillage := st.commit()
 	return maillage
 
@@ -377,52 +573,88 @@ static func peinture(indice: int, graine: int) -> Color:
 
 # ------------------------------------------------------------ les personnages
 
-const VOXEL_PERSONNAGE := 0.42
+const VOXEL_PERSONNAGE := 0.24
 
-## Un personnage en cubes : jambes articulées (nœuds « JambeG » et « JambeD »
-## pivotés à la hanche), torse de la couleur donnée, tête couleur peau. Il
-## regarde +X. Sa hauteur : environ trois unités et demie.
+## Un personnage en cubes FINS (un quart d'unité) : jambes articulées (nœuds
+## « JambeG » et « JambeD » pivotés à la hanche, avec pantalon et chaussures),
+## torse de la couleur donnée avec une ceinture, bras qui se balancent (« BrasG »,
+## « BrasD »), tête couleur peau, cheveux, yeux. Il regarde +X. Sa hauteur :
+## environ trois unités et demie, comme avant — seulement plus de cubes.
 static func personnage(couleur: Color, peau: Color = Color(0.9, 0.72, 0.6), cheveux: Color = Color(0.25, 0.18, 0.12)) -> Node3D:
 	var racine := Node3D.new()
 	var v := VOXEL_PERSONNAGE
-	var jambes := Color(0.2, 0.22, 0.3, MUR)
+	var pantalon := Color(0.2, 0.22, 0.3, MUR)
+	var chaussure := Color(0.12, 0.1, 0.1, MUR)
+	var teinte := Color(couleur, MUR)
+	var hanche := 6.0 * v
 	for cote in [-1.0, 1.0]:
 		var jambe := MeshInstance3D.new()
 		jambe.name = "JambeG" if cote < 0.0 else "JambeD"
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		# Pivot à la hanche : les cubes descendent de zéro vers le bas.
-		for k in 3:
-			_cube(st, Vector3(0, -0.5 * v - k * v, 0), v, jambes if k < 2 else Color(0.12, 0.1, 0.1, MUR))
+		# Pivot à la hanche : deux voxels de large, six de haut, la chaussure
+		# qui avance d'un voxel.
+		for k in 6:
+			for dz in 2:
+				for dx in 2:
+					_cube(st, Vector3((dx - 0.5) * v, -0.5 * v - k * v, (dz - 0.5) * v), v,
+						pantalon.lightened(0.04 * (k % 2)) if k < 5 else chaussure)
+		for dz in 2:
+			_cube(st, Vector3(1.5 * v, -5.5 * v, (dz - 0.5) * v), v, chaussure)
 		jambe.mesh = st.commit()
 		jambe.material_override = matiere_voxel()
-		jambe.position = Vector3(0, 3.0 * v, cote * 0.5 * v)
+		jambe.position = Vector3(0, hanche, cote * 1.0 * v)
 		racine.add_child(jambe)
+	for cote in [-1.0, 1.0]:
+		var bras := MeshInstance3D.new()
+		bras.name = "BrasG" if cote < 0.0 else "BrasD"
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		# Pivot à l'épaule : la manche puis la main.
+		for k in 5:
+			_cube(st, Vector3(0, -0.5 * v - k * v, 0), v, teinte.darkened(0.15) if k < 4 else Color(peau, MUR))
+		bras.mesh = st.commit()
+		bras.material_override = matiere_voxel()
+		bras.position = Vector3(0, hanche + 5.5 * v, cote * 2.5 * v)
+		racine.add_child(bras)
 	var corps := MeshInstance3D.new()
 	corps.name = "Corps"
 	var st2 := SurfaceTool.new()
 	st2.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var teinte := Color(couleur, MUR)
+	# Le torse : quatre de large, deux d'épais, six de haut ; une ceinture
+	# sombre en bas, un col plus clair en haut.
+	for k in 6:
+		for z in range(-2, 2):
+			for x in range(-1, 1):
+				var c := teinte.lightened(0.05 * (k % 2)) if k > 0 else Color(0.15, 0.12, 0.1, MUR)
+				if k == 5 and abs(z + 0.5) < 1.0:
+					c = teinte.lightened(0.2)
+				_cube(st2, Vector3((x + 0.5) * v, hanche + (k + 0.5) * v, (z + 0.5) * v), v, c)
+	# Les épaules.
+	for z in [-2.5, 2.5]:
+		_cube(st2, Vector3(0, hanche + 5.5 * v, z * v), v, teinte.darkened(0.1))
+	# Le cou, la tête (trois cubes de côté), les cheveux, les yeux, le nez.
+	var y_tete := hanche + 6.0 * v
+	_cube(st2, Vector3(0, y_tete + 0.5 * v, 0), v, Color(peau, MUR))
 	for k in 3:
-		for z in [-0.5, 0.5]:
-			_cube(st2, Vector3(0, 3.0 * v + 0.5 * v + k * v, z * v), v, teinte if k < 2 else teinte.darkened(0.1))
-	# Les bras, un peu en retrait.
-	for z in [-1.5, 1.5]:
-		for k in 3:
-			_cube(st2, Vector3(0, 3.0 * v + 0.5 * v + k * v, z * v), v * 0.8, teinte.darkened(0.15) if k > 0 else Color(peau, MUR))
-	# La tête et les cheveux.
-	var y_tete := 6.0 * v + 0.6 * v
-	_cube(st2, Vector3(0, y_tete, 0), v * 1.6, Color(peau, MUR))
-	_cube(st2, Vector3(-0.1 * v, y_tete + 0.7 * v, 0), v * 1.5, Color(cheveux, MUR))
-	# Les yeux : deux points sombres à l'avant, pour dire où il regarde.
-	for z in [-0.35, 0.35]:
-		_cube(st2, Vector3(0.75 * v, y_tete + 0.15 * v, z * v), v * 0.3, Color(0.08, 0.08, 0.1, MUR))
+		for z in range(-1, 2):
+			for x in range(-1, 2):
+				_cube(st2, Vector3(x * v, y_tete + (1.5 + k) * v, z * v), v, Color(peau, MUR))
+	for z in range(-1, 2):
+		for x in range(-1, 2):
+			_cube(st2, Vector3(x * v, y_tete + 4.5 * v, z * v), v, Color(cheveux, MUR))
+		# La nuque : les cheveux descendent d'un cube à l'arrière.
+		_cube(st2, Vector3(-1.0 * v, y_tete + 3.5 * v, z * v), v * 1.02, Color(cheveux, MUR))
+	for z in [-1, 1]:
+		_cube(st2, Vector3(1.55 * v, y_tete + 3.0 * v, z * 0.6 * v), v * 0.5, Color(0.08, 0.08, 0.1, MUR))
+	_cube(st2, Vector3(1.6 * v, y_tete + 2.4 * v, 0), v * 0.5, Color(peau, MUR).darkened(0.1))
 	corps.mesh = st2.commit()
 	corps.material_override = matiere_voxel()
 	racine.add_child(corps)
 	return racine
 
-## Balance les jambes d'un personnage qui marche ; les remet droites sinon.
+## Balance les jambes (et les bras, en opposition) d'un personnage qui
+## marche ; les remet droits sinon.
 static func animer(personnage_noeud: Node3D, marche: bool, temps: float, vitesse: float = 9.0) -> void:
 	var g := personnage_noeud.get_node_or_null("JambeG") as Node3D
 	var d := personnage_noeud.get_node_or_null("JambeD") as Node3D
@@ -431,6 +663,11 @@ static func animer(personnage_noeud: Node3D, marche: bool, temps: float, vitesse
 	var angle := sin(temps * vitesse) * 0.7 if marche else 0.0
 	g.rotation.z = angle
 	d.rotation.z = -angle
+	var bg := personnage_noeud.get_node_or_null("BrasG") as Node3D
+	var bd := personnage_noeud.get_node_or_null("BrasD") as Node3D
+	if bg and bd:
+		bg.rotation.z = -angle * 0.8
+		bd.rotation.z = angle * 0.8
 
 # ------------------------------------------------------------ outils
 

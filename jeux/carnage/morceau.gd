@@ -52,6 +52,8 @@ var _multi: MultiMesh
 var _places: Dictionary = {}          ## modele -> Array[{t, c, id}]
 var _lumineux: SurfaceTool
 var _flaques: SurfaceTool
+var _ombres: SurfaceTool
+var _quelque_ombre := false
 var _quelque_chose_de_lumineux := false
 var _quelque_flaque := false
 
@@ -69,6 +71,8 @@ func commencer(plan: PlanVille, cle_du_morceau: Vector2i, reveillees: Dictionary
 	_lumineux.begin(Mesh.PRIMITIVE_TRIANGLES)
 	_flaques = SurfaceTool.new()
 	_flaques.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_ombres = SurfaceTool.new()
+	_ombres.begin(Mesh.PRIMITIVE_TRIANGLES)
 
 ## Tout d'un coup, pour le départ.
 func batir(plan: PlanVille, cle_du_morceau: Vector2i, reveillees: Dictionary, detruits: Dictionary = {}) -> void:
@@ -120,6 +124,15 @@ func _lire_les_fiches() -> void:
 			for b in fiche["batis"]:
 				_poser_immeuble(b, id_immeuble(c, l, rang))
 				rang += 1
+				# L'ombre de contact au pied des volumes posés au sol.
+				if float(b["y"]) < 0.1 and float(b["h"]) >= 2.0:
+					var demi := Vector2(float(b["w"]), float(b["d"])) * 0.5 * Decor.ECHELLE
+					var centre_o := Decor.vers3d(b["p"], 0.03)
+					var dx := Vector3(demi.x + 3.0, 0, 0)
+					var dz := Vector3(0, 0, demi.y + 3.0)
+					_quad(_ombres, [centre_o - dx - dz, centre_o + dx - dz, centre_o + dx + dz, centre_o - dx + dz],
+						Color(demi.x / 100.0, demi.y / 100.0, 0.0, 1.0))
+					_quelque_ombre = true
 				if b.get("chapeau", false) or (int(b["style"]) == PlanVille.F_TOUR and float(b["h"]) >= 24.0):
 					# La balise rouge d'une tour : ce qui dit la hauteur de nuit.
 					_cube(Decor.vers3d(b["p"], float(b["y"]) + float(b["h"]) + 0.6), 0.7,
@@ -183,6 +196,16 @@ func _poser_immeuble(b: Dictionary, id: int) -> void:
 				inst[(i * 16 + j) * 32 + k] = _n
 				_poser_voxel(v, i, j, k, couleurs[(i * nz + j) * ny + k])
 	_immeubles[id] = {"v": v, "inst": inst}
+	# Les ornements — corniches, balcons, stores, toits — hors de la grille :
+	# ils ne se cassent pas, mais ils font la différence entre une boîte et
+	# un immeuble.
+	for orn in VoxelsCarnage.ornements(v, id):
+		_instance(orn[0], orn[1], Color((orn[2] as Color).r, (orn[2] as Color).g, (orn[2] as Color).b, VoxelsCarnage.MUR))
+
+## Le nombre de cubes de la nappe : pour le journal du banc, qui surveille ce
+## que le navigateur doit dessiner.
+func cubes_poses() -> int:
+	return _n
 
 static func _expose(solide: PackedByteArray, nx: int, nz: int, ny: int, i: int, j: int, k: int) -> bool:
 	if i == 0 or j == 0 or k == 0 or i == nx - 1 or j == nz - 1 or k == ny - 1:
@@ -296,6 +319,12 @@ func _poser_les_lumieres() -> void:
 		noeud_f.material_override = MatieresCarnage.flaque()
 		noeud_f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(noeud_f)
+	if _quelque_ombre:
+		var noeud_o := MeshInstance3D.new()
+		noeud_o.mesh = _ombres.commit()
+		noeud_o.material_override = MatieresCarnage.ombre()
+		noeud_o.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(noeud_o)
 
 ## Les lieux dont le pâté tombe dans ce morceau : tag de repaire, dalle de
 ## garage, cabine, cercle d'arène. Ils vivent et meurent avec le morceau.

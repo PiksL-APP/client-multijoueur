@@ -598,17 +598,73 @@ func _conduire_civile(auto: Dictionary, delta: float, joueurs: Dictionary = {}) 
 		auto["patience"] = min(float(auto.get("patience", 0.0)), 0.0) + delta * 0.5
 	auto["vitesse"] = move_toward(float(auto["vitesse"]), voulue, (320.0 if voulue > 0.0 else 900.0) * delta)
 
-	# Tenir sa file : on glisse vers la droite de l'axe. `carrefour_proche` donne
-	# l'axe de la rue ; la normale à droite du sens de marche donne le côté.
-	var axe := plan.carrefour_proche(auto["p"])
-	var droite := Vector2(-direction.y, direction.x)
-	var ecart_lateral: float
-	if abs(direction.x) > 0.5:
-		ecart_lateral = (axe.y + droite.y * FILE) - float(auto["p"].y)
-		auto["p"] = Vector2(auto["p"].x, float(auto["p"].y) + clamp(ecart_lateral, -60.0 * delta, 60.0 * delta))
-	else:
-		ecart_lateral = (axe.x + droite.x * FILE) - float(auto["p"].x)
-		auto["p"] = Vector2(float(auto["p"].x) + clamp(ecart_lateral, -60.0 * delta, 60.0 * delta), auto["p"].y)
+	# Sur une voie libre — avenue en diagonale, boulevard circulaire, place en
+	# étoile — la file n'est plus un axe de la grille mais la tangente de la
+	# voie. On la suit si l'on arrive à peu près dans son sens (ou qu'on la
+	# suivait déjà) ; sinon on la traverse tout droit, comme un carrefour.
+	var libre := plan.voie_libre_en(auto["p"])
+	if not libre.is_empty() and String(libre["genre"]) == "esplanade":
+		libre = {}          # le parvis se traverse comme une rue de la grille
+	var suivait := bool(auto.get("libre", false))
+	var suit_libre := false
+	if not libre.is_empty():
+		var t: Vector2 = libre["d"]
+		var genre := String(libre["genre"])
+		var alignee := direction.dot(t)
+		if genre == "place" or abs(alignee) > 0.5 or suivait:
+			suit_libre = true
+			var meme_sens := genre == "place" or alignee >= 0.0
+			if not meme_sens:
+				t = -t
+			var s: float = float(libre["s"]) * (1.0 if meme_sens else -1.0)
+			# La place est serrée : on tourne vite et on ralentit.
+			var raideur := 9.0 if genre == "place" else 3.5
+			direction = direction.lerp(t, clampf(delta * raideur, 0.0, 1.0)).normalized()
+			if genre == "place":
+				auto["vitesse"] = minf(float(auto["vitesse"]), VITESSE_TRAFIC * 0.65)
+				# Sortir de la place : quand on passe devant une avenue, une fois
+				# sur deux environ, on la prend.
+				var radial: Vector2 = (Vector2(auto["p"]) / PlanVille.PAS - Vector2(libre["c"])).normalized()
+				for e in plan.sorties_de_la_place(int(libre["e"])):
+					if Vector2(e).dot(radial) > 0.94 and _rng.randf() < delta * 1.4:
+						direction = e
+			auto["d"] = direction
+			var droite_t := Vector2(-t.y, t.x)
+			var ecart_libre := (PlanVille.FILE_BOULEVARD - s) * PlanVille.PAS
+			auto["p"] = Vector2(auto["p"]) + droite_t * clampf(ecart_libre, -80.0 * delta, 80.0 * delta)
+			auto["libre"] = true
+			# Quitter un boulevard : au croisement d'une rue de la grille, une
+			# fois de temps en temps, on tourne dedans.
+			if genre != "place" and _rng.randf() < delta * 0.35:
+				var colonne := int(floor(float(auto["p"].x) / PlanVille.PAS))
+				var ligne := int(floor(float(auto["p"].y) / PlanVille.PAS))
+				if PlanVille.est_voie(ligne) and abs(direction.x) > 0.3:
+					direction = Vector2(signf(direction.x), 0.0)
+					auto["d"] = direction
+					auto["libre"] = false
+				elif PlanVille.est_voie(colonne) and abs(direction.y) > 0.3:
+					direction = Vector2(0.0, signf(direction.y))
+					auto["d"] = direction
+					auto["libre"] = false
+	if not suit_libre and suivait:
+		# On sort d'une voie libre : on se recale sur l'axe de la grille le plus
+		# proche de notre cap, la file suit.
+		auto["libre"] = false
+		direction = Vector2(signf(direction.x), 0.0) if abs(direction.x) >= abs(direction.y) else Vector2(0.0, signf(direction.y))
+		auto["d"] = direction
+
+	if not suit_libre:
+		# Tenir sa file : on glisse vers la droite de l'axe. `carrefour_proche` donne
+		# l'axe de la rue ; la normale à droite du sens de marche donne le côté.
+		var axe := plan.carrefour_proche(auto["p"])
+		var droite := Vector2(-direction.y, direction.x)
+		var ecart_lateral: float
+		if abs(direction.x) > 0.5:
+			ecart_lateral = (axe.y + droite.y * FILE) - float(auto["p"].y)
+			auto["p"] = Vector2(auto["p"].x, float(auto["p"].y) + clamp(ecart_lateral, -60.0 * delta, 60.0 * delta))
+		else:
+			ecart_lateral = (axe.x + droite.x * FILE) - float(auto["p"].x)
+			auto["p"] = Vector2(float(auto["p"].x) + clamp(ecart_lateral, -60.0 * delta, 60.0 * delta), auto["p"].y)
 
 	var suivant: Vector2 = auto["p"] + direction * float(auto["vitesse"]) * delta
 
@@ -616,10 +672,15 @@ func _conduire_civile(auto: Dictionary, delta: float, joueurs: Dictionary = {}) 
 	if plan.dans_un_batiment(suivant + direction * 60.0, RAYON_AUTO):
 		direction = Vector2(-direction.y, direction.x) if _rng.randf() < 0.5 \
 			else Vector2(direction.y, -direction.x)
+		if suit_libre:
+			# Au bout d'une avenue en diagonale, on reprend la grille : une
+			# perpendiculaire à un cap oblique n'est pas une rue.
+			direction = Vector2(signf(direction.x), 0.0) if abs(direction.x) >= abs(direction.y) else Vector2(0.0, signf(direction.y))
+			auto["libre"] = false
 		auto["d"] = direction
 		auto["vitesse"] = float(auto["vitesse"]) * 0.4
-		suivant = plan.carrefour_proche(auto["p"])
-	elif _rng.randf() < delta * 0.55:
+		suivant = plan.carrefour_proche(auto["p"]) if not suit_libre else Vector2(auto["p"])
+	elif not suit_libre and _rng.randf() < delta * 0.55:
 		# De temps à autre, on prend la perpendiculaire : sans ça, tout le
 		# trafic finit aligné sur deux avenues. On ne tourne qu'au carrefour,
 		# et on repart sur la file de droite de la nouvelle rue.

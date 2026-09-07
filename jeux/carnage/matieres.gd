@@ -40,6 +40,13 @@ varying vec3 teinte;
 varying vec3 posm;
 // La voie ferrée : ax + bz = c en unités monde (PlanVille.rail()).
 uniform vec3 rail = vec3(0.0, 1.0, -100000.0);
+// Les voies libres (PlanVille) : trois lignes (normale, offset, demi-longueur)
+// qui passent par la place en étoile, l'ellipse du boulevard circulaire
+// (centre, rayons) et la place (centre, rayon, rayon de l'îlot).
+uniform vec4 lignes[7];      // (nx, ny, c, -) : n·p = c
+uniform vec4 origines[7];    // (ox, oy, longueur vers +d, longueur vers -d)
+uniform vec4 anneaux[2];     // (cx, cy, rx, ry)
+uniform vec4 etoiles[3];     // (cx, cy, rayon, rayon de l'îlot)
 uniform float nuit : hint_range(0.0, 1.0) = 0.5;
 
 void vertex() {
@@ -80,17 +87,45 @@ vec3 trottoir_dalle(vec2 uv, vec3 base) {
 // cellule, jamais entre deux. C'est ce qui accorde le sol aux cubes posés
 // dessus.
 const float CELLULES = 5.0;
+// Le dessin (bandes, trottoirs, passages) se décide par cellule de deux
+// unités ; le GRAIN et les joints, par sous-cellule d'une unité — les mêmes
+// sous-cubes que sur les murs.
+const float FINES = 10.0;
+
+// L'ombre des nuages : un bruit large qui glisse sur la ville. Ce n'est pas
+// une vraie ombre (rien ne la projette), mais c'est ce qui fait qu'une rue
+// n'est jamais éclairée pareil d'un bout à l'autre — et qu'elle bouge.
+float nuages(vec2 p) {
+	vec2 q = p / 110.0 + vec2(TIME * 0.011, TIME * 0.006);
+	float n = bruit(q) * 0.65 + bruit(q * 2.3 + vec2(5.0)) * 0.35;
+	return 1.0 - 0.16 * smoothstep(0.48, 0.78, n) * (1.0 - 0.7 * nuit);
+}
+
+// La distance d'une cellule à l'axe d'une avenue en diagonale : infinie hors
+// du segment, pour qu'une avenue ne marque pas le boulevard qu'elle
+// prolongerait en pointillé de l'autre côté de la ville.
+float d_ligne(vec4 l, vec4 o, vec2 p) {
+	vec2 dir = vec2(l.y, -l.x);
+	float le_long = dot(p - o.xy, dir);
+	if (le_long > o.z || le_long < -o.w) return 1e9;
+	return abs(l.x * p.x + l.y * p.y - l.z);
+}
+
+float d_anneau(vec4 a, vec2 p) {
+	vec2 q = (p - a.xy) / a.zw;
+	return abs((length(q) - 1.0) * (a.z + a.w) * 0.5);
+}
 
 void fragment() {
 	int k = int(sol + 0.5);
 	vec2 cel = floor(uvl * CELLULES);
 	vec2 uvq = (cel + 0.5) / CELLULES;
-	vec2 celm = floor(posm.xz / 2.0);
-	vec3 asphalte = vec3(0.13, 0.14, 0.16);
-	vec3 trottoir = vec3(0.40, 0.39, 0.36);
-	vec3 bordure = vec3(0.22, 0.22, 0.21);
+	vec2 celm = floor(posm.xz);
+	vec3 asphalte = vec3(0.12, 0.13, 0.16);
+	vec3 trottoir = vec3(0.56, 0.53, 0.47);
+	vec3 bordure = vec3(0.30, 0.29, 0.27);
 	vec3 blanc = vec3(0.85, 0.85, 0.80);
-	vec3 jaune = vec3(0.90, 0.72, 0.25);
+	vec3 jaune = vec3(0.86, 0.68, 0.24);
 	vec3 col = trottoir;
 	float rug = 0.85;
 	float spec = 0.15;
@@ -99,8 +134,8 @@ void fragment() {
 	vec3 emission = vec3(0.0);
 	// Le joint entre deux cellules, un peu plus sombre : c'est lui qui fait
 	// lire le sol comme un carrelage de cubes.
-	vec2 jc = abs(fract(uvl * CELLULES) - 0.5);
-	float joint = step(0.46, max(jc.x, jc.y)) * 0.08;
+	vec2 jc = abs(fract(uvl * FINES) - 0.5);
+	float joint = step(0.42, max(jc.x, jc.y)) * 0.06;
 
 	if (k <= 2) {
 		// ROUTE / PASSAGE_A / PASSAGE_B : trottoir à gauche (une cellule), axe à droite.
@@ -137,13 +172,13 @@ void fragment() {
 	} else if (k == 4) {
 		col = trottoir;
 	} else if (k == 5) {
-		// PAVÉS : deux tons par cellule.
+		// PAVÉS : deux tons chauds par cellule.
 		float ton = hache(celm + vec2(3.0));
-		col = mix(vec3(0.36, 0.34, 0.33), vec3(0.46, 0.43, 0.40), step(0.5, ton));
+		col = mix(vec3(0.50, 0.44, 0.38), vec3(0.60, 0.54, 0.46), step(0.5, ton));
 	} else if (k == 6 || k == 7 || k == 8 || k == 9) {
 		// HERBE, et les allées d'un parc : une bande de sable d'une cellule.
 		float h = hache(celm + vec2(7.0));
-		col = mix(vec3(0.17, 0.33, 0.14), vec3(0.28, 0.45, 0.18), step(0.5, h));
+		col = mix(vec3(0.22, 0.42, 0.16), vec3(0.34, 0.54, 0.20), step(0.5, h));
 		rug = 0.95;
 		spec = 0.05;
 		bool allee = (k == 7 && abs(cel.x - 2.0) < 0.5) || (k == 8 && abs(cel.y - 2.0) < 0.5)
@@ -154,7 +189,7 @@ void fragment() {
 		}
 	} else if (k == 10) {
 		// BÉTON : des dalles claires, une tache par-ci par-là.
-		col = vec3(0.33, 0.33, 0.32) * (0.9 + 0.2 * hache(celm + vec2(11.0)));
+		col = vec3(0.46, 0.45, 0.42) * (0.9 + 0.2 * hache(celm + vec2(11.0)));
 		if (hache(celm + vec2(13.0)) > 0.9) col *= 0.6;
 	} else if (k == 11) {
 		// PARKING : du bitume et des places peintes en travers (une cellule sur deux).
@@ -180,13 +215,86 @@ void fragment() {
 		float le_long = -rail.y * posm.x + rail.x * posm.z;         // abscisse le long de la voie
 		if (abs(d) < 1.5 && fract(le_long / 1.1) < 0.35) col = vec3(0.30, 0.22, 0.16);   // traverses
 		if (abs(abs(d) - 0.75) < 0.07) { col = vec3(0.55, 0.55, 0.58); rug = 0.3; spec = 0.6; }
+	} else if (k == 15) {
+		// BOULEVARD : la chaussée d'une voie libre, tracée en espace monde par
+		// cellule de deux unités — l'axe jaune continu, la file, le trottoir
+		// dallé et sa bordure au bord de la voie.
+		vec2 pq = (celm + 0.5) * 2.0;
+		float d = 1e9;
+		for (int i = 0; i < 7; i++) d = min(d, d_ligne(lignes[i], origines[i], pq));
+		d = min(d, min(d_anneau(anneaux[0], pq), d_anneau(anneaux[1], pq)));
+		float demi = 15.0;          // LARGEUR_BOULEVARD / 2, en unités
+		float trottoir_l = 6.0;     // TROTTOIR_BOULEVARD, en unités
+		col = asphalte;
+		rug = 0.55;
+		spec = 0.35;
+		if (d < 1.0) col = jaune;
+
+		if (d > demi - trottoir_l) {
+			col = trottoir;
+			if (d < demi - trottoir_l + 1.0) col = bordure;
+			rug = 0.85;
+			spec = 0.15;
+		}
+	} else if (k == 16) {
+		// PLACE : un anneau de chaussée autour d'un îlot pavé, le trottoir au
+		// bord, la bordure de l'îlot en pierre claire.
+		vec2 pq = (celm + 0.5) * 2.0;
+		// La place la plus proche : c'est la nôtre.
+		vec4 etoile = etoiles[0];
+		float r = length(pq - etoile.xy);
+		for (int i = 1; i < 3; i++) {
+			float ri = length(pq - etoiles[i].xy);
+			if (ri < r) { r = ri; etoile = etoiles[i]; }
+		}
+		col = asphalte;
+		rug = 0.55;
+		spec = 0.35;
+		if (r < etoile.w) {
+			float ton = hache(celm + vec2(3.0));
+			col = mix(vec3(0.42, 0.40, 0.38), vec3(0.52, 0.49, 0.46), step(0.5, ton));
+			rug = 0.8;
+			spec = 0.15;
+			if (r > etoile.w - 1.5) col = blanc * 0.8;
+		} else if (r > etoile.z - 6.0) {
+			col = trottoir;
+			if (r < etoile.z - 5.0) col = bordure;
+			rug = 0.85;
+			spec = 0.15;
+		} else if (r < etoile.w + 1.0) {
+			col = bordure;
+		}
+	} else if (k == 17) {
+		// ESPLANADE : le parvis d'une place, en pavés qui rayonnent — des
+		// anneaux de deux tons autour de la place la plus proche.
+		vec2 pq = celm + 0.5;
+		float r = length(pq - etoiles[0].xy);
+		for (int i = 1; i < 3; i++) r = min(r, length(pq - etoiles[i].xy));
+		float anneau_p = mod(floor(r / 4.0), 2.0);
+		float ton = hache(celm + vec2(23.0));
+		col = mix(mix(vec3(0.46, 0.42, 0.38), vec3(0.54, 0.50, 0.44), step(0.5, ton)),
+			mix(vec3(0.58, 0.52, 0.44), vec3(0.66, 0.60, 0.50), step(0.5, ton)), anneau_p);
+		rug = 0.8;
+		spec = 0.15;
 	} else {
 		// TERRE
 		col = mix(vec3(0.30, 0.24, 0.17), vec3(0.38, 0.31, 0.22), hache(celm + vec2(19.0)));
 		rug = 0.95;
 	}
 
-	ALBEDO = col * teinte * (1.0 + grain - joint);
+	// La nuit, le bitume est mouillé : des flaques par plaques, où la rue
+	// devient un miroir sombre qui rend le ciel et les enseignes.
+	bool bitume = (k <= 3 || k == 11 || k == 15 || k == 16) && spec > 0.3;
+	if (bitume && nuit > 0.05) {
+		float fl = smoothstep(0.52, 0.66, bruit(posm.xz / 9.0 + vec2(3.7, 1.3)));
+		float humide = nuit * (0.35 + 0.65 * fl);
+		col *= 1.0 - 0.38 * humide;
+		rug = mix(rug, 0.08, humide);
+		spec = mix(spec, 0.85, humide);
+		emission += vec3(0.05, 0.07, 0.12) * fl * nuit;
+	}
+	if (k != 4 && k != 5 && k != 10 && k != 17) joint = 0.0;
+	ALBEDO = col * teinte * (1.0 + grain - joint) * nuages(posm.xz);
 	ROUGHNESS = rug;
 	SPECULAR = spec;
 	EMISSION = emission;
@@ -357,10 +465,43 @@ uniform vec4 teinte : source_color = vec4(1.0);
 
 varying vec4 c;
 varying vec2 uvl;
+varying vec3 posm;
+varying vec3 nrm;
+varying float grand;
 
 void vertex() {
 	c = COLOR;
 	uvl = UV;
+	posm = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	nrm = normalize(mat3(MODEL_MATRIX) * NORMAL);
+	// La taille du cube : la longueur du premier axe de sa transformation.
+	// Au-dessus d'une unité et demie, la face se découpe en sous-cubes.
+	grand = step(1.5, length(MODEL_MATRIX[0].xyz));
+}
+
+// Le SOUS-CUBE : les gros cubes (immeubles, deux unités) se lisent comme
+// deux sur deux sur deux cubes d'une unité, chacun avec son arête et son
+// grain. C'est ce qui donne « beaucoup de cubes » sans multiplier les
+// instances par huit : la géométrie reste grosse, la matière est fine.
+const float SOUS = 1.0;
+
+float hache(vec2 p) {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float bruit(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hache(i), hache(i + vec2(1.0, 0.0)), f.x), mix(hache(i + vec2(0.0, 1.0)), hache(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+// La même ombre de nuages que le sol : un immeuble et sa rue s'assombrissent
+// ensemble, sinon l'un flotte au-dessus de l'autre.
+float nuages(vec2 p) {
+	vec2 q = p / 110.0 + vec2(TIME * 0.011, TIME * 0.006);
+	float n = bruit(q) * 0.65 + bruit(q * 2.3 + vec2(5.0)) * 0.35;
+	return 1.0 - 0.16 * smoothstep(0.48, 0.78, n) * (1.0 - 0.7 * nuit);
 }
 
 void fragment() {
@@ -368,7 +509,23 @@ void fragment() {
 	float bord = smoothstep(0.86, 0.99, max(d.x, d.y));
 	float lumiere = step(0.25, c.a) * step(c.a, 0.75);
 	float vitre = step(c.a, 0.25);
-	vec3 col = c.rgb * mix(teinte.rgb, vec3(1.0), max(lumiere, vitre)) * (1.0 - 0.20 * bord * (1.0 - lumiere));
+	vec3 col = c.rgb * mix(teinte.rgb, vec3(1.0), max(lumiere, vitre));
+	if (grand > 0.5) {
+		// Les deux axes de la face : ceux que la normale ne porte pas.
+		vec3 an = abs(nrm);
+		vec2 pf = (an.y > 0.5) ? posm.xz : ((an.x > 0.5) ? posm.zy : posm.xy);
+		vec2 cel = floor(pf / SOUS);
+		vec2 f = abs(fract(pf / SOUS) - vec2(0.5)) * 2.0;
+		float arete = smoothstep(0.74, 0.98, max(f.x, f.y));
+		// Un grain par sous-cube : deux briques voisines ne sont jamais tout à
+		// fait de la même teinte. Les vitres restent lisses.
+		float g = (fract(sin(dot(cel + floor(posm.xz * 0.01), vec2(127.1, 311.7))) * 43758.5453) - 0.5) * 0.10;
+		col *= (1.0 + g * (1.0 - vitre)) * (1.0 - 0.16 * arete * (1.0 - lumiere) * (1.0 - vitre));
+		col *= 1.0 - 0.10 * bord * (1.0 - lumiere);
+	} else {
+		col *= 1.0 - 0.20 * bord * (1.0 - lumiere);
+	}
+	col *= mix(nuages(posm.xz), 1.0, lumiere);
 	ALBEDO = col;
 	ROUGHNESS = mix(0.85, 0.2, vitre);
 	SPECULAR = mix(0.15, 0.7, vitre);
@@ -408,6 +565,68 @@ void fragment() {
 }
 """
 
+## L'ombre de contact au pied d'un immeuble : un rectangle MULTIPLICATIF, un
+## peu plus grand que l'emprise, qui s'assombrit vers le mur. Le mode
+## compatibilité n'a pas d'occlusion ambiante ; sans elle, les immeubles
+## flottent sur le trottoir. La couleur porte la demi-emprise (r, g : en
+## centaines d'unités) pour que le shader retrouve où est le mur.
+const OMBRE := """
+shader_type spatial;
+render_mode unshaded, blend_mul, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;
+
+uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+
+varying vec4 c;
+varying vec2 uvl;
+
+void vertex() {
+	c = COLOR;
+	uvl = UV;
+}
+
+void fragment() {
+	vec2 demi = c.rg * 100.0;
+	vec2 p = (uvl - vec2(0.5)) * 2.0 * (demi + vec2(3.0));
+	vec2 dd = abs(p) - demi;
+	float d = max(dd.x, dd.y);
+	float a = (1.0 - smoothstep(0.0, 3.0, max(d, 0.0))) * (0.5 - 0.25 * nuit);
+	ALBEDO = vec3(1.0 - a);
+}
+"""
+
+## Les traces de pneus : des rectangles multiplicatifs posés au sol par le
+## joueur qui freine ou dérape, qui pâlissent avec le temps (l'alpha).
+const TRACE := """
+shader_type spatial;
+render_mode unshaded, blend_mul, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;
+
+varying vec4 c;
+varying vec2 uvl;
+
+void vertex() {
+	c = COLOR;
+	uvl = UV;
+}
+
+void fragment() {
+	float bord = 1.0 - smoothstep(0.3, 0.5, abs(uvl.y - 0.5));
+	ALBEDO = vec3(1.0 - 0.55 * c.a * bord);
+}
+"""
+
+static var _ombre: ShaderMaterial
+static var _trace: ShaderMaterial
+
+static func ombre() -> ShaderMaterial:
+	if _ombre == null:
+		_ombre = _materiau(OMBRE)
+	return _ombre
+
+static func trace() -> ShaderMaterial:
+	if _trace == null:
+		_trace = _materiau(TRACE)
+	return _trace
+
 ## Les enseignes et balises : de la couleur pure, sans éclairage, qui passe
 ## le seuil du halo.
 const LUMINEUX := """
@@ -427,6 +646,42 @@ void fragment() {
 	EMISSION = c.rgb * 0.6 * nuit;
 }
 """
+
+## Le post-traitement, en un rectangle sur l'écran : une vignette qui ferme
+## les angles et un grain léger qui bouge — c'est ce qui fait « film » plutôt
+## que « rendu ». Le mode compatibilité n'a pas de post-traitement natif à part
+## le halo ; on relit l'écran dans un shader de canevas.
+const POST := """
+shader_type canvas_item;
+render_mode blend_mix;
+
+uniform sampler2D ecran : hint_screen_texture, filter_linear;
+uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+uniform float secousse : hint_range(0.0, 1.0) = 0.0;
+
+float hache(vec2 p) {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+void fragment() {
+	vec2 d = SCREEN_UV - vec2(0.5);
+	vec3 c = texture(ecran, SCREEN_UV).rgb;
+	// Un choc rougit les bords, le temps d'une image ou deux.
+	float v = smoothstep(0.30, 0.95, length(d) * 1.3);
+	c = mix(c, vec3(0.0), v * (0.34 + 0.14 * nuit));
+	c = mix(c, vec3(0.6, 0.05, 0.02), v * secousse * 0.35);
+	float g = hache(floor(SCREEN_UV * 480.0) + vec2(fract(TIME * 7.0) * 100.0)) - 0.5;
+	c += g * (0.025 + 0.03 * nuit);
+	COLOR = vec4(c, 1.0);
+}
+"""
+
+static var _post: ShaderMaterial
+
+static func post() -> ShaderMaterial:
+	if _post == null:
+		_post = _materiau(POST)
+	return _post
 
 static func _materiau(source: String) -> ShaderMaterial:
 	var shader := Shader.new()
@@ -479,7 +734,7 @@ static var _nuit_courante := 0.5
 
 static func regler_nuit(valeur: float) -> void:
 	_nuit_courante = valeur
-	for m in [sol(), facade(), flaque(), lumineux(), voxel()]:
+	for m in [sol(), facade(), flaque(), lumineux(), voxel(), post(), ombre()]:
 		m.set_shader_parameter("nuit", valeur)
 	for cle in _voxels_teintes:
 		(_voxels_teintes[cle] as ShaderMaterial).set_shader_parameter("nuit", valeur)
@@ -511,8 +766,8 @@ static func nuit() -> float:
 ## tout s'interpole : ciel, soleil, ambiante, brouillard, halo.
 const HEURES := [
 	{"haut": Color("#3b7bd8"), "horizon": Color("#cfe2f5"), "sol_h": Color("#8fa0b0"), "sol_b": Color("#3a4450"),
-		"soleil_x": -62.0, "soleil_y": -40.0, "soleil_c": Color("#fff0d8"), "soleil_e": 1.35,
-		"ambiante": Color("#8fa4c4"), "ambiante_e": 1.0, "brume": Color("#9fb4cc"), "brume_d": 0.0012,
+		"soleil_x": -52.0, "soleil_y": -38.0, "soleil_c": Color("#fff0d0"), "soleil_e": 1.75,
+		"ambiante": Color("#7f97c8"), "ambiante_e": 0.72, "brume": Color("#7f93ab"), "brume_d": 0.0005,
 		"halo": 0.4, "seuil": 0.95, "lune": 0.1},
 	{"haut": Color("#0a1030"), "horizon": Color("#c85a3a"), "sol_h": Color("#3a2430"), "sol_b": Color("#06070c"),
 		"soleil_x": -42.0, "soleil_y": -52.0, "soleil_c": Color("#ffb27a"), "soleil_e": 1.25,
@@ -564,7 +819,7 @@ static func ambiance() -> Array:
 	environnement.glow_bloom = 0.12
 	environnement.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
 	environnement.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	environnement.tonemap_exposure = 1.05
+	environnement.tonemap_exposure = 1.12
 	environnement.tonemap_white = 4.0
 	var monde := WorldEnvironment.new()
 	monde.environment = environnement

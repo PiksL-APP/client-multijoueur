@@ -51,7 +51,7 @@ const NOMS_QUARTIERS := ["centre d'affaires", "quartier des bureaux", "rues comm
 
 ## Les sols, tels que le shader du sol les dessine (`jeux/carnage/matieres.gd`).
 enum { S_ROUTE, S_PASSAGE_A, S_PASSAGE_B, S_CARREFOUR, S_TROTTOIR, S_PAVES, S_HERBE,
-	S_ALLEE_V, S_ALLEE_H, S_ALLEE_X, S_BETON, S_PARKING, S_EAU, S_TERRE, S_RAIL }
+	S_ALLEE_V, S_ALLEE_H, S_ALLEE_X, S_BETON, S_PARKING, S_EAU, S_TERRE, S_RAIL, S_BOULEVARD, S_PLACE, S_ESPLANADE }
 
 ## Les styles de façade, tels que le shader des immeubles les dessine.
 enum { F_BUREAUX, F_LOGEMENTS, F_COMMERCE, F_VIEUX, F_HANGAR, F_MAISON, F_PLEIN, F_TOUR }
@@ -69,14 +69,28 @@ const GANGS := [
 ## couleurs d'interface : elles restent sourdes pour que la palette (joueurs,
 ## gangs, lieux) garde seule le droit d'être vive.
 const TEINTES := {
-	F_BUREAUX: [Color("#5b6572"), Color("#6b7380"), Color("#4d5866"), Color("#7a8290"), Color("#596b7a")],
-	F_TOUR: [Color("#3d4a5c"), Color("#4a5a6e"), Color("#2f3b4c"), Color("#556478")],
-	F_LOGEMENTS: [Color("#8a8378"), Color("#9a9285"), Color("#7d7a70"), Color("#a39a8a"), Color("#8c8c84")],
-	F_COMMERCE: [Color("#8e6f5c"), Color("#6f7d86"), Color("#9c8a6a"), Color("#7b6a7e"), Color("#6c8a7a"), Color("#a08070")],
-	F_VIEUX: [Color("#b08a5a"), Color("#a3674d"), Color("#b89a78"), Color("#9c7a62"), Color("#c0a080"), Color("#8f5f4f")],
-	F_HANGAR: [Color("#5a5f5c"), Color("#6a625a"), Color("#4f5a58"), Color("#736a5a"), Color("#5d6b62")],
-	F_MAISON: [Color("#c8c2b4"), Color("#d2c8b0"), Color("#bcc4c8"), Color("#cbbfa8"), Color("#d8d0c0"), Color("#b9c2b0")],
-	F_PLEIN: [Color("#3a3d42"), Color("#44474c"), Color("#2e3136")],
+	F_BUREAUX: [Color("#8fa3b5"), Color("#b9b2a2"), Color("#6f8aa6"), Color("#c9c2b4"), Color("#7e9aa8"), Color("#a7a59c")],
+	F_TOUR: [Color("#3f6f8f"), Color("#4a7f96"), Color("#2f5a78"), Color("#5a8aa0"), Color("#476a8a")],
+	F_LOGEMENTS: [Color("#d9b58a"), Color("#c98f6c"), Color("#e0c9a6"), Color("#b98a72"), Color("#d8a878"), Color("#c4a07e")],
+	F_COMMERCE: [Color("#c8553a"), Color("#3f8a86"), Color("#d9a441"), Color("#7a4f8a"), Color("#e2d3b0"), Color("#b8443f"), Color("#4f7a9c"), Color("#d47a3c")],
+	F_VIEUX: [Color("#d29a5e"), Color("#b8624a"), Color("#e0b98a"), Color("#a8674d"), Color("#e8c99a"), Color("#c47a5a"), Color("#9c5a4a")],
+	F_HANGAR: [Color("#7d8a8f"), Color("#9a8570"), Color("#6b7f86"), Color("#a08a6a"), Color("#8c9a7c"), Color("#b0a08a")],
+	F_MAISON: [Color("#f0e6d0"), Color("#e8d8b8"), Color("#d8e4e8"), Color("#f2d9b0"), Color("#e6e0d0"), Color("#d0dcc0"), Color("#f0d0c0")],
+	F_PLEIN: [Color("#4a4d52"), Color("#54575c"), Color("#3e4146")],
+}
+## Les toits, par style : tuile et terre cuite pour les logements et la vieille
+## ville, gravier clair pour les bureaux, goudron sombre pour les hangars, et
+## des terrasses. Vus de dessus — et la caméra les voit d'abord — ce sont eux
+## qui colorent la ville.
+const TOITS_PAR_STYLE := {
+	F_BUREAUX: [Color("#a8a49c"), Color("#8c8a84"), Color("#b8b0a0"), Color("#6e7278")],
+	F_TOUR: [Color("#4a5560"), Color("#5a6a78"), Color("#3c4650")],
+	F_LOGEMENTS: [Color("#a8503a"), Color("#b86a48"), Color("#8c4a3a"), Color("#7a6a60"), Color("#c07a5a")],
+	F_COMMERCE: [Color("#7a5a4a"), Color("#8c8278"), Color("#a05a40"), Color("#606870")],
+	F_VIEUX: [Color("#a8503a"), Color("#c06a48"), Color("#8c4a3a"), Color("#b86a4a"), Color("#5a5a60")],
+	F_HANGAR: [Color("#5a6068"), Color("#6a6a62"), Color("#7a5a4a"), Color("#50585e")],
+	F_MAISON: [Color("#a8503a"), Color("#4a4f5a"), Color("#c06a48"), Color("#3f4046"), Color("#946444"), Color("#5a4a44")],
+	F_PLEIN: [Color("#3a3d42")],
 }
 ## Les toits des maisons : tuile, ardoise, zinc. Vus de dessus, ce sont eux
 ## qui font la banlieue.
@@ -100,10 +114,17 @@ const LARGEUR_RIVIERE := 7.0                 ## en tuiles
 ## quelques rues fermées une à une. Les fermetures au hasard seules donnaient
 ## un semis de petits carrés sans structure ; les îlots donnent de vrais gros
 ## blocs — l'usine, le parc, la cité — comme sur la carte de GTA 2.
-const FUSION := {CENTRE: 0.15, AFFAIRES: 0.25, COMMERCE: 0.10, VIEUX: 0.05, RESIDENCES: 0.50,
-	BANLIEUE: 0.30, INDUSTRIE: 0.60, PORT: 0.55, PARC: 0.75, EAU: 0.0}
-const FERMETURE := {CENTRE: 0.06, AFFAIRES: 0.12, COMMERCE: 0.05, VIEUX: 0.02, RESIDENCES: 0.20,
-	BANLIEUE: 0.15, INDUSTRIE: 0.25, PORT: 0.22, PARC: 0.35, EAU: 0.0}
+const FUSION := {CENTRE: 0.22, AFFAIRES: 0.32, COMMERCE: 0.18, VIEUX: 0.12, RESIDENCES: 0.55,
+	BANLIEUE: 0.40, INDUSTRIE: 0.65, PORT: 0.55, PARC: 0.75, EAU: 0.0}
+const FERMETURE := {CENTRE: 0.14, AFFAIRES: 0.18, COMMERCE: 0.16, VIEUX: 0.20, RESIDENCES: 0.28,
+	BANLIEUE: 0.26, INDUSTRIE: 0.30, PORT: 0.26, PARC: 0.40, EAU: 0.0}
+## Le DÉCALAGE : entre deux avenues, une rue transversale sur deux s'arrête
+## en T — comme les briques d'un mur, jamais alignées d'un rang à l'autre. C'est
+## LE motif qui fait qu'une ville ne se lit pas comme un quadrillage : on
+## remplace la plupart des carrefours par des T. Une rue « décalée » devient
+## une cour qu'on traverse quand même (voir `_cour`).
+const DECALAGE := {CENTRE: 0.45, AFFAIRES: 0.50, COMMERCE: 0.55, VIEUX: 0.65, RESIDENCES: 0.60,
+	BANLIEUE: 0.65, INDUSTRIE: 0.50, PORT: 0.45, PARC: 0.60, EAU: 0.0}
 ## La voie ferrée : une ligne droite, en biais, d'un bord à l'autre. C'est le
 ## seul trait de la ville qui ne suive pas la grille — et c'est ce qui la fait
 ## lire comme une ville plutôt que comme un quadrillage.
@@ -128,6 +149,7 @@ var _zones: Dictionary = {}       ## indice de pâté -> type | (gang + 1) << 8
 var _pates: Dictionary = {}       ## Vector2i (pâté) -> Array[9] de fiches de tuile
 var _rues: Dictionary = {}        ## indice de tuile -> fiche de tuile de rue
 var _secteurs: Dictionary = {}    ## Vector2i -> {garages, cabines, arenes, repaires}
+var _libres: Dictionary = {}      ## indice de tuile -> fiche de voie libre ({} si aucune)
 
 # ------------------------------------------------------------ construction
 
@@ -136,6 +158,7 @@ func _init(code_de_manche: String) -> void:
 	_sel = hash(code)
 	for i in 4:
 		_phases[i] = _bruit(i, 0, 5) * TAU
+	_tracer_les_voies_libres()
 
 func etendue() -> Vector2:
 	return Vector2(COLONNES, LIGNES) * PAS
@@ -215,6 +238,14 @@ func carrefour_proche(point: Vector2) -> Vector2:
 func sur_la_chaussee(point: Vector2) -> bool:
 	var colonne := int(floor(point.x / PAS))
 	var ligne := int(floor(point.y / PAS))
+	var libre := voie_libre(colonne, ligne)
+	if not libre.is_empty():
+		if String(libre["genre"]) == "esplanade":
+			return false
+		if String(libre["genre"]) == "place":
+			var r: float = libre["r"]
+			return r > float(_etoiles[int(libre["e"])]["ilot"]) and r < float(_etoiles[int(libre["e"])]["r"]) - TROTTOIR_BOULEVARD
+		return abs(float(libre["s"])) < LARGEUR_BOULEVARD * 0.5 - TROTTOIR_BOULEVARD
 	var vc := est_voie(colonne)
 	var vl := est_voie(ligne)
 	if not vc and not vl:
@@ -226,12 +257,211 @@ func sur_la_chaussee(point: Vector2) -> bool:
 func sur_une_rue(point: Vector2, tolerance: float = 0.0) -> bool:
 	var colonne := int(floor(point.x / PAS))
 	var ligne := int(floor(point.y / PAS))
-	if est_voie(colonne) or est_voie(ligne):
+	if est_voie(colonne) or est_voie(ligne) or not voie_libre(colonne, ligne).is_empty():
 		return true
 	if tolerance <= 0.0:
 		return false
 	return abs(point.x - voie_proche(point.x)) < PAS + tolerance \
 		or abs(point.y - voie_proche(point.y)) < PAS + tolerance
+
+# ------------------------------------------------------------ les voies libres
+
+## Ce qui casse le damier. Une ville qui n'est qu'une grille se lit comme un
+## circuit imprimé : GTA 2 avait ses diagonales, Paris son étoile et ses
+## boulevards. Ici : une PLACE EN ÉTOILE un peu au nord du centre, six avenues
+## qui en rayonnent en diagonale jusqu'à la côte, deux places secondaires avec
+## leurs quatre avenues, un BOULEVARD CIRCULAIRE (une ellipse) autour de la
+## grande place, et les GRANDS BOULEVARDS — une seconde ellipse, large, qui
+## ceinture le centre et franchit la rivière sur deux ponts.
+##
+## Ces voies ne suivent pas la grille : une tuile qu'elles traversent devient
+## du boulevard quoi qu'en dise la grille, le pâté qu'elles coupent perd ses
+## immeubles, et le shader du sol trace la chaussée en espace monde (comme la
+## voie ferrée). Le trafic les suit par leur tangente (`voie_libre_en`).
+const LARGEUR_BOULEVARD := 3.0       ## en tuiles : chaussée et trottoirs
+const TROTTOIR_BOULEVARD := 0.6      ## en tuiles, de chaque côté
+const FILE_BOULEVARD := 0.6          ## en tuiles : la file de droite, depuis l'axe
+const ESPLANADE := 5.0               ## en tuiles : autour d'une place, les rues de la grille deviennent une esplanade pavée
+const MAX_LIGNES := 7                ## ce que le shader du sol accepte
+
+var _etoiles: Array = []          ## {p: Vector2 (tuiles), r: rayon, lignes: [indices dans _lignes]}
+var _lignes: Array = []           ## {o: origine (tuiles), d: direction, n: normale, l_plus, l_moins}
+var _anneaux: Array = []          ## {c: centre (tuiles), rx, ry}
+
+func _tracer_les_voies_libres() -> void:
+	_etoiles = []
+	_lignes = []
+	_anneaux = []
+	# La grande place : au nord de la rivière, jamais dessus. Trois lignes, six
+	# branches, à soixante degrés les unes des autres à peu près — et jamais à
+	# moins de quinze degrés d'un axe de la grille, sinon l'avenue longe une
+	# rue sur trois pâtés et les deux se marchent dessus.
+	var grande := Vector2(float(COLONNES) * lerpf(0.42, 0.58, _bruit(3, 0, 7)),
+		float(LIGNES) * lerpf(0.30, 0.42, _bruit(4, 0, 7)))
+	_etoile(grande, 4.2, 3, deg_to_rad(lerpf(18.0, 42.0, _bruit(5, 0, 7))), 120.0, 260.0, 20)
+	# Deux places secondaires : une au sud de la rivière, une à l'est, quatre
+	# branches chacune, plus courtes.
+	_etoile(Vector2(float(COLONNES) * lerpf(0.28, 0.44, _bruit(3, 1, 7)), float(LIGNES) * lerpf(0.70, 0.80, _bruit(4, 1, 7))),
+		3.0, 2, deg_to_rad(lerpf(20.0, 70.0, _bruit(5, 1, 7))), 50.0, 120.0, 40)
+	_etoile(Vector2(float(COLONNES) * lerpf(0.72, 0.84, _bruit(3, 2, 7)), float(LIGNES) * lerpf(0.36, 0.52, _bruit(4, 2, 7))),
+		3.0, 2, deg_to_rad(lerpf(20.0, 70.0, _bruit(5, 2, 7))), 50.0, 110.0, 60)
+	# Le boulevard circulaire autour de la grande place, et les grands
+	# boulevards autour du centre de la ville — assez larges pour couper la
+	# rivière et la voie ferrée.
+	var r1 := lerpf(40.0, 52.0, _bruit(12, 0, 7))
+	_anneaux.append({"c": grande, "rx": r1, "ry": r1 * lerpf(0.78, 0.92, _bruit(13, 0, 7))})
+	var centre_v := Vector2(float(COLONNES) * lerpf(0.47, 0.53, _bruit(14, 0, 7)), float(LIGNES) * lerpf(0.50, 0.56, _bruit(15, 0, 7)))
+	_anneaux.append({"c": centre_v, "rx": float(COLONNES) * lerpf(0.21, 0.25, _bruit(16, 0, 7)),
+		"ry": float(LIGNES) * lerpf(0.23, 0.28, _bruit(17, 0, 7))})
+
+func _etoile(p: Vector2, rayon: float, combien: int, base: float, court: float, long: float, sel: int) -> void:
+	var indices: Array = []
+	for i in combien:
+		if _lignes.size() >= MAX_LIGNES:
+			break
+		var angle := base + float(i) * PI / float(combien) + deg_to_rad((_bruit(sel + i, 0, 7) - 0.5) * 16.0)
+		var reste := fmod(angle, PI * 0.5)
+		if reste < deg_to_rad(15.0):
+			angle += deg_to_rad(15.0) - reste
+		elif reste > deg_to_rad(75.0):
+			angle -= reste - deg_to_rad(75.0)
+		var d := Vector2.RIGHT.rotated(angle)
+		indices.append(_lignes.size())
+		_lignes.append({"o": p, "d": d, "n": Vector2(-d.y, d.x),
+			"l_plus": lerpf(court, long, _bruit(sel + 5 + i, 0, 7)), "l_moins": lerpf(court, long, _bruit(sel + 9 + i, 0, 7))})
+	# L'îlot central grandit avec la place : le monument a besoin de place.
+	_etoiles.append({"p": p, "r": rayon, "ilot": rayon * 0.38, "lignes": indices})
+
+## La fiche de voie libre d'un point (en TUILES, flottant) : vide si la grille
+## commande. Sinon {genre: "place" | "avenue" | "anneau", d: tangente (sens
+## arbitraire), s: distance signée à l'axe en tuiles (positive à DROITE de d),
+## et pour une place : c (son centre en tuiles), r (distance au centre), e
+## (l'indice de la place)}.
+func _voie_libre_a(p: Vector2) -> Dictionary:
+	for e in _etoiles.size():
+		var etoile: Dictionary = _etoiles[e]
+		var vers_e: Vector2 = p - etoile["p"]
+		var r := vers_e.length()
+		var rayon: float = etoile["r"]
+		var ilot: float = etoile["ilot"]
+		if r < rayon:
+			var radial := vers_e / maxf(r, 0.001)
+			# `s` suit la même convention que sur un boulevard : positif à DROITE
+			# de la tangente, c'est-à-dire vers l'îlot. L'axe de la chaussée est
+			# au milieu de l'anneau roulable ; la file de droite, une file plus
+			# près de l'îlot.
+			var axe := (ilot + rayon - TROTTOIR_BOULEVARD) * 0.5
+			return {"genre": "place", "d": Vector2(-radial.y, radial.x), "s": axe - r,
+				"r": r, "c": etoile["p"], "e": e}
+		# Autour de la place, les rues de la GRILLE deviennent une esplanade
+		# pavée : c'est ce qui donne à la place son parvis, au lieu d'une mer
+		# de bitume où six avenues et quatre rues se rejoignent.
+		if r < rayon + ESPLANADE:
+			var c := int(floor(p.x))
+			var l := int(floor(p.y))
+			if est_voie(c) or est_voie(l):
+				var radial := vers_e / maxf(r, 0.001)
+				return {"genre": "esplanade", "d": Vector2(-radial.y, radial.x), "s": 0.0, "r": r, "c": etoile["p"], "e": e}
+	var meilleure := {}
+	var plus_pres := 1e9
+	for b in _lignes:
+		var vers: Vector2 = p - b["o"]
+		var le_long: float = vers.dot(b["d"])
+		var s: float = vers.dot(b["n"])
+		if le_long < -float(b["l_moins"]) or le_long > float(b["l_plus"]):
+			continue
+		if abs(s) < LARGEUR_BOULEVARD * 0.5 and abs(s) < plus_pres:
+			plus_pres = abs(s)
+			# Une branche va DE la place VERS le large : sa tangente est orientée
+			# dans le sens du côté où l'on est. Deux branches opposées d'une même
+			# ligne ont ainsi la même géométrie et une tangente cohérente.
+			var d: Vector2 = b["d"] if le_long >= 0.0 else -(b["d"] as Vector2)
+			meilleure = {"genre": "avenue", "d": d, "s": s if le_long >= 0.0 else -s}
+	# Les anneaux : la distance signée à une ellipse, approchée par le rayon moyen.
+	for a in _anneaux:
+		var vers: Vector2 = p - a["c"]
+		var rx: float = a["rx"]
+		var ry: float = a["ry"]
+		var q := Vector2(vers.x / rx, vers.y / ry)
+		var s_anneau := (q.length() - 1.0) * (rx + ry) * 0.5
+		if abs(s_anneau) < LARGEUR_BOULEVARD * 0.5 and abs(s_anneau) < plus_pres:
+			plus_pres = abs(s_anneau)
+			var radial := Vector2(q.x / rx, q.y / ry).normalized()
+			# « À droite » de la tangente (-ry, rx), c'est vers le CENTRE : la
+			# distance signée change donc de signe pour suivre la convention.
+			meilleure = {"genre": "anneau", "d": Vector2(-radial.y, radial.x), "s": -s_anneau}
+	return meilleure
+
+## La fiche de voie libre d'une TUILE, mise en cache : c'est elle que `tuile`
+## consulte, et le morceau après elle.
+func voie_libre(colonne: int, ligne: int) -> Dictionary:
+	var indice := ligne * COLONNES + colonne
+	if not _libres.has(indice):
+		_libres[indice] = _voie_libre_a(Vector2(float(colonne) + 0.5, float(ligne) + 0.5))
+	return _libres[indice]
+
+## La même chose en un point en PIXELS, sans cache et sans quantification : le
+## trafic s'en sert pour tenir sa file sur le boulevard.
+func voie_libre_en(point: Vector2) -> Dictionary:
+	return _voie_libre_a(point / PAS)
+
+## Le pâté est-il coupé par une voie libre ? Une de ses neuf tuiles suffit.
+func _coupe(pate: Vector2i) -> bool:
+	var coin := coin_pate(pate)
+	for j in 3:
+		for i in 3:
+			if not voie_libre(coin.x + i, coin.y + j).is_empty():
+				return true
+	return false
+
+## La grande place en étoile, en pixels : c'est là qu'on regarde d'abord.
+func place_etoile() -> Vector2:
+	return Vector2(_etoiles[0]["p"]) * PAS
+
+## Les avenues qui partent d'une place : directions unitaires, dans les deux
+## sens — pour le trafic qui en sort.
+func sorties_de_la_place(e: int) -> Array:
+	var liste: Array = []
+	for i in _etoiles[e]["lignes"]:
+		liste.append(Vector2(_lignes[i]["d"]))
+		liste.append(-Vector2(_lignes[i]["d"]))
+	return liste
+
+## Les paramètres pour le shader du sol, en unités monde : les lignes
+## (normale, offset, +), leurs origines et longueurs, les ellipses, les places.
+func lignes_libres() -> PackedVector4Array:
+	var liste := PackedVector4Array()
+	for b in _lignes:
+		var n: Vector2 = b["n"]
+		liste.append(Vector4(n.x, n.y, n.dot(b["o"]) * TUILE, 0.0))
+	while liste.size() < MAX_LIGNES:
+		liste.append(Vector4(0.0, 1.0, -100000.0, 0.0))
+	return liste
+
+func origines_libres() -> PackedVector4Array:
+	var liste := PackedVector4Array()
+	for b in _lignes:
+		var o: Vector2 = b["o"]
+		liste.append(Vector4(o.x * TUILE, o.y * TUILE, float(b["l_plus"]) * TUILE, float(b["l_moins"]) * TUILE))
+	while liste.size() < MAX_LIGNES:
+		liste.append(Vector4(0.0, 0.0, 0.0, 0.0))
+	return liste
+
+func anneaux_libres() -> PackedVector4Array:
+	var liste := PackedVector4Array()
+	for a in _anneaux:
+		liste.append(Vector4(Vector2(a["c"]).x * TUILE, Vector2(a["c"]).y * TUILE, float(a["rx"]) * TUILE, float(a["ry"]) * TUILE))
+	while liste.size() < 2:
+		liste.append(Vector4(-100000.0, -100000.0, 1.0, 1.0))
+	return liste
+
+func etoiles_libres() -> PackedVector4Array:
+	var liste := PackedVector4Array()
+	for e in _etoiles:
+		liste.append(Vector4(Vector2(e["p"]).x * TUILE, Vector2(e["p"]).y * TUILE, float(e["r"]) * TUILE, float(e["ilot"]) * TUILE))
+	while liste.size() < 3:
+		liste.append(Vector4(-100000.0, -100000.0, 1.0, 0.5))
+	return liste
 
 # ------------------------------------------------------------ le zonage
 
@@ -369,7 +599,7 @@ func eau(colonne: int, ligne: int) -> bool:
 	if _hors_cote(colonne, ligne):
 		return true
 	if _dans_la_riviere(colonne, ligne):
-		return not (_est_pont(colonne) or sur_le_rail(colonne, ligne))
+		return not (_est_pont(colonne) or sur_le_rail(colonne, ligne) or not voie_libre(colonne, ligne).is_empty())
 	return false
 
 ## Une avenue (une rue verticale sur quatre) franchit la rivière : c'est un pont.
@@ -393,7 +623,11 @@ func rue_fermee_v(k: int, py: int) -> bool:
 	# La rue intérieure d'un îlot fondu : k impair, entre les pâtés 2g et 2g+1.
 	if posmod(k, 2) == 1 and _ilot_fondu(Vector2i((k - 1) / 2, py / 2)):
 		return true
-	return _bruit(k, py, 300) < float(FERMETURE.get(quartier_du_pate(a), 0.0))
+	var quartier := quartier_du_pate(a)
+	# Le décalage : les segments verticaux des rangs pairs (k + py pair).
+	if posmod(k + py, 2) == 0 and _bruit(k, py, 303) < float(DECALAGE.get(quartier, 0.0)):
+		return true
+	return _bruit(k, py, 300) < float(FERMETURE.get(quartier, 0.0))
 
 func rue_fermee_h(kl: int, px: int) -> bool:
 	if posmod(kl, AVENUE) == 0:
@@ -404,7 +638,12 @@ func rue_fermee_h(kl: int, px: int) -> bool:
 		return false
 	if posmod(kl, 2) == 1 and _ilot_fondu(Vector2i(px / 2, (kl - 1) / 2)):
 		return true
-	return _bruit(kl, px, 301) < float(FERMETURE.get(quartier_du_pate(a), 0.0))
+	var quartier := quartier_du_pate(a)
+	# Et les segments horizontaux des rangs impairs : jamais les deux à la fois
+	# autour d'un même carrefour, sinon la rue devient une impasse en croix.
+	if posmod(kl + px, 2) == 1 and _bruit(kl, px, 304) < float(DECALAGE.get(quartier, 0.0)) * 0.6:
+		return true
+	return _bruit(kl, px, 301) < float(FERMETURE.get(quartier, 0.0))
 
 ## Un îlot de deux pâtés sur deux est fondu si ses quatre pâtés sont du même
 ## quartier, du même gang, sans lieu ni eau, et que le tirage le veut.
@@ -468,7 +707,7 @@ func _lieux_du_secteur(secteur: Vector2i) -> Dictionary:
 				for i2 in 3:
 					if eau(coin_l.x + i2, coin_l.y + j2) or sur_le_rail(coin_l.x + i2, coin_l.y + j2):
 						noye = true
-			if noye:
+			if noye or _coupe(pate):
 				continue
 			candidats.append(pate)
 			var t := territoire_du_pate(pate)
@@ -589,13 +828,16 @@ func tuile(colonne: int, ligne: int) -> Dictionary:
 	if colonne < 0 or ligne < 0 or colonne >= COLONNES or ligne >= LIGNES:
 		return _mer(colonne, ligne)
 	var pate := pate_de(colonne, ligne)
-	if pate.x < 0 or eau(colonne, ligne) or sur_le_rail(colonne, ligne):
+	var libre := voie_libre(colonne, ligne)
+	if pate.x < 0 or eau(colonne, ligne) or sur_le_rail(colonne, ligne) or not libre.is_empty():
 		var indice := ligne * COLONNES + colonne
 		if not _rues.has(indice):
 			if eau(colonne, ligne):
 				_rues[indice] = _mer(colonne, ligne)
 			elif sur_le_rail(colonne, ligne):
 				_rues[indice] = _voie_ferree(colonne, ligne)
+			elif not libre.is_empty():
+				_rues[indice] = _boulevard(colonne, ligne, libre)
 			else:
 				_rues[indice] = _amenager_rue(colonne, ligne)
 		return _rues[indice]
@@ -618,6 +860,70 @@ func _voie_ferree(colonne: int, ligne: int) -> Dictionary:
 	var fiche := _vierge(colonne, ligne, S_RAIL)
 	var pate := _pate_proche_de(colonne, ligne)
 	fiche["teinte"] = _teinte_territoire(territoire_du_pate(pate), 0.1)
+	return fiche
+
+## Une tuile de boulevard ou de place. Le shader dessine la chaussée d'après
+## la géométrie de la voie ; ici on ne pose que le mobilier des trottoirs —
+## lampadaires et arbres en quinconce sur la bande extérieure, comme sur les
+## avenues de la grille — et l'îlot de la place, avec son monument.
+func _boulevard(colonne: int, ligne: int, libre: Dictionary) -> Dictionary:
+	var genre := String(libre["genre"])
+	var place := genre == "place"
+	var fiche := _vierge(colonne, ligne, S_PLACE if place else (S_ESPLANADE if genre == "esplanade" else S_BOULEVARD))
+	var pate := _pate_proche_de(colonne, ligne)
+	fiche["teinte"] = _teinte_territoire(territoire_du_pate(pate), 0.10)
+	fiche["graine"] = 0.75
+	var centre_px := centre_tuile(colonne, ligne)
+	if _dans_la_riviere(colonne, ligne):
+		fiche["pont"] = true
+	if genre == "esplanade":
+		# Le parvis : des pavés, des arbres en quinconce, des bancs, des lampes.
+		var t := _bruit(colonne, ligne, 335)
+		var ou: Vector2 = centre_px + Vector2((_bruit(colonne, ligne, 336) - 0.5) * 30.0, (_bruit(colonne, ligne, 337) - 0.5) * 30.0)
+		if t < 0.30:
+			_prop(fiche, "arbre" if t < 0.12 else "arbre_petit", ou, 0.0, 0.9)
+			_bloquer(fiche, Rect2(ou - Vector2(8, 8), Vector2(16, 16)))
+		elif t < 0.42:
+			_prop(fiche, "banc", ou, PI * 0.5 * float(_entier(colonne, ligne, 338, 4)))
+		elif t < 0.50:
+			_prop(fiche, "lampadaire_parc", ou)
+		elif t < 0.56:
+			_prop(fiche, "fontaine", centre_px)
+			_bloquer(fiche, Rect2(centre_px - Vector2(22, 22), Vector2(44, 44)))
+		return fiche
+	if place:
+		var r: float = libre["r"]
+		var centre_place: Vector2 = libre["c"]
+		var rayon_place: float = _etoiles[int(libre["e"])]["r"]
+		var ilot: float = _etoiles[int(libre["e"])]["ilot"]
+		if r < ilot:
+			# L'îlot : une dalle qu'on ne traverse pas, un monument au milieu —
+			# l'obélisque sur la grande place, une fontaine sur les autres — et
+			# des arbres autour.
+			fiche["bloc"] = true
+			fiche["rect"] = Rect2(centre_px - Vector2(PAS, PAS) * 0.5, Vector2(PAS, PAS))
+			if r < 0.5:
+				_prop(fiche, "monument" if int(libre["e"]) == 0 else "fontaine", centre_place * PAS)
+			elif r > ilot - 0.8 and _bruit(colonne, ligne, 339) < 0.55:
+				_prop(fiche, "arbre_petit", centre_px, 0.0, 0.9)
+		elif r > rayon_place - TROTTOIR_BOULEVARD - 0.3 and _bruit(colonne, ligne, 330) < 0.5:
+			var radial := (Vector2(float(colonne) + 0.5, float(ligne) + 0.5) - centre_place).normalized()
+			_prop(fiche, "lampadaire", (centre_place + radial * (rayon_place - TROTTOIR_BOULEVARD * 0.5)) * PAS, radial.angle() + PI)
+		return fiche
+	# Le bord : la cellule de trottoir la plus extérieure de la tuile.
+	var s: float = libre["s"]
+	var bord := LARGEUR_BOULEVARD * 0.5 - TROTTOIR_BOULEVARD * 0.5
+	if abs(s) > bord - 0.5 and not fiche.has("pont"):
+		var d: Vector2 = libre["d"]
+		var n := Vector2(-d.y, d.x) * signf(s)
+		var sur_trottoir: Vector2 = centre_px + n * (bord - abs(s)) * PAS
+		var t := _bruit(colonne, ligne, 331)
+		if t < 0.28:
+			_prop(fiche, "lampadaire", sur_trottoir, n.angle())
+		elif t < 0.62:
+			_prop(fiche, "arbre_petit", sur_trottoir, 0.0, 0.9)
+		elif t < 0.70:
+			_prop(fiche, "banc", sur_trottoir, n.angle() + PI * 0.5)
 	return fiche
 
 func _mer(colonne: int, ligne: int) -> Dictionary:
@@ -877,6 +1183,14 @@ func _amenager_pate(pate: Vector2i) -> Array:
 				au_bord_de_l_eau = true
 	if au_bord_de_l_eau:
 		_rive(fiches, pate, quartier, gang)
+		_garer(fiches, pate, quartier, gang, false)
+		return fiches
+
+	# Un pâté qu'un boulevard traverse : des immeubles d'une seule tuile, un
+	# peu plus hauts que la moyenne — c'est la façade sur boulevard — et rien
+	# sur les tuiles que la voie emprunte (elles sont réécrites par `tuile`).
+	if _coupe(pate):
+		_bordure(fiches, pate, quartier, gang)
 		_garer(fiches, pate, quartier, gang, false)
 		return fiches
 
@@ -1274,6 +1588,42 @@ func _rive(fiches: Array, pate: Vector2i, quartier: int, _gang: int) -> void:
 				continue
 			_immeuble(fiches, i, j, 1, 1, _hauteur(pate, sel, 5.0, 9.0), style, pate, sel)
 
+## Les façades sur boulevard : une tuile, un immeuble, dans le style du
+## quartier mais d'un étage de plus, avec un rez-de-chaussée commerçant dans
+## les quartiers denses. Les tuiles que la voie coupe restent vierges.
+func _bordure(fiches: Array, pate: Vector2i, quartier: int, _gang: int) -> void:
+	var style := F_LOGEMENTS
+	match quartier:
+		COMMERCE, CENTRE: style = F_COMMERCE
+		AFFAIRES: style = F_BUREAUX
+		VIEUX: style = F_VIEUX
+		INDUSTRIE, PORT: style = F_HANGAR
+		BANLIEUE: style = F_MAISON
+		PARC: style = F_PLEIN
+	for j in 3:
+		for i in 3:
+			var fiche: Dictionary = _f(fiches, i, j)
+			var c := int(fiche["c"])
+			var l := int(fiche["l"])
+			if not voie_libre(c, l).is_empty():
+				continue
+			var sel := 340 + j * 3 + i
+			if quartier == PARC:
+				fiche["sol"] = S_HERBE
+				if _bruit(c, l, sel) < 0.5:
+					var centre_px := _centre_de(fiches, i, j)
+					_prop(fiche, "arbre", centre_px, 0.0, 1.0)
+					_bloquer(fiche, Rect2(centre_px - Vector2(10, 10), Vector2(20, 20)))
+				continue
+			if quartier == BANLIEUE:
+				var centre_b := _centre_de(fiches, i, j)
+				var h := _hauteur(pate, sel, 3.4, 4.4)
+				_bati(fiche, centre_b, 54.0, 48.0, h, F_MAISON, _teinte_de(F_MAISON, c, l, sel))
+				_bati(fiche, centre_b, 60.0, 54.0, 0.5, F_PLEIN, _parmi(TOITS, c, l, sel + 5), false, h)
+				continue
+			var basse := 7.0 if quartier in [CENTRE, AFFAIRES, COMMERCE] else 5.5
+			_immeuble(fiches, i, j, 1, 1, _hauteur(pate, sel, basse, basse + 5.0), style, pate, sel)
+
 ## Un pâté SIMPLE : des immeubles d'une tuile, pour que le garage ou la cabine
 ## qu'il porte en (0,0) ne se retrouve pas sous une tour de quatre tuiles.
 func _simple(fiches: Array, pate: Vector2i, quartier: int, _gang: int, garage: bool) -> void:
@@ -1330,7 +1680,13 @@ func _garer(fiches: Array, pate: Vector2i, quartier: int, gang: int, repaire: bo
 				var cote := int(bord[1])
 				if _bruit(int(fiche["c"]), int(fiche["l"]), 240 + cote) > chance:
 					continue
-				if eau(int(fiche["c"]), int(fiche["l"])) or eau(int(fiche["c"]) + int((bord[0] as Vector2).x), int(fiche["l"]) + int((bord[0] as Vector2).y)):
+				var cv := int(fiche["c"]) + int((bord[0] as Vector2).x)
+				var lv := int(fiche["l"]) + int((bord[0] as Vector2).y)
+				if eau(int(fiche["c"]), int(fiche["l"])) or eau(cv, lv):
+					continue
+				# Ni sur un boulevard ni le long : la place serait sur le trottoir
+				# du boulevard, en travers du sens de sa circulation.
+				if not voie_libre(int(fiche["c"]), int(fiche["l"])).is_empty() or not voie_libre(cv, lv).is_empty():
 					continue
 				var place := {"p": c + (bord[0] as Vector2) * (PAS * 0.5 + STATIONNEMENT), "a": float(bord[2]), "cote": cote}
 				if gang >= 0 and (repaire or _bruit(int(fiche["c"]), int(fiche["l"]), 250 + cote) < 0.14):
@@ -1470,6 +1826,15 @@ func point_de_rue(rng: RandomNumberGenerator, autour: Vector2,
 func point_de_chaussee(rng: RandomNumberGenerator, autour: Vector2,
 		rayon_min: float, rayon_max: float) -> Dictionary:
 	var p := point_de_rue(rng, autour, rayon_min, rayon_max)
+	var libre := voie_libre_en(p)
+	if not libre.is_empty() and String(libre["genre"]) in ["avenue", "anneau"]:
+		# Sur un boulevard : dans un sens ou l'autre, sur la file de droite.
+		var d: Vector2 = libre["d"]
+		if rng.randf() < 0.5:
+			d = -d
+		var n := Vector2(-d.y, d.x)
+		var ecart: float = float(libre["s"]) * (1.0 if d == Vector2(libre["d"]) else -1.0)
+		return {"p": p + n * (FILE_BOULEVARD * PAS - ecart * PAS), "d": d}
 	var carrefour := carrefour_proche(p)
 	var horizontal: bool = abs(p.y - carrefour.y) < abs(p.x - carrefour.x)
 	var sens: float = 1.0 if rng.randf() < 0.5 else -1.0
@@ -1594,6 +1959,8 @@ func peindre_pate(image: Image, indice: int) -> void:
 				couleur = CARTE_EAU
 			elif sur_le_rail(c, l):
 				couleur = CARTE_RAIL
+			elif not voie_libre(c, l).is_empty():
+				couleur = CARTE_AVENUE.lightened(0.12)
 			elif dc < 2 and dl < 2:
 				couleur = cour if croisement else (CARTE_AVENUE if est_avenue(c) or est_avenue(l) else CARTE_RUE)
 			elif dc < 2:

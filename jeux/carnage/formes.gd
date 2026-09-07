@@ -55,6 +55,100 @@ static func phares(racine: Node3D, avant: float, arriere: float) -> void:
 	noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	noeud.name = "Phares"
 	racine.add_child(noeud)
+
+## Deux VRAIS phares — des projecteurs — pour la voiture du joueur seulement :
+## le mode compatibilité n'admet que huit lumières par objet, deux suffisent à
+## faire surgir les façades et les passants dans le faisceau, la nuit. Le jour,
+## leur énergie est à zéro (`regler_phares`).
+static func projecteurs(racine: Node3D, avant: float) -> void:
+	for z in [-1.1, 1.1]:
+		var spot := SpotLight3D.new()
+		spot.name = "ProjecteurG" if z < 0.0 else "ProjecteurD"
+		spot.position = Vector3(avant, 1.1, z)
+		spot.rotation_degrees = Vector3(-8.0, -90.0, 0.0)
+		spot.spot_range = 46.0
+		spot.spot_angle = 26.0
+		spot.spot_angle_attenuation = 0.8
+		spot.light_color = Color(1.0, 0.9, 0.72)
+		spot.light_energy = 0.0
+		spot.shadow_enabled = false
+		racine.add_child(spot)
+
+static func regler_projecteurs(racine: Node3D, nuit: float) -> void:
+	for nom in ["ProjecteurG", "ProjecteurD"]:
+		var spot := racine.get_node_or_null(nom) as SpotLight3D
+		if spot:
+			spot.light_energy = 3.2 * clampf((nuit - 0.15) / 0.5, 0.0, 1.0)
+			spot.visible = spot.light_energy > 0.01
+
+## Les étincelles d'une tôle qui racle un mur : des grains jaunes, vifs, qui
+## retombent vite.
+static func etincelles() -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.amount = 18
+	p.lifetime = 0.5
+	p.one_shot = true
+	p.explosiveness = 0.95
+	p.emitting = true
+	p.local_coords = false
+	var grain := BoxMesh.new()
+	grain.size = Vector3(0.25, 0.25, 0.25)
+	p.mesh = grain
+	p.direction = Vector3(0, 1, 0)
+	p.spread = 70.0
+	p.initial_velocity_min = 6.0
+	p.initial_velocity_max = 14.0
+	p.gravity = Vector3(0, -30.0, 0)
+	p.scale_amount_min = 0.6
+	p.scale_amount_max = 1.4
+	var teinte := Gradient.new()
+	teinte.set_color(0, Color(1.0, 0.95, 0.6, 1.0))
+	teinte.set_color(1, Color(1.0, 0.4, 0.1, 0.0))
+	p.color_ramp = teinte
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.emission_enabled = true
+	m.emission = Color(1.0, 0.7, 0.3)
+	m.emission_energy_multiplier = 1.5
+	p.material_override = m
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return p
+
+## La poussière d'un cube qui part : une bouffée de grains dans la couleur du
+## mur, qui retombe. Sans elle, un cube disparaît ; avec, il s'effondre.
+static func poussiere(couleur: Color) -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.amount = 14
+	p.lifetime = 0.9
+	p.one_shot = true
+	p.explosiveness = 0.9
+	p.emitting = true
+	p.local_coords = false
+	var grain := BoxMesh.new()
+	grain.size = Vector3(0.5, 0.5, 0.5)
+	p.mesh = grain
+	p.direction = Vector3(0, 1, 0)
+	p.spread = 180.0
+	p.initial_velocity_min = 2.0
+	p.initial_velocity_max = 5.5
+	p.gravity = Vector3(0, -3.0, 0)
+	p.damping_min = 2.0
+	p.damping_max = 4.0
+	p.scale_amount_min = 0.8
+	p.scale_amount_max = 2.2
+	var teinte := Gradient.new()
+	teinte.set_color(0, Color(couleur.r, couleur.g, couleur.b, 0.7).lightened(0.2))
+	teinte.set_color(1, Color(couleur.r, couleur.g, couleur.b, 0.0))
+	p.color_ramp = teinte
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	p.material_override = m
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return p
 static func _flaque(st: SurfaceTool, centre: Vector3, dx: Vector3, dz: Vector3, couleur: Color) -> void:
 	var p := [centre - dx - dz, centre + dx - dz, centre + dx + dz, centre - dx + dz]
 	var uvs := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
@@ -445,11 +539,9 @@ static func explosion() -> CPUParticles3D:
 	p.explosiveness = 0.95
 	p.emitting = true
 	p.local_coords = false
-	var grain := SphereMesh.new()
-	grain.radius = 0.5
-	grain.height = 1.0
-	grain.radial_segments = 6
-	grain.rings = 3
+	# Des cubes, pas des boules : une explosion en voxels dans une ville en voxels.
+	var grain := BoxMesh.new()
+	grain.size = Vector3(0.9, 0.9, 0.9)
 	p.mesh = grain
 	p.direction = Vector3(0, 1, 0)
 	p.spread = 180.0
