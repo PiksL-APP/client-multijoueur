@@ -44,6 +44,13 @@ static func _argument(arguments: PackedStringArray, nom: String, defaut: String 
 ## navigateurs, et ça tient dans un script de contrôle avant déploiement.
 func _banc_d_essai() -> void:
 	Session.definir_pseudo("Banc-" + Session.id.substr(0, 4))
+	# `--marche=0,-1` fait marcher le personnage tout droit : c'est ainsi
+	# qu'on vérifie en photo qu'un mur l'arrête.
+	var marche := _argument(OS.get_cmdline_args(), "--marche")
+	if marche != "":
+		var xy := marche.split(",")
+		Commandes.pilote_automatique = true
+		Commandes.direction_simulee = Vector2(float(xy[0]), float(xy[1]))
 	aller_a("hub", {})
 	for i in 12:
 		await get_tree().create_timer(1.0).timeout
