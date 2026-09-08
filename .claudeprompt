@@ -175,7 +175,10 @@ de `outils/voxel.py` et de lui seul : modèles bâtis cube par cube à la palett
 maillage glouton ; le village est un plan de cases (16 pixels dans la
 simulation, une unité dans le monde) qui produit à la fois le terrain, les
 objets posés et `plan.json` (cases bloquées, portes, sortie, portail, vitres,
-cheminées). Les personnages sont des glTF à six parties nommées (`tete`,
+cheminées). Les personnages sont bâtis DEUX FOIS plus fin que le décor
+(`FIN2` = 1/16, trente-deux voxels de haut pour deux unités : à la moitié de
+cette résolution il n'y a place ni pour une main, ni pour un nez, ni pour une
+épaule). Ce sont des glTF à six parties nommées (`tete`,
 `corps`, `bras_g`, `bras_d`, `jambe_g`, `jambe_d`), chacune exprimée autour
 de son pivot : le moteur les anime en tournant les nœuds. Pour changer le
 village, on change le script et on le relance ; `outils/voir.sh a,b` pose des

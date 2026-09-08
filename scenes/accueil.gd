@@ -117,8 +117,8 @@ func _vitrine(nom: String) -> SubViewportContainer:
 	var camera := Camera3D.new()
 	camera.fov = 30.0
 	fenetre.add_child(camera)
-	camera.position = Vector3(0, 1.7, 5.6)
-	camera.look_at(Vector3(0, 1.2, 0))
+	camera.position = Vector3(0, 1.5, 6.6)
+	camera.look_at(Vector3(0, 1.0, 0))
 	_vitrines.append(pantin)
 	return cadre
 

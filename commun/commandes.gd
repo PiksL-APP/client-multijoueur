@@ -10,6 +10,10 @@ extends RefCounted
 ## Les codes sont PHYSIQUES : W A S D tombent sur Z Q S D d'un clavier AZERTY,
 ## sans carte d'entrées à configurer.
 
+## Vrai pendant qu'on écrit dans un champ (le tchat du village) : les lettres
+## vont au texte, pas aux pieds du personnage.
+static var saisie := false
+
 static var pilote_automatique := false
 static var direction_simulee := Vector2.ZERO
 static var tir_simule := false
@@ -17,6 +21,8 @@ static var tir_simule := false
 static func direction() -> Vector2:
 	if pilote_automatique:
 		return direction_simulee
+	if saisie:
+		return Vector2.ZERO
 	if Tactile.actif() and Tactile.direction != Vector2.ZERO:
 		return Tactile.direction_de_marche()
 	var d := Vector2.ZERO
