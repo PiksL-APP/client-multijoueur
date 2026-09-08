@@ -31,14 +31,15 @@ func demarrer() -> void:
 	colonne.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	marge.add_child(colonne)
 
-	colonne.add_child(UI.entete("Options", "Le son, l'image, les touches. Tout est gardé sur cette machine."))
+	colonne.add_child(Charte.entete("Options", "Le son, l'image, les touches. Tout est gardé sur cette machine."))
 
 	_onglets = TabContainer.new()
 	_onglets.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_onglets.custom_minimum_size = Vector2(720, 400)
 	colonne.add_child(_onglets)
-	_onglets.add_theme_font_override("font", UI.TEXTE_POLICE)
-	_onglets.add_theme_font_size_override("font_size", UI.taille_texte(17))
+	_onglets.add_theme_font_override("font", Charte.CAPITALES)
+	_onglets.add_theme_font_size_override("font_size", 18)
+	_onglets.add_theme_constant_override("font_spacing_glyph", 3)
 	_onglets.add_child(_page_son())
 	_onglets.add_child(_page_image())
 	_onglets.add_child(_page_touches())
@@ -52,10 +53,10 @@ func demarrer() -> void:
 	var bas := HBoxContainer.new()
 	bas.add_theme_constant_override("separation", 12)
 	colonne.add_child(bas)
-	var retour := UI.bouton("Retour", true)
+	var retour := Charte.bouton("Retour", true)
 	retour.pressed.connect(_sortir)
 	bas.add_child(retour)
-	var defauts := UI.bouton("Tout remettre à zéro")
+	var defauts := Charte.bouton("Tout remettre à zéro")
 	defauts.pressed.connect(_remettre_a_zero)
 	bas.add_child(defauts)
 
@@ -78,8 +79,7 @@ func _page_son() -> Control:
 		Reglages.appliquer_le_son()
 		Reglages.ecrire()
 		_gouter()))
-	page.add_child(UI.texte("Le volume se règle en direct : un bip sonne au niveau choisi dès qu'on lâche le curseur.",
-		13, Palette.ENCRE_FAIBLE, true))
+	page.add_child(Charte.texte("Le volume se règle en direct : un bip sonne au niveau choisi dès qu'on lâche le curseur.", 16, Color(1, 1, 1, 0.5), true))
 	return boite
 
 var _dernier_gout := 0.0
@@ -122,8 +122,7 @@ func _page_image() -> Control:
 		Reglages.finesse = clampf(v, 0.5, 1.0)
 		Reglages.appliquer_l_image()
 		Reglages.ecrire()))
-	page.add_child(UI.texte("Baisser la finesse rend le jeu en plus petit puis agrandit l'image : deux fois moins de pixels à calculer, une netteté à peine entamée sur des voxels.",
-		13, Palette.ENCRE_FAIBLE, true))
+	page.add_child(Charte.texte("Baisser la finesse rend le jeu en plus petit puis agrandit l'image : deux fois moins de pixels à calculer, une netteté à peine entamée sur des voxels.", 16, Color(1, 1, 1, 0.5), true))
 	return boite
 
 # ── Touches ────────────────────────────────────────────────────────────────
@@ -131,8 +130,7 @@ func _page_image() -> Control:
 func _page_touches() -> Control:
 	var boite := _page("Touches")
 	var page: VBoxContainer = _pages["Touches"]
-	page.add_child(UI.texte("Cliquez sur une touche puis appuyez sur la nouvelle. Elles valent pour Piks Theft Auto comme pour les parties courtes. Les flèches du clavier restent toujours actives pour se déplacer.",
-		13, Palette.ENCRE_FAIBLE, true))
+	page.add_child(Charte.texte("Cliquez sur une touche puis appuyez sur la nouvelle. Elles valent pour Piks Theft Auto comme pour les parties courtes. Les flèches du clavier restent toujours actives pour se déplacer.", 16, Color(1, 1, 1, 0.5), true))
 	# Dix actions ne tiennent pas dans la hauteur d'un onglet : la liste défile.
 	var defilement := ScrollContainer.new()
 	defilement.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -145,15 +143,15 @@ func _page_touches() -> Control:
 	grille.add_theme_constant_override("v_separation", 4)
 	defilement.add_child(grille)
 	for action in Reglages.LIBELLES:
-		var etiquette := UI.texte(String(Reglages.LIBELLES[action]), 15, Palette.ENCRE_DOUCE)
+		var etiquette := Charte.texte(String(Reglages.LIBELLES[action]), 18, Color(1, 1, 1, 0.78))
 		etiquette.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grille.add_child(etiquette)
-		var b := UI.bouton("")
+		var b := Charte.bouton("")
 		b.custom_minimum_size = Vector2(170, 34)
 		b.pressed.connect(func(): _attendre(String(action)))
 		grille.add_child(b)
 		_cases[String(action)] = b
-	var remise := UI.bouton("Touches par défaut")
+	var remise := Charte.bouton("Touches par défaut")
 	remise.pressed.connect(func():
 		Sons.interface("special", -8.0)
 		Reglages.remettre_les_touches()
@@ -173,7 +171,7 @@ func _rafraichir_les_touches() -> void:
 		var b: Button = _cases[action]
 		if action == _en_attente:
 			b.text = "…"
-			b.modulate = MenuPrincipal.ORANGE
+			b.modulate = Charte.ORANGE
 		else:
 			b.text = Reglages.nom_de_touche(String(action))
 			b.modulate = Color.WHITE
@@ -205,10 +203,10 @@ func _curseur(libelle: String, valeur: float, mini: float, maxi: float,
 	var boite := VBoxContainer.new()
 	boite.add_theme_constant_override("separation", 4)
 	var ligne := HBoxContainer.new()
-	var nom := UI.texte(libelle, 17, Palette.ENCRE)
+	var nom := Charte.texte(libelle, 19, Color.WHITE)
 	nom.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ligne.add_child(nom)
-	var chiffre := UI.texte("%d %%" % roundi(valeur * 100.0), 15, MenuPrincipal.ORANGE)
+	var chiffre := Charte.capitales("%d %%" % roundi(valeur * 100.0), 16, Charte.ORANGE, 0.08)
 	ligne.add_child(chiffre)
 	boite.add_child(ligne)
 	var glissiere := HSlider.new()
@@ -229,14 +227,14 @@ func _bascule(libelle: String, valeur: bool, aide: String, action: Callable) -> 
 	var bouton := CheckButton.new()
 	bouton.text = libelle
 	bouton.button_pressed = valeur
-	bouton.add_theme_font_override("font", UI.TEXTE_POLICE)
-	bouton.add_theme_font_size_override("font_size", UI.taille_texte(17))
+	bouton.add_theme_font_override("font", Charte.COURANTE)
+	bouton.add_theme_font_size_override("font_size", 19)
 	bouton.toggled.connect(func(v: bool) -> void:
 		Sons.interface("valider" if v else "retour", -10.0)
 		action.call(v))
 	boite.add_child(bouton)
 	if aide != "":
-		boite.add_child(UI.texte(aide, 13, Palette.ENCRE_FAIBLE, true))
+		boite.add_child(Charte.texte(aide, 16, Color(1, 1, 1, 0.5), true))
 	return boite
 
 # ── Le fond ────────────────────────────────────────────────────────────────

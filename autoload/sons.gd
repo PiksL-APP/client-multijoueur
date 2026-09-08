@@ -103,6 +103,15 @@ func _ready() -> void:
 		lecteur.bus = Reglages.BUS_EFFETS
 		add_child(lecteur)
 		_clavier.append(lecteur)
+	# La sirène et la radio ont chacune leur lecteur : sur le tourniquet
+	# commun, une sirène qui boucle serait coupée au premier impact.
+	_sirene = AudioStreamPlayer.new()
+	_sirene.bus = Reglages.BUS_EFFETS
+	add_child(_sirene)
+	_radio = AudioStreamPlayer.new()
+	_radio.bus = Reglages.BUS_EFFETS
+	add_child(_radio)
+	_lister_les_sfx()
 
 ## Lance la musique d'un lieu (`res://sons/<nom>.ogg`, en boucle), en fondu
 ## depuis la précédente. `""` arrête. Rejouer le même nom ne redémarre rien.
@@ -161,8 +170,145 @@ func _charger_preference() -> void:
 
 ## `hauteur` multiplie la fréquence de lecture : un même échantillon sert de
 ## grave et d'aigu, ce qui évite d'en fabriquer dix variantes.
+## LA BANQUE DE BRUITAGES DU JEU (`sons/sfx/*.ogg`) : ce sont des
+## enregistrements, et beaucoup viennent par FAMILLES — `voix_cri_1` à
+## `voix_cri_11`, `klaxon_1` à `klaxon_4`. On demande la famille (`voix_cri`)
+## et le tirage se fait ici : un appelant qui devrait connaître le nombre de
+## variantes se trompe le jour où on en ajoute une.
+##
+## Le catalogue est bâti UNE fois, en listant le dossier : une table écrite à
+## la main se désynchronise du disque au premier fichier ajouté, et le son
+## manquant ne se remarque qu'en jouant.
+var _sfx: Dictionary = {}          ## famille -> Array[String] de chemins
+
+const DOSSIER_SFX := "res://sons/sfx/"
+
+func _lister_les_sfx() -> void:
+	var dossier := DirAccess.open(DOSSIER_SFX)
+	if dossier == null:
+		return
+	for fichier in dossier.get_files():
+		# À l'export, un .ogg importé se présente en .ogg.import ou .remap.
+		var nom := String(fichier).trim_suffix(".import").trim_suffix(".remap")
+		if not nom.ends_with(".ogg"):
+			continue
+		nom = nom.trim_suffix(".ogg")
+		var famille := nom
+		var tiret := nom.rfind("_")
+		if tiret > 0 and nom.substr(tiret + 1).is_valid_int():
+			famille = nom.substr(0, tiret)
+		if not _sfx.has(famille):
+			_sfx[famille] = []
+		if not _sfx[famille].has(nom):
+			_sfx[famille].append(nom)
+	for famille in _sfx:
+		(_sfx[famille] as Array).sort()
+
+## Un flux de la banque de bruitages, tiré au sort dans sa famille. `null` si
+## la famille n'existe pas — l'appelant n'a pas à s'en soucier.
+func _flux_sfx(famille: String) -> AudioStream:
+	if not _sfx.has(famille):
+		return null
+	var noms: Array = _sfx[famille]
+	if noms.is_empty():
+		return null
+	return load(DOSSIER_SFX + String(noms[randi() % noms.size()]) + ".ogg")
+
+## Le moteur d'un véhicule : `demarrer_moteur("sport")` prend
+## `moteur_sport.ogg`. Sans nom, le moteur standard.
+func demarrer_moteur_type(type: String = "standard") -> void:
+	if not actif or _moteur == null:
+		return
+	var flux := _flux_sfx("moteur_" + type)
+	if flux == null:
+		flux = _flux_sfx("moteur_standard")
+	if flux != null:
+		if flux is AudioStreamOggVorbis:
+			(flux as AudioStreamOggVorbis).loop = true
+		_moteur.stream = flux
+	if not _moteur.playing:
+		_moteur.play()
+
+## Une VOIX de la rue : le cri, l'insulte, le grognement. Même chose que
+## `jouer`, mais sur son propre lecteur — une voix qui se fait couper par un
+## impact de balle s'entend comme un bogue.
+func voix(famille: String, volume_db: float = -10.0) -> void:
+	jouer(famille, randf_range(0.94, 1.07), volume_db)
+
+## LA SIRÈNE de la police : `niveau` 0 l'arrête, 1 et 2 donnent la lente puis
+## la rapide. Elle boucle sur son propre lecteur tant que le niveau tient —
+## rejouée à chaque image, elle bégaierait.
+var _sirene: AudioStreamPlayer
+var _sirene_niveau := 0
+
+func sirene(niveau: int, volume_db: float = -18.0) -> void:
+	if _sirene == null:
+		return
+	if niveau == _sirene_niveau:
+		return
+	_sirene_niveau = niveau
+	if niveau <= 0 or not actif:
+		_sirene.stop()
+		return
+	var flux := _flux_sfx("sirene_lente" if niveau < 2 else "sirene_rapide")
+	if flux == null:
+		return
+	if flux is AudioStreamOggVorbis:
+		(flux as AudioStreamOggVorbis).loop = true
+	_sirene.stream = flux
+	_sirene.volume_db = volume_db
+	_sirene.play()
+
+## LA RADIO DE LA POLICE : une phrase assemblée de bouts enregistrés, comme
+## dans le jeu d'origine — « central », un code, une direction, un blanc. On
+## ne la déclenche qu'à l'entrée d'un niveau de recherche : à répétition, elle
+## couvre tout le reste.
+const PHRASE_RADIO := ["radio_central", "radio_all_units", "radio_respond_to",
+	"radio_code_10", "radio_suspect", "radio_heading"]
+
+var _radio_jusqua := 0.0
+
+func radio_police(niveau: int, _reserve: int = 0, cap: String = "") -> void:
+	if not actif or niveau <= 0 or _radio == null:
+		return
+	var maintenant := Time.get_ticks_msec() / 1000.0
+	if maintenant < _radio_jusqua:
+		return
+	_radio_jusqua = maintenant + 9.0
+	var phrase: Array = [PHRASE_RADIO[randi() % PHRASE_RADIO.size()]]
+	if cap != "":
+		phrase.append("radio_" + cap)
+	phrase.append("radio_spacer_a")
+	_dire_a_la_radio(phrase)
+
+var _radio: AudioStreamPlayer
+
+## Les morceaux s'enchaînent : chacun attend la fin du précédent. Les jouer
+## ensemble ferait une bouillie.
+func _dire_a_la_radio(morceaux: Array) -> void:
+	for morceau in morceaux:
+		var flux := _flux_sfx(String(morceau))
+		if flux == null:
+			continue
+		_radio.stream = flux
+		_radio.volume_db = -14.0
+		_radio.play()
+		await _radio.finished
+
 func jouer(nom: String, hauteur: float = 1.0, volume_db: float = -6.0) -> void:
-	if not actif or not _banque.has(nom):
+	if not actif:
+		return
+	# La banque de bruitages du jeu passe avant les ondes calculées : un même
+	# nom des deux côtés doit sonner comme l'enregistrement.
+	if _sfx.has(nom):
+		var lecteur_sfx := _voix[_prochaine]
+		_prochaine = (_prochaine + 1) % VOIX
+		lecteur_sfx.stream = _flux_sfx(nom)
+		lecteur_sfx.pitch_scale = clamp(hauteur, 0.3, 3.0)
+		lecteur_sfx.volume_db = volume_db
+		lecteur_sfx.play()
+		return
+	if not _banque.has(nom):
 		return
 	# Tourniquet de voix : couper le son le plus ancien vaut mieux qu'ignorer
 	# le nouveau. Dans Carnage, six écrasements peuvent tomber sur la même
@@ -174,8 +320,16 @@ func jouer(nom: String, hauteur: float = 1.0, volume_db: float = -6.0) -> void:
 	lecteur.volume_db = volume_db
 	lecteur.play()
 
-func demarrer_moteur() -> void:
-	if actif and not _moteur.playing:
+## Le moteur tourne. Avec un type (`"sport"`, `"camion"`…), c'est
+## l'enregistrement correspondant ; sans, c'est l'onde calculée d'origine —
+## la Bousculade et l'Énigme n'ont pas de parc automobile.
+func demarrer_moteur(type: String = "") -> void:
+	if not actif or _moteur == null:
+		return
+	if type != "":
+		demarrer_moteur_type(type)
+		return
+	if not _moteur.playing:
 		_moteur.play()
 
 func arreter_moteur() -> void:

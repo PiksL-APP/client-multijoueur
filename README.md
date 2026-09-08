@@ -12,8 +12,31 @@ bâti au couchant et tournant lentement sous l'effet maquette. Quand la ville
 change, le menu change avec elle. « Commencer » demande un pseudo et un
 personnage, « Options » règle le son, l'image et les touches, « Quitter »
 renvoie sur piks-l.com. La pochette du jeu est posée à gauche, dans une vraie boîte 3D qui se retourne au survol pour montrer son dos.
-Le village en voxels reste joignable par `--ecran=hub` le temps que les
-bâtiments de la ville ouvrent les autres jeux.
+**Le village n'existe plus.** Il a été l'écran d'accueil — une place, cinq
+maisons, des habitants, des portails — et Pikstown a pris sa place : c'est la
+ville, maintenant, qui est le hub. `scenes/hub.gd` et `scenes/accueil.gd` sont
+supprimés, avec les modèles qui ne servaient qu'à eux ; ce qui savait les
+bâtir dort encore dans `outils/voxel.py`, sous `VILLAGE = False`.
+
+**L'habillage d'avant-partie suit la maquette** (`Loading GTA Piks Theft
+Auto`) : polices Archivo Black et Barlow Condensed, palette rose `#ff2ea6`,
+cyan `#22e3f2` et orange `#ff9d2e`, capitales très espacées. Tout est
+rassemblé dans `ui/charte.gd` — elle ne remplace pas `ui/fabrique.gd`, qui
+habille le JEU : l'un est l'affiche du film, l'autre la borne d'arcade.
+
+**Un vrai chargement.** Les vingt-cinq morceaux de ville ne sont pas bâtis
+d'un bloc : ils partent en file, du plus proche du centre au plus lointain, un
+par image, derrière l'écran de chargement de la maquette
+(`ui/chargement.gd`) : neuf affiches qui se croisent, l'astuce qui tourne,
+l'anneau et son compteur, la barre biseautée violet–rose–cyan. Puis le voile
+se fond et le menu paraît, sur la ville. Et cette ville VIT : trente-quatre
+voitures et seize passants suivent les axes de la trame — pas la simulation du
+jeu, une circulation taillée pour être vue de très haut, qui boucle au bord du
+champ.
+
+**Le thème** *Vice City Drift* tourne sous le menu, la création, les options
+et le salon, se tait quand la manche commence et reprend aux résultats.
+L'interface sonne aussi — neuf bruitages de menu dans `sons/interface/`.
 
 **Le casting vient de Kenney** (`modeles/kenney/`, CC0) : un seul maillage
 articulé de 58 os, `characterMedium.fbx`, et douze images de peau tirées des
@@ -24,8 +47,9 @@ propres fichiers, sans maillage, et se greffent sur le squelette à la volée
 
 **Tout se règle** (`autoload/reglages.gd`, gardé dans `user://`) : trois
 volumes sur trois bus audio, l'effet maquette, les ombres, la finesse du rendu,
-le plein écran, et chaque touche du clavier — que `Commandes` lit désormais
-sans exception.
+le plein écran, et chaque touche du clavier. Les trois valent partout, menu ET
+Piks Theft Auto : `Commandes` lit toutes ses touches dans les réglages, et
+`MatieresCarnage.ambiance()` y prend son halo et ses ombres.
 
 **Un mur ne stoppe pas, il fait glisser.** Une collision ne coûte que la part
 de vitesse mise dans la façade, et la voiture se réaligne dessus quand on la

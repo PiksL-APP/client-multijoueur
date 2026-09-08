@@ -15,11 +15,6 @@ extends Ecran
 ## Le vrai lettrage du jeu, détouré sur fond transparent (lettres blanches,
 ## liseré noir compris) : la police pixel de la maison ne sait pas le dessiner,
 ## et une approximation à côté de la jaquette se serait vue tout de suite.
-const LOGO := "res://images/logo.png"
-## Le lettrage occupe trois lignes : au-delà de cette largeur, la colonne
-## déborde la hauteur de l'écran et emporte la boîte avec elle.
-const LOGO_LARGEUR := 300.0
-
 const VITRINE := "PIKSTOWN"         ## le code de ville montré au menu — et son nom
 const CREPUSCULE := 0.50            ## 0 plein jour, 1 nuit noire — 0,5 est le couchant
 ## Côté du carré de morceaux bâtis. Cinq sur cinq, soit mille unités : à trois,
@@ -34,8 +29,8 @@ const TOUR := 150.0                 ## secondes pour un tour complet
 ## Les entrées, dans l'ordre. `ecran` vide = traitement particulier.
 const ENTREES := [
 	{"cle": "commencer", "libelle": "Commencer", "aide": "Choisir son pseudo et son personnage"},
-	{"cle": "options", "libelle": "Options", "aide": "Son, image, touches du clavier"},
-	{"cle": "quitter", "libelle": "Quitter", "aide": "Retour sur piks-l.com"},
+	{"cle": "options", "libelle": "Options", "aide": "Affichage, son et commandes"},
+	{"cle": "quitter", "libelle": "Quitter", "aide": "Retour au bureau"},
 ]
 
 const ADRESSE_SORTIE := "https://www.piks-l.com"
@@ -57,9 +52,7 @@ var _chantiers: Array[MorceauVille] = []
 var _a_batir: Array = []            ## [distance², clé de morceau], du plus proche au plus loin
 var _total_a_batir := 0
 var _tuile0 := Vector2i.ZERO        ## coin du carré bâti, en tuiles
-var _voile_chargement: Control
-var _jauge: ColorRect
-var _libelle_chargement: Label
+var _voile: VoileChargement
 var _fondu := 0.0                   ## 0 pendant le chargement, 1 quand le menu est là
 var _t := 0.0
 var _choix := 0
@@ -74,7 +67,7 @@ func demarrer() -> void:
 	# L'interface attend derrière l'écran de chargement : montée tout de suite
 	# mais invisible, elle est prête à l'instant où la ville l'est.
 	interface().visible = false
-	_poser_le_chargement()
+	_voile = VoileChargement.poser(self)
 	# L'effet maquette, plus appuyé qu'en jeu : bande nette resserrée sur les
 	# entrées, flou épais en haut (le ciel) et en bas (le premier plan). C'est
 	# lui qui fait passer la ville pour une maquette sous vitrine.
@@ -120,7 +113,9 @@ func _preparer_la_ville() -> void:
 	# lisait comme une ligne tracée à la règle. On lui donne EXACTEMENT la
 	# couleur de l'horizon, puis on la laisse descendre vers le sombre : plus
 	# aucune arête, et le couchant garde sa chaleur.
-	ciel.sky_curve = 0.16
+	# La courbe reste celle du jeu : à 0,16 l'orange de l'horizon montait
+	# jusqu'en haut du cadre et le ciel perdait son bleu de nuit.
+	ciel.sky_curve = 0.10
 	ciel.ground_horizon_color = ciel.sky_horizon_color
 	ciel.ground_bottom_color = ciel.sky_horizon_color.darkened(0.72)
 	ciel.ground_curve = 0.55
@@ -175,61 +170,8 @@ func _placer_la_camera(temps: float) -> void:
 	# donnait une vue à la verticale où la ville n'avait plus de ciel.
 	_camera.look_at(vise + Vector3(0, 34.0, 0))
 
-## L'écran de chargement : le lettrage sur fond noir, une barre qui avance, et
-## le nom de ce qui est en train de se bâtir. Il vit dans SA propre couche,
-## au-dessus de l'interface du menu, pour pouvoir s'effacer d'un fondu sans
-## qu'on ait à démonter quoi que ce soit.
-func _poser_le_chargement() -> void:
-	var couche := CanvasLayer.new()
-	couche.layer = 2
-	add_child(couche)
-
-	_voile_chargement = Control.new()
-	_voile_chargement.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_voile_chargement.mouse_filter = Control.MOUSE_FILTER_STOP
-	couche.add_child(_voile_chargement)
-
-	var fond := ColorRect.new()
-	fond.color = Color("#080510")
-	fond.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_voile_chargement.add_child(fond)
-
-	var centre := CenterContainer.new()
-	centre.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_voile_chargement.add_child(centre)
-
-	var colonne := VBoxContainer.new()
-	colonne.add_theme_constant_override("separation", 26)
-	colonne.alignment = BoxContainer.ALIGNMENT_CENTER
-	centre.add_child(colonne)
-
-	var logo := TextureRect.new()
-	logo.texture = load(LOGO)
-	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	var t: Texture2D = logo.texture
-	logo.custom_minimum_size = Vector2(420, 420 * float(t.get_height()) / float(t.get_width()))
-	colonne.add_child(logo)
-
-	# La barre est deux rectangles : le creux et ce qui le remplit. Pas de
-	# ProgressBar — il faudrait l'habiller de quatre styles pour obtenir ces
-	# deux traits-là, et l'habillage se déferait au premier changement de thème.
-	var creux := ColorRect.new()
-	creux.color = Color(1, 1, 1, 0.12)
-	creux.custom_minimum_size = Vector2(420, 6)
-	colonne.add_child(creux)
-	_jauge = ColorRect.new()
-	_jauge.color = ORANGE
-	_jauge.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	_jauge.size = Vector2(0, 6)
-	creux.add_child(_jauge)
-
-	_libelle_chargement = UI.texte("Construction de Pikstown…", 15, Palette.ENCRE_FAIBLE)
-	_libelle_chargement.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	colonne.add_child(_libelle_chargement)
-
-## Une image de chantier : UN morceau bâti, la barre avancée. Renvoie vrai
-## quand il ne reste rien à faire.
+## Une image de chantier : UN morceau bâti, la barre du voile avancée.
+## Renvoie vrai quand il ne reste rien à faire.
 func _avancer_le_chantier() -> bool:
 	if _a_batir.is_empty():
 		return true
@@ -238,11 +180,8 @@ func _avancer_le_chantier() -> bool:
 	monde().add_child(morceau)
 	morceau.batir(_carte, cle, {}, {})
 	_chantiers.append(morceau)
-	var part := 1.0 - float(_a_batir.size()) / float(maxi(1, _total_a_batir))
-	if _jauge != null:
-		_jauge.size.x = 420.0 * part
-	if _libelle_chargement != null:
-		_libelle_chargement.text = "Construction de Pikstown… %d %%" % roundi(part * 100.0)
+	if _voile != null and is_instance_valid(_voile):
+		_voile.avancer(1.0 - float(_a_batir.size()) / float(maxi(1, _total_a_batir)))
 	return _a_batir.is_empty()
 
 # ── La ville vit ───────────────────────────────────────────────────────────
@@ -359,101 +298,86 @@ func _animer_la_circulation(delta: float) -> void:
 func _poser_l_interface() -> void:
 	var couche := interface()
 
-	# Un dégradé sombre le long du bord gauche : sans lui, un libellé clair
-	# passe sur un toit clair et devient illisible une fois sur trois pendant
-	# que la caméra tourne.
+	# Un voile sombre au bas de l'écran, comme sur la maquette : il porte le
+	# pied de page et détache les entrées des toits qui défilent dessous.
 	var degrade := GradientTexture2D.new()
-	degrade.fill = GradientTexture2D.FILL_LINEAR
 	degrade.fill_from = Vector2(0, 0)
-	# Le voile court jusqu'aux deux tiers de l'écran : depuis que la boîte
-	# occupe la gauche, le menu s'est décalé vers le milieu, et un dégradé
-	# qui s'arrêtait au quart laissait « OPTIONS » sur un toit blanc.
-	degrade.fill_to = Vector2(0.72, 0)
+	degrade.fill_to = Vector2(0, 1)
 	var couleurs := Gradient.new()
-	couleurs.set_offset(0, 0.0)
-	couleurs.set_color(0, Color(0.02, 0.01, 0.06, 0.92))
-	couleurs.set_offset(1, 1.0)
-	couleurs.set_color(1, Color(0.02, 0.01, 0.06, 0.0))
+	couleurs.offsets = PackedFloat32Array([0.0, 0.32, 0.62, 1.0])
+	couleurs.colors = PackedColorArray([Color(Charte.NUIT, 0.55), Color(Charte.NUIT, 0.10),
+		Color(Charte.NUIT, 0.38), Color(Charte.NUIT, 0.88)])
 	degrade.gradient = couleurs
 	var fond := TextureRect.new()
 	fond.texture = degrade
+	fond.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	fond.stretch_mode = TextureRect.STRETCH_SCALE
 	fond.set_anchors_preset(Control.PRESET_FULL_RECT)
 	fond.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	couche.add_child(fond)
 
-	var marge := MarginContainer.new()
-	marge.set_anchors_preset(Control.PRESET_FULL_RECT)
-	marge.add_theme_constant_override("margin_left", 72)
-	marge.add_theme_constant_override("margin_top", 56)
-	marge.add_theme_constant_override("margin_bottom", 40)
-	couche.add_child(marge)
+	# Le même en-tête que pendant le chargement : c'est le seul élément que la
+	# maquette garde d'un écran à l'autre.
+	Charte.entete_pikstown(couche)
 
-	var rangee := HBoxContainer.new()
-	rangee.alignment = BoxContainer.ALIGNMENT_BEGIN
-	rangee.add_theme_constant_override("separation", 40)
-	rangee.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	marge.add_child(rangee)
-	rangee.add_child(_boite_du_jeu())
+	# La boîte : au bord gauche, à mi-hauteur, un peu remontée.
+	var boite := VBoxContainer.new()
+	boite.add_theme_constant_override("separation", 14)
+	boite.position = Vector2(Charte.serre(24, 5.0, 90), 0)
+	boite.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	couche.add_child(boite)
+	boite.add_child(_boite_du_jeu())
+	var legende := Charte.capitales("Cliquer pour retourner",
+		Charte.serre(9, 0.9, 13), Color(1, 1, 1, 0.38), 0.24, 0)
+	legende.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	boite.add_child(legende)
+	# À mi-hauteur, remontée de quarante-deux pour cent de sa propre taille,
+	# comme le `translateY(-42%)` de la maquette.
+	boite.resized.connect(func() -> void:
+		boite.position.y = couche.get_viewport().get_visible_rect().size.y * 0.5 - boite.size.y * 0.42)
+
+	# Les entrées, CENTRÉES dans l'écran.
+	var centre := CenterContainer.new()
+	centre.set_anchors_preset(Control.PRESET_FULL_RECT)
+	centre.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	couche.add_child(centre)
 
 	var colonne := VBoxContainer.new()
 	colonne.alignment = BoxContainer.ALIGNMENT_CENTER
-	colonne.add_theme_constant_override("separation", 4)
-	colonne.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	rangee.add_child(colonne)
-
-	# Le lettrage porte déjà son liseré noir : sur une ville qui tourne, un
-	# titre blanc nu se perd dès qu'un toit clair passe dessous.
-	var logo := TextureRect.new()
-	logo.texture = load(LOGO)
-	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	logo.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var t: Texture2D = logo.texture
-	logo.custom_minimum_size = Vector2(LOGO_LARGEUR,
-		LOGO_LARGEUR * float(t.get_height()) / float(t.get_width()))
-	colonne.add_child(logo)
-	var sous := UI.texte("Pikstown. Une ville sans limites.",
-		17, Palette.ENCRE_DOUCE)
-	sous.add_theme_color_override("font_outline_color", Color("#120a18"))
-	sous.add_theme_constant_override("outline_size", 6)
-	colonne.add_child(sous)
-
-	var espace := Control.new()
-	espace.custom_minimum_size = Vector2(0, 26)
-	colonne.add_child(espace)
+	colonne.add_theme_constant_override("separation", Charte.serre(6, 0.8, 14))
+	centre.add_child(colonne)
 
 	for i in ENTREES.size():
 		var b := _entree(String(ENTREES[i]["libelle"]), i)
 		colonne.add_child(b)
 		_boutons.append(b)
 
-	# La boîte se cale sur la HAUTEUR de la colonne, pas sur celle de l'écran :
-	# les deux blocs se répondent alors, au lieu que l'un flotte dans le vide.
-	colonne.resized.connect(func() -> void:
-		if _cadre_boite != null and is_instance_valid(_cadre_boite):
-			_cadre_boite.custom_minimum_size.y = clampf(colonne.size.y, 300.0, HAUTEUR_BOITE_MAX))
+	var espace := Control.new()
+	espace.custom_minimum_size = Vector2(0, Charte.serre(14, 1.6, 26))
+	colonne.add_child(espace)
 
-	var espace2 := Control.new()
-	espace2.custom_minimum_size = Vector2(0, 22)
-	colonne.add_child(espace2)
-	_aide = UI.texte("", 15, Palette.ENCRE_DOUCE)
-	_aide.add_theme_color_override("font_outline_color", Color("#120a18"))
-	_aide.add_theme_constant_override("outline_size", 6)
-	_aide.custom_minimum_size = Vector2(470, 0)
+	# L'aide sous les entrées : en bas de casse, pas en capitales, et décalée
+	# de la largeur du losange pour s'aligner sur les libellés.
+	_aide = Charte.texte("", Charte.serre(13, 1.25, 19), Color(1, 1, 1, 0.62))
+	_aide.add_theme_constant_override("font_spacing_glyph", 2)
+	_aide.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	colonne.add_child(_aide)
 
+	var marge: int = Charte.serre(18, 2.6, 42)
 	var bas := HBoxContainer.new()
-	bas.add_theme_constant_override("separation", 14)
-	bas.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	bas.offset_left = 72
-	bas.offset_top = -46
-	bas.offset_bottom = -18
+	bas.add_theme_constant_override("separation", Charte.serre(16, 2.4, 44))
+	bas.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	bas.offset_left = marge
+	bas.offset_right = -marge
+	bas.offset_top = -marge - 20
+	bas.offset_bottom = -marge
 	couche.add_child(bas)
-	_etat = UI.etat_reseau()
+	var taille: int = Charte.serre(10, 0.95, 14)
+	_etat = Charte.etat_reseau()
 	bas.add_child(_etat)
-	bas.add_child(UI.texte("version " + Config.version, 13, Palette.ENCRE_FAIBLE))
-	bas.add_child(UI.texte("Haut et bas pour choisir · Entrée pour valider", 13, Palette.ENCRE_FAIBLE))
+	bas.add_child(Charte.capitales("Version " + Config.version, taille, Color(1, 1, 1, 0.42), 0.22))
+	bas.add_child(Charte.capitales("Haut / Bas pour choisir · Entrée pour valider",
+		taille, Color(1, 1, 1, 0.42), 0.22))
 
 ## La pochette du jeu, dans sa boîte, posée à gauche du menu.
 ##
@@ -469,20 +393,20 @@ const POCHETTE_DOS := "res://images/pochette-dos.jpg"
 ## la même forme, avec une bande sombre là où il en manque, vaut mieux que de
 ## les étirer chacune à la sienne — un dos déformé de douze pour cent se voit.
 const BOITE := Vector3(1.34, 1.94, 0.26)
-const LARGEUR_BOITE := 240.0               ## largeur du panneau, en pixels
-const HAUTEUR_BOITE_MAX := 400.0           ## au-delà, la boîte écrase le menu
+## Les dimensions de la maquette : dix-sept pour cent de la largeur de la
+## fenêtre, dans un rapport de 0,7 sur 1 comme un vrai boîtier.
+const RAPPORT_BOITE := 0.7
 
 func _boite_du_jeu() -> SubViewportContainer:
 	var cadre := SubViewportContainer.new()
 	cadre.stretch = true
-	cadre.custom_minimum_size = Vector2(LARGEUR_BOITE, 330)
-	cadre.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var large: float = Charte.serre(150, 17.0, 300)
+	cadre.custom_minimum_size = Vector2(large, large / RAPPORT_BOITE)
 	# La boîte se retourne au survol : il lui faut donc les événements de
 	# souris, que le reste de l'habillage laisse passer.
 	cadre.mouse_filter = Control.MOUSE_FILTER_STOP
 	cadre.mouse_entered.connect(func(): _retournee = true)
 	cadre.mouse_exited.connect(func(): _retournee = false)
-	_cadre_boite = cadre
 	# `--pochette-dos` : forcer le demi-tour, pour photographier le dos au banc
 	# — une ligne de commande ne survole rien.
 	if "--pochette-dos" in OS.get_cmdline_args():
@@ -576,12 +500,14 @@ func _boite_du_jeu() -> SubViewportContainer:
 	return cadre
 
 var _boite: Node3D
-var _cadre_boite: Control
 var _retournee := false
 var _demi_tour := 0.0
 
-const ROSE := Color("#ff4f9a")
-const ORANGE := Color("#ffa441")
+## La charte de Pikstown, celle de la jaquette et de l'écran de chargement :
+## rose néon, cyan, orange pour ce qui est élu, violet pour les dégradés.
+const ROSE := Charte.ROSE
+const ORANGE := Charte.ORANGE
+const VERT := Charte.VERT
 
 ## Une entrée de menu : pas un bouton d'arcade encadré, mais un grand libellé
 ## nu qui s'allume au survol. Le cadre du reste du jeu écraserait la ville
@@ -592,24 +518,28 @@ func _entree(libelle: String, indice: int) -> Button:
 	b.flat = true
 	b.focus_mode = Control.FOCUS_NONE
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.add_theme_font_override("font", UI.TITRE_POLICE)
-	b.add_theme_font_size_override("font_size", UI.taille_titre(24))
+	b.add_theme_font_override("font", Charte.TITRE)
+	b.add_theme_font_size_override("font_size", Charte.serre(26, 3.0, 52))
 	# Cerné de noir, comme le titre : le fond bouge, et une entrée qui passe
 	# sur un toit clair doit rester lisible sans qu'on ait à assombrir la
 	# ville.
 	b.add_theme_color_override("font_outline_color", Color("#120a18"))
 	b.add_theme_constant_override("outline_size", 10)
-	b.custom_minimum_size = Vector2(470, 58)
+	# Assez large pour la plus longue entrée, et haut d'une ligne et demie.
+	b.custom_minimum_size = Vector2(0, Charte.serre(26, 3.0, 52) * 1.35)
 	b.mouse_entered.connect(func() -> void: _viser(indice))
 	# Le curseur était un « ◆ » posé dans le libellé : la police de titre est
 	# une police pixel qui n'a pas ce caractère, et le moteur affichait le
 	# rectangle du caractère manquant. On le dessine plutôt qu'on ne l'écrit.
 	var marque := ColorRect.new()
 	marque.color = ORANGE
-	marque.size = Vector2(13, 13)
-	marque.pivot_offset = Vector2(6.5, 6.5)
+	marque.size = Vector2(14, 14)
+	marque.pivot_offset = Vector2(7, 7)
 	marque.rotation = PI * 0.25
-	marque.position = Vector2(4, 22)
+	marque.position = Vector2(0, 0)
+	# Le losange se recale sur la hauteur du bouton dès qu'elle est connue.
+	b.resized.connect(func() -> void:
+		marque.position = Vector2(0, (b.size.y - 14.0) * 0.5))
 	marque.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	b.add_child(marque)
 	_marques.append(marque)
@@ -622,6 +552,11 @@ func _entree(libelle: String, indice: int) -> Button:
 
 ## `vers` dit dans quel sens on s'est déplacé : le son monte ou descend avec
 ## le curseur. Un seul « clic » pour les deux, et la liste perd son relief.
+## Un libellé en capitales espacées, cerné de noir : la signature typographique
+## de la maquette, et la seule qui tienne sur une ville qui défile.
+func _capitales(texte: String, taille: int, couleur: Color) -> Label:
+	return Charte.capitales(texte, taille, couleur)
+
 func _viser(indice: int, vers: int = 0) -> void:
 	var vise := posmod(indice, ENTREES.size())
 	if vise == _choix:
@@ -631,15 +566,16 @@ func _viser(indice: int, vers: int = 0) -> void:
 	_rafraichir()
 
 func _rafraichir() -> void:
-	UI.rafraichir_etat_reseau(_etat)
+	Charte.rafraichir_etat(_etat)
 	for i in _boutons.size():
 		var b := _boutons[i]
 		var elu := i == _choix
 		# Le losange en tête d'entrée sert de curseur : sur un fond qui bouge,
 		# une simple couleur de texte ne se repère pas assez vite.
-		b.text = "     " + String(ENTREES[i]["libelle"]).to_upper()
+		b.text = "   " + String(ENTREES[i]["libelle"]).to_upper()
+		b.add_theme_constant_override("outline_size", 10 if elu else 8)
 		_marques[i].visible = elu
-		var teinte := ORANGE if elu else Color(1, 1, 1, 0.62)
+		var teinte: Color = ORANGE if elu else Color(1, 1, 1, 0.62)
 		for etat in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 			b.add_theme_color_override(etat, teinte)
 	_aide.text = String(ENTREES[_choix]["aide"])
@@ -671,6 +607,8 @@ func _process(delta: float) -> void:
 	if "--chargement" in OS.get_cmdline_args():
 		_t += delta
 		_placer_la_camera(_t)
+		if _voile != null and is_instance_valid(_voile):
+			_voile.avancer(fmod(_t * 0.12, 1.0))
 		return
 	if not _a_batir.is_empty():
 		_t += delta
@@ -681,9 +619,9 @@ func _process(delta: float) -> void:
 	if _fondu < 1.0:
 		_fondu = minf(1.0, _fondu + delta * 1.4)
 		interface().visible = true
-		if _voile_chargement != null:
-			_voile_chargement.modulate.a = 1.0 - _fondu
-			_voile_chargement.visible = _fondu < 1.0
+		if _voile != null and is_instance_valid(_voile):
+			_voile.effacer()
+			_voile = null
 
 	_t += delta
 	_placer_la_camera(_t)
