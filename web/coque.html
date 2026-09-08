@@ -60,7 +60,10 @@ $GODOT_HEAD_INCLUDE
 </helmet>
 <div style="position:relative; width:100%; height:100vh; min-height:420px; background:#05040a; overflow:hidden; font-family:Barlow, sans-serif; color:#fff; user-select:none">
 
-  <div style="position:absolute; inset:0; overflow:hidden">
+  <!-- Le fond est AUSSI posé en CSS : les deux `img` ne reçoivent leur
+       source qu'au premier rendu du kit, et sans cela la page s'ouvre sur
+       du noir le temps que React passe. -->
+  <div style="position:absolute; inset:0; overflow:hidden; background:url(kit/uploads/Loading1.jpg) center/cover no-repeat">
     <img src="{{ srcA }}" alt="" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:{{ opacityA }}; transition:opacity 1.4s ease; animation:pk-bgpan 18s ease-in-out infinite alternate">
     <img src="{{ srcB }}" alt="" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:{{ opacityB }}; transition:opacity 1.4s ease; animation:pk-bgpan 18s ease-in-out infinite alternate-reverse">
   </div>
@@ -119,18 +122,8 @@ $GODOT_HEAD_INCLUDE
 
   <sc-if value="{{ isMenu }}">
   <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:0 clamp(24px,6vw,110px); animation:pk-fadein .8s ease both">
-    <div onClick="{{ flipBox }}" style="position:absolute; left:clamp(24px,5vw,90px); top:50%; transform:translateY(-42%); width:clamp(150px,17vw,300px); perspective:1600px; cursor:pointer">
-      <div style="{{ boxStyle }}">
-        <div style="position:absolute; inset:0; backface-visibility:hidden; border-radius:3px; overflow:hidden; border-left:7px solid #0b0a11; box-shadow:-26px 26px 54px rgba(0,0,0,.75)">
-          <img src="kit/uploads/Jaquette - Avant.png" alt="Jaquette Piks Theft Auto" style="display:block; width:100%; height:100%; object-fit:cover">
-          <div style="position:absolute; inset:0; background:linear-gradient(100deg, rgba(255,255,255,.22) 0%, rgba(255,255,255,0) 30%)"></div>
-        </div>
-        <div style="position:absolute; inset:0; backface-visibility:hidden; transform:rotateY(180deg); border-radius:3px; overflow:hidden; border-right:7px solid #0b0a11; box-shadow:26px 26px 54px rgba(0,0,0,.75); background:#0b0a11">
-          <img src="kit/uploads/Jaquette - Arriere.png" alt="Dos de la jaquette" style="display:block; width:100%; height:100%; object-fit:contain">
-        </div>
-      </div>
-      <div style="margin-top:14px; text-align:center; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(9px,.9vw,13px); letter-spacing:.24em; text-transform:uppercase; color:rgba(255,255,255,.38)">Cliquer pour retourner</div>
-    </div>
+    <!-- La jaquette a été retirée du menu : elle n'y servait à rien et
+         passait sous le lettrage dès que la fenêtre s'élargissait. -->
 
     <div style="flex:0 1 auto; min-width:0; max-width:660px; display:flex; flex-direction:column; align-items:center; text-align:center; gap:clamp(14px,1.6vw,26px)">
 
@@ -332,6 +325,7 @@ window.PK = {
 		"kit/uploads/Loading7.jpg", "kit/uploads/Loading8.jpg", "kit/uploads/Loading9.jpg"
 	],
 	entrer: function (choix) {
+		if (window.PK.sonner) { window.PK.sonner("special"); }
 		window.PK.depart = choix;
 		// La page rend aussi la main sur le son : le thème est joué ici, et
 		// deux musiques qui se superposent s'entendent tout de suite.
@@ -350,6 +344,85 @@ window.PK = {
 	quitter: function () { window.location.href = "https://www.piks-l.com"; }
 };
 var PK_FONDS = window.PK.fonds;
+
+// ── LES SONS DE L'INTERFACE ────────────────────────────────────────────────
+//
+// Ils sont branchés DEPUIS L'EXTÉRIEUR du kit : on écoute les événements qui
+// remontent de son arbre plutôt que d'aller poser un appel dans chacun de ses
+// boutons. Le dessin reste ainsi intact, et un bouton ajouté demain sonnera
+// sans qu'on ait rien à rebrancher.
+(function () {
+	var VOLUME = 0.5;                 // la moitié du maximum, comme demandé
+	var NOMS = ["haut", "bas", "gauche", "droite", "valider", "retour",
+		"effacer", "frappe", "special"];
+	var banque = {};
+	NOMS.forEach(function (n) {
+		// Trois exemplaires par son : on peut survoler plus vite qu'un son ne
+		// dure, et un seul élément se couperait lui-même.
+		banque[n] = [0, 1, 2].map(function () {
+			var a = new Audio("kit/sons/" + n + ".ogg");
+			a.volume = VOLUME;
+			a.preload = "auto";
+			return a;
+		});
+		banque[n].tour = 0;
+	});
+	function sonner(nom) {
+		var v = banque[nom];
+		if (!v) { return; }
+		var a = v[v.tour];
+		v.tour = (v.tour + 1) % v.length;
+		try { a.currentTime = 0; a.play(); } catch (e) {}
+	}
+	window.PK.sonner = sonner;
+
+	var kit = document.getElementById("pk-kit");
+
+	// Ce qu'un bouton veut dire : revenir en arrière, ou valider. Le libellé
+	// le dit mieux qu'une classe — le kit n'en pose aucune.
+	function estUnRetour(el) {
+		var t = (el.textContent || "").toLowerCase();
+		return t.indexOf("retour") >= 0 || t.indexOf("quitter") >= 0
+			|| t.indexOf("fermer") >= 0 || t.indexOf("annuler") >= 0;
+	}
+
+	var survole = null;
+	kit.addEventListener("mouseover", function (e) {
+		var b = e.target.closest("button, [role=button], input[type=range]");
+		if (!b || b === survole) { return; }
+		survole = b;
+		sonner("droite");
+	}, true);
+	kit.addEventListener("mouseout", function (e) {
+		if (survole && !survole.contains(e.relatedTarget)) { survole = null; }
+	}, true);
+
+	kit.addEventListener("click", function (e) {
+		var b = e.target.closest("button, [role=button]");
+		if (!b) { return; }
+		sonner(estUnRetour(b) ? "retour" : "valider");
+	}, true);
+
+	kit.addEventListener("input", function (e) {
+		if (e.target.matches("input[type=range]")) { sonner("gauche"); }
+	}, true);
+
+	// Au clavier : les flèches montent et descendent, Entrée valide, Échap
+	// revient, la frappe crépite et l'effacement a son propre bruit.
+	kit.addEventListener("keydown", function (e) {
+		if (e.key === "Backspace" || e.key === "Delete") { sonner("effacer"); }
+		else if (e.key.length === 1) { sonner("frappe"); }
+	}, true);
+	window.addEventListener("keydown", function (e) {
+		if (kit.style.display === "none") { return; }
+		if (e.key === "ArrowUp") { sonner("haut"); }
+		else if (e.key === "ArrowDown") { sonner("bas"); }
+		else if (e.key === "ArrowLeft") { sonner("gauche"); }
+		else if (e.key === "ArrowRight") { sonner("droite"); }
+		else if (e.key === "Enter") { sonner("valider"); }
+		else if (e.key === "Escape") { sonner("retour"); }
+	});
+}());
 </script>
 
 <script src="kit/react.js"></script>
