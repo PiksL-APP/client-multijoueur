@@ -5,11 +5,6 @@ const ECRANS := {
 	"menu": "res://scenes/menu.gd",
 	"creation": "res://scenes/creation.gd",
 	"options": "res://scenes/options.gd",
-	# L'accueil et le village sont l'entrée d'AVANT : ils ne s'ouvrent plus
-	# d'eux-mêmes, mais `--ecran=hub` y mène encore, le temps que la ville
-	# reprenne ce qu'ils portaient.
-	"accueil": "res://scenes/accueil.gd",
-	"hub": "res://scenes/hub.gd",
 	"salon": "res://scenes/salon.gd",
 	"carnage": "res://jeux/carnage.gd",
 	# ÉNIGME, c'est désormais la ferme (voir CONCEPTION-ENIGME.md) : le portail
@@ -41,7 +36,7 @@ func _ready() -> void:
 	var dossier_photos := _argument(arguments, "--photo")
 	if dossier_photos != "":
 		_photographier(dossier_photos)
-	# `--ecran=ferme` ouvre un écran directement, sans passer par l'accueil ni
+	# `--ecran=ferme` ouvre un écran directement, sans passer par le menu ni
 	# par les clés Supabase : c'est ce qui permet de photographier un écran
 	# solo au banc, comme `--lieu=` le fait pour les pièces du hub.
 	var ecran := _argument(arguments, "--ecran")
@@ -85,26 +80,16 @@ static func _argument(arguments: PackedStringArray, nom: String, defaut: String 
 	return defaut
 
 ## Banc d'essai sans interface : `godot --headless -- --banc`.
-## Deux instances lancées côte à côte doivent se voir dans le hub. C'est le
-## seul moyen de vérifier la présence et la diffusion sans ouvrir deux
-## navigateurs, et ça tient dans un script de contrôle avant déploiement.
+## Il ouvre le menu et le tient ouvert : ce qu'on vérifie ici, c'est que la
+## ville se bâtit, que les écrans se montent et que la connexion tient. La
+## présence à plusieurs, elle, se vérifie dans les bancs de partie — c'est le
+## salon qui apparie, depuis que le village n'est plus sur le chemin.
 func _banc_d_essai() -> void:
 	Session.definir_pseudo("Banc-" + Session.id.substr(0, 4))
-	# `--marche=0,-1` fait marcher le personnage tout droit : c'est ainsi
-	# qu'on vérifie en photo qu'un mur l'arrête.
-	var marche := _argument(OS.get_cmdline_args(), "--marche")
-	if marche != "":
-		var xy := marche.split(",")
-		Commandes.pilote_automatique = true
-		Commandes.direction_simulee = Vector2(float(xy[0]), float(xy[1]))
-	aller_a("hub", {})
+	aller_a("menu", {})
 	for i in 12:
 		await get_tree().create_timer(1.0).timeout
-		var hub := _ecran
-		var vus := 0
-		if hub and hub.has_method("nombre_de_joueurs"):
-			vus = hub.nombre_de_joueurs()
-		print("[banc] t=%ds reseau=%s joueurs_vus=%d" % [i + 1, Reseau.libelle_etat(), vus])
+		print("[banc] t=%ds reseau=%s ecran=%s" % [i + 1, Reseau.libelle_etat(), _nom_ecran])
 	get_tree().quit()
 
 ## Photographies périodiques de l'écran, pour contrôler le rendu d'un jeu sans

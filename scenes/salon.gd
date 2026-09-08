@@ -201,7 +201,7 @@ func _construire() -> void:
 	actions.add_child(_bouton_changer)
 
 	var retour := UI.bouton("Retour au hub")
-	retour.pressed.connect(func(): demande_ecran.emit("hub", {}))
+	retour.pressed.connect(func(): demande_ecran.emit("menu", {}))
 	actions.add_child(retour)
 
 func _rafraichir() -> void:

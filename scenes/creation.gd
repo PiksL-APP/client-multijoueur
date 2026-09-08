@@ -56,7 +56,11 @@ func demarrer() -> void:
 	gauche.add_child(UI.texte("Votre pseudo", 15, Palette.ENCRE_FAIBLE))
 	_champ = UI.champ("Votre pseudo", Session.pseudo)
 	_champ.text_submitted.connect(func(_x): _entrer())
-	_champ.text_changed.connect(func(_x): _rafraichir())
+	# Chaque frappe s'entend, comme sur une borne : c'est ce qui fait qu'un
+	# champ de texte a du corps.
+	_champ.text_changed.connect(func(_x) -> void:
+		Sons.interface("frappe", -16.0)
+		_rafraichir())
 	gauche.add_child(_champ)
 
 	gauche.add_child(UI.texte("Votre personnage", 15, Palette.ENCRE_FAIBLE))
@@ -88,7 +92,9 @@ func demarrer() -> void:
 		_courts.append(b)
 
 	var retour := UI.bouton("Retour au menu")
-	retour.pressed.connect(func(): demande_ecran.emit("menu", {}))
+	retour.pressed.connect(func() -> void:
+		Sons.interface("retour", -8.0)
+		demande_ecran.emit("menu", {}))
 	gauche.add_child(retour)
 
 	_avertissement = UI.texte("", 13, Palette.AVERTISSEMENT, true)
@@ -188,8 +194,10 @@ func _vitrine() -> SubViewportContainer:
 	# Cadrage pied-à-tête d'un bonhomme d'un mètre quatre-vingts, avec un peu
 	# d'air au-dessus : la caméra vise la poitrine, pas les yeux, sinon les
 	# pieds sortent du cadre dès qu'on l'anime.
+	# L'inclinaison est posée à la main plutôt que par `look_at` : la caméra
+	# n'est pas encore dans l'arbre ici, et `look_at` refuse de travailler.
 	camera.position = Vector3(0, 1.05, 3.6)
-	camera.look_at(Vector3(0, 0.92, 0))
+	camera.rotation = Vector3(-atan2(1.05 - 0.92, 3.6), 0, 0)
 	return cadre
 
 func _fond() -> void:
@@ -239,7 +247,7 @@ func _choisir(cle: String) -> void:
 	_cle = cle
 	Session.definir_personnage(cle)
 	Personnages.habiller(_modele, cle)
-	Sons.jouer("clic", 1.0, -12.0)
+	Sons.interface("droite", -10.0)
 	_rafraichir()
 
 func _rafraichir() -> void:
@@ -290,9 +298,11 @@ func _partir(jeu: String, titre: String) -> void:
 		return
 	Session.definir_pseudo(pseudo)
 	Session.definir_personnage(_cle)
+	Sons.interface("valider", -4.0)
 	demande_ecran.emit("salon", {"jeu": jeu, "titre": titre.to_upper()})
 
 func _input(evenement: InputEvent) -> void:
 	var touche := evenement as InputEventKey
 	if touche != null and touche.pressed and not touche.echo and touche.keycode == KEY_ESCAPE:
+		Sons.interface("retour", -8.0)
 		demande_ecran.emit("menu", {})

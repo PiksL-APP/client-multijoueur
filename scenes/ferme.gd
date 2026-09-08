@@ -725,7 +725,7 @@ func _unhandled_input(evenement: InputEvent) -> void:
 		KEY_2: _changer_outil(GRAINES)
 		KEY_3: _changer_outil(ARROSOIR)
 		KEY_A: _changer_culture()
-		KEY_ESCAPE: demande_ecran.emit("hub", {})
+		KEY_ESCAPE: demande_ecran.emit("menu", {})
 
 func _changer_outil(outil: int) -> void:
 	# Reprendre le semoir alors qu'on l'a déjà en main fait tourner la graine :

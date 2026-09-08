@@ -867,7 +867,7 @@ static func regler_nuit(valeur: float) -> void:
 # ------------------------------------------------------------ l'ambiance
 
 ## L'heure de la ville est celle du VILLAGE : un cycle de quinze minutes calé
-## sur l'heure universelle (`scenes/hub.gd`, CYCLE), neuf minutes de jour, une
+## sur l'heure universelle (quinze minutes de cycle), neuf minutes de jour, une
 ## de crépuscule, quatre de nuit, une d'aube. On entre en ville à l'heure qu'il
 ## est au village, et tous les joueurs voient la même. `nuit_forcee` sert au
 ## banc (`--nuit=0.5` photographie le crépuscule).
@@ -951,6 +951,9 @@ static func ambiance() -> Array:
 	environnement.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environnement.fog_enabled = true
 	environnement.fog_sky_affect = 0.35
+	# Le halo et les ombres portées sont les deux réglages d'image des
+	# options : ils valent pour la VILLE comme pour le menu, sinon « couper
+	# les effets » ne changerait rien là où le jeu rame vraiment.
 	environnement.glow_enabled = _reglage("effets", true)
 	environnement.glow_strength = 1.0
 	environnement.glow_bloom = 0.12

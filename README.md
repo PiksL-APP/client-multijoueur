@@ -12,8 +12,11 @@ bâti au couchant et tournant lentement sous l'effet maquette. Quand la ville
 change, le menu change avec elle. « Commencer » demande un pseudo et un
 personnage, « Options » règle le son, l'image et les touches, « Quitter »
 renvoie sur piks-l.com. La pochette du jeu est posée à gauche, dans une vraie boîte 3D qui se retourne au survol pour montrer son dos.
-Le village en voxels reste joignable par `--ecran=hub` le temps que les
-bâtiments de la ville ouvrent les autres jeux.
+**Le village n'existe plus.** Il a été l'écran d'accueil — une place, cinq
+maisons, des habitants, des portails — et Pikstown a pris sa place : c'est la
+ville, maintenant, qui est le hub. `scenes/hub.gd` et `scenes/accueil.gd` sont
+supprimés, avec les modèles qui ne servaient qu'à eux ; ce qui savait les
+bâtir dort encore dans `outils/voxel.py`, sous `VILLAGE = False`.
 
 **Le casting vient de Kenney** (`modeles/kenney/`, CC0) : un seul maillage
 articulé de 58 os, `characterMedium.fbx`, et douze images de peau tirées des
@@ -23,9 +26,12 @@ propres fichiers, sans maillage, et se greffent sur le squelette à la volée
 (`commun/personnages.gd`). Douze personnages pour le poids d'un.
 
 **Tout se règle** (`autoload/reglages.gd`, gardé dans `user://`) : trois
-volumes sur trois bus audio, l'effet maquette, les ombres, la finesse du rendu,
-le plein écran, et chaque touche du clavier — que `Commandes` lit désormais
-sans exception.
+volumes sur trois bus audio, les effets d'image, les ombres, la finesse du
+rendu, le plein écran, et chaque touche du clavier. Les trois valent partout,
+menu ET Piks Theft Auto : `Commandes` lit toutes ses touches dans les
+réglages, et `MatieresCarnage.ambiance()` y prend son halo et ses ombres.
+L'interface sonne, elle aussi — neuf bruitages de menu dans `sons/interface/`,
+sur le bus « Effets ».
 
 **Un mur ne stoppe pas, il fait glisser.** Une collision ne coûte que la part
 de vitesse mise dans la façade, et la voiture se réaligne dessus quand on la
