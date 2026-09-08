@@ -114,9 +114,9 @@ const NEONS := [Palette.CRITIQUE, Palette.SERIEUX, Palette.AVERTISSEMENT, Palett
 ## industrielle et les parcs, jamais dans la vieille ville), une RIVIÈRE qui
 ## serpente d'ouest en est et ne se franchit que par les avenues, et une côte
 ## irrégulière tout autour. C'est la carte de GTA 2 : des îlots de toutes
-## tailles, de l'eau, des ponts.
+## tailles, de l'eau, des ponts. Depuis la v13, TROIS bras d'eau (`BRAS`)
+## découpent la ville en six îles.
 const AVENUE := 4                            ## une rue sur quatre est une avenue
-const LARGEUR_RIVIERE := 7.0                 ## en tuiles
 ## Deux échelles de fermeture : des ÎLOTS de deux pâtés sur deux fondus d'un
 ## bloc (leurs quatre rues intérieures deviennent une cour en croix), puis
 ## quelques rues fermées une à une. Les fermetures au hasard seules donnaient
@@ -194,6 +194,60 @@ func etendue() -> Vector2:
 
 func centre() -> Vector2:
 	return etendue() * 0.5
+
+## LE CŒUR : le point de terre le plus proche du centre géométrique. ⚠ Depuis
+## que la ville est un archipel, le centre de la carte peut tomber en pleine
+## eau — et c'est vers lui que le jeu ramène qui sort de la ville, et autour de
+## lui que naissent les quatre joueurs. On le cherche une fois, en spirale
+## carrée, et on s'en sert partout où « le milieu de la ville » veut dire un
+## endroit où l'on peut se tenir.
+var _coeur := Vector2.ZERO
+
+func coeur() -> Vector2:
+	if _coeur != Vector2.ZERO:
+		return _coeur
+	var c0 := COLONNES / 2
+	var l0 := LIGNES / 2
+	_coeur = centre()
+	for rayon in 90:
+		for k in maxi(1, rayon * 8):
+			# Le tour du carré de rayon `rayon`, un point sur huit suffit.
+			var angle := TAU * float(k) / float(maxi(1, rayon * 8))
+			var c := c0 + int(round(cos(angle) * float(rayon)))
+			var l := l0 + int(round(sin(angle) * float(rayon)))
+			if c < 0 or l < 0 or c >= COLONNES or l >= LIGNES:
+				continue
+			if not eau(c, l) and not sur_le_rail(c, l):
+				_coeur = centre_tuile(c, l)
+				return _coeur
+	return _coeur
+
+## Un pont, pour la photo : le premier tablier qu'on trouve avec de l'eau des
+## deux côtés. Sans lui, le banc ne cadre un pont que par chance — et un pont
+## qu'on ne photographie pas est un pont qu'on ne corrige pas.
+func un_pont() -> Vector2:
+	for k in COLONNES / PERIODE:
+		var c := k * PERIODE
+		if not est_avenue(c):
+			continue
+		for l in range(20, LIGNES - 20):
+			if eau(c, l) or not bool(tuile(c, l).get("pont", false)):
+				continue
+			if eau(c, l - 8) and eau(c, l + 8):
+				return centre_tuile(c, l)
+	return coeur()
+
+## Les deux points sont-ils sur la MÊME terre — c'est-à-dire peut-on aller de
+## l'un à l'autre en ligne droite sans traverser l'eau ? Ce n'est pas une
+## recherche de chemin, juste de quoi ne pas faire naître un joueur sur l'île
+## d'en face, à trois kilomètres du premier pont.
+func meme_terre(a: Vector2, b: Vector2) -> bool:
+	var pas := int(ceilf(a.distance_to(b) / (PAS * 0.5)))
+	for i in range(1, maxi(2, pas)):
+		var p: Vector2 = a.lerp(b, float(i) / float(pas))
+		if eau(int(floor(p.x / PAS)), int(floor(p.y / PAS))):
+			return false
+	return true
 
 ## Marge jouable au-delà des dernières tuiles : c'est de l'eau, et le rappel
 ## vers le centre ramène qui s'y aventure.
@@ -596,13 +650,64 @@ func _hors_cote(colonne: int, ligne: int) -> bool:
 	var r: float = lerpf(d.length(), max(abs(d.x), abs(d.y)), 0.45)
 	return r > limite
 
-## La rivière : une bande qui serpente d'ouest en est, un peu au sud du centre.
-func _ligne_de_riviere(colonne: int) -> float:
-	var x := float(colonne)
-	return float(LIGNES) * 0.58 + 26.0 * sin(x / 64.0 + float(_phases[3])) + 11.0 * sin(x / 21.0 + float(_phases[0]) * 2.0)
+## LES BRAS D'EAU. La ville n'est pas une île, c'en est SIX : un bras
+## horizontal — l'ancienne rivière — et deux verticaux la découpent en trois
+## colonnes et deux rangées. C'est la carte de GTA : on voit l'eau depuis la
+## rive d'en face, on sait qu'on change de monde en passant le pont, et la
+## police d'un district met un temps fou à venir.
+##
+## Chaque bras est une bande sinueuse, décrite par son AXE (0 : il court
+## d'ouest en est, sa position dépend de la colonne ; 1 : du nord au sud, sa
+## position dépend de la ligne), la part de la carte où il passe, sa largeur en
+## tuiles et deux amplitudes de sinus. ⚠ Un bras se franchit par les avenues
+## PERPENDICULAIRES : un bras horizontal se traverse par les avenues
+## verticales, et l'inverse. Sans ça, la ville se casse en morceaux
+## inatteignables — il n'y a pas de recherche de chemin dans ce jeu, une
+## voiture qui bute sur l'eau tourne au hasard.
+## ⚠ Les largeurs sont GÉNÉREUSES et les ponts RARES, et c'est le même
+## problème vu deux fois : la carte fait six cents tuiles de large, un bras de
+## dix tuiles franchi à chaque avenue ne s'y lit pas comme un bras de mer mais
+## comme une flaque percée de trous. Il faut voir la rive d'en face, et devoir
+## chercher le pont.
+const BRAS := [
+	{"axe": 0, "part": 0.60, "largeur": 26.0, "onde": 26.0, "ride": 9.0, "sel": 3},
+	{"axe": 1, "part": 0.34, "largeur": 22.0, "onde": 21.0, "ride": 7.0, "sel": 0},
+	{"axe": 1, "part": 0.75, "largeur": 22.0, "onde": 24.0, "ride": 8.0, "sel": 1},
+]
+## Une avenue sur trois porte un pont : les autres s'arrêtent au quai. Trois
+## fois moins de ponts, c'est encore un tous les six cents mètres — de quoi
+## traverser sans détour, pas de quoi oublier qu'on change d'île.
+const PONTS_PAR_AVENUE := 3
 
+## L'axe d'un bras à la traversée `t` (la colonne pour un bras horizontal, la
+## ligne pour un vertical), en tuiles.
+func _ligne_de_bras(bras: Dictionary, t: int) -> float:
+	var long := float(LIGNES if int(bras["axe"]) == 0 else COLONNES)
+	var x := float(t)
+	return long * float(bras["part"]) \
+		+ float(bras["onde"]) * sin(x / 64.0 + float(_phases[int(bras["sel"])])) \
+		+ float(bras["ride"]) * sin(x / 21.0 + float(_phases[posmod(int(bras["sel"]) + 1, 4)]) * 2.0)
+
+## Cette tuile est-elle dans le bras numéro `i` ?
+func _dans_le_bras(i: int, colonne: int, ligne: int) -> bool:
+	var bras: Dictionary = BRAS[i]
+	var horizontal := int(bras["axe"]) == 0
+	var t := colonne if horizontal else ligne
+	var v := float(ligne if horizontal else colonne) + 0.5
+	return absf(v - _ligne_de_bras(bras, t)) < float(bras["largeur"]) * 0.5
+
+## Dans quel bras d'eau tombe cette tuile ? L'indice du PREMIER, ou -1 — ce qui
+## suffit à orienter un tablier de pont ; `eau()`, lui, les regarde tous.
+func _bras_de(colonne: int, ligne: int) -> int:
+	for i in BRAS.size():
+		if _dans_le_bras(i, colonne, ligne):
+			return i
+	return -1
+
+## Gardée pour ce qui ne s'intéresse qu'à « suis-je au-dessus d'un bras » : la
+## rivière d'origine n'est plus qu'un bras parmi trois.
 func _dans_la_riviere(colonne: int, ligne: int) -> bool:
-	return abs(float(ligne) + 0.5 - _ligne_de_riviere(colonne)) < LARGEUR_RIVIERE * 0.5
+	return _bras_de(colonne, ligne) >= 0
 
 ## La voie ferrée passe-t-elle par cette tuile ? La ligne va du nord-ouest au
 ## sud-est, décalée par le code ; ses paramètres sont aussi donnés au shader du
@@ -627,13 +732,33 @@ func eau(colonne: int, ligne: int) -> bool:
 		return true
 	if _hors_cote(colonne, ligne):
 		return true
-	if _dans_la_riviere(colonne, ligne):
-		return not (_est_pont(colonne) or sur_le_rail(colonne, ligne) or not voie_libre(colonne, ligne).is_empty())
-	return false
+	var dans_un_bras := false
+	var franchi := true
+	for i in BRAS.size():
+		if not _dans_le_bras(i, colonne, ligne):
+			continue
+		dans_un_bras = true
+		# ⚠ Là où deux bras se croisent, il faut être un pont pour LES DEUX :
+		# une avenue verticale qui franchit le bras d'ouest en est longe le
+		# bras nord-sud, et la prendre pour un pont ouvrait un couloir
+		# d'asphalte au milieu de l'eau sur toute la hauteur de la carte.
+		if not _est_pont(colonne, ligne, i):
+			franchi = false
+	if not dans_un_bras:
+		return false
+	return not (franchi or sur_le_rail(colonne, ligne) or not voie_libre(colonne, ligne).is_empty())
 
-## Une avenue (une rue verticale sur quatre) franchit la rivière : c'est un pont.
-func _est_pont(colonne: int) -> bool:
-	return est_voie(colonne) and posmod(colonne / PERIODE, AVENUE) == 0
+## Une avenue franchit un bras d'eau : c'est un pont. ⚠ L'avenue doit être
+## PERPENDICULAIRE au bras — une avenue qui court dans le sens du courant ne
+## traverse rien, elle longe la berge, et la prendre pour un pont ouvrait un
+## couloir d'asphalte au milieu de l'eau sur toute la longueur de la carte.
+func _est_pont(colonne: int, ligne: int, bras: int) -> bool:
+	if bras < 0 or bras >= BRAS.size():
+		return false
+	var indice := colonne if int(BRAS[bras]["axe"]) == 0 else ligne
+	if not est_avenue(indice):
+		return false
+	return posmod(indice / PERIODE / AVENUE, PONTS_PAR_AVENUE) == 0
 
 static func est_avenue(indice: int) -> bool:
 	return est_voie(indice) and posmod(indice / PERIODE, AVENUE) == 0
@@ -1073,13 +1198,27 @@ func _amenager_rue(colonne: int, ligne: int) -> Dictionary:
 	var kl := ligne / PERIODE
 
 	# Un pont : de la chaussée au-dessus de l'eau, un lampadaire, rien d'autre.
-	if _dans_la_riviere(colonne, ligne):
-		fiche["rot"] = 0 if pc == 0 else 2
+	# ⚠ Son orientation suit celle du BRAS qu'il franchit : un pont sur un bras
+	# nord-sud court d'est en ouest, et poser ses garde-corps du mauvais côté
+	# ouvrait la chaussée sur le vide.
+	var bras := _bras_de(colonne, ligne)
+	if bras >= 0:
+		var horizontal := int(BRAS[bras]["axe"]) == 0
 		fiche["pont"] = true
+		# La clé dit dans quel sens le tablier court : le morceau y pose les
+		# garde-corps, et le shader du sol y trace la double ligne.
+		fiche["pont_axe"] = 1 if horizontal else 0
 		fiche["graine"] = 0.75
-		if pl == 3:
-			_prop(fiche, "lampadaire", centre_px + Vector2(-1.0 if pc == 0 else 1.0, 0.0) * (PAS * 0.5 - TROTTOIR * 0.5),
-				0.0 if pc == 1 else PI)
+		if horizontal:
+			fiche["rot"] = 0 if pc == 0 else 2
+			if pl == 3:
+				_prop(fiche, "lampadaire", centre_px + Vector2(-1.0 if pc == 0 else 1.0, 0.0) * (PAS * 0.5 - TROTTOIR * 0.5),
+					0.0 if pc == 1 else PI)
+		else:
+			fiche["rot"] = 1 if pl == 0 else 3
+			if pc == 3:
+				_prop(fiche, "lampadaire", centre_px + Vector2(0.0, -1.0 if pl == 0 else 1.0) * (PAS * 0.5 - TROTTOIR * 0.5),
+					PI * 0.5 if pl == 1 else -PI * 0.5)
 		return fiche
 
 	# Une rue fermée : les deux pâtés n'en font qu'un. Dans un quartier dense,
@@ -2028,7 +2167,19 @@ func couleur_du_gang(indice: int) -> Color:
 ## même endroit se poussent mutuellement dans un mur avant même le décompte.
 func depart(place: int, rng: RandomNumberGenerator) -> Dictionary:
 	var angle := TAU * float(posmod(place, 4)) / 4.0
-	var p := point_de_rue(rng, centre() + Vector2.RIGHT.rotated(angle) * 420.0, 0.0, 240.0)
+	# ⚠ Tous les joueurs naissent sur l'ÎLE DU CŒUR. Tirés autour du centre
+	# géométrique, deux d'entre eux tombaient de part et d'autre d'un bras
+	# d'eau et ne se croisaient pas de la manche — il n'y a pas de recherche de
+	# chemin ici, et le premier pont peut être à trois kilomètres.
+	var ancre := coeur()
+	var p := ancre
+	for essai in 12:
+		var vers := ancre + Vector2.RIGHT.rotated(angle) * 420.0
+		p = point_de_rue(rng, vers, 0.0, 240.0)
+		if meme_terre(ancre, p):
+			break
+		# Une place occupée par l'eau : on tourne d'un huitième et on rapproche.
+		angle += PI * 0.25
 	return {"p": p, "a": angle + PI}
 
 # ------------------------------------------------------------ la casse

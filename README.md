@@ -12,11 +12,8 @@ bâti au couchant et tournant lentement sous l'effet maquette. Quand la ville
 change, le menu change avec elle. « Commencer » demande un pseudo et un
 personnage, « Options » règle le son, l'image et les touches, « Quitter »
 renvoie sur piks-l.com. La pochette du jeu est posée à gauche, dans une vraie boîte 3D qui se retourne au survol pour montrer son dos.
-**Le village n'existe plus.** Il a été l'écran d'accueil — une place, cinq
-maisons, des habitants, des portails — et Pikstown a pris sa place : c'est la
-ville, maintenant, qui est le hub. `scenes/hub.gd` et `scenes/accueil.gd` sont
-supprimés, avec les modèles qui ne servaient qu'à eux ; ce qui savait les
-bâtir dort encore dans `outils/voxel.py`, sous `VILLAGE = False`.
+Le village en voxels reste joignable par `--ecran=hub` le temps que les
+bâtiments de la ville ouvrent les autres jeux.
 
 **Le casting vient de Kenney** (`modeles/kenney/`, CC0) : un seul maillage
 articulé de 58 os, `characterMedium.fbx`, et douze images de peau tirées des
@@ -26,12 +23,9 @@ propres fichiers, sans maillage, et se greffent sur le squelette à la volée
 (`commun/personnages.gd`). Douze personnages pour le poids d'un.
 
 **Tout se règle** (`autoload/reglages.gd`, gardé dans `user://`) : trois
-volumes sur trois bus audio, les effets d'image, les ombres, la finesse du
-rendu, le plein écran, et chaque touche du clavier. Les trois valent partout,
-menu ET Piks Theft Auto : `Commandes` lit toutes ses touches dans les
-réglages, et `MatieresCarnage.ambiance()` y prend son halo et ses ombres.
-L'interface sonne, elle aussi — neuf bruitages de menu dans `sons/interface/`,
-sur le bus « Effets ».
+volumes sur trois bus audio, l'effet maquette, les ombres, la finesse du rendu,
+le plein écran, et chaque touche du clavier — que `Commandes` lit désormais
+sans exception.
 
 **La ville s'entend.** Piks Theft Auto tire ses bruitages de `sons/sfx/` : 238
 échantillons OGG mono 22 kHz, 2,1 Mo en tout — armes, moteurs par châssis,
@@ -306,6 +300,41 @@ tuiles sur une la faisait déborder en travers de la rue. La nuit, les fenêtres
 les carreaux à leur bleu franc dans l'atlas — ⚠ seulement sur les faces
 VERTICALES, sans quoi le gris-bleu des toitures passait pour du vitrage et
 les toits luisaient.
+
+**La ville est un ARCHIPEL.** Depuis la v13, trois bras d'eau (`PlanVille.BRAS`)
+la découpent en six îles : un bras d'ouest en est — l'ancienne rivière — et
+deux du nord au sud. On voit la rive d'en face, on sait qu'on change de monde
+en passant le pont, et la police d'un district met un temps fou à venir. Deux
+réglages ont demandé plusieurs essais à l'image : les bras sont LARGES (vingt
+à vingt-six tuiles) et les ponts RARES (une avenue sur trois,
+`PONTS_PAR_AVENUE`) — c'est le même problème vu deux fois, un bras de dix
+tuiles franchi à chaque avenue ne se lit pas comme un bras de mer mais comme
+une flaque percée de trous.
+
+Trois pièges, tous vérifiés carte en main. ⚠ Un bras se franchit par les
+avenues **perpendiculaires** : une avenue qui court dans le sens du courant ne
+traverse rien, elle longe la berge, et la prendre pour un pont ouvrait un
+couloir d'asphalte au milieu de l'eau sur toute la carte. ⚠ Là où deux bras se
+croisent, il faut être un pont pour **les deux**, sinon le même couloir
+réapparaît au croisement. ⚠ Et la ville doit rester **d'un seul tenant** : il
+n'y a aucune recherche de chemin dans ce jeu — une voiture qui bute sur l'eau
+tourne au hasard, une patrouille reste plaquée contre le rivage. On le vérifie
+en comptant les composantes connexes de la carte (un atelier qui parcourt les
+tuiles praticables en largeur) : il doit en rester UNE.
+
+Ce que l'archipel a obligé à reprendre : le **cœur** (`PlanVille.coeur`), le
+point de terre le plus proche du centre géométrique, parce que le milieu de la
+carte peut désormais tomber en pleine eau — et c'est vers lui qu'on ramène qui
+sort de la ville, et autour de lui que naissent les quatre joueurs. `depart`
+vérifie en plus que chaque place est sur la **même terre** que le cœur
+(`meme_terre`, un échantillonnage du segment) : tirés autour du centre, deux
+joueurs tombaient de part et d'autre d'un bras et ne se croisaient pas de la
+manche. Et les PONTS ont enfin une géométrie : un garde-corps de chaque côté
+du tablier et une pile qui plonge dans l'eau sous une travée sur trois
+(`MorceauVille._poser_le_pont`, une instance par tuile et par côté — une file
+de cubes en coûterait mille sur un pont de vingt-six tuiles). `--banc-position=pont`
+cadre un tablier : un pont qu'on ne photographie pas est un pont qu'on ne
+corrige pas.
 
 **Les habitants sont des gens.** Depuis la v12, les piétons, les hommes de
 main, les flics à pied et les joueurs descendus de voiture viennent du CASTING

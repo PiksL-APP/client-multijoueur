@@ -318,6 +318,9 @@ func preparer() -> void:
 					# `--banc-position=etoile` : partir près de la grande place, dont
 					# la position dépend du code de la manche.
 					_position = carte.point_de_rue(_rng, carte.place_etoile(), 320.0, 480.0)
+				elif String(argument).ends_with("pont"):
+					# `--banc-position=pont` : sur un tablier, l'eau des deux côtés.
+					_position = carte.un_pont()
 	_vehicule = ID_VOITURE_DEPART + place
 	_pied = false
 
@@ -1111,7 +1114,10 @@ func _surveiller_la_friche(delta: float) -> void:
 		_hors_ville = max(0.0, _hors_ville - delta * 2.0)
 		return
 	_hors_ville += delta
-	var vers_centre := (carte.centre() - _position).normalized()
+	# ⚠ Vers le CŒUR, pas vers le centre géométrique : depuis que la ville est
+	# un archipel, le milieu de la carte peut être en pleine eau, et on y
+	# poussait le joueur perdu jusqu'à ce qu'il y reste planté.
+	var vers_centre := (carte.coeur() - _position).normalized()
 	_position += vers_centre * RETOUR * delta * min(_hors_ville, 3.0)
 
 ## Les lieux qui font quelque chose quand on s'y arrête : le garage de

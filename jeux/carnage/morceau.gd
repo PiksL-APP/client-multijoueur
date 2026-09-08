@@ -192,6 +192,8 @@ func _lire_les_fiches() -> void:
 		for c in range(c0, c0 + PlanVille.MORCEAU):
 			var fiche := _plan.tuile(c, l)
 			_fiches.append(fiche)
+			if bool(fiche.get("pont", false)):
+				_poser_le_pont(fiche)
 			var rang := 0
 			for b in fiche["batis"]:
 				_poser_immeuble(b, id_immeuble(c, l, rang))
@@ -411,16 +413,35 @@ func _instance(centre: Vector3, taille: Vector3, couleur: Color) -> void:
 
 # ------------------------------------------------------------ étape 1 : le sol
 
+## L'EAU : la dalle du fond reste dans le maillage du sol (c'est la vase), et
+## la nappe vive part dans un maillage à part, découpée menu — sans quoi le
+## shader n'aurait que quatre sommets par tuile à lever, et pas une facette.
+const EAU_FOND := -1.6            ## la vase, sous la nappe
+const EAU_NAPPE := -0.55          ## le niveau au repos ; les vagues font ±0,45
+const EAU_DECOUPE := 4            ## carreaux par côté de tuile (2,5 unités)
+
 func _poser_le_sol() -> void:
 	var sol := SurfaceTool.new()
 	sol.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var eau := SurfaceTool.new()
+	eau.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var quelque_eau := false
 	for fiche in _fiches:
 		_dalle(sol, fiche)
+		if int(fiche["sol"]) == PlanVille.S_EAU:
+			_nappe_eau(eau, fiche)
+			quelque_eau = true
 	var noeud_sol := MeshInstance3D.new()
 	noeud_sol.mesh = sol.commit()
 	noeud_sol.material_override = MatieresCarnage.sol()
 	noeud_sol.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(noeud_sol)
+	if quelque_eau:
+		var noeud_eau := MeshInstance3D.new()
+		noeud_eau.mesh = eau.commit()
+		noeud_eau.material_override = MatieresCarnage.eau()
+		noeud_eau.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(noeud_eau)
 
 # ------------------------------------------------------------ étape 2 : les cubes
 
@@ -701,6 +722,47 @@ func rez_de_chaussee_restant(id: int) -> float:
 				pleins += 1
 	return float(pleins) / float(max(1, nx * nz))
 
+## LE PONT. Jusqu'à la v13 une tuile de pont était une dalle de bitume posée
+## sur l'eau, sans plus : on franchissait un bras de mer comme on traverse une
+## rue, et rien ne disait qu'il y avait le vide dessous. On lui donne donc ce
+## qui fait un pont vu d'en haut — un GARDE-CORPS de chaque côté du tablier,
+## et une PILE qui descend dans l'eau sous une travée sur trois.
+##
+## ⚠ Les garde-corps se posent le long du tablier, pas en travers : la clé
+## `pont_axe` de la fiche dit dans quel sens il court (0 : d'ouest en est,
+## 1 : du nord au sud), parce qu'un pont sur un bras nord-sud franchit d'est
+## en ouest, et l'inverse.
+const HAUT_GARDE := 1.1
+const EPAIS_GARDE := 0.5
+
+func _poser_le_pont(fiche: Dictionary) -> void:
+	var c := int(fiche["c"])
+	var l := int(fiche["l"])
+	var axe := int(fiche.get("pont_axe", 1))
+	var centre_p := Decor.vers3d(PlanVille.centre_tuile(c, l), 0.0)
+	var demi := PlanVille.TUILE * 0.5
+	# Le tablier court selon `long`, les garde-corps se posent selon `large`.
+	var long := Vector3(PlanVille.TUILE, 0, 0) if axe == 0 else Vector3(0, 0, PlanVille.TUILE)
+	var large := Vector3(0, 0, 1) if axe == 0 else Vector3(1, 0, 0)
+	# Le garde-corps ne se pose qu'au BORD de la chaussée, c'est-à-dire sur la
+	# tuile de rue extérieure : posé sur les deux, il coupait la rue en deux.
+	var pc := posmod(c, PlanVille.PERIODE)
+	var pl := posmod(l, PlanVille.PERIODE)
+	var bord := (pc if axe == 1 else pl)
+	if bord > 1:
+		return
+	var cote := -1.0 if bord == 0 else 1.0
+	var muret := centre_p + large * (demi * cote * 0.94) + Vector3(0, HAUT_GARDE * 0.5, 0)
+	var gris := Color(0.62, 0.64, 0.68, VoxelsCarnage.MUR)
+	# Une seule instance par tuile et par côté : le muret est une boîte étirée,
+	# pas une file de cubes — un pont de vingt-six tuiles en coûterait mille.
+	_instance(muret, long + large * EPAIS_GARDE + Vector3(0, HAUT_GARDE, 0), gris)
+	# La pile : un pilier trapu sous une travée sur trois, qui plonge sous le
+	# niveau de l'eau — c'est ce qui donne sa hauteur au pont.
+	if posmod(c + l, 3) == 0:
+		var pile := centre_p + large * (demi * cote * 0.7) + Vector3(0, -1.4, 0)
+		_instance(pile, Vector3(2.2, 3.0, 2.2), Color(0.5, 0.52, 0.56, VoxelsCarnage.MUR))
+
 # ------------------------------------------------------------ géométrie
 
 ## Une tuile de sol : un quadrilatère à plat, UV tournées selon la fiche,
@@ -710,7 +772,7 @@ func _dalle(st: SurfaceTool, fiche: Dictionary) -> void:
 	var c := int(fiche["c"])
 	var l := int(fiche["l"])
 	var sol := int(fiche["sol"])
-	var y := -0.3 if sol == PlanVille.S_EAU else 0.0
+	var y := EAU_FOND if sol == PlanVille.S_EAU else 0.0
 	var rot := int(fiche["rot"])
 	var teinte: Color = fiche["teinte"]
 	# La graine : du bruit pour le shader, et ≥ 0,5 sur une avenue (le shader y
@@ -726,6 +788,29 @@ func _dalle(st: SurfaceTool, fiche: Dictionary) -> void:
 		st.set_uv2(Vector2(float(sol), graine))
 		st.set_normal(Vector3.UP)
 		st.add_vertex(p)
+
+## La NAPPE d'eau d'une tuile : une grille plate de EAU_DECOUPE carreaux de
+## côté. Elle ne porte ni UV ni couleur — le shader EAU lève chaque sommet
+## d'après sa position dans le monde, et prend la normale à la dérivée de la
+## face. La grille est calée sur la tuile, donc deux tuiles d'eau voisines
+## posent leurs sommets aux mêmes points : ils se lèvent pareil, sans une
+## fente entre les deux. Sur la rive, la nappe s'arrête net au bord de la
+## tuile, un mètre sous le quai : c'est le quai qui cache la couture.
+func _nappe_eau(st: SurfaceTool, fiche: Dictionary) -> void:
+	var c := int(fiche["c"])
+	var l := int(fiche["l"])
+	var pas := PlanVille.TUILE / float(EAU_DECOUPE)
+	var x0 := c * PlanVille.TUILE
+	var z0 := l * PlanVille.TUILE
+	for i in EAU_DECOUPE:
+		for j in EAU_DECOUPE:
+			var a := Vector3(x0 + i * pas, EAU_NAPPE, z0 + j * pas)
+			var b := a + Vector3(pas, 0.0, 0.0)
+			var d := a + Vector3(pas, 0.0, pas)
+			var e := a + Vector3(0.0, 0.0, pas)
+			for p in [a, b, d, a, d, e]:
+				st.set_normal(Vector3.UP)
+				st.add_vertex(p)
 
 ## Les coordonnées de texture d'un coin de tuile dont le dessin a été tourné de
 ## `rot` quarts de tour dans le sens horaire : on défait la rotation.

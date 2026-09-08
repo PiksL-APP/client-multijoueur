@@ -420,7 +420,7 @@ func prochain_id() -> int:
 func _autour_d_un_joueur(joueurs: Dictionary) -> Vector2:
 	var cles := joueurs.keys()
 	if cles.is_empty():
-		return plan.centre()
+		return plan.coeur()   # ⚠ le cœur, pas le centre : il peut être en pleine eau
 	return joueurs[cles[_rng.randi_range(0, cles.size() - 1)]]["p"]
 
 func _naitre_passant(joueurs: Dictionary, large: bool) -> void:
