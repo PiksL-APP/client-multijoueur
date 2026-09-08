@@ -182,7 +182,17 @@ village, on change le script et on le relance ; `outils/voir.sh a,b` pose des
 modèles en ligne et les photographie. Un modèle fin est en voxels de 1/8
 d'unité, les arbres et le terrain en 1/4 ou 1/2 : le grain reste lisible et
 les fichiers petits (un grain de couleur se limite à trois teintes, sinon le
-maillage glouton ne fusionne plus rien). Les collisions du hub ne se codent
+maillage glouton ne fusionne plus rien). Le maillage cuit une OCCLUSION
+AMBIANTE dans les sommets (quatre niveaux, `Modele.AO`) : c'est elle qui fait
+lire un monde de cubes — sans elle deux faces perpendiculaires de même teinte
+se confondent et tout paraît plat. Deux cases ne fusionnent que si couleur ET
+occlusion concordent, et le pli du quadrilatère suit la diagonale la plus
+claire. La couleur d'une masse (feuillage, pelouse, dallage) vient d'un BRUIT
+DE TACHES (`bruit(x, y, z, maille, graine)`) mêlé à la hauteur, jamais d'un
+tirage case par case : tiré au sort, un feuillage grésille comme de la neige
+de télévision — et un sol taché se fusionne en grands rectangles, donc coûte
+moins cher. Le relief n'existe qu'en dehors de la clairière (le sol sous les
+pieds du joueur reste plat : les collisions, elles, le sont). Les collisions du hub ne se codent
 pas à la main : elles viennent de `plan.json`. Le pack *Pixel Crawler*
 (`modeles/village/`, `outils/village.py`) ne sert plus qu'à `Pixels.heros_de`
 (le héros par défaut d'un identifiant) — les portraits de l'accueil sont des
