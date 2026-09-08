@@ -307,14 +307,18 @@ func preparer() -> void:
 	monde().add_child(_corps_auto)
 
 	# Le post-traitement (vignette, grain) : premier enfant de la couche, donc
-	# SOUS l'interface — le HUD ne doit pas prendre le grain.
-	var post := ColorRect.new()
-	post.name = "Post"
-	post.set_anchors_preset(Control.PRESET_FULL_RECT)
-	post.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	post.material = MatieresCarnage.post()
-	interface().add_child(post)
-	interface().move_child(post, 0)
+	# SOUS l'interface — le HUD ne doit pas prendre le grain. ⚠ Il obéit au
+	# réglage « effets » du hub : c'est une passe plein écran qui relit l'image,
+	# donc la première chose à couper sur une machine lente — et le joueur qui
+	# la coupe dans les options doit la voir disparaître ici aussi.
+	if Reglages.effets and not ("--sans-effets" in OS.get_cmdline_args()):
+		var post := ColorRect.new()
+		post.name = "Post"
+		post.set_anchors_preset(Control.PRESET_FULL_RECT)
+		post.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		post.material = MatieresCarnage.post()
+		interface().add_child(post)
+		interface().move_child(post, 0)
 
 	# Les traces de pneus : une nappe d'instances qu'on réutilise en anneau.
 	# Un rectangle par roue et par pas de temps, qui pâlit avec l'âge.
@@ -2402,6 +2406,18 @@ func fiche_joueur() -> Dictionary:
 		fiche["alerte"] = alerte
 	return fiche
 
+## Les cabochons d'aide, en bas de l'écran. ⚠ Ils sont LUS dans les réglages,
+## jamais écrits en dur : un joueur qui a remis « avancer » sur la flèche haut
+## dans les options du hub lisait quand même « Z S » ici, et cherchait la
+## panne dans le jeu. `Reglages.nom_de_touche` rend le nom GRAVÉ sur son
+## clavier — « Z » sur un AZERTY là où le moteur dit « W ».
 func aide_touches() -> Array:
-	return [["Z S", "avancer, freiner"], ["Q D", "tourner"], ["ESPACE", "tirer"],
-		["E", "monter, descendre"], ["H", "klaxon"], ["TAB", "carte"]]
+	var t := func(action: String) -> String: return Reglages.nom_de_touche(action)
+	return [
+		["%s %s" % [t.call("avancer"), t.call("reculer")], "avancer, freiner"],
+		["%s %s" % [t.call("gauche"), t.call("droite")], "tourner"],
+		[t.call("tir"), "tirer"],
+		[t.call("action"), "monter, descendre"],
+		[t.call("klaxon"), "klaxon"],
+		[t.call("carte"), "carte"],
+	]

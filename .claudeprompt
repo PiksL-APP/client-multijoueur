@@ -103,6 +103,12 @@ rendu et l'interface ; le reste est à côté :
   d'instance, carreaux allumés la nuit sur les faces verticales seulement).
   ⚠ Chaque kit a SON `Textures/colormap.png`, en fichier externe ;
   ⚠ `SurfaceTool` ne garde pas les matières.
+- LES RÉGLAGES DU HUB s'appliquent à Carnage : `aide_touches()` construit ses
+  cabochons avec `Reglages.nom_de_touche` (jamais de touche en dur) ;
+  `Reglages.ombres` pilote `soleil.shadow_enabled` et `Reglages.effets` le
+  `glow` de l'environnement et la passe POST (le `ColorRect` n'est même pas
+  créé). ⚠ `MatieresCarnage._reglage(nom, defaut)` lit l'autoload DANS
+  L'ARBRE : les ateliers en `-s script.gd` n'en ont pas.
 - LES HABITANTS (v12) : ils viennent du casting partagé `Personnages`
   (`commun/personnages.gd`) — `Personnages.creer(cle, echelle)` rend le modèle
   habillé avec son AnimationPlayer « Animations » (repos/course/saut).

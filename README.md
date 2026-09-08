@@ -306,6 +306,24 @@ lise. Le fanion des hommes de main se dresse maintenant AU-DESSUS de la tête ;
 planté à hauteur d'épaule comme du temps des cubes, il passait devant le
 visage.
 
+**Les options du hub commandent la ville.** Ce qu'on règle dans l'écran des
+options vaut partout, Carnage compris — un réglage qui ne s'applique qu'à
+moitié se lit comme une panne du jeu. Les TOUCHES : les cabochons d'aide en bas
+de l'écran sont construits avec `Reglages.nom_de_touche`, jamais écrits en dur
+— un joueur qui a remis « avancer » sur la flèche haut lisait quand même
+« Z S » et cherchait le défaut dans le jeu ; et le nom affiché est celui GRAVÉ
+sur son clavier (« Z » sur un AZERTY là où le moteur dit « W »). Les OMBRES :
+`Reglages.ombres` éteint l'ombre portée du soleil de la ville — les taches de
+contact sous les voitures restent, ce sont des maillages, et sans elles les
+voitures flottent. Les EFFETS : `Reglages.effets` coupe le halo de
+l'environnement et la passe de post-traitement (vignette, grain, coup rouge à
+l'impact), qui relit l'image entière et est la première chose à retirer sur
+une machine lente. La finesse de rendu et les volumes, eux, agissent déjà par
+le viewport racine et les bus audio. ⚠ `MatieresCarnage` va chercher ces
+réglages DANS L'ARBRE (`_reglage`) au lieu de nommer l'autoload : les ateliers
+et les bancs lancés en `-s script.gd` n'ont pas d'autoload, et une référence
+directe les ferait tous tomber en panne de compilation.
+
 **Ça brûle.** Une voiture qui saute laisse un BRASIER, et un brasier est une
 chose vivante : il chauffe ce qui l'entoure (passants, joueurs, tôle), il
 essaie toutes les trois secondes de sauter sur une voiture voisine — qui

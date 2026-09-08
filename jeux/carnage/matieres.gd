@@ -926,6 +926,18 @@ static func _valeur(cle: String, n: float):
 ## a pas une seule vraie lumière dans la ville en dehors de ces deux-là : le
 ## mode compatibilité n'en supporte que huit par objet, et une flaque additive
 ## au sol fait le même effet pour rien.
+## Un réglage du hub, lu SANS dépendre de l'autoload. ⚠ `Reglages` n'existe
+## que dans le jeu : les ateliers et les bancs lancés en `-s script.gd` n'ont
+## pas d'autoload, et une référence directe les ferait tous tomber en panne de
+## compilation. On va donc le chercher dans l'arbre, et on retombe sur la
+## valeur d'usine s'il n'y est pas.
+static func _reglage(nom: String, defaut: bool) -> bool:
+	var boucle := Engine.get_main_loop()
+	if boucle == null or not (boucle is SceneTree):
+		return defaut
+	var noeud := (boucle as SceneTree).root.get_node_or_null("/root/Reglages")
+	return bool(noeud.get(nom)) if noeud != null else defaut
+
 static func ambiance() -> Array:
 	var environnement := Environment.new()
 	var ciel := ProceduralSkyMaterial.new()
@@ -939,7 +951,7 @@ static func ambiance() -> Array:
 	environnement.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environnement.fog_enabled = true
 	environnement.fog_sky_affect = 0.35
-	environnement.glow_enabled = true
+	environnement.glow_enabled = _reglage("effets", true)
 	environnement.glow_strength = 1.0
 	environnement.glow_bloom = 0.12
 	environnement.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
@@ -950,7 +962,7 @@ static func ambiance() -> Array:
 	monde.environment = environnement
 
 	var soleil := DirectionalLight3D.new()
-	soleil.shadow_enabled = true
+	soleil.shadow_enabled = _reglage("ombres", true)
 	soleil.directional_shadow_max_distance = 220.0
 	soleil.shadow_bias = 0.05
 	soleil.shadow_normal_bias = 1.5
