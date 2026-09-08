@@ -33,6 +33,24 @@ réglages, et `MatieresCarnage.ambiance()` y prend son halo et ses ombres.
 L'interface sonne, elle aussi — neuf bruitages de menu dans `sons/interface/`,
 sur le bus « Effets ».
 
+**La ville s'entend.** Piks Theft Auto tire ses bruitages de `sons/sfx/` : 238
+échantillons OGG mono 22 kHz, 2,1 Mo en tout — armes, moteurs par châssis,
+tôle, pas, voix de trottoir, radio de la police. Chacun est chargé au premier
+usage puis gardé : rien à attendre au démarrage, rien à télécharger pour un
+son qu'on n'entendra jamais. Chaque arme a sa détonation, le moteur suit le
+châssis, le crissement se déclenche sur l'ÉCART entre le cap de la voiture et
+sa trajectoire réelle — un virage négocié reste muet, un tête-à-queue
+s'entend. Deux choses sortent de la file des voix et prennent leur propre
+lecteur : la **sirène**, parce qu'une poursuite est un état et non un
+événement — elle tient, enfle avec les étoiles, passe au régime rapide à
+trois, et un coup de feu ne la coupe plus ; et le **dispatch**, qui assemble
+des bribes enregistrées mot à mot en `AudioStreamPlaylist` (« all units /
+respond to / a ten-90 / in vicinity of area 7 / heading east / suspect is
+armed »). La synthèse d'origine reste entière, en filet : si un fichier
+manque, `jouer("choc")` sort quand même un choc. L'ÉNIGME, elle, garde ses
+ondes calculées — c'est un jeu abstrait, il n'a rien à gagner à sonner comme
+une rue.
+
 **Un mur ne stoppe pas, il fait glisser.** Une collision ne coûte que la part
 de vitesse mise dans la façade, et la voiture se réaligne dessus quand on la
 frôle. Le braquage atteint son plein dès 165 px/s : avant, la voiture ne
@@ -657,8 +675,9 @@ cassent le chargement de ressources tierces. Pour de la 2D, on n'y perd rien.
   tuiles dessinées une par une, c'est quatre cents appels de dessin par image,
   ce qui ne passe pas dans un navigateur en mode compatibilité. Regroupées par
   modèle, il en reste une quinzaine.
-- Le son est entièrement synthétisé au démarrage (`autoload/sons.gd`) : aucun
-  fichier binaire au dépôt. **M** le coupe, et le choix survit à la session.
+- Le son de la ville tient dans 2,1 Mo d'échantillons (`sons/sfx/`) ; la
+  synthèse d'origine (`autoload/sons.gd`) reste le filet et sert encore
+  l'ÉNIGME. **M** coupe tout, et le choix survit à la session.
 - Le classement affiché est un top brut ; pas de saison, pas de remise à zéro.
 - Chaque manche consomme des messages Realtime (≈ 50 par seconde à quatre
   joueurs). C'est confortable à l'échelle d'une démonstration, à surveiller si
