@@ -45,6 +45,7 @@ const LIEUX := {
 			"La taverne mène au Carnage, l'armurerie à l'Énigme, l'auberge à la Bousculade.",
 			"Le champion du Carnage, c'est {champion_carnage}. À l'Énigme, {champion_enigme}. À la Bousculade, {champion_bousculade}.",
 			"Les réverbères s'allument tout seuls le soir. Personne ne sait qui les entretient.",
+			"Chaque arche donne sur un monde qui n'est pas fait de la même pâte que le nôtre.",
 			"Le tableau, là-bas au coin de la place, dit qui a joué en dernier.",
 		]}],
 	},
@@ -53,6 +54,8 @@ const LIEUX := {
 		"rangs": 5,
 		"jeu": "carnage",
 		"titre": "CARNAGE",
+		"monde": 0,
+		"couleur": Color("#ff9a3c"),
 		"pnj": [{"nom": "serveuse", "position": Vector2(48, 112), "phrases": [
 			"Une chope ? Non ? Alors pousse-toi, j'ai des tables.",
 			"Le patron dit que les vainqueurs boivent gratis. Il ment.",
@@ -63,7 +66,8 @@ const LIEUX := {
 			"Décroche à une cabine : ils paient pour ce qu'ils n'osent pas faire eux-mêmes.",
 			"Descends de voiture quand il le faut — mais à pied, tout te fait mal deux fois.",
 			"Les deux esplanades cerclées de rouge, c'est là qu'on règle ses comptes entre nous.",
-			"Le portail, c'est l'arche du fond, à droite. On y va à deux, à trois, à quatre.",
+			"Regarde par l'arche du fond : là-bas rien n'est taillé au cube. C'est une autre matière.",
+			"On y va à deux, à trois, à quatre. Personne n'en revient tout à fait pareil.",
 		]}],
 	},
 	"armurerie": {
@@ -71,11 +75,13 @@ const LIEUX := {
 		"rangs": 5,
 		"jeu": "enigme",
 		"titre": "ÉNIGME",
+		"monde": 1,
+		"couleur": Color("#7fe0d6"),
 		"pnj": [{"nom": "squelette", "position": Vector2(72, 88), "phrases": [
 			"Trois chambres. Aucune ne s'ouvre à un seul.",
 			"Une dalle ne reste enfoncée que si quelque chose pèse dessus — quelqu'un, ou une caisse.",
 			"Et la sortie n'accepte l'équipe qu'au complet. Personne ne finit seul.",
-			"Le portail est là, au fond, à droite.",
+			"Le portail est là, au fond. Regarde dedans : la pierre y est lisse, et froide.",
 		]}],
 	},
 	"auberge": {
@@ -83,17 +89,90 @@ const LIEUX := {
 		"rangs": 5,
 		"jeu": "bousculade",
 		"titre": "BOUSCULADE",
+		"monde": 2,
+		"couleur": Color("#8fd0ff"),
 		"pnj": [{"nom": "aubergiste", "position": Vector2(168, 72), "phrases": [
 			"Chut, il y a des gens qui dorment. Ici on se repose entre deux parties.",
 			"Derrière l'arche, l'île flotte. On s'y bouscule : le dernier debout gagne.",
 			"Espace pour charger. Une charge dans le dos, et l'autre part dans le vide.",
 			"L'île s'effrite par le bord. Reste au milieu, ou pousse plus fort que les autres.",
 			"Tombé ? On te repêche au centre trois secondes plus tard. Mais l'autre a marqué.",
+			"Par l'arche, on voit l'île. Elle est du même bois que nous, celle-là.",
 		]}],
 	},
 	"maison": {"nom": "Maison", "ferme": "C'est fermé. Les habitants sont partis jouer au Carnage."},
 	"grange": {"nom": "Grange", "ferme": "La grange donne sur la ferme. Elle ouvre bientôt : ça sent déjà le foin et les radis."},
 }
+
+## Le portail n'est pas une lueur : c'est une FENÊTRE. Le hub est en voxels,
+## les jeux ne le sont pas — plutôt que de cacher l'écart, l'arche le montre.
+## On voit derrière elle un aperçu du monde où l'on va : la ville de nuit du
+## Carnage et ses fenêtres allumées, la pierre froide et les dalles de
+## l'Énigme, le ciel et l'île de la Bousculade. Le passage est alors un
+## passage, et le contraste devient une intention.
+const FENETRE := """
+shader_type spatial;
+render_mode unshaded, cull_disabled;
+uniform int monde = 0;
+uniform float battement = 1.0;
+
+float hache(vec2 p) { return fract(sin(dot(p, vec2(41.31, 289.17))) * 43758.5453); }
+
+void fragment() {
+	// UV part du HAUT en Godot ; on remet le ciel en haut et le sol en bas.
+	vec2 uv = vec2(UV.x, 1.0 - UV.y);
+	vec3 c;
+	if (monde == 0) {
+		// CARNAGE : une ville de nuit, des tours, des fenêtres, des phares.
+		// De GRANDES formes : à travers une arche, l'image ne fait que
+		// soixante pixels de haut à l'écran — un détail fin n'y est que du bruit.
+		c = mix(vec3(0.58, 0.34, 0.40), vec3(0.08, 0.09, 0.26), uv.y);
+		c = mix(c, vec3(1.0, 0.95, 0.86),
+			smoothstep(0.07, 0.045, distance(uv * vec2(1.0, 2.2), vec2(0.74, 1.72))));
+		vec2 g = floor(vec2(uv.x * 5.0, uv.y * 8.0));
+		float haut = hache(vec2(g.x, 1.0)) * 0.40 + 0.26;
+		if (uv.y < haut) {
+			c = vec3(0.06, 0.06, 0.14);
+			float allumee = step(0.66, hache(g));
+			float vacille = step(0.15, fract(hache(g) * 9.0 + TIME * 0.13));
+			c = mix(c, vec3(1.0, 0.74, 0.32), allumee * vacille);
+		}
+		for (int i = 0; i < 2; i++) {
+			float f = float(i);
+			float x = fract(TIME * (0.22 + f * 0.13) + f * 0.5);
+			c += vec3(1.0, 0.90, 0.60) * smoothstep(0.09, 0.0, distance(uv, vec2(x, 0.06 + f * 0.05)));
+		}
+	} else if (monde == 1) {
+		// ÉNIGME : une salle de pierre froide, des dalles qui s'allument.
+		c = mix(vec3(0.52, 0.58, 0.64), vec3(0.20, 0.26, 0.32), uv.y);
+		vec2 g = floor(uv * vec2(4.0, 6.0));
+		float joint = step(0.09, fract(uv.x * 4.0)) * step(0.09, fract(uv.y * 6.0));
+		c *= 0.66 + 0.34 * joint;
+		float pulse = 0.5 + 0.5 * sin(TIME * 1.4 + hache(g) * 6.28);
+		float active = step(0.72, hache(g));
+		c = mix(c, vec3(0.55, 1.0, 0.92), active * pulse);
+	} else {
+		// BOUSCULADE : le grand ciel, et l'île qui flotte dans le vide.
+		c = mix(vec3(0.62, 0.80, 0.94), vec3(0.16, 0.42, 0.80), uv.y);
+		for (int i = 0; i < 3; i++) {
+			float f = float(i);
+			vec2 p = vec2(fract(0.2 + f * 0.37 + TIME * (0.014 + f * 0.006)), 0.62 + f * 0.11);
+			c = mix(c, vec3(1.0), smoothstep(0.13, 0.02, distance(uv * vec2(1.0, 1.9), p * vec2(1.0, 1.9))) * 0.85);
+		}
+		float d = distance(uv * vec2(1.0, 0.7), vec2(0.5, 0.24 + 0.012 * sin(TIME * 0.7)));
+		c = mix(c, vec3(0.34, 0.60, 0.30), smoothstep(0.20, 0.17, d));
+		c = mix(c, vec3(0.46, 0.36, 0.28), smoothstep(0.17, 0.13, d) * step(0.30, uv.y * -1.0 + 0.62));
+	}
+	// Le bord de l'arche se fond dans la pierre : une image nette au ras du
+	// mur ressemblerait à une affiche collée, pas à une ouverture.
+	float bord = min(min(uv.x, 1.0 - uv.x) * 3.4, min(uv.y, 1.0 - uv.y) * 3.4);
+	c *= smoothstep(0.0, 0.14, bord);
+	// Une fenêtre laisse passer la lumière : elle est plus claire que la
+	// pièce, sinon l'arche n'est qu'un trou noir dans un mur.
+	ALBEDO = c * (1.35 + 0.2 * battement);
+}
+"""
+static var _fenetre: Shader
 
 static var _carte: Dictionary = {}
 
@@ -433,22 +512,31 @@ func _batir_piece(lieu: String, geometrie: Dictionary) -> void:
 	for vitre in geometrie.get("fenetres", []):
 		_lampe(Vector3(float(vitre[0]), float(vitre[1]), float(vitre[2]) + 0.8), Color(0.8, 0.9, 1.0), 4.0, 0.5)
 	if _portail != Rect2():
-		# Le vide de l'arche s'emplit d'une lueur qui palpite.
-		var lueur := MeshInstance3D.new()
+		# L'arche s'ouvre sur l'autre monde : on voit ce qui attend derrière.
+		var fiche: Dictionary = LIEUX[lieu]
+		if _fenetre == null:
+			_fenetre = Shader.new()
+			_fenetre.code = FENETRE
+		var vue := MeshInstance3D.new()
 		var q := QuadMesh.new()
 		q.size = Vector2(1.5, 2.5)
-		lueur.mesh = q
-		var m := StandardMaterial3D.new()
-		m.albedo_color = Palette.SERIE.lightened(0.2)
-		m.emission_enabled = true
-		m.emission = Palette.SERIE
-		m.emission_energy_multiplier = 2.2
-		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		lueur.material_override = m
-		lueur.position = Vector3(_portail.get_center().x / UNITE, 1.3, -0.05)
-		monde().add_child(lueur)
-		_portail_lueur = lueur
-		_lampe(lueur.position + Vector3(0, 0, 1.0), Palette.SERIE, 6.0, 1.4)
+		vue.mesh = q
+		var m := ShaderMaterial.new()
+		m.shader = _fenetre
+		m.set_shader_parameter("monde", int(fiche.get("monde", 0)))
+		vue.material_override = m
+		# Devant le fond noir de l'arche, pas dedans : la case de voxels du
+		# fond occupe z ∈ [-1/8, 0], une nappe posée à -0,05 disparaît derrière.
+		vue.position = Vector3(_portail.get_center().x / UNITE, 1.3, 0.06)
+		monde().add_child(vue)
+		_portail_lueur = vue
+		# La lueur qui déborde de l'arche porte la couleur du monde d'en face.
+		var couleur: Color = fiche.get("couleur", Palette.SERIE)
+		_lampe(vue.position + Vector3(0, 0, 1.0), couleur, 7.0, 1.5)
+		var enseigne := _ecriteau(String(fiche.get("titre", "")), 0.2)
+		enseigne.modulate = couleur
+		enseigne.position = vue.position + Vector3(0, 1.5, 0.1)
+		monde().add_child(enseigne)
 	if geometrie.has("tableau"):
 		var cadre: Array = geometrie["tableau"]
 		_tableau = _inscription(Vector3(float(cadre[0]), float(cadre[1]), float(cadre[2])), 0.3, HORIZONTAL_ALIGNMENT_CENTER)
@@ -837,8 +925,7 @@ func _process(delta: float) -> void:
 	_camera.position = _camera.position.lerp(_position_camera(), clampf(delta * 6.0, 0.0, 1.0))
 	if _portail_lueur:
 		var battement := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.0024)
-		_portail_lueur.scale = Vector3(1.0, 0.94 + 0.06 * battement, 1.0)
-		(_portail_lueur.material_override as StandardMaterial3D).emission_energy_multiplier = 1.6 + 1.4 * battement
+		(_portail_lueur.material_override as ShaderMaterial).set_shader_parameter("battement", battement)
 	_chercher_quoi_faire()
 
 	_depuis_envoi += delta
@@ -942,7 +1029,8 @@ func _agir() -> void:
 		var jeu := _jeu_du_lieu
 		var titre := _titre_du_lieu
 		_invite = ""
-		_fondu(Palette.SERIE.lightened(0.6), 0.7, func() -> void: demande_ecran.emit("salon", {"jeu": jeu, "titre": titre}))
+		var teinte: Color = LIEUX[_lieu].get("couleur", Palette.SERIE)
+		_fondu(teinte, 0.7, func() -> void: demande_ecran.emit("salon", {"jeu": jeu, "titre": titre}))
 	elif _invite == "parler" and _pnj_proche >= 0:
 		var phrases: Array = _pnj[_pnj_proche]["phrases"]
 		_phrase = (_phrase + 1) % (phrases.size() + 1)
