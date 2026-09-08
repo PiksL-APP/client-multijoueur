@@ -230,10 +230,21 @@ feuillage TURQUOISE, donc on recolore par nom de matière (`TEINTES_KENNEY`) —
 le modèle reste celui de Kenney, la palette est la nôtre. Les modèles sont
 posés comme le reste : une nappe (`MultiMesh`) par modèle et par morceau, la
 longueur d'une voiture restant celle de son gabarit (les collisions, les places
-de stationnement et le pare-buffle s'y réfèrent). Les IMMEUBLES, eux, restent
-en voxels : sous une caméra presque verticale, les bâtiments du City Kit sont
-de grands toits unis là où les nôtres ont parapets, fenêtres et cheminées — et
-surtout, un modèle glTF ne se casse pas cube par cube.
+de stationnement et le pare-buffle s'y réfèrent). Les IMMEUBLES aussi viennent des kits :
+commercial pour le centre et les affaires, industriel pour les hangars,
+suburban pour les pavillons. On choisit le modèle dont le rapport
+hauteur/largeur ressemble le plus au volume demandé par le plan, puis on
+l'étire à l'emprise exacte — un modèle bien choisi s'étire peu —, et la teinte
+du quartier passe en couleur d'instance, sinon la ville entière serait
+gris-bleu. **Et ça se casse quand même** : la grille de voxels de chaque
+immeuble existe toujours, invisible, sous le modèle ; au PREMIER cube arraché
+le modèle disparaît et la grille prend le relais, avec ses faces d'intérieur
+et sa ruine (`MorceauVille.casser`). Tant qu'un immeuble est intact, il n'est
+pas maillé du tout : la ville coûte dix fois moins de rectangles qu'en voxels
+pleins. La nuit, les fenêtres s'allument par le shader `KENNEY` : on repère
+les carreaux à leur bleu franc dans l'atlas — ⚠ seulement sur les faces
+VERTICALES, sans quoi le gris-bleu des toitures passait pour du vitrage et
+les toits luisaient.
 
 **Ça brûle.** Une voiture qui saute laisse un BRASIER, et un brasier est une
 chose vivante : il chauffe ce qui l'entoure (passants, joueurs, tôle), il

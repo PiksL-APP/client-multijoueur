@@ -360,20 +360,122 @@ static var _textures_source: Dictionary = {}   ## chemin -> l'atlas du kit (ou n
 ## La matière d'un kit : son atlas s'il en a un, la couleur de sommet sinon
 ## (elle porte la matière d'origine de chaque morceau du modèle), et le grain
 ## mat du reste du jeu.
-static func matiere_kenney(chemin_modele: String) -> StandardMaterial3D:
+static func matiere_kenney(chemin_modele: String) -> Material:
 	if _matieres_kenney.has(chemin_modele):
 		return _matieres_kenney[chemin_modele]
 	maillage_kenney(chemin_modele)          # remplit `_textures_source` au passage
-	var m := StandardMaterial3D.new()
 	var texture = _textures_source.get(chemin_modele)
+	var m: Material
 	if texture != null:
-		m.albedo_texture = texture
-		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	m.vertex_color_use_as_albedo = true
-	m.roughness = 0.86
-	m.specular = 0.2
+		# Un modèle à atlas passe par le shader des kits : il sait allumer les
+		# fenêtres la nuit (seulement pour les bâtiments — une voiture dont les
+		# vitres brillent, ça fait un sapin de Noël).
+		m = MatieresCarnage.kenney(texture, chemin_modele.contains("/batiments/") \
+			or chemin_modele.contains("/pavillons/") or chemin_modele.contains("/industriel/"))
+	else:
+		# Pas d'atlas (le Nature Kit) : la couleur de sommet porte tout.
+		var simple := StandardMaterial3D.new()
+		simple.vertex_color_use_as_albedo = true
+		simple.roughness = 0.9
+		simple.specular = 0.15
+		m = simple
 	_matieres_kenney[chemin_modele] = m
 	return m
+
+## LES IMMEUBLES viennent maintenant des City Kits : commercial pour le centre
+## et les affaires, industriel pour les hangars, suburban pour les pavillons.
+## Chaque entrée donne le ratio hauteur/largeur du modèle : on choisit celui
+## qui ressemble le plus au volume demandé par le plan, puis on l'étire pour
+## qu'il remplisse exactement l'emprise. Un modèle bien choisi s'étire peu.
+## ⚠ Un modèle ne se casse PAS : tant que l'immeuble est intact, on pose le
+## modèle ; au premier cube arraché, il disparaît et la grille de voxels prend
+## le relais (voir `MorceauVille.casser`). C'est ce qui garde la destruction.
+const BATIMENTS_KENNEY := {
+	PlanVille.F_TOUR: [
+		["batiments/building-skyscraper-a", 2.12], ["batiments/building-skyscraper-b", 3.29],
+		["batiments/building-skyscraper-c", 3.19], ["batiments/building-skyscraper-d", 4.27],
+		["batiments/building-skyscraper-e", 3.16], ["batiments/building-m", 2.54],
+	],
+	PlanVille.F_BUREAUX: [
+		["batiments/building-f", 2.01], ["batiments/building-g", 1.74],
+		["batiments/building-i", 1.35], ["batiments/building-l", 1.66],
+		["batiments/building-n", 1.07], ["batiments/building-skyscraper-a", 2.12],
+	],
+	PlanVille.F_COMMERCE: [
+		["batiments/building-a", 1.47], ["batiments/building-b", 1.33],
+		["batiments/building-c", 1.01], ["batiments/building-d", 1.54],
+		["batiments/building-e", 0.54], ["batiments/building-h", 1.47],
+		["batiments/building-j", 0.81], ["batiments/building-k", 0.71],
+	],
+	PlanVille.F_LOGEMENTS: [
+		["batiments/building-a", 1.47], ["batiments/building-b", 1.33],
+		["batiments/building-d", 1.54], ["batiments/building-h", 1.47],
+		["pavillons/building-type-b", 0.62], ["pavillons/building-type-n", 0.64],
+		["pavillons/building-type-s", 0.81], ["pavillons/building-type-u", 0.80],
+	],
+	PlanVille.F_VIEUX: [
+		["batiments/building-c", 1.01], ["batiments/building-e", 0.54],
+		["batiments/building-k", 0.71], ["pavillons/building-type-f", 0.80],
+		["pavillons/building-type-t", 0.89], ["pavillons/building-type-o", 0.90],
+	],
+	PlanVille.F_HANGAR: [
+		["industriel/building-a", 0.71], ["industriel/building-b", 0.71],
+		["industriel/building-c", 0.66], ["industriel/building-g", 0.76],
+		["industriel/building-l", 0.92], ["industriel/building-q", 0.41],
+		["industriel/building-r", 0.56], ["industriel/building-s", 0.40],
+		["industriel/building-t", 0.59],
+	],
+	PlanVille.F_MAISON: [
+		["pavillons/building-type-a", 0.64], ["pavillons/building-type-c", 0.80],
+		["pavillons/building-type-e", 0.88], ["pavillons/building-type-g", 0.53],
+		["pavillons/building-type-h", 0.57], ["pavillons/building-type-i", 0.57],
+		["pavillons/building-type-j", 0.76], ["pavillons/building-type-m", 0.52],
+		["pavillons/building-type-p", 0.74], ["pavillons/building-type-q", 0.74],
+	],
+}
+
+## Le modèle qui va le mieux à ce volume : même famille que le style, et le
+## ratio hauteur/largeur le plus proche (la graine départage les ex æquo, pour
+## que deux immeubles voisins de même taille ne soient pas jumeaux).
+static func batiment_kenney(style: int, largeur: float, hauteur: float, graine: int) -> String:
+	var famille: Array = BATIMENTS_KENNEY.get(style, [])
+	if famille.is_empty() or largeur <= 0.01:
+		return ""
+	var voulu := hauteur / largeur
+	var meilleur := ""
+	var ecart := INF
+	for i in famille.size():
+		var fiche: Array = famille[posmod(i + graine, famille.size())]
+		var e: float = absf(float(fiche[1]) - voulu)
+		if e < ecart:
+			ecart = e
+			meilleur = String(fiche[0])
+	return "res://modeles/kenney/" + meilleur + ".glb"
+
+## Le maillage d'un bâtiment, ramené à une BOÎTE UNITÉ posée sur le sol :
+## l'instance porte ensuite l'emprise (largeur, hauteur, profondeur) du plan.
+static var _unitaires: Dictionary = {}
+
+static func maillage_batiment(chemin: String) -> ArrayMesh:
+	if _unitaires.has(chemin):
+		return _unitaires[chemin]
+	var brut := maillage_kenney(chemin, 1.0, Vector3.AXIS_X, 0.0)
+	var arrays := brut.surface_get_arrays(0) if brut.get_surface_count() > 0 else []
+	if arrays.is_empty():
+		_unitaires[chemin] = brut
+		return brut
+	var boite := brut.get_aabb()
+	var sommets: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var facteur := Vector3(1.0 / maxf(boite.size.x, 0.001), 1.0 / maxf(boite.size.y, 0.001), 1.0 / maxf(boite.size.z, 0.001))
+	for i in sommets.size():
+		var v := sommets[i]
+		sommets[i] = Vector3((v.x - boite.get_center().x) * facteur.x, (v.y - boite.position.y) * facteur.y,
+			(v.z - boite.get_center().z) * facteur.z)
+	arrays[Mesh.ARRAY_VERTEX] = sommets
+	var unite := ArrayMesh.new()
+	unite.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_unitaires[chemin] = unite
+	return unite
 
 ## LE MOBILIER DE RUE et la NATURE viennent eux aussi des kits : lampadaires,
 ## feux, bennes, panneaux, arbres, buissons, bancs. Chaque entrée dit le
@@ -436,8 +538,12 @@ static func voiture_kit(indice: int, couleur: Color = Color.WHITE, halo_couleur:
 	# sont sombres dans l'atlas, ils le restent en multipliant). Un modèle voxel
 	# garde la matière à couleurs de sommet.
 	if est_kenney(i):
-		var matiere := matiere_kenney(modele_kenney_de(i)).duplicate() as StandardMaterial3D
-		matiere.albedo_color = peinture if couleur != Color.WHITE else Color.WHITE
+		var matiere: Material = matiere_kenney(modele_kenney_de(i)).duplicate()
+		var teinte_v := peinture if couleur != Color.WHITE else Color.WHITE
+		if matiere is ShaderMaterial:
+			(matiere as ShaderMaterial).set_shader_parameter("teinte", teinte_v)
+		elif matiere is BaseMaterial3D:
+			(matiere as BaseMaterial3D).albedo_color = teinte_v
 		coque.material_override = matiere
 	else:
 		coque.material_override = MatieresCarnage.voxel_teinte(peinture)
@@ -508,8 +614,11 @@ static func epave() -> Node3D:
 	var coque := MeshInstance3D.new()
 	coque.mesh = maillage_voiture(0)
 	if est_kenney(0):
-		var brulee := matiere_kenney(modele_kenney_de(0)).duplicate() as StandardMaterial3D
-		brulee.albedo_color = Color("#2a2624")
+		var brulee: Material = matiere_kenney(modele_kenney_de(0)).duplicate()
+		if brulee is ShaderMaterial:
+			(brulee as ShaderMaterial).set_shader_parameter("teinte", Color("#2a2624"))
+		elif brulee is BaseMaterial3D:
+			(brulee as BaseMaterial3D).albedo_color = Color("#2a2624")
 		coque.material_override = brulee
 	else:
 		coque.material_override = MatieresCarnage.voxel_teinte(Color("#141414"))

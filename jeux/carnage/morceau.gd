@@ -55,6 +55,8 @@ var _a_mailler: Array = []            ## les groupes qui attendent leur premier 
 const BUDGET_MAILLAGE_USEC := 6000
 var _cellules := 0                    ## cellules pleines d'immeubles, pour le journal
 var _props_kenney: Dictionary = {}    ## nom de prop -> [Transform3D] (une nappe par modèle)
+var _bats_kenney: Dictionary = {}     ## chemin de modèle -> [{t, id}] : les immeubles intacts
+var _bat_instance: Dictionary = {}    ## id d'immeuble -> [MultiMesh, rang] pour le faire disparaître
 var _multi: MultiMesh
 var _places: Dictionary = {}          ## modele -> Array[{t, c, id}]
 var _lumineux: SurfaceTool
@@ -132,6 +134,10 @@ func _mailler_dans_le_budget(file: Array, budget_usec: int) -> bool:
 		var reste := false
 		for id in entree["ids"]:
 			if tampons.has(id):
+				continue
+			if _immeubles[id].has("kenney"):
+				tampons[id] = [PackedVector3Array(), PackedVector3Array(), PackedColorArray(),
+					PackedVector2Array(), PackedInt32Array()]
 				continue
 			var t0 := Time.get_ticks_usec()
 			tampons[id] = _mailler_immeuble(id)
@@ -262,6 +268,30 @@ func _poser_immeuble(b: Dictionary, id: int) -> void:
 		_a_mailler.append(groupe)
 	(_groupes[groupe]["ids"] as Array).append(id)
 	_cellules += int(v["nx"]) * int(v["nz"]) * int(v["ny"]) - (v["trous"] as PackedInt32Array).size()
+
+	# LE MODÈLE : tant que l'immeuble est INTACT, c'est un bâtiment des City
+	# Kits qu'on voit — dessiné, avec ses fenêtres, ses auvents et son toit. La
+	# grille de voxels existe quand même, invisible : elle attend le premier
+	# cube arraché pour prendre le relais (voir `casser`). Un immeuble déjà
+	# cassé quand le morceau se bâtit reste en voxels.
+	var chemin := ""
+	if not bool(v["plat"]):
+		chemin = FormesCarnage.batiment_kenney(int(b["style"]),
+			maxf(float(b["w"]), float(b["d"])) * Decor.ECHELLE, float(b["h"]), id)
+	if chemin != "" and casses.is_empty():
+		if not _bats_kenney.has(chemin):
+			_bats_kenney[chemin] = []
+		var emprise := Vector3(float(b["w"]) * Decor.ECHELLE, float(b["h"]), float(b["d"]) * Decor.ECHELLE)
+		var tourne := Basis(Vector3.UP, PI * 0.5 * float(posmod(id, 4))).scaled(emprise)
+		# La teinte du quartier passe en couleur d'instance : les modèles du kit
+		# sont gris-bleu, la ville doit garder ses couleurs de quartier — c'est
+		# ce qui fait qu'on sait où l'on est en regardant une rue.
+		var teinte_b: Color = (b["c"] as Color).lerp(Color.WHITE, 0.42)
+		_bats_kenney[chemin].append({"t": Transform3D(tourne, Decor.vers3d(b["p"], float(b["y"]))),
+			"id": id, "c": teinte_b})
+		_immeubles[id]["kenney"] = chemin
+		return          # ni ornements ni maillage voxel : le modèle fait tout
+
 	# Les ornements — corniches, balcons, stores, toits — hors de la grille :
 	# ils ne se cassent pas, mais ils font la différence entre une boîte et
 	# un immeuble. Eux restent des instances.
@@ -417,10 +447,32 @@ func _poser_les_voitures() -> void:
 		add_child(noeud_v)
 
 	_poser_les_props_kenney()
+	_poser_les_batiments_kenney()
 
 ## Une nappe par modèle de prop : lampadaires, arbres, bancs, bennes. La
 ## matière vient du kit (son atlas), les ombres restent allumées — un arbre
 ## sans ombre flotte au-dessus du trottoir.
+func _poser_les_batiments_kenney() -> void:
+	for chemin in _bats_kenney:
+		var poses: Array = _bats_kenney[chemin]
+		if poses.is_empty():
+			continue
+		var multi := MultiMesh.new()
+		multi.transform_format = MultiMesh.TRANSFORM_3D
+		multi.use_colors = true
+		multi.mesh = FormesCarnage.maillage_batiment(String(chemin))
+		multi.instance_count = poses.size()
+		for i in poses.size():
+			multi.set_instance_transform(i, poses[i]["t"])
+			multi.set_instance_color(i, poses[i]["c"])
+			_bat_instance[int(poses[i]["id"])] = [multi, i, poses[i]["t"]]
+		var noeud := MultiMeshInstance3D.new()
+		noeud.multimesh = multi
+		noeud.material_override = FormesCarnage.matiere_kenney(String(chemin))
+		noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		add_child(noeud)
+	_bats_kenney.clear()
+
 func _poser_les_props_kenney() -> void:
 	for nom in _props_kenney:
 		var poses: Array = _props_kenney[nom]
@@ -435,12 +487,15 @@ func _poser_les_props_kenney() -> void:
 		var noeud := MultiMeshInstance3D.new()
 		noeud.multimesh = multi
 		var fiche_p: Dictionary = FormesCarnage.prop_kenney(String(nom))
-		var matiere := FormesCarnage.matiere_kenney(String(fiche_p["m"]))
+		var matiere: Material = FormesCarnage.matiere_kenney(String(fiche_p["m"]))
 		if fiche_p.has("c"):
 			# Un lampadaire blanc de six mètres se voit de trop loin : la teinte
 			# du prop assombrit le modèle sans toucher au kit.
-			matiere = matiere.duplicate() as StandardMaterial3D
-			matiere.albedo_color = fiche_p["c"]
+			matiere = matiere.duplicate()
+			if matiere is ShaderMaterial:
+				(matiere as ShaderMaterial).set_shader_parameter("teinte", fiche_p["c"])
+			elif matiere is BaseMaterial3D:
+				(matiere as BaseMaterial3D).albedo_color = fiche_p["c"]
 		noeud.material_override = matiere
 		noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		add_child(noeud)
@@ -560,6 +615,16 @@ func casser(id: int, locale: int) -> Dictionary:
 	_cellules -= 1
 	var tuile := tuile_d_immeuble(id)
 	var groupe := Vector2i(tuile.x / PlanVille.PERIODE, tuile.y / PlanVille.PERIODE)
+	if _immeubles[id].has("kenney"):
+		# Premier cube arraché : le modèle s'efface et la grille de voxels prend
+		# le relais. C'est l'instant où un bâtiment dessiné devient un tas de
+		# cubes qu'on peut vider — sans ça, tirer sur une façade ne ferait rien.
+		_immeubles[id].erase("kenney")
+		if _bat_instance.has(id):
+			var place: Array = _bat_instance[id]
+			(place[0] as MultiMesh).set_instance_transform(int(place[1]),
+				Transform3D(Basis().scaled(Vector3.ZERO), (place[2] as Transform3D).origin))
+			_bat_instance.erase(id)
 	if _groupes.has(groupe):
 		_groupes[groupe]["sale"] = true
 		(_groupes[groupe]["tampons"] as Dictionary).erase(id)   # cet immeuble seul est à remailler

@@ -579,6 +579,66 @@ void fragment() {
 }
 """
 
+## LES KITS KENNEY : un atlas, la couleur d'instance en teinte, et — c'est tout
+## l'enjeu de nuit — les FENÊTRES qui s'allument. Un bâtiment glTF est une
+## boîte texturée : sans ça, la ville s'éteignait d'un bloc à la tombée du jour
+## alors que nos immeubles voxel avaient leurs carreaux jaunes. On repère les
+## carreaux à leur couleur dans l'atlas (le bleu franc du kit), et on en allume
+## une partie, tirée par bâtiment et par étage.
+const KENNEY := """
+shader_type spatial;
+render_mode cull_back, diffuse_lambert, specular_schlick_ggx;
+
+uniform sampler2D atlas : source_color, filter_nearest;
+uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+uniform float fenetres : hint_range(0.0, 1.0) = 0.0;
+uniform vec4 teinte : source_color = vec4(1.0);
+
+varying vec4 c;
+varying vec3 posm;
+
+void vertex() {
+	c = COLOR;
+	posm = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+float hache(vec2 p) {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+void fragment() {
+	vec4 t = texture(atlas, UV);
+	vec3 col = t.rgb * c.rgb * teinte.rgb;
+	// Le carreau : un bleu FRANC dans l'atlas, et seulement sur une face
+	// VERTICALE. ⚠ Sans le test de normale, le gris-bleu des toitures passait
+	// pour du vitrage et les toits luisaient la nuit.
+	float debout = step(0.5, 1.0 - abs(NORMAL.y));
+	float vitre = step(0.62, t.b) * step(t.r + 0.16, t.b) * fenetres * debout;
+	// Une fenêtre sur deux allumée, par bâtiment (sa position) et par étage.
+	float allume = step(0.32, hache(floor(posm.xz * 0.6) + vec2(floor(posm.y * 1.1) * 7.0)));
+	float nuitf = smoothstep(0.28, 0.85, nuit);
+	ALBEDO = mix(col, col * 1.25, vitre * allume * nuitf);
+	EMISSION = vec3(1.0, 0.86, 0.6) * vitre * allume * nuitf * 2.1;
+	ROUGHNESS = mix(0.86, 0.32, vitre);
+	SPECULAR = mix(0.18, 0.6, vitre);
+}
+"""
+
+## Une matière de kit par atlas (et par usage) : les shaders coûtent, les
+## matières se partagent.
+static var _kenneys: Dictionary = {}
+
+static func kenney(atlas: Texture2D, fenetres: bool) -> ShaderMaterial:
+	var cle := "%s|%s" % [atlas.resource_path if atlas != null else "vide", fenetres]
+	if _kenneys.has(cle):
+		return _kenneys[cle]
+	var m := _materiau(KENNEY)
+	m.set_shader_parameter("atlas", atlas)
+	m.set_shader_parameter("fenetres", 1.0 if fenetres else 0.0)
+	m.set_shader_parameter("nuit", _nuit_courante)
+	_kenneys[cle] = m
+	return m
+
 # ------------------------------------------------------------ les lumières
 
 ## Une flaque de lumière au sol : un quadrilatère additif à dégradé radial. La
@@ -801,6 +861,8 @@ static func regler_nuit(valeur: float) -> void:
 		m.set_shader_parameter("nuit", valeur)
 	for cle in _voxels_teintes:
 		(_voxels_teintes[cle] as ShaderMaterial).set_shader_parameter("nuit", valeur)
+	for cle in _kenneys:
+		(_kenneys[cle] as ShaderMaterial).set_shader_parameter("nuit", valeur)
 
 # ------------------------------------------------------------ l'ambiance
 

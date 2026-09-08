@@ -88,8 +88,16 @@ rendu et l'interface ; le reste est à côté :
   modèle) et `PROPS_KENNEY` (prop → modèle, hauteur, teinte) disent ce qui est
   Kenney ; `est_kenney(i)` choisit la matière d'une voiture. Le morceau range
   les props dans `_props_kenney` et pose une nappe par modèle
-  (`_poser_les_props_kenney`). ⚠ Chaque kit a SON `Textures/colormap.png`, en
-  fichier externe ; ⚠ `SurfaceTool` ne garde pas les matières.
+  (`_poser_les_props_kenney`). Les IMMEUBLES : `BATIMENTS_KENNEY` (style →
+  [modèle, ratio h/l]), `batiment_kenney(style, largeur, hauteur, graine)`
+  choisit par ratio, `maillage_batiment(chemin)` normalise en boîte unité et
+  l'instance porte l'emprise ; `_bats_kenney` / `_bat_instance` dans le
+  morceau, et `casser()` efface l'instance (échelle 0) puis laisse la grille
+  voxel prendre le relais — un immeuble intact n'est PAS maillé. Matière :
+  `MatieresCarnage.kenney(atlas, fenetres)` (shader KENNEY : atlas × couleur
+  d'instance, carreaux allumés la nuit sur les faces verticales seulement).
+  ⚠ Chaque kit a SON `Textures/colormap.png`, en fichier externe ;
+  ⚠ `SurfaceTool` ne garde pas les matières.
 - LE FEU (`vivant.gd`, section « le feu ») : `feux` [{id,p,force,t,propage,
   ronge}], `allumer(p, force)` (les foyers proches fusionnent), `arroser(p, r,
   delta)`, `feu_le_plus_proche`, `_animer_les_feux` (dégâts, propagation aux
