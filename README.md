@@ -12,8 +12,11 @@ bâti au couchant et tournant lentement sous l'effet maquette. Quand la ville
 change, le menu change avec elle. « Commencer » demande un pseudo et un
 personnage, « Options » règle le son, l'image et les touches, « Quitter »
 renvoie sur piks-l.com. La pochette du jeu est posée à gauche, dans une vraie boîte 3D qui se retourne au survol pour montrer son dos.
-Le village en voxels reste joignable par `--ecran=hub` le temps que les
-bâtiments de la ville ouvrent les autres jeux.
+**Le village n'existe plus.** Il a été l'écran d'accueil — une place, cinq
+maisons, des habitants, des portails — et Pikstown a pris sa place : c'est la
+ville, maintenant, qui est le hub. `scenes/hub.gd` et `scenes/accueil.gd` sont
+supprimés, avec les modèles qui ne servaient qu'à eux ; ce qui savait les
+bâtir dort encore dans `outils/voxel.py`, sous `VILLAGE = False`.
 
 **Le casting vient de Kenney** (`modeles/kenney/`, CC0) : un seul maillage
 articulé de 58 os, `characterMedium.fbx`, et douze images de peau tirées des
@@ -23,27 +26,22 @@ propres fichiers, sans maillage, et se greffent sur le squelette à la volée
 (`commun/personnages.gd`). Douze personnages pour le poids d'un.
 
 **Tout se règle** (`autoload/reglages.gd`, gardé dans `user://`) : trois
-volumes sur trois bus audio, l'effet maquette, les ombres, la finesse du rendu,
-le plein écran, et chaque touche du clavier — que `Commandes` lit désormais
-sans exception.
+volumes sur trois bus audio, les effets d'image, les ombres, la finesse du
+rendu, le plein écran, et chaque touche du clavier. Les trois valent partout,
+menu ET Piks Theft Auto : `Commandes` lit toutes ses touches dans les
+réglages, et `MatieresCarnage.ambiance()` y prend son halo et ses ombres.
+L'interface sonne, elle aussi — neuf bruitages de menu dans `sons/interface/`,
+sur le bus « Effets » — et le thème *Vice City Drift* tourne sous le menu, la
+création, les options et le salon, puis se tait quand la manche commence.
 
-**La ville s'entend.** Piks Theft Auto tire ses bruitages de `sons/sfx/` : 238
-échantillons OGG mono 22 kHz, 2,1 Mo en tout — armes, moteurs par châssis,
-tôle, pas, voix de trottoir, radio de la police. Chacun est chargé au premier
-usage puis gardé : rien à attendre au démarrage, rien à télécharger pour un
-son qu'on n'entendra jamais. Chaque arme a sa détonation, le moteur suit le
-châssis, le crissement se déclenche sur l'ÉCART entre le cap de la voiture et
-sa trajectoire réelle — un virage négocié reste muet, un tête-à-queue
-s'entend. Deux choses sortent de la file des voix et prennent leur propre
-lecteur : la **sirène**, parce qu'une poursuite est un état et non un
-événement — elle tient, enfle avec les étoiles, passe au régime rapide à
-trois, et un coup de feu ne la coupe plus ; et le **dispatch**, qui assemble
-des bribes enregistrées mot à mot en `AudioStreamPlaylist` (« all units /
-respond to / a ten-90 / in vicinity of area 7 / heading east / suspect is
-armed »). La synthèse d'origine reste entière, en filet : si un fichier
-manque, `jouer("choc")` sort quand même un choc. L'ÉNIGME, elle, garde ses
-ondes calculées — c'est un jeu abstrait, il n'a rien à gagner à sonner comme
-une rue.
+**Un vrai chargement.** Les vingt-cinq morceaux de ville ne sont plus bâtis
+d'un bloc : ils partent en file, du plus proche du centre au plus lointain, un
+par image, derrière le lettrage et une barre qui avance. Puis le voile se fond
+et le menu paraît. Et la ville VIT : trente-quatre voitures et seize passants
+suivent les axes de la trame — pas la simulation du jeu, une circulation
+taillée pour être vue de très haut, qui boucle au bord du champ. Plus de trait
+à l'horizon non plus : la moitié basse de la voûte a désormais exactement la
+couleur de l'horizon, et c'est l'écart entre les deux qui dessinait la ligne.
 
 **Un mur ne stoppe pas, il fait glisser.** Une collision ne coûte que la part
 de vitesse mise dans la façade, et la voiture se réaligne dessus quand on la
@@ -704,9 +702,8 @@ cassent le chargement de ressources tierces. Pour de la 2D, on n'y perd rien.
   tuiles dessinées une par une, c'est quatre cents appels de dessin par image,
   ce qui ne passe pas dans un navigateur en mode compatibilité. Regroupées par
   modèle, il en reste une quinzaine.
-- Le son de la ville tient dans 2,1 Mo d'échantillons (`sons/sfx/`) ; la
-  synthèse d'origine (`autoload/sons.gd`) reste le filet et sert encore
-  l'ÉNIGME. **M** coupe tout, et le choix survit à la session.
+- Le son est entièrement synthétisé au démarrage (`autoload/sons.gd`) : aucun
+  fichier binaire au dépôt. **M** le coupe, et le choix survit à la session.
 - Le classement affiché est un top brut ; pas de saison, pas de remise à zéro.
 - Chaque manche consomme des messages Realtime (≈ 50 par seconde à quatre
   joueurs). C'est confortable à l'échelle d'une démonstration, à surveiller si

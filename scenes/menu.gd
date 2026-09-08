@@ -54,6 +54,13 @@ var _camera: Camera3D
 var _maquette: Maquette
 var _ambiance: Array = []
 var _chantiers: Array[MorceauVille] = []
+var _a_batir: Array = []            ## [distance², clé de morceau], du plus proche au plus loin
+var _total_a_batir := 0
+var _tuile0 := Vector2i.ZERO        ## coin du carré bâti, en tuiles
+var _voile_chargement: Control
+var _jauge: ColorRect
+var _libelle_chargement: Label
+var _fondu := 0.0                   ## 0 pendant le chargement, 1 quand le menu est là
 var _t := 0.0
 var _choix := 0
 var _boutons: Array[Button] = []
@@ -62,19 +69,31 @@ var _aide: Label
 var _etat: HBoxContainer
 
 func demarrer() -> void:
-	_batir_la_ville()
+	_preparer_la_ville()
 	_poser_l_interface()
-	_maquette = Maquette.poser(self, 0.66, 7.0)
+	# L'interface attend derrière l'écran de chargement : montée tout de suite
+	# mais invisible, elle est prête à l'instant où la ville l'est.
+	interface().visible = false
+	_poser_le_chargement()
+	# L'effet maquette, plus appuyé qu'en jeu : bande nette resserrée sur les
+	# entrées, flou épais en haut (le ciel) et en bas (le premier plan). C'est
+	# lui qui fait passer la ville pour une maquette sous vitrine.
+	_maquette = Maquette.poser(self, 0.62, 14.0)
+	if _maquette != null:
+		_maquette.regler("nettete", 0.09)
+		_maquette.regler("fondu", 0.30)
+		_maquette.regler("saturation", 1.24)
+	Sons.musique(Sons.THEME)
 	Reseau.etat_change.connect(func(_e): _rafraichir())
 	_rafraichir()
 
 # ── Le fond ────────────────────────────────────────────────────────────────
 
-## La ville, bâtie d'un bloc au démarrage. Un carré de deux morceaux sur deux
-## suffit : la caméra est haute, tourne sur un petit rayon, et le brouillard
-## mange le bord avant qu'on l'atteigne. Bâtir plus coûterait une seconde
-## d'attente pour des toits qu'on ne voit jamais.
-func _batir_la_ville() -> void:
+## Ce qui ne coûte rien : le plan, le ciel, la caméra. Les vingt-cinq morceaux,
+## eux, sont mis en FILE et bâtis un par image — vingt-cinq morceaux d'un bloc,
+## c'est une seconde de fenêtre gelée avant le premier dessin, et un joueur ne
+## sait pas si ça charge ou si ça a planté.
+func _preparer_la_ville() -> void:
 	_carte = PlanVille.new(VITRINE)
 	_ambiance = MatieresCarnage.ambiance()
 	for noeud in _ambiance:
@@ -88,8 +107,23 @@ func _batir_la_ville() -> void:
 	# rang d'immeubles dans l'horizon, pour qu'aucune arête ne trahisse le
 	# bord du monde. En jeu on veut voir loin ; ici on veut voir beau.
 	var air: Environment = (_ambiance[0] as WorldEnvironment).environment
-	air.fog_density = 0.0052
-	air.fog_sky_affect = 0.6
+	air.fog_density = 0.0026
+	# Un peu de brume dans le ciel, pas plus : à 1, elle repeignait toute la
+	# voûte de sa couleur et le couchant disparaissait sous un lavis uni.
+	air.fog_sky_affect = 0.45
+
+	# La voûte elle-même s'adoucit : sol et horizon presque de la même teinte,
+	# et la courbe étalée, pour qu'aucune bande ne se dessine.
+	var ciel := ((_ambiance[0] as WorldEnvironment).environment.sky.sky_material) as ProceduralSkyMaterial
+	# LE TRAIT À L'HORIZON venait de la voûte elle-même : sa moitié basse a sa
+	# propre couleur (un gris violacé) et la rencontre avec le ciel orange se
+	# lisait comme une ligne tracée à la règle. On lui donne EXACTEMENT la
+	# couleur de l'horizon, puis on la laisse descendre vers le sombre : plus
+	# aucune arête, et le couchant garde sa chaleur.
+	ciel.sky_curve = 0.16
+	ciel.ground_horizon_color = ciel.sky_horizon_color
+	ciel.ground_bottom_color = ciel.sky_horizon_color.darkened(0.72)
+	ciel.ground_curve = 0.55
 	var sol := MatieresCarnage.sol()
 	sol.set_shader_parameter("rail", _carte.rail())
 	sol.set_shader_parameter("lignes", _carte.lignes_libres())
@@ -104,13 +138,16 @@ func _batir_la_ville() -> void:
 	var centre_tuiles := Vector2i(PlanVille.COLONNES / 2, PlanVille.LIGNES / 2)
 	var m0 := Vector2i(centre_tuiles.x / PlanVille.MORCEAU, centre_tuiles.y / PlanVille.MORCEAU) \
 		- Vector2i.ONE * (MORCEAUX_LARGE / 2)
+	# Du plus proche du centre au plus lointain : ce qu'on voit d'abord se
+	# remplit d'abord, et le fond arrive pendant qu'on regarde déjà le titre.
+	var milieu := Vector2(MORCEAUX_LARGE - 1, MORCEAUX_LARGE - 1) * 0.5
 	for j in MORCEAUX_LARGE:
 		for i in MORCEAUX_LARGE:
-			var morceau := MorceauVille.new()
-			monde().add_child(morceau)
-			morceau.batir(_carte, m0 + Vector2i(i, j), {}, {})
-			_chantiers.append(morceau)
+			_a_batir.append([Vector2(i, j).distance_squared_to(milieu), m0 + Vector2i(i, j)])
+	_a_batir.sort_custom(func(x, y): return float(x[0]) < float(y[0]))
+	_total_a_batir = _a_batir.size()
 
+	_tuile0 = m0 * PlanVille.MORCEAU
 	var cote := PlanVille.MORCEAU * PlanVille.PAS
 	_centre = Vector2(m0) * cote + Vector2.ONE * cote * MORCEAUX_LARGE * 0.5
 
@@ -137,6 +174,185 @@ func _placer_la_camera(temps: float) -> void:
 	# et le ciel du couchant entre dans l'image. Viser le sol, comme au début,
 	# donnait une vue à la verticale où la ville n'avait plus de ciel.
 	_camera.look_at(vise + Vector3(0, 34.0, 0))
+
+## L'écran de chargement : le lettrage sur fond noir, une barre qui avance, et
+## le nom de ce qui est en train de se bâtir. Il vit dans SA propre couche,
+## au-dessus de l'interface du menu, pour pouvoir s'effacer d'un fondu sans
+## qu'on ait à démonter quoi que ce soit.
+func _poser_le_chargement() -> void:
+	var couche := CanvasLayer.new()
+	couche.layer = 2
+	add_child(couche)
+
+	_voile_chargement = Control.new()
+	_voile_chargement.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_voile_chargement.mouse_filter = Control.MOUSE_FILTER_STOP
+	couche.add_child(_voile_chargement)
+
+	var fond := ColorRect.new()
+	fond.color = Color("#080510")
+	fond.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_voile_chargement.add_child(fond)
+
+	var centre := CenterContainer.new()
+	centre.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_voile_chargement.add_child(centre)
+
+	var colonne := VBoxContainer.new()
+	colonne.add_theme_constant_override("separation", 26)
+	colonne.alignment = BoxContainer.ALIGNMENT_CENTER
+	centre.add_child(colonne)
+
+	var logo := TextureRect.new()
+	logo.texture = load(LOGO)
+	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	var t: Texture2D = logo.texture
+	logo.custom_minimum_size = Vector2(420, 420 * float(t.get_height()) / float(t.get_width()))
+	colonne.add_child(logo)
+
+	# La barre est deux rectangles : le creux et ce qui le remplit. Pas de
+	# ProgressBar — il faudrait l'habiller de quatre styles pour obtenir ces
+	# deux traits-là, et l'habillage se déferait au premier changement de thème.
+	var creux := ColorRect.new()
+	creux.color = Color(1, 1, 1, 0.12)
+	creux.custom_minimum_size = Vector2(420, 6)
+	colonne.add_child(creux)
+	_jauge = ColorRect.new()
+	_jauge.color = ORANGE
+	_jauge.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	_jauge.size = Vector2(0, 6)
+	creux.add_child(_jauge)
+
+	_libelle_chargement = UI.texte("Construction de Pikstown…", 15, Palette.ENCRE_FAIBLE)
+	_libelle_chargement.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	colonne.add_child(_libelle_chargement)
+
+## Une image de chantier : UN morceau bâti, la barre avancée. Renvoie vrai
+## quand il ne reste rien à faire.
+func _avancer_le_chantier() -> bool:
+	if _a_batir.is_empty():
+		return true
+	var cle: Vector2i = _a_batir.pop_front()[1]
+	var morceau := MorceauVille.new()
+	monde().add_child(morceau)
+	morceau.batir(_carte, cle, {}, {})
+	_chantiers.append(morceau)
+	var part := 1.0 - float(_a_batir.size()) / float(maxi(1, _total_a_batir))
+	if _jauge != null:
+		_jauge.size.x = 420.0 * part
+	if _libelle_chargement != null:
+		_libelle_chargement.text = "Construction de Pikstown… %d %%" % roundi(part * 100.0)
+	return _a_batir.is_empty()
+
+# ── La ville vit ───────────────────────────────────────────────────────────
+#
+# Les morceaux bâtis sont un décor mort : leurs voitures dorment dans une
+# nappe, leurs habitants n'existent pas. On y met donc NOTRE circulation, plus
+# simple que celle du jeu et taillée pour être vue de très haut : des voitures
+# qui suivent les axes de la trame et des passants qui longent les trottoirs.
+# Personne ne s'arrête, personne ne se croise — à cette distance ça ne se voit
+# pas, et une vraie simulation coûterait le prix du jeu pour un fond de menu.
+
+const VOITURES := 34
+const PASSANTS := 16
+const RAYON_VIE := 190.0            ## on ne peuple que ce que la caméra survole
+
+var _circulation: Array = []        ## {n: Node3D, p: Vector2, d: Vector2, v: float, marche: bool}
+
+## L'axe de rue le plus proche d'une coordonnée, en unités monde. La trame fait
+## cinq tuiles : deux de chaussée, trois de pâté. Le milieu de la chaussée
+## tombe donc sur (5k + 1) tuiles.
+func _axe_de_rue(k: int) -> float:
+	return float((_tuile0.x / PlanVille.PERIODE + k) * PlanVille.PERIODE + 1) * PlanVille.TUILE
+
+func _axe_de_rue_z(k: int) -> float:
+	return float((_tuile0.y / PlanVille.PERIODE + k) * PlanVille.PERIODE + 1) * PlanVille.TUILE
+
+func _peupler_la_ville() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(VITRINE)
+	var vise := Decor.vers3d(_centre, 0.0)
+	# Combien d'axes de rue tiennent dans le rayon peuplé, de part et d'autre.
+	var portee := int(RAYON_VIE / (PlanVille.PERIODE * PlanVille.TUILE))
+	var gabarits: Array = FormesCarnage.KENNEY_VOITURES.keys()
+
+	for i in VOITURES:
+		var vertical := i % 2 == 0
+		var k := rng.randi_range(-portee, portee)
+		var sens := 1.0 if rng.randf() < 0.5 else -1.0
+		# Une voie de chaque côté de l'axe, et on roule à droite.
+		var voie := 2.6 * sens
+		var depart := rng.randf_range(-RAYON_VIE, RAYON_VIE)
+		var p: Vector2
+		var d: Vector2
+		if vertical:
+			p = Vector2(_axe_de_rue(k) - vise.x + voie, depart)
+			d = Vector2(0, sens)
+		else:
+			p = Vector2(depart, _axe_de_rue_z(k) - vise.z - voie)
+			d = Vector2(sens, 0)
+
+		var indice: int = gabarits[rng.randi() % gabarits.size()]
+		var auto := MeshInstance3D.new()
+		auto.mesh = FormesCarnage.maillage_voiture(indice)
+		auto.material_override = FormesCarnage.matiere_kenney(FormesCarnage.modele_kenney_de(indice))
+		monde().add_child(auto)
+		_circulation.append({"n": auto, "p": p, "d": d, "v": rng.randf_range(9.0, 17.0),
+			"marche": false, "centre": Vector2(vise.x, vise.z)})
+
+	for i in PASSANTS:
+		var vertical := i % 2 == 0
+		var k := rng.randi_range(-portee, portee)
+		var sens := 1.0 if rng.randf() < 0.5 else -1.0
+		# Le trottoir : au bord de la chaussée, contre les façades.
+		var bord := 7.5 * (1.0 if rng.randf() < 0.5 else -1.0)
+		var depart := rng.randf_range(-RAYON_VIE, RAYON_VIE)
+		var p: Vector2
+		var d: Vector2
+		if vertical:
+			p = Vector2(_axe_de_rue(k) - vise.x + bord, depart)
+			d = Vector2(0, sens)
+		else:
+			p = Vector2(depart, _axe_de_rue_z(k) - vise.z + bord)
+			d = Vector2(sens, 0)
+		var peau: String = FormesCarnage.PEAUX_CIVILES[rng.randi() % FormesCarnage.PEAUX_CIVILES.size()]
+		# Un support qui porte le cap : la silhouette a déjà sa propre rotation
+		# pour regarder vers +X, on ne la lui reprend pas.
+		var support := Node3D.new()
+		support.add_child(FormesCarnage.silhouette_kenney(peau))
+		monde().add_child(support)
+		_circulation.append({"n": support, "p": p, "d": d, "v": rng.randf_range(1.4, 2.2),
+			"marche": true, "centre": Vector2(vise.x, vise.z)})
+
+	for fiche in _circulation:
+		_animer_kenney_si_besoin(fiche)
+
+func _animer_kenney_si_besoin(fiche: Dictionary) -> void:
+	if not bool(fiche["marche"]):
+		return
+	var support: Node3D = fiche["n"]
+	if support.get_child_count() > 0:
+		FormesCarnage.animer_kenney(support.get_child(0) as Node3D, true)
+
+## Chacun avance tout droit et REVIENT de l'autre côté quand il sort du rayon
+## peuplé : un bouclage, pas un demi-tour. Vu d'aussi haut, la boucle ne se
+## remarque pas ; un demi-tour, si.
+func _animer_la_circulation(delta: float) -> void:
+	for fiche in _circulation:
+		var noeud: Node3D = fiche["n"]
+		if not is_instance_valid(noeud):
+			continue
+		var p: Vector2 = fiche["p"] + fiche["d"] * float(fiche["v"]) * delta
+		if absf(p.x) > RAYON_VIE:
+			p.x = -signf(p.x) * RAYON_VIE
+		if absf(p.y) > RAYON_VIE:
+			p.y = -signf(p.y) * RAYON_VIE
+		fiche["p"] = p
+		var c: Vector2 = fiche["centre"]
+		noeud.position = Vector3(c.x + p.x, 0.0, c.y + p.y)
+		# Le maillage regarde +X : un cap vers +Z est un quart de tour négatif.
+		noeud.rotation.y = atan2(-float(fiche["d"].y), float(fiche["d"].x))
 
 # ── L'interface ────────────────────────────────────────────────────────────
 
@@ -447,8 +663,31 @@ func _quitter() -> void:
 	get_tree().quit()
 
 func _process(delta: float) -> void:
+	# Tant que la ville se bâtit, le menu n'existe pas encore : une image de
+	# chantier, et rien d'autre. La caméra tourne quand même — le fond bouge
+	# derrière le voile, et c'est ce qui se découvre au fondu.
+	# `--chargement` : garder l'écran de chargement à l'image, pour le
+	# photographier au banc — il ne dure qu'une poignée d'images en vrai.
+	if "--chargement" in OS.get_cmdline_args():
+		_t += delta
+		_placer_la_camera(_t)
+		return
+	if not _a_batir.is_empty():
+		_t += delta
+		_placer_la_camera(_t)
+		if _avancer_le_chantier():
+			_peupler_la_ville()
+		return
+	if _fondu < 1.0:
+		_fondu = minf(1.0, _fondu + delta * 1.4)
+		interface().visible = true
+		if _voile_chargement != null:
+			_voile_chargement.modulate.a = 1.0 - _fondu
+			_voile_chargement.visible = _fondu < 1.0
+
 	_t += delta
 	_placer_la_camera(_t)
+	_animer_la_circulation(delta)
 	# Le boîtier se balance sur trois quarts, sans jamais se retourner : on
 	# doit pouvoir lire l'affiche à tout instant.
 	if _boite != null and is_instance_valid(_boite):
@@ -463,7 +702,7 @@ func _process(delta: float) -> void:
 	# La ligne de netteté vise le bas de l'écran, là où la ville est proche :
 	# le lointain reste dans le flou, et c'est lui qui fait la maquette.
 	if _maquette != null:
-		_maquette.viser(0.66)
+		_maquette.viser(0.62)
 
 func _input(evenement: InputEvent) -> void:
 	var touche := evenement as InputEventKey

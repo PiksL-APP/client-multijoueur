@@ -110,6 +110,9 @@ func demarrer() -> void:
 	# ── Colonne de droite : le personnage en grand ──────────────────────
 	rangee.add_child(_vitrine())
 
+	# Le thème continue : `musique` compare au nom en cours et ne redémarre
+	# rien, donc passer du menu à la création ne coupe pas le morceau.
+	Sons.musique(Sons.THEME)
 	Reseau.etat_change.connect(func(_e): _rafraichir())
 	_champ.grab_focus()
 	_rafraichir()
