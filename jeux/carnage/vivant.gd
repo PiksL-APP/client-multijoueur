@@ -24,8 +24,10 @@ extends RefCounted
 enum { PIETON, GANG, FLIC }                        ## `genre` d'un passant
 enum { CIVILE, PATROUILLE, VOITURE_GANG, EPAVE }   ## `genre` d'un véhicule
 
-const GENS_MAX := 90
-const AUTOS_MOBILES_MAX := 26   ## celles qui roulent ; les garées ne comptent pas
+const GENS_MAX := 90            ## de jour ; la nuit, la ville se vide à moitié
+const AUTOS_MOBILES_MAX := 44   ## celles qui roulent ; les garées ne comptent pas
+const GENS_NUIT := 40
+const AUTOS_NUIT := 14
 const PAR_REPAIRE := 5          ## gars qui traînent à un repaire
 const CAISSES_MAX := 8
 const PORTEE_VUE := 1600.0        ## au-delà, on ne diffuse plus : personne ne regarde
@@ -245,13 +247,16 @@ func _peupler(delta: float, _temps: float, joueurs: Dictionary) -> void:
 			_poser_caisse(joueurs)
 
 	_depuis_gens += delta
-	if _depuis_gens >= 0.32 and gens.size() < GENS_MAX:
+	# La ville vit au rythme du jour : pleine de monde et de voitures à midi,
+	# à moitié vide la nuit. L'heure est la même chez tous (celle du village).
+	var nuit := MatieresCarnage.nuit()
+	if _depuis_gens >= lerpf(0.32, 0.7, nuit) and gens.size() < plafond_gens():
 		_depuis_gens = 0.0
 		_naitre_passant(joueurs, false)
 		_peupler_les_repaires(joueurs)
 
 	_depuis_autos += delta
-	if _depuis_autos >= 1.4 and _mobiles() < AUTOS_MOBILES_MAX:
+	if _depuis_autos >= lerpf(0.5, 1.8, nuit) and _mobiles() < plafond_autos():
 		_depuis_autos = 0.0
 		_naitre_auto(joueurs, CIVILE, "")
 
@@ -322,7 +327,7 @@ func _peupler_les_repaires(joueurs: Dictionary) -> void:
 		for personne in gens:
 			if personne.has("attache") and Vector2(personne["attache"]) == Vector2(r["p"]):
 				presents += 1
-		if presents >= PAR_REPAIRE or gens.size() >= GENS_MAX:
+		if presents >= PAR_REPAIRE or gens.size() >= plafond_gens():
 			continue
 		var p := plan.point_de_rue(_rng, r["p"], 30.0, PlanVille.RAYON_REPAIRE * 0.8)
 		gens.append({
@@ -331,6 +336,13 @@ func _peupler_les_repaires(joueurs: Dictionary) -> void:
 			"etat": 0, "minuterie": _rng.randf_range(0.5, 2.0), "recharge": 0.0, "a": 0.0,
 			"attache": r["p"],
 		})
+
+## Les plafonds de population selon l'heure.
+func plafond_autos() -> int:
+	return int(round(lerpf(float(AUTOS_MOBILES_MAX), float(AUTOS_NUIT), MatieresCarnage.nuit())))
+
+func plafond_gens() -> int:
+	return int(round(lerpf(float(GENS_MAX), float(GENS_NUIT), MatieresCarnage.nuit())))
 
 func _mobiles() -> int:
 	var total := 0
@@ -380,12 +392,21 @@ func _naitre_passant(joueurs: Dictionary, large: bool) -> void:
 func _naitre_auto(joueurs: Dictionary, genre: int, cible: String) -> void:
 	# Le plafond porte sur ce qui ROULE : les garées sont trois cents et ne
 	# comptent pas, sinon plus rien ne circulerait jamais.
-	if _mobiles() >= AUTOS_MOBILES_MAX and genre != PATROUILLE:
+	if _mobiles() >= plafond_autos() and genre != PATROUILLE:
 		return
 	var autour := _autour_d_un_joueur(joueurs)
 	if cible != "" and joueurs.has(cible):
 		autour = joueurs[cible]["p"]
 	var pose := plan.point_de_chaussee(_rng, autour, NAISSANCE_MIN, NAISSANCE_MAX)
+	# Jamais SUR une autre voiture (garée ou non) : deux caisses emboîtées, ça
+	# se voit tout de suite et ça ne se démêle jamais. Trois essais, sinon on
+	# renonce pour cette fois.
+	for essai in 3:
+		if _degage_des_autos(pose["p"]):
+			break
+		pose = plan.point_de_chaussee(_rng, autour, NAISSANCE_MIN, NAISSANCE_MAX)
+	if not _degage_des_autos(pose["p"]):
+		return
 	var direction: Vector2 = pose["d"]
 	# Une berline sur quatre porte les couleurs du quartier : c'est ce qui fait
 	# qu'on hésite avant de tirer dans le tas sur le territoire d'un gang avec
@@ -403,6 +424,14 @@ func _naitre_auto(joueurs: Dictionary, genre: int, cible: String) -> void:
 		"pv": PV_AUTO, "pilote": "", "cible": cible, "minuterie": 0.0, "recharge": 0.0,
 		"modele": modele, "garee": false,
 	})
+
+## Vrai si aucune voiture (ni aucun joueur) ne se trouve à moins de deux
+## longueurs de voiture du point.
+func _degage_des_autos(point: Vector2) -> bool:
+	for auto in autos:
+		if Vector2(auto["p"]).distance_squared_to(point) < (RAYON_AUTO * 2.4) * (RAYON_AUTO * 2.4):
+			return false
+	return true
 
 func _poser_caisse(joueurs: Dictionary) -> void:
 	var noms := ["mitraillette", "roquette", "eperon"]
@@ -603,8 +632,9 @@ func _conduire_civile(auto: Dictionary, delta: float, joueurs: Dictionary = {}) 
 	# voie. On la suit si l'on arrive à peu près dans son sens (ou qu'on la
 	# suivait déjà) ; sinon on la traverse tout droit, comme un carrefour.
 	var libre := plan.voie_libre_en(auto["p"])
-	if not libre.is_empty() and String(libre["genre"]) == "esplanade":
-		libre = {}          # le parvis se traverse comme une rue de la grille
+	var sur_esplanade := not libre.is_empty() and String(libre["genre"]) == "esplanade"
+	if sur_esplanade:
+		libre = {}          # le parvis se traverse tout droit, comme une rue de la grille
 	var suivait := bool(auto.get("libre", false))
 	var suit_libre := false
 	if not libre.is_empty():
@@ -669,7 +699,12 @@ func _conduire_civile(auto: Dictionary, delta: float, joueurs: Dictionary = {}) 
 	var suivant: Vector2 = auto["p"] + direction * float(auto["vitesse"]) * delta
 
 	# Devant un mur, on tourne au prochain carrefour plutôt que de s'y écraser.
-	if plan.dans_un_batiment(suivant + direction * 60.0, RAYON_AUTO):
+	# Le parvis de la place est un mur aussi : sans ça, les voitures y entraient
+	# par les axes de la grille, s'y bloquaient les unes derrière les autres, et
+	# la place était un parking. Celles qui y sont déjà le traversent pour sortir.
+	var devant := plan.voie_libre_en(suivant + direction * 60.0)
+	var parvis_devant := not sur_esplanade and not devant.is_empty() and String(devant["genre"]) == "esplanade"
+	if parvis_devant or plan.dans_un_batiment(suivant + direction * 60.0, RAYON_AUTO):
 		direction = Vector2(-direction.y, direction.x) if _rng.randf() < 0.5 \
 			else Vector2(direction.y, -direction.x)
 		if suit_libre:
@@ -775,7 +810,7 @@ func _depecher_la_police(delta: float, joueurs: Dictionary) -> void:
 			_naitre_auto(joueurs, PATROUILLE, String(cle))
 
 		# À deux étoiles, la police descend de voiture.
-		if niveau >= 2 and gens.size() < GENS_MAX and _rng.randf() < delta * 0.6 * float(niveau - 1):
+		if niveau >= 2 and gens.size() < plafond_gens() and _rng.randf() < delta * 0.6 * float(niveau - 1):
 			var p := plan.point_de_rue(_rng, j["p"], 420.0, 760.0)
 			gens.append({
 				"id": _id(), "p": p, "d": Vector2.RIGHT, "genre": FLIC, "gang": -1,
@@ -1146,13 +1181,17 @@ func _avancer_livraison(cle: String) -> void:
 ## clients qui casseraient chacun de leur côté verraient deux ruines différentes.
 var detruits: Dictionary = {}
 var _coups_voxel: Dictionary = {}   ## clé globale -> balles reçues
-const COUPS_PAR_VOXEL := 3
-const RAYON_ROQUETTE := 2.6         ## unités 3D
-const RAYON_EXPLOSION := 2.4
-const RAYON_CHOC := 1.3
+## Les cubes font une unité (`VoxelsCarnage.V`) : une balle en emporte un, la
+## roquette une sphère d'une quarantaine.
+const COUPS_PAR_VOXEL := 1
+const RAYON_ROQUETTE := 2.2         ## unités 3D
+const RAYON_EXPLOSION := 2.0
+const RAYON_CHOC := 1.2
+## La clé locale tient sur 16 bits (32 × 32 × 64 cellules).
+const LOCALES_PAR_IMMEUBLE := 65536
 
-## Une balle ou une roquette dans un mur. Le pistolet écaille (trois balles par
-## cube), la roquette creuse une sphère.
+## Une balle ou une roquette dans un mur. Le pistolet écaille (un cube par
+## balle), la roquette creuse une sphère.
 func impacter(point: Vector2, arme: String, hauteur: float = 1.4) -> void:
 	var trouve := plan.immeuble_a(point)
 	if trouve.is_empty():
@@ -1166,7 +1205,7 @@ func impacter(point: Vector2, arme: String, hauteur: float = 1.4) -> void:
 	var locale := VoxelsCarnage.voxel_proche_de(b, p3)
 	if _deja_casse(id, locale):
 		return
-	var cle := id * 8192 + locale
+	var cle := id * LOCALES_PAR_IMMEUBLE + locale
 	_coups_voxel[cle] = int(_coups_voxel.get(cle, 0)) + 1
 	if int(_coups_voxel[cle]) >= COUPS_PAR_VOXEL:
 		_casser(id, [locale])
@@ -1194,7 +1233,7 @@ func choquer(point: Vector2, direction: Vector2, vitesse: float) -> void:
 	var rayon := RAYON_CHOC * (1.6 if vitesse > 600.0 else 1.0)
 	var liste: Array = []
 	for locale in VoxelsCarnage.voxels_autour_de(trouve["b"], Decor.vers3d(point + direction * 18.0, 1.0), rayon):
-		if posmod(int(locale), 32) == 0:      # le rez-de-chaussée seulement
+		if posmod(int(locale), 64) < 2:       # le rez-de-chaussée seulement
 			liste.append(locale)
 	_casser(int(trouve["id"]), liste)
 

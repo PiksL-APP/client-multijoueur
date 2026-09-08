@@ -69,28 +69,41 @@ rendu et l'interface ; le reste est à côté :
   Murs indexés PAR TUILE (une fiche, un rectangle) : ne jamais revenir à un
   balayage d'une liste de rectangles.
 - `jeux/carnage/morceau.gd` (`MorceauVille`) — un morceau rendu de vingt tuiles
-  : sol en un maillage, TOUT le bâti en une nappe de cubes unitaires
-  (`MultiMesh.buffer`, seize flottants par cube, alpha d'instance = matière),
-  voitures dormantes en nappes par modèle, flaques de lumière. Bâti quand son
-  bord passe à portée du joueur, un par image, libéré au loin. `casser(id,
-  locale)` retire un cube et expose ses voisins ; `ville.detruits` est rejoué
-  quand un morceau se rebâtit.
+  : sol en un maillage, les immeubles en UN `ArrayMesh` fusionné PAR PÂTÉ
+  (`_groupes` {ids, noeud, sale, quads}, `_mailler_groupe`, un pâté par image au
+  chantier via `_a_mailler`), le mobilier et les ornements en une nappe de
+  cubes (`MultiMesh.buffer`, alpha d'instance = matière), voitures dormantes en
+  nappes par modèle, flaques de lumière. Bâti quand son bord passe à portée du
+  joueur, une étape par image, libéré au loin. `casser(id, locale)` vide la
+  cellule et salit le pâté ; `rafraichir()` (appelé par `carnage.gd` pour tous
+  les morceaux, un pâté sale par image) le remaille ; `ville.detruits` est
+  rejoué quand un morceau se rebâtit. Le banc affiche `quads=` et
+  `maillage_max=` (statiques `quads_total`, `maillage_max_ms`).
 - Les VOIES LIBRES du plan (`voie_libre`, `voie_libre_en`, `_voie_libre_a`) :
   places en étoile, avenues en diagonale, anneaux — une fonction pure du point,
   mise en cache par tuile. Une tuile libre l'emporte sur la grille dans `tuile`
   (après l'eau et le rail) ; un pâté coupé passe par `_bordure`. Le shader du
   sol reçoit `lignes/origines/anneaux/etoiles` (PackedVector4Array, tailles
   fixes 7/7/2/3). ⚠ Convention : `s` positif à DROITE de la tangente `d`. Le
-  DÉCALAGE (`DECALAGE`) ferme une transversale sur deux en T ; une rue fermée
-  est une cour traversable.
+  DÉCALAGE (`DECALAGE`) ferme une transversale sur deux en T ; les PÂTÉS LONGS
+  (`LONG`, sens par secteur `_sens_est_ouest`) ferment une transversale sur
+  deux par tranches de trois pâtés ; une rue fermée est BÂTIE dans les
+  quartiers denses (`QUARTIERS_BATIS`, `_rue_batie`) et une cour ailleurs.
 - `jeux/carnage/voxels.gd` (`VoxelsCarnage`) — la fabrique de cubes :
-  immeubles (grille d'occupation, styles de façade), mobilier, voitures
-  (`GABARITS`), personnages animés (`animer`). Deux unités par cube d'immeuble,
-  0,5 par cube de voiture, 0,42 par cube de personnage. ⚠ `commun/voxels.gd`
+  immeubles en voxels d'UNE unité (`immeuble` : grille `solide`, `trous`,
+  `fonds`, `ny_mur`/toit en pente dans la grille, `couleur_cellule`), mailleur
+  glouton par pâté (`mailler`, `_tranche`, `_face`, `_appui`, UV = position en
+  cellules), ornements à l'échelle E = 2, voitures en quarts d'unité maillées
+  par `mailler_grille` (UV constants, `GABARITS` seize gabarits, alpha `BRUT`
+  pour ce qui ne prend pas la peinture), personnages animés (`animer`, 0,24).
+  Clé locale d'une cellule : `(i·32 + j)·64 + k`. ⚠ `to_rgba32()` ne tient pas
+  dans un `PackedInt32Array` ; un tableau compact lu dans un dictionnaire puis
+  allongé n'allonge qu'une copie. ⚠ `commun/voxels.gd`
   (`Voxels`) est la fabrique de la FERME, à l'autre session : ne pas confondre.
 - `jeux/carnage/matieres.gd` (`MatieresCarnage`) — les shaders (sol quantifié
-  sur la grille des cubes, voxel biseauté à SOUS-CUBES d'une unité pour les
-  gros cubes, flaques additives, ombres de contact et traces en `blend_mul`,
+  sur la grille des cubes, voxel : uniform `fusionne` pour les maillages de
+  pâté (`voxel_fusionne()`), arêtes discrètes, fenêtres allumées = verre le
+  jour, classe `ECLAIRE`, seule l'alpha 1 prend `teinte` ; flaques additives, ombres de contact et traces en `blend_mul`,
   lumineux, post-traitement vignette/grain via `hint_screen_texture`) et le
   cycle jour/nuit : `nuit()` reprend l'horloge du village (quinze minutes),
   `ambiance()` + `regler_heure()` interpolent ciel, brouillard, soleil et lune

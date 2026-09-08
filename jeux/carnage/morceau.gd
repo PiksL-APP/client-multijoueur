@@ -22,7 +22,6 @@ extends Node3D
 ## apparaissent. Le morceau garde pour cela l'occupation de chaque immeuble.
 
 const E := Decor.ECHELLE
-const RESERVE := 0.12          ## part d'instances gardées libres pour les intérieurs dévoilés
 
 ## Les lampadaires éclairent le sol : la flaque, sa portée, sa couleur.
 const LAMPES := {
@@ -46,8 +45,10 @@ var _etape := 0
 var _fiches: Array = []
 var _tampon := PackedFloat32Array()
 var _n := 0
-var _immeubles: Dictionary = {}       ## id d'immeuble -> {"v": voxels, "inst": {clé locale -> instance}}
-var _libres: Array = []               ## instances libres (cachées)
+var _immeubles: Dictionary = {}       ## id d'immeuble -> {"v": voxels}
+var _groupes: Dictionary = {}         ## pâté -> {ids, noeud: MeshInstance3D, sale}
+var _a_mailler: Array = []            ## les groupes qui attendent leur premier maillage
+var _cellules := 0                    ## cellules pleines d'immeubles, pour le journal
 var _multi: MultiMesh
 var _places: Dictionary = {}          ## modele -> Array[{t, c, id}]
 var _lumineux: SurfaceTool
@@ -80,10 +81,19 @@ func batir(plan: PlanVille, cle_du_morceau: Vector2i, reveillees: Dictionary, de
 	while not avancer():
 		pass
 
-func fini() -> bool:
-	return _etape >= 5
+## Un morceau libéré rend ses rectangles au compte du banc.
+func _exit_tree() -> void:
+	for groupe in _groupes:
+		quads_total -= int(_groupes[groupe].get("quads", 0))
+	_groupes.clear()
 
-## Une étape de chantier. Renvoie vrai quand le morceau est complet.
+func fini() -> bool:
+	return _etape >= 5 and _a_mailler.is_empty()
+
+## Une étape de chantier. Renvoie vrai quand le morceau est complet. Les
+## maillages d'immeubles viennent après tout le reste, UN PÂTÉ PAR IMAGE : un
+## morceau en a seize, c'est un quart de seconde à soixante images — et les
+## immeubles apparaissent pâté par pâté, au loin, au lieu d'un à-coup.
 func avancer() -> bool:
 	match _etape:
 		0: _lire_les_fiches()
@@ -96,8 +106,14 @@ func avancer() -> bool:
 			_fiches.clear()
 			_places.clear()
 			_tampon = PackedFloat32Array()
+		_:
+			if not _a_mailler.is_empty():
+				var groupe: Vector2i = _a_mailler.pop_front()
+				_mailler_groupe(groupe)
+				for id in _groupes[groupe]["ids"]:
+					_cellules += int(_immeubles[id]["v"]["nx"]) * int(_immeubles[id]["v"]["nz"]) * int(_immeubles[id]["v"]["ny"]) - (_immeubles[id]["v"]["trous"] as PackedInt32Array).size()
 	_etape += 1
-	return _etape >= 5
+	return fini()
 
 # ------------------------------------------------------------ étape 0 : les fiches
 
@@ -168,90 +184,90 @@ func _lire_les_fiches() -> void:
 				_quelque_chose_de_lumineux = true
 				_quelque_flaque = true
 
-## Un immeuble : sa grille de voxels, les cubes cassés retirés, et seulement
-## les cubes EXPOSÉS posés dans la nappe. L'intérieur attend qu'on l'ouvre.
+## Un immeuble : sa grille de voxels d'une unité, les cellules cassées de la
+## manche retirées, rangé dans le GROUPE de son pâté — c'est par pâté qu'on
+## fusionne les maillages (une dizaine d'immeubles, un seul appel de dessin) et
+## qu'on les refait quand un cube part.
 func _poser_immeuble(b: Dictionary, id: int) -> void:
 	var v := VoxelsCarnage.immeuble(b, id)
-	var solide: PackedByteArray = v["solide"]
 	var nx := int(v["nx"])
 	var nz := int(v["nz"])
 	var ny := int(v["ny"])
 	# Ce que la manche a déjà cassé dans cet immeuble.
 	var casses: Array = _detruits.get(id, [])
 	for locale in casses:
-		var i := int(locale) / 512
-		var j := (int(locale) / 32) % 16
-		var k := int(locale) % 32
-		if i < nx and j < nz and k < ny:
-			solide[(i * nz + j) * ny + k] = 0
-	var inst: Dictionary = {}
-	var couleurs: PackedColorArray = v["couleurs"]
-	for i in nx:
-		for j in nz:
-			for k in ny:
-				if solide[(i * nz + j) * ny + k] == 0:
-					continue
-				if not _expose(solide, nx, nz, ny, i, j, k):
-					continue
-				inst[(i * 16 + j) * 32 + k] = _n
-				_poser_voxel(v, i, j, k, couleurs[(i * nz + j) * ny + k], _dehors(solide, nx, nz, ny, i, j, k))
-	_immeubles[id] = {"v": v, "inst": inst}
+		var c := VoxelsCarnage.decoder_locale(int(locale))
+		if c.x < nx and c.y < nz and c.z < ny:
+			VoxelsCarnage._creuser(v, c.x, c.y, c.z)
+	_immeubles[id] = {"v": v}
+	var tuile := tuile_d_immeuble(id)
+	var groupe := Vector2i(tuile.x / PlanVille.PERIODE, tuile.y / PlanVille.PERIODE)
+	if not _groupes.has(groupe):
+		_groupes[groupe] = {"ids": [], "noeud": null, "sale": true}
+		_a_mailler.append(groupe)
+	(_groupes[groupe]["ids"] as Array).append(id)
 	# Les ornements — corniches, balcons, stores, toits — hors de la grille :
 	# ils ne se cassent pas, mais ils font la différence entre une boîte et
-	# un immeuble.
+	# un immeuble. Eux restent des instances.
 	for orn in VoxelsCarnage.ornements(v, id):
 		_instance(orn[0], orn[1], Color((orn[2] as Color).r, (orn[2] as Color).g, (orn[2] as Color).b, VoxelsCarnage.MUR))
 
-## Le nombre de cubes de la nappe : pour le journal du banc, qui surveille ce
-## que le navigateur doit dessiner.
+## Le nombre de cubes du morceau : les cellules pleines de ses immeubles plus
+## les instances de mobilier — pour le journal du banc.
 func cubes_poses() -> int:
-	return _n
+	return _n + _cellules
 
-static func _expose(solide: PackedByteArray, nx: int, nz: int, ny: int, i: int, j: int, k: int) -> bool:
-	if i == 0 or j == 0 or k == 0 or i == nx - 1 or j == nz - 1 or k == ny - 1:
-		return true
-	return solide[((i - 1) * nz + j) * ny + k] == 0 or solide[((i + 1) * nz + j) * ny + k] == 0 \
-		or solide[(i * nz + j - 1) * ny + k] == 0 or solide[(i * nz + j + 1) * ny + k] == 0 \
-		or solide[(i * nz + j) * ny + k - 1] == 0 or solide[(i * nz + j) * ny + k + 1] == 0
+## Le maillage fusionné d'un groupe (un pâté) : tous ses immeubles dans un
+## seul ArrayMesh. Appelé au chantier (un groupe par image) et après une casse.
+## Le maillage le plus long de la session, en millisecondes : le banc l'affiche,
+## c'est la saccade maximale qu'une casse ou un chantier peut causer.
+static var maillage_max_ms := 0.0
+static var quads_total := 0
+
+func _mailler_groupe(groupe: Vector2i) -> void:
+	var depart := Time.get_ticks_usec()
+	var entree: Dictionary = _groupes[groupe]
+	var sommets := PackedVector3Array()
+	var normales := PackedVector3Array()
+	var couleurs := PackedColorArray()
+	var uvs := PackedVector2Array()
+	var indices := PackedInt32Array()
+	for id in entree["ids"]:
+		VoxelsCarnage.mailler(_immeubles[id]["v"], sommets, normales, couleurs, uvs, indices)
+	entree["sale"] = false
+	var maillage := VoxelsCarnage.maillage_depuis(sommets, normales, couleurs, uvs, indices)
+	var noeud: MeshInstance3D = entree["noeud"]
+	if noeud == null:
+		noeud = MeshInstance3D.new()
+		noeud.material_override = MatieresCarnage.voxel_fusionne()
+		noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		add_child(noeud)
+		entree["noeud"] = noeud
+	noeud.mesh = maillage
+	quads_total += sommets.size() / 4 - int(entree.get("quads", 0))
+	entree["quads"] = sommets.size() / 4
+	maillage_max_ms = maxf(maillage_max_ms, float(Time.get_ticks_usec() - depart) / 1000.0)
+
+## Refait le maillage d'UN groupe sali par une casse — un par image, pour
+## qu'une rafale ne fasse pas dix maillages dans la même image. Renvoie vrai
+## s'il a travaillé.
+func rafraichir() -> bool:
+	for groupe in _groupes:
+		if bool(_groupes[groupe]["sale"]) and _groupes[groupe]["noeud"] != null:
+			_mailler_groupe(groupe)
+			return true
+	return false
 
 func _centre_voxel(v: Dictionary, i: int, j: int, k: int) -> Vector3:
 	var t := float(v["taille"])
 	var h := float(v["hauteur"])
 	return (v["origine"] as Vector3) + Vector3((i + 0.5) * t, (k + 0.5) * h, (j + 0.5) * t)
 
-## Le côté horizontal par lequel un cube donne sur le vide (le bord de la
-## grille ou un creux), ou ZERO s'il n'en a pas : c'est la normale de la façade.
-static func _dehors(solide: PackedByteArray, nx: int, nz: int, ny: int, i: int, j: int, k: int) -> Vector3:
-	if i == 0 or solide[((i - 1) * nz + j) * ny + k] == 0:
-		return Vector3(-1, 0, 0)
-	if i == nx - 1 or solide[((i + 1) * nz + j) * ny + k] == 0:
-		return Vector3(1, 0, 0)
-	if j == 0 or solide[(i * nz + j - 1) * ny + k] == 0:
-		return Vector3(0, 0, -1)
-	if j == nz - 1 or solide[(i * nz + j + 1) * ny + k] == 0:
-		return Vector3(0, 0, 1)
-	return Vector3.ZERO
-
-## Un cube d'immeuble. Une FENÊTRE (vitre ou lumière) est en RETRAIT : le cube
-## s'amincit et rentre dans la façade de deux tiers ; les flancs des cubes
-## voisins, qui sont des cubes entiers, deviennent l'encadrement. C'est ce qui
-## donne du relief à un mur — une fenêtre à fleur de mur, c'est un sticker.
-func _poser_voxel(v: Dictionary, i: int, j: int, k: int, couleur: Color, dehors: Vector3 = Vector3.ZERO) -> void:
-	var t := float(v["taille"])
-	var h := float(v["hauteur"])
-	var centre := _centre_voxel(v, i, j, k)
-	var taille := Vector3(t, h, t)
-	if couleur.a < 0.75 and dehors != Vector3.ZERO and not bool(v["plat"]):
-		var profondeur := 0.62 * t
-		centre -= dehors * profondeur * 0.5
-		taille -= dehors.abs() * profondeur
-	_instance(centre, taille, couleur)
-
 func _cube(centre: Vector3, cote: float, couleur: Color) -> void:
 	_instance(centre, Vector3(cote, cote, cote), couleur)
 
 ## Seize nombres dans le tampon : la transformation (trois lignes de quatre) et
-## la couleur. C'est le format de `MultiMesh.buffer` avec les couleurs.
+## la couleur.
 func _instance(centre: Vector3, taille: Vector3, couleur: Color) -> void:
 	_tampon.append_array(PackedFloat32Array([
 		taille.x, 0.0, 0.0, centre.x,
@@ -291,12 +307,6 @@ static func cube_unitaire() -> ArrayMesh:
 func _poser_les_cubes() -> void:
 	if _n == 0:
 		return
-	var reserve := int(ceil(float(_n) * RESERVE)) + 16
-	# Les instances de réserve : cachées sous la ville, en attendant qu'un
-	# intérieur à dévoiler les réclame.
-	for i in reserve:
-		_libres.append(_n)
-		_instance(Vector3(0, -80, 0), Vector3(0.001, 0.001, 0.001), Color.BLACK)
 	_multi = MultiMesh.new()
 	_multi.transform_format = MultiMesh.TRANSFORM_3D
 	_multi.use_colors = true
@@ -403,81 +413,50 @@ func cacher_voiture(id: int) -> void:
 func porte(id: int) -> bool:
 	return _immeubles.has(id)
 
-## Un voxel cassé : il disparaît, et les cubes pleins qu'il cachait apparaissent
-## (en gris d'intérieur, ou dans leur couleur si c'était une autre façade).
-## Renvoie le centre et la couleur du cube parti, pour les débris — ou vide.
+## Un voxel cassé : la cellule se vide, son pâté est marqué à remailler (voir
+## `rafraichir`), et les faces des cellules qu'il cachait apparaîtront au
+## prochain maillage — en gris d'intérieur, ou dans leur couleur si c'était une
+## autre façade. Renvoie le centre et la couleur du cube parti, pour les
+## débris — ou vide.
 func casser(id: int, locale: int) -> Dictionary:
-	if not _immeubles.has(id) or _multi == null:
-		return {}
-	var entree: Dictionary = _immeubles[id]
-	var v: Dictionary = entree["v"]
-	var inst: Dictionary = entree["inst"]
-	var solide: PackedByteArray = v["solide"]
-	var nx := int(v["nx"])
-	var nz := int(v["nz"])
-	var ny := int(v["ny"])
-	var i := locale / 512
-	var j := (locale / 32) % 16
-	var k := locale % 32
-	if i >= nx or j >= nz or k >= ny:
-		return {}
-	var idx := (i * nz + j) * ny + k
-	if solide[idx] == 0:
-		return {}
-	solide[idx] = 0
-	var couleurs: PackedColorArray = v["couleurs"]
-	var couleur: Color = couleurs[idx]
-	var centre := _centre_voxel(v, i, j, k)
-	if inst.has(locale):
-		var indice := int(inst[locale])
-		_multi.set_instance_transform(indice, Transform3D(Basis.from_scale(Vector3(0.001, 0.001, 0.001)), Vector3(0, -80, 0)))
-		inst.erase(locale)
-		_libres.append(indice)
-	# Les voisins pleins qui n'étaient pas dessinés le deviennent.
-	for voisin: Vector3i in [Vector3i(-1, 0, 0), Vector3i(1, 0, 0), Vector3i(0, -1, 0), Vector3i(0, 1, 0), Vector3i(0, 0, -1), Vector3i(0, 0, 1)]:
-		var vi: int = i + voisin.x
-		var vj: int = j + voisin.z
-		var vk: int = k + voisin.y
-		if vi < 0 or vj < 0 or vk < 0 or vi >= nx or vj >= nz or vk >= ny:
-			continue
-		var vidx := (vi * nz + vj) * ny + vk
-		if solide[vidx] == 0:
-			continue
-		var vlocale := (vi * 16 + vj) * 32 + vk
-		if inst.has(vlocale) or _libres.is_empty():
-			continue
-		var slot := int(_libres.pop_back())
-		inst[vlocale] = slot
-		_multi.set_instance_transform(slot, Transform3D(Basis.from_scale(Vector3(float(v["taille"]), float(v["hauteur"]), float(v["taille"]))),
-			_centre_voxel(v, vi, vj, vk)))
-		_multi.set_instance_color(slot, couleurs[vidx])
-	return {"p": centre, "c": couleur, "taille": float(v["taille"])}
-
-## Le voxel PLEIN d'un immeuble le plus proche d'un point 3D (en unités), pour
-## savoir ce qu'une balle ou un pare-chocs a touché. Renvoie la clé locale ou -1.
-func voxel_proche(id: int, point: Vector3) -> int:
 	if not _immeubles.has(id):
-		return -1
+		return {}
 	var v: Dictionary = _immeubles[id]["v"]
 	var solide: PackedByteArray = v["solide"]
 	var nx := int(v["nx"])
 	var nz := int(v["nz"])
 	var ny := int(v["ny"])
+	var c := VoxelsCarnage.decoder_locale(locale)
+	if c.x >= nx or c.y >= nz or c.z >= ny:
+		return {}
+	var idx := (c.x * nz + c.y) * ny + c.z
+	if solide[idx] == 0:
+		return {}
+	var couleur := VoxelsCarnage.couleur_cellule(v, c.x, c.y, c.z)
+	VoxelsCarnage._creuser(v, c.x, c.y, c.z)
+	_cellules -= 1
+	var tuile := tuile_d_immeuble(id)
+	var groupe := Vector2i(tuile.x / PlanVille.PERIODE, tuile.y / PlanVille.PERIODE)
+	if _groupes.has(groupe):
+		_groupes[groupe]["sale"] = true
+	return {"p": _centre_voxel(v, c.x, c.y, c.z), "c": couleur, "taille": float(v["taille"])}
+
+## Le voxel PLEIN d'un immeuble le plus proche d'un point 3D (en unités), pour
+## savoir ce qu'une balle ou un pare-chocs a touché. Renvoie la clé locale ou -1.
+func voxel_proche(id: int, point: Vector3) -> int:
 	var meilleur := -1
 	var distance := INF
-	for i in nx:
-		for j in nz:
-			for k in ny:
-				if solide[(i * nz + j) * ny + k] == 0:
-					continue
-				var d := _centre_voxel(v, i, j, k).distance_squared_to(point)
-				if d < distance:
-					distance = d
-					meilleur = (i * 16 + j) * 32 + k
+	var v: Dictionary = _immeubles[id]["v"] if _immeubles.has(id) else {}
+	for locale in voxels_autour(id, point, 3.0):
+		var c := VoxelsCarnage.decoder_locale(int(locale))
+		var d := _centre_voxel(v, c.x, c.y, c.z).distance_squared_to(point)
+		if d < distance:
+			distance = d
+			meilleur = int(locale)
 	return meilleur
 
 ## Les voxels pleins d'un immeuble à moins de `rayon` unités d'un point : la
-## roquette, l'explosion.
+## roquette, l'explosion. On ne parcourt que la boîte du rayon.
 func voxels_autour(id: int, point: Vector3, rayon: float) -> Array:
 	if not _immeubles.has(id):
 		return []
@@ -486,14 +465,15 @@ func voxels_autour(id: int, point: Vector3, rayon: float) -> Array:
 	var nx := int(v["nx"])
 	var nz := int(v["nz"])
 	var ny := int(v["ny"])
+	var o: Vector3 = v["origine"]
+	var t := float(v["taille"])
+	var h := float(v["hauteur"])
 	var liste: Array = []
-	for i in nx:
-		for j in nz:
-			for k in ny:
-				if solide[(i * nz + j) * ny + k] == 0:
-					continue
-				if _centre_voxel(v, i, j, k).distance_to(point) <= rayon:
-					liste.append((i * 16 + j) * 32 + k)
+	for i in range(max(0, int(floor((point.x - rayon - o.x) / t))), min(nx - 1, int(floor((point.x + rayon - o.x) / t))) + 1):
+		for j in range(max(0, int(floor((point.z - rayon - o.z) / t))), min(nz - 1, int(floor((point.z + rayon - o.z) / t))) + 1):
+			for k in range(max(0, int(floor((point.y - rayon - o.y) / h))), min(ny - 1, int(floor((point.y + rayon - o.y) / h))) + 1):
+				if solide[(i * nz + j) * ny + k] == 1 and _centre_voxel(v, i, j, k).distance_to(point) <= rayon:
+					liste.append(VoxelsCarnage.cle_locale(i, j, k))
 	return liste
 
 ## Ce qui reste du rez-de-chaussée, de 0 à 1. En dessous d'un seuil, l'immeuble

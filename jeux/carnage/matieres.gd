@@ -122,7 +122,7 @@ void fragment() {
 	vec2 uvq = (cel + 0.5) / CELLULES;
 	vec2 celm = floor(posm.xz);
 	vec3 asphalte = vec3(0.12, 0.13, 0.16);
-	vec3 trottoir = vec3(0.56, 0.53, 0.47);
+	vec3 trottoir = vec3(0.47, 0.44, 0.39);
 	vec3 bordure = vec3(0.30, 0.29, 0.27);
 	vec3 blanc = vec3(0.85, 0.85, 0.80);
 	vec3 jaune = vec3(0.86, 0.68, 0.24);
@@ -178,7 +178,9 @@ void fragment() {
 	} else if (k == 6 || k == 7 || k == 8 || k == 9) {
 		// HERBE, et les allées d'un parc : une bande de sable d'une cellule.
 		float h = hache(celm + vec2(7.0));
-		col = mix(vec3(0.22, 0.42, 0.16), vec3(0.34, 0.54, 0.20), step(0.5, h));
+		// Un vert d'herbe, pas de citron : sous le soleil à pic le ton clair
+		// d'avant tirait au fluo.
+		col = mix(vec3(0.17, 0.32, 0.13), vec3(0.24, 0.40, 0.16), step(0.5, h));
 		rug = 0.95;
 		spec = 0.05;
 		bool allee = (k == 7 && abs(cel.x - 2.0) < 0.5) || (k == 8 && abs(cel.y - 2.0) < 0.5)
@@ -252,7 +254,7 @@ void fragment() {
 		spec = 0.35;
 		if (r < etoile.w) {
 			float ton = hache(celm + vec2(3.0));
-			col = mix(vec3(0.42, 0.40, 0.38), vec3(0.52, 0.49, 0.46), step(0.5, ton));
+			col = mix(vec3(0.30, 0.28, 0.26), vec3(0.38, 0.36, 0.33), step(0.5, ton));
 			rug = 0.8;
 			spec = 0.15;
 			if (r > etoile.w - 1.5) col = blanc * 0.8;
@@ -272,8 +274,13 @@ void fragment() {
 		for (int i = 1; i < 3; i++) r = min(r, length(pq - etoiles[i].xy));
 		float anneau_p = mod(floor(r / 4.0), 2.0);
 		float ton = hache(celm + vec2(23.0));
-		col = mix(mix(vec3(0.40, 0.37, 0.34), vec3(0.47, 0.44, 0.39), step(0.5, ton)),
-			mix(vec3(0.50, 0.45, 0.39), vec3(0.57, 0.52, 0.44), step(0.5, ton)), anneau_p);
+		// ⚠ Sombre à dessein : sous le soleil à pic, un pavé à 0,5 sortait blanc
+		// et le parvis n'était qu'une nappe crème sans dessin.
+		col = mix(mix(vec3(0.27, 0.25, 0.23), vec3(0.33, 0.30, 0.27), step(0.5, ton)),
+			mix(vec3(0.36, 0.32, 0.27), vec3(0.42, 0.37, 0.31), step(0.5, ton)), anneau_p);
+		// Le joint entre deux pavés, un trait sombre sur la grille fine.
+		vec2 jf = abs(fract(uvl * FINES) - 0.5) * 2.0;
+		col *= 1.0 - 0.18 * smoothstep(0.8, 0.97, max(jf.x, jf.y));
 		rug = 0.8;
 		spec = 0.15;
 	} else {
@@ -478,6 +485,9 @@ uniform float nuit : hint_range(0.0, 1.0) = 0.5;
 // La peinture d'un maillage à couleurs de sommet (une voiture) : elle
 // multiplie les cubes de mur, pas les lumières ni les vitres.
 uniform vec4 teinte : source_color = vec4(1.0);
+// 1.0 pour un MAILLAGE FUSIONNÉ (un pâté d'immeubles en un seul maillage de
+// cubes d'une unité) : les UV y portent la position en cellules, pas 0..1.
+uniform float fusionne = 0.0;
 
 varying vec4 c;
 varying vec2 uvl;
@@ -492,7 +502,7 @@ void vertex() {
 	nrm = normalize(mat3(MODEL_MATRIX) * NORMAL);
 	// La taille du cube : la longueur du premier axe de sa transformation.
 	// Au-dessus d'une unité et demie, la face se découpe en sous-cubes.
-	grand = step(1.5, length(MODEL_MATRIX[0].xyz));
+	grand = max(step(1.5, length(MODEL_MATRIX[0].xyz)), fusionne);
 }
 
 // Le SOUS-CUBE : les gros cubes (immeubles, deux unités) se lisent comme
@@ -525,22 +535,38 @@ void fragment() {
 	float bord = smoothstep(0.86, 0.99, max(d.x, d.y));
 	float lumiere = step(0.25, c.a) * step(c.a, 0.75);
 	float vitre = step(c.a, 0.25);
-	vec3 col = c.rgb * mix(teinte.rgb, vec3(1.0), max(lumiere, vitre));
+	// L'appui d'une fenêtre allumée : un mur le jour, qui luit la nuit.
+	float eclaire = step(0.8, c.a) * step(c.a, 0.9);
+	// Seule la tôle (alpha 1) prend la peinture d'instance : pneus, chrome,
+	// feux, vitres, lumières gardent leur couleur (alpha < 0,97).
+	vec3 col = c.rgb * mix(vec3(1.0), teinte.rgb, step(0.97, c.a));
+	// Une fenêtre « allumée » n'est qu'une vitre de jour : sa couleur chaude
+	// n'apparaît qu'avec la nuit, sinon les tours sont des damiers crème.
+	vec3 verre = vec3(0.13, 0.17, 0.24);
+	col = mix(col, verre, lumiere * (1.0 - smoothstep(0.35, 0.8, nuit)));
 	if (grand > 0.5) {
-		// Les deux axes de la face : ceux que la normale ne porte pas.
+		// Les deux axes de la face : ceux que la normale ne porte pas. Sur un
+		// maillage fusionné, les UV sont déjà la position en cellules.
 		vec3 an = abs(nrm);
-		vec2 pf = (an.y > 0.5) ? posm.xz : ((an.x > 0.5) ? posm.zy : posm.xy);
+		vec2 pf = (fusionne > 0.5) ? uvl : ((an.y > 0.5) ? posm.xz : ((an.x > 0.5) ? posm.zy : posm.xy));
+		bord *= 1.0 - fusionne;
 		vec2 cel = floor(pf / SOUS);
 		vec2 f = abs(fract(pf / SOUS) - vec2(0.5)) * 2.0;
 		float arete = smoothstep(0.74, 0.98, max(f.x, f.y));
 		// Un grain par sous-cube : deux briques voisines ne sont jamais tout à
 		// fait de la même teinte. Les vitres restent lisses.
-		float g = (fract(sin(dot(cel + floor(posm.xz * 0.01), vec2(127.1, 311.7))) * 43758.5453) - 0.5) * 0.14;
+		float g = (fract(sin(dot(cel + floor(posm.xz * 0.01), vec2(127.1, 311.7))) * 43758.5453) - 0.5) * 0.06;
 		// L'arête du HAUT de chaque sous-cube prend la lumière, celle du bas la
 		// perd : c'est ce qui fait lire un relief et non un carrelage.
 		float fy = fract(pf.y / SOUS);
-		float haut_c = (an.y > 0.5) ? 0.0 : smoothstep(0.86, 0.98, fy) * 0.10;
-		col *= (1.0 + g * (1.0 - vitre)) * (1.0 - 0.16 * arete * (1.0 - lumiere) * (1.0 - vitre)) * (1.0 + haut_c * (1.0 - vitre));
+		float haut_c = (an.y > 0.5) ? 0.0 : smoothstep(0.86, 0.98, fy) * 0.06;
+		// Des arêtes DISCRÈTES : le voxel se lit à la forme (chaque cube fait
+		// son relief à la lumière), pas à un quadrillage dessiné. Sur un toit
+		// (face horizontale) presque rien, un grain de gravier.
+		float toit = step(0.5, an.y);
+		float f_arete = mix(0.06, 0.02, toit);
+		g *= 1.0 + 0.8 * toit;
+		col *= (1.0 + g * (1.0 - vitre)) * (1.0 - f_arete * arete * (1.0 - lumiere) * (1.0 - vitre)) * (1.0 + haut_c * (1.0 - vitre));
 		col *= 1.0 - 0.10 * bord * (1.0 - lumiere);
 	} else {
 		col *= 1.0 - 0.20 * bord * (1.0 - lumiere);
@@ -549,7 +575,7 @@ void fragment() {
 	ALBEDO = col;
 	ROUGHNESS = mix(0.85, 0.2, vitre);
 	SPECULAR = mix(0.15, 0.7, vitre);
-	EMISSION = c.rgb * lumiere * (0.25 + 1.15 * nuit);
+	EMISSION = c.rgb * (lumiere * 1.4 + eclaire * 1.1) * smoothstep(0.3, 0.85, nuit);
 }
 """
 
@@ -629,8 +655,10 @@ void vertex() {
 }
 
 void fragment() {
-	float bord = 1.0 - smoothstep(0.3, 0.5, abs(uvl.y - 0.5));
-	ALBEDO = vec3(1.0 - 0.55 * c.a * bord);
+	// Une trace de pneu est une ombre de gomme, pas une tuile noire : au plus
+	// un quart de la lumière en moins, et des bords fondus.
+	float bord = 1.0 - smoothstep(0.12, 0.5, abs(uvl.y - 0.5));
+	ALBEDO = vec3(1.0 - 0.26 * c.a * bord);
 }
 """
 
@@ -735,6 +763,18 @@ static func voxel() -> ShaderMaterial:
 		_voxel = _materiau(VOXEL)
 	return _voxel
 
+## La matière des MAILLAGES FUSIONNÉS : un pâté d'immeubles en cubes d'une
+## unité, cousus en un seul maillage. Même shader, mais les arêtes et le grain
+## se lisent dans les UV (position en cellules) et non dans la transformation.
+static var _voxel_fusionne: ShaderMaterial
+
+static func voxel_fusionne() -> ShaderMaterial:
+	if _voxel_fusionne == null:
+		_voxel_fusionne = _materiau(VOXEL)
+		_voxel_fusionne.set_shader_parameter("fusionne", 1.0)
+		_voxel_fusionne.set_shader_parameter("nuit", _nuit_courante)
+	return _voxel_fusionne
+
 ## La matière voxel peinte d'une couleur, une par couleur (mise en cache : les
 ## peintures sont peu nombreuses, et chaque matière doit recevoir la nuit).
 static var _voxels_teintes: Dictionary = {}
@@ -754,7 +794,7 @@ static var _nuit_courante := 0.5
 
 static func regler_nuit(valeur: float) -> void:
 	_nuit_courante = valeur
-	for m in [sol(), facade(), flaque(), lumineux(), voxel(), post(), ombre()]:
+	for m in [sol(), facade(), flaque(), lumineux(), voxel(), voxel_fusionne(), post(), ombre()]:
 		m.set_shader_parameter("nuit", valeur)
 	for cle in _voxels_teintes:
 		(_voxels_teintes[cle] as ShaderMaterial).set_shader_parameter("nuit", valeur)
@@ -786,8 +826,8 @@ static func nuit() -> float:
 ## tout s'interpole : ciel, soleil, ambiante, brouillard, halo.
 const HEURES := [
 	{"haut": Color("#3b7bd8"), "horizon": Color("#cfe2f5"), "sol_h": Color("#8fa0b0"), "sol_b": Color("#3a4450"),
-		"soleil_x": -52.0, "soleil_y": -38.0, "soleil_c": Color("#fff0d0"), "soleil_e": 1.75,
-		"ambiante": Color("#7f97c8"), "ambiante_e": 0.72, "brume": Color("#7f93ab"), "brume_d": 0.0005,
+		"soleil_x": -52.0, "soleil_y": -38.0, "soleil_c": Color("#fff0d0"), "soleil_e": 1.45,
+		"ambiante": Color("#7f97c8"), "ambiante_e": 0.62, "brume": Color("#7f93ab"), "brume_d": 0.0005,
 		"halo": 0.4, "seuil": 0.95, "lune": 0.1},
 	{"haut": Color("#0a1030"), "horizon": Color("#c85a3a"), "sol_h": Color("#3a2430"), "sol_b": Color("#06070c"),
 		"soleil_x": -42.0, "soleil_y": -52.0, "soleil_c": Color("#ffb27a"), "soleil_e": 1.25,

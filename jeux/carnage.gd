@@ -120,6 +120,12 @@ const CARACTERES := {
 	7: {"v": 0.82, "a": 0.72, "t": 1.6},    # camion de livraison
 	8: {"v": 0.78, "a": 0.68, "t": 1.8},    # camion
 	9: {"v": 1.12, "a": 1.1, "t": 1.0},     # police
+	10: {"v": 1.22, "a": 1.2, "t": 0.7},    # coupé
+	11: {"v": 0.98, "a": 0.95, "t": 1.1},   # break
+	12: {"v": 0.95, "a": 0.9, "t": 1.3},    # pick-up
+	13: {"v": 0.72, "a": 0.6, "t": 2.2},    # bus
+	14: {"v": 0.95, "a": 0.8, "t": 1.4},    # limousine
+	15: {"v": 1.0, "a": 0.95, "t": 1.3},    # ambulance
 }
 
 ## Le butin qui n'est pas une arme : une trousse rend cinquante points de vie,
@@ -400,6 +406,12 @@ func _planter_decor() -> void:
 ## bâtir un d'un bloc en pleine course ferait une saccade au passage de chaque
 ## rue.
 func _diffuser_la_ville(entiers: int = 0) -> void:
+	# Un pâté sali par une casse se remaille : UN par image, tous morceaux
+	# confondus, pour qu'une roquette ne coûte jamais plus qu'un maillage.
+	if _chantier == null:
+		for cle in _morceaux:
+			if (_morceaux[cle] as MorceauVille).rafraichir():
+				break
 	if _chantier != null and entiers == 0:
 		if _chantier.avancer():
 			_chantier = null
@@ -513,8 +525,9 @@ func _casser_dans_le_decor(id: int, locale: int) -> void:
 	if not _morceaux.has(cle_morceau):
 		return
 	var morceau: MorceauVille = _morceaux[cle_morceau]
-	if not morceau.fini():
-		return
+	# Le morceau peut être en chantier : s'il porte déjà l'immeuble, la cellule
+	# se vide et le maillage à venir la montrera creuse ; sinon `detruits`,
+	# rejoué en posant l'immeuble, s'en charge.
 	var parti := morceau.casser(id, locale)
 	if parti.is_empty():
 		return
@@ -546,7 +559,7 @@ func _verifier_la_ruine(id: int) -> void:
 	var sol_total := int(g["nx"]) * int(g["nz"])
 	var partis := 0
 	for locale in ville.detruits.get(id, []):
-		if posmod(int(locale), 32) == 0:
+		if posmod(int(locale), 64) == 0:
 			partis += 1
 	if float(sol_total - partis) / float(max(1, sol_total)) < 0.4:
 		carte.eventrer(id)
@@ -626,8 +639,9 @@ func _piloter_pour_le_banc() -> void:
 		var cubes := 0
 		for cle in _morceaux:
 			cubes += (_morceaux[cle] as MorceauVille).cubes_poses()
-		print("[banc] t=%ds fps=%d gens=%d autos=%d morceaux=%d cubes=%d fiches=%d noeuds=%d %s" % [int(temps),
+		print("[banc] t=%ds fps=%d gens=%d autos=%d morceaux=%d cubes=%d quads=%d maillage_max=%.1fms fiches=%d noeuds=%d %s" % [int(temps),
 			Engine.get_frames_per_second(), ville.gens.size(), ville.autos.size(), _morceaux.size(), cubes,
+			MorceauVille.quads_total, MorceauVille.maillage_max_ms,
 			carte.fiches_en_cache(), get_tree().get_node_count(), "hôte" if est_hote() else "client"])
 	# ⚠ L'action se PULSE. Maintenue, elle ne produit qu'un seul front : le
 	# pilote descendait de voiture et ne remontait jamais, et la moitié du jeu

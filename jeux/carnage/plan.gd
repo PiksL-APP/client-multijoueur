@@ -123,8 +123,18 @@ const FERMETURE := {CENTRE: 0.14, AFFAIRES: 0.18, COMMERCE: 0.16, VIEUX: 0.20, R
 ## LE motif qui fait qu'une ville ne se lit pas comme un quadrillage : on
 ## remplace la plupart des carrefours par des T. Une rue « décalée » devient
 ## une cour qu'on traverse quand même (voir `_cour`).
-const DECALAGE := {CENTRE: 0.45, AFFAIRES: 0.50, COMMERCE: 0.55, VIEUX: 0.65, RESIDENCES: 0.60,
+const DECALAGE := {CENTRE: 0.6, AFFAIRES: 0.6, COMMERCE: 0.65, VIEUX: 0.7, RESIDENCES: 0.65,
 	BANLIEUE: 0.65, INDUSTRIE: 0.50, PORT: 0.45, PARC: 0.60, EAU: 0.0}
+## Les PÂTÉS LONGS : par secteur, la ville a un sens — ses rues courent d'est
+## en ouest ou du nord au sud — et une rue transversale sur deux se ferme sur
+## trois pâtés d'affilée. Des blocs de trois par huit ou treize tuiles, comme à
+## Manhattan ou Barcelone : c'est ce qui casse le damier de pâtés carrés.
+const LONG := {CENTRE: 0.55, AFFAIRES: 0.6, COMMERCE: 0.5, VIEUX: 0.4, RESIDENCES: 0.55,
+	BANLIEUE: 0.35, INDUSTRIE: 0.5, PORT: 0.4, PARC: 0.3, EAU: 0.0}
+## Dans les quartiers denses, une rue fermée est BÂTIE — les immeubles des deux
+## pâtés se rejoignent — et non laissée en cour pavée : une cour de la largeur
+## d'une rue, vue d'en haut, c'est encore une rue.
+const QUARTIERS_BATIS := [CENTRE, AFFAIRES, COMMERCE, VIEUX, RESIDENCES]
 ## La voie ferrée : une ligne droite, en biais, d'un bord à l'autre. C'est le
 ## seul trait de la ville qui ne suive pas la grille — et c'est ce qui la fait
 ## lire comme une ville plutôt que comme un quadrillage.
@@ -624,6 +634,10 @@ func rue_fermee_v(k: int, py: int) -> bool:
 	if posmod(k, 2) == 1 and _ilot_fondu(Vector2i((k - 1) / 2, py / 2)):
 		return true
 	var quartier := quartier_du_pate(a)
+	# Les pâtés longs : dans un secteur orienté est-ouest, une rue verticale sur
+	# deux se ferme par tranches de trois pâtés.
+	if posmod(k, 2) == 1 and _sens_est_ouest(a) and _bruit(k, py / 3, 305) < float(LONG.get(quartier, 0.0)):
+		return true
 	# Le décalage : les segments verticaux des rangs pairs (k + py pair).
 	if posmod(k + py, 2) == 0 and _bruit(k, py, 303) < float(DECALAGE.get(quartier, 0.0)):
 		return true
@@ -639,11 +653,19 @@ func rue_fermee_h(kl: int, px: int) -> bool:
 	if posmod(kl, 2) == 1 and _ilot_fondu(Vector2i(px / 2, (kl - 1) / 2)):
 		return true
 	var quartier := quartier_du_pate(a)
+	if posmod(kl, 2) == 1 and not _sens_est_ouest(a) and _bruit(kl, px / 3, 306) < float(LONG.get(quartier, 0.0)):
+		return true
 	# Et les segments horizontaux des rangs impairs : jamais les deux à la fois
 	# autour d'un même carrefour, sinon la rue devient une impasse en croix.
 	if posmod(kl + px, 2) == 1 and _bruit(kl, px, 304) < float(DECALAGE.get(quartier, 0.0)) * 0.6:
 		return true
 	return _bruit(kl, px, 301) < float(FERMETURE.get(quartier, 0.0))
+
+## Le sens d'un secteur de huit pâtés : vrai si ses rues longues courent
+## d'est en ouest (les pâtés s'allongent en x).
+func _sens_est_ouest(pate: Vector2i) -> bool:
+	var secteur := Vector2i(pate.x * PERIODE / SECTEUR, pate.y * PERIODE / SECTEUR)
+	return _bruit(secteur.x, secteur.y, 307) < 0.5
 
 ## Un îlot de deux pâtés sur deux est fondu si ses quatre pâtés sont du même
 ## quartier, du même gang, sans lieu ni eau, et que le tirage le veut.
@@ -999,12 +1021,13 @@ func _amenager_rue(colonne: int, ligne: int) -> Dictionary:
 				0.0 if pc == 1 else PI)
 		return fiche
 
-	# Une rue fermée : les deux pâtés n'en font qu'un, et ici c'est leur cour.
-	if vc and not vl and rue_fermee_v(k, kl):
-		return _cour(fiche, centre_px, quartier, gang, colonne, ligne)
-	if vl and not vc and rue_fermee_h(kl, k):
-		return _cour(fiche, centre_px, quartier, gang, colonne, ligne)
-	if vc and vl and rue_fermee_v(k, kl - 1) and rue_fermee_v(k, kl) and rue_fermee_h(kl, k - 1) and rue_fermee_h(kl, k):
+	# Une rue fermée : les deux pâtés n'en font qu'un. Dans un quartier dense,
+	# on bâtit dessus (les immeubles se rejoignent) ; ailleurs c'est leur cour.
+	var fermee := (vc and not vl and rue_fermee_v(k, kl)) or (vl and not vc and rue_fermee_h(kl, k)) \
+		or (vc and vl and rue_fermee_v(k, kl - 1) and rue_fermee_v(k, kl) and rue_fermee_h(kl, k - 1) and rue_fermee_h(kl, k))
+	if fermee:
+		if quartier in QUARTIERS_BATIS and not _dans_la_riviere(colonne, ligne):
+			return _rue_batie(fiche, centre_px, quartier, gang, pate, colonne, ligne)
 		return _cour(fiche, centre_px, quartier, gang, colonne, ligne)
 
 	# Une avenue : le shader lit la graine ≥ 0,5 et trace la double ligne.
@@ -1050,6 +1073,26 @@ func _amenager_rue(colonne: int, ligne: int) -> Dictionary:
 ## La cour d'un îlot fondu : ce qu'il y a à la place d'une rue fermée. Elle se
 ## traverse (à pied, en voiture), c'est un raccourci — et ce qui la meuble
 ## dit le quartier autant que les façades.
+## Une rue fermée BÂTIE : un immeuble d'une tuile, du style et de la hauteur
+## des pâtés qu'il relie, avec le même retrait qu'eux — de haut, le bloc n'est
+## plus qu'un seul long pâté. Une tuile sur six reste une cour intérieure.
+func _rue_batie(fiche: Dictionary, c: Vector2, quartier: int, gang: int, pate: Vector2i, colonne: int, ligne: int) -> Dictionary:
+	var sel := 320
+	if _bruit(colonne, ligne, 321) < 0.16:
+		return _cour(fiche, c, quartier, gang, colonne, ligne)
+	var style := F_LOGEMENTS
+	match quartier:
+		COMMERCE, CENTRE: style = F_COMMERCE
+		AFFAIRES: style = F_BUREAUX
+		VIEUX: style = F_VIEUX
+	fiche["sol"] = S_PAVES
+	fiche["teinte"] = _teinte_territoire(gang, 0.16)
+	var basse := 7.0 if quartier in [CENTRE, AFFAIRES, COMMERCE] else 5.5
+	var hauteur := _hauteur(pate, sel + posmod(colonne + ligne, 3), basse, basse + 5.0)
+	var cote := PAS - 2.0 * RETRAIT
+	_bati(fiche, c, cote, cote, hauteur, style, _teinte_de(style, colonne, ligne, sel))
+	return fiche
+
 func _cour(fiche: Dictionary, c: Vector2, quartier: int, gang: int, colonne: int, ligne: int) -> Dictionary:
 	fiche["teinte"] = _teinte_territoire(gang, 0.16)
 	var t := _bruit(colonne, ligne, 310)
@@ -1827,6 +1870,13 @@ func point_de_chaussee(rng: RandomNumberGenerator, autour: Vector2,
 		rayon_min: float, rayon_max: float) -> Dictionary:
 	var p := point_de_rue(rng, autour, rayon_min, rayon_max)
 	var libre := voie_libre_en(p)
+	# Pas sur le parvis ni sur l'îlot de la place : une voiture qui y naît ne
+	# suit aucune file.
+	for essai in 6:
+		if libre.is_empty() or String(libre["genre"]) in ["avenue", "anneau"]:
+			break
+		p = point_de_rue(rng, autour, rayon_min, rayon_max)
+		libre = voie_libre_en(p)
 	if not libre.is_empty() and String(libre["genre"]) in ["avenue", "anneau"]:
 		# Sur un boulevard : dans un sens ou l'autre, sur la file de droite.
 		var d: Vector2 = libre["d"]

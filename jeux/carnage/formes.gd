@@ -13,21 +13,22 @@ extends RefCounted
 ## L'indice est ce qui circule sur le réseau — un joueur qui vole un taxi doit
 ## être vu dans un taxi par les trois autres, pas dans une berline générique.
 const MODELES_VOITURES := ["berline", "berline sport", "compacte", "4x4", "4x4 de luxe",
-	"taxi", "fourgon", "camion de livraison", "camion", "police"]
+	"taxi", "fourgon", "camion de livraison", "camion", "police",
+	"coupé", "break", "pick-up", "bus", "limousine", "ambulance"]
 const MODELE_POLICE := 9
 ## Ce que chaque quartier gare et fait rouler. Le centre roule en taxi, la zone
 ## industrielle en fourgon, la banlieue en break : c'est ce qui fait qu'on sait
 ## où l'on est en regardant ce qui passe.
 const VOITURES_PAR_QUARTIER := {
-	PlanVille.CENTRE: [0, 1, 4, 5, 5, 5, 1],
-	PlanVille.AFFAIRES: [0, 1, 4, 4, 5, 1, 0],
-	PlanVille.COMMERCE: [0, 0, 1, 4, 5, 6, 2],
-	PlanVille.VIEUX: [0, 2, 2, 0, 5, 3, 6],
-	PlanVille.RESIDENCES: [0, 0, 2, 3, 6, 0, 2],
-	PlanVille.INDUSTRIE: [6, 6, 7, 7, 8, 8, 3],
-	PlanVille.PORT: [7, 8, 8, 6, 3, 7, 6],
-	PlanVille.BANLIEUE: [0, 0, 3, 3, 2, 6, 4],
-	PlanVille.PARC: [0, 2, 3],
+	PlanVille.CENTRE: [0, 1, 4, 5, 5, 5, 1, 14, 13, 10],
+	PlanVille.AFFAIRES: [0, 1, 4, 4, 5, 1, 0, 14, 13, 10],
+	PlanVille.COMMERCE: [0, 0, 1, 4, 5, 6, 2, 11, 13, 15],
+	PlanVille.VIEUX: [0, 2, 2, 0, 5, 3, 6, 10, 11],
+	PlanVille.RESIDENCES: [0, 0, 2, 3, 6, 0, 2, 11, 12, 13],
+	PlanVille.INDUSTRIE: [6, 6, 7, 7, 8, 8, 3, 12, 12],
+	PlanVille.PORT: [7, 8, 8, 6, 3, 7, 6, 12],
+	PlanVille.BANLIEUE: [0, 0, 3, 3, 2, 6, 4, 11, 11, 12, 10],
+	PlanVille.PARC: [0, 2, 3, 13],
 	PlanVille.EAU: [0],
 }
 

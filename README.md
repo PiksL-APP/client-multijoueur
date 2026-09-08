@@ -146,32 +146,61 @@ voiture dormante, un maillage d'enseignes, un de flaques de lumière. L'ancienne
 ville dessinait chaque voiture garée en cinq appels ; celle-ci en dessine cent
 cinquante par morceau en dix.
 
-**Tout est en voxels — et ça se casse.** Immeubles, mobilier, voitures,
-passants et joueurs sont des cubes : un immeuble est une grille d'occupation
-(`VoxelsCarnage.immeuble`, deux unités par cube) dont seules les faces
-exposées existent, et un morceau de ville tient dans UNE nappe de cubes
-unitaires (`MultiMesh.buffer`, seize flottants par cube). La couleur
-d'instance porte la teinte ; son alpha dit la matière — mur, fenêtre allumée
-qui rayonne la nuit, vitre qui reflète. Le shader découpe chaque face en
-SOUS-CUBES d'une unité, chacun avec son arête et son grain : huit fois plus
-de cubes à l'œil, pas un de plus en géométrie. Les voitures sont en voxels de
-un tiers d'unité (capot plongeant, passages de roue, rétroviseurs), les
-passants en quarts d'unité (bras et jambes articulés), les arbres en boules
-de demi-cubes. Le sol est quantifié sur la même grille pour que la rue ait
-le même grain que les murs. Autour de la grille des cubes, les ORNEMENTS
-(`VoxelsCarnage.ornements`) : corniches, balcons, stores, et sur les toits —
-que la caméra voit en premier — climatiseurs, citernes, antennes, cages
-d'escalier, cheminées ; les toits ont leur couleur par style (tuiles,
-gravier, goudron), les façades une palette franche. **La destruction est arbitrée par l'hôte** : une balle, une
+**Tout est en voxels — des voxels d'UNE unité, cousus par pâté — et ça se
+casse.** Immeubles, mobilier, voitures, passants et joueurs sont des cubes.
+Depuis la v7, un immeuble est une grille de cellules d'un mètre (jusqu'à
+31 × 31 × 63 : `VoxelsCarnage.immeuble`) avec ses trous — fenêtres de deux
+cubes en retrait dans la façade, porte, cour d'un L, retrait d'attique, toit en
+pente (des rangs qui se resserrent d'un cube jusqu'au faîte, cheminée
+comprise), cubes cassés — et TOUT LE PÂTÉ (jusqu'à seize immeubles) devient UN
+seul `ArrayMesh` : un mailleur glouton fond les cellules voisines de même
+couleur en rectangles (un mur de trente sur seize n'est plus quatre cent
+quatre-vingts cubes de douze triangles mais une trentaine de rectangles), et
+chaque trou ajoute les faces des cellules pleines qui le bordent. Le relief
+vient de la forme et de la lumière, pas d'un quadrillage : le shader ne dessine
+qu'une arête discrète par cube (lue dans les UV, la position en cellules sur la
+face, car l'origine d'un immeuble n'est pas alignée sur l'unité), les fenêtres
+« allumées » ne sont que du verre le jour et ne luisent qu'avec la nuit, et
+l'APPUI d'une fenêtre allumée — le dessus de la cellule sous le trou, la seule
+chose qu'une caméra presque verticale voit d'une embrasure — reçoit sa lumière
+(classe `ECLAIRE`). Le parapet est clair sur un toit sombre : c'est le trait
+qui dessine le contour de l'immeuble vu d'en haut. Autour de la grille, les
+ORNEMENTS (`VoxelsCarnage.ornements`, instances à l'échelle E = 2) : bandeaux
+d'étage en saillie, corniches, balcons, stores, et sur les toits plats
+climatiseurs, citernes, antennes, cages d'escalier. Les VOITURES sont en voxels
+d'un quart d'unité maillés de la même façon (`mailler_grille`, UV constants :
+une peau lisse) : capot plus bas que le toit, pare-brise et lunette en
+escalier, passages de roue, jantes claires, rétroviseurs, baguette de chrome,
+seize gabarits (berline, sportive, citadine, 4×4, monospace, taxi, fourgon,
+camion de livraison, benne, police, coupé, break, pick-up, bus, limousine,
+ambulance). Seule la tôle (alpha 1) prend la peinture d'instance ; pneus,
+chrome, feux, vitres gardent leur couleur (alpha `BRUT`). Les passants sont en
+quarts d'unité (bras et jambes articulés). Le sol est quantifié sur la grille
+des cubes. **La destruction est arbitrée par l'hôte** : une balle, une
 roquette, une explosion ou un choc frontal à plus de trois cent quatre-vingts
-pixels par seconde ôte des cubes (`VilleVivante.impacter/exploser/choquer`,
-trois coups par cube au pistolet), l'événement `casse` — groupé dans le `lot`
-de l'image — les retire chez tout le monde, expose les cubes de l'intérieur
-qu'ils cachaient et lâche des débris. Quand il reste moins de quarante pour
-cent du rez-de-chaussée, l'immeuble est ÉVENTRÉ : sa fiche perd son bloc et on
-le traverse en voiture. Les cubes détruits sont gardés par identifiant
-(immeuble = tuile et rang, cube = trois indices) : c'est ce qui permet à un
-morceau libéré puis rebâti de rester en ruine.
+pixels par seconde ôte des cubes (`VilleVivante.impacter/exploser/choquer`, un
+cube par balle), l'événement `casse` — groupé dans le `lot` de l'image — vide
+la cellule chez tout le monde et salit son pâté, qui se remaille — UN par
+image, tous morceaux confondus (`MorceauVille.rafraichir`), dix à vingt
+millisecondes — en exposant l'intérieur gris et en lâchant des débris. Quand il
+reste moins de quarante pour cent du rez-de-chaussée, l'immeuble est ÉVENTRÉ :
+sa fiche perd son bloc et on le traverse en voiture. Les cubes détruits sont
+gardés par identifiant (immeuble = tuile et rang, cube = clé locale
+`(i·32 + j)·64 + k`) : c'est ce qui permet à un morceau libéré puis rebâti de
+rester en ruine. ⚠ Deux pièges GDScript rencontrés ici : `Color.to_rgba32()`
+dépasse le signé 32 bits (un `PackedInt32Array` le tronquait en négatif), et
+un tableau compact lu dans un dictionnaire puis allongé n'allonge qu'une copie
+— on le réécrit dans la fiche. Pour juger une façade ou une carrosserie sans
+relancer le banc : `/tmp/atelier.gd` et `/tmp/parc.gd` (six immeubles, seize
+voitures, sous la caméra du jeu, dix secondes).
+
+**La circulation suit l'heure.** Quarante-quatre voitures et quatre-vingt-dix
+passants le jour, quatorze et quarante la nuit (`plafond_autos`,
+`plafond_gens`, interpolés sur `MatieresCarnage.nuit()`), des cadences
+d'apparition qui s'allongent la nuit, jamais une voiture qui naît sur une
+autre (`_degage_des_autos`), et le parvis d'une place est un mur pour les
+voitures — sinon elles y entraient par les axes de la grille et la place
+devenait un parking.
 
 **Le jour et la nuit.** La même horloge que le village : un cycle de quinze
 minutes (`MatieresCarnage.nuit()`), neuf de jour, une de crépuscule, quatre de
@@ -193,6 +222,16 @@ un mur, la poussière d'un cube qui part, et sur l'écran une vignette avec un
 grain léger qui rougit aux chocs. ⚠ Une matière additive doit couper le
 brouillard (`fog_disabled`) : sinon il peint un carré violet là où la flaque
 devait être transparente.
+
+**Les pâtés ne sont pas tous carrés.** Par secteur, la ville a un sens — ses
+rues longues courent d'est en ouest ou du nord au sud — et une transversale
+sur deux se ferme par tranches de trois pâtés (`LONG`) ; le DÉCALAGE ferme en
+T la plupart des autres carrefours. Dans les quartiers denses
+(`QUARTIERS_BATIS`), une rue fermée est BÂTIE : un immeuble d'une tuile du
+style et de la hauteur des pâtés qu'il relie, et de haut le bloc n'est plus
+qu'un seul long pâté de huit ou treize tuiles ; ailleurs elle reste une cour
+(jardin, chantier, dépôt). Une cour de la largeur d'une rue, vue d'en haut,
+c'était encore une rue — et la ville restait un damier.
 
 **Les rues font deux tuiles de large.** Trottoir, file de stationnement, voie
 de circulation, de chaque côté d'un axe. Une rue d'une tuile ne laissait pas la
