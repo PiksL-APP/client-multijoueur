@@ -13,10 +13,15 @@ extends RefCounted
 static var pilote_automatique := false
 static var direction_simulee := Vector2.ZERO
 static var tir_simule := false
+## Vrai pendant qu'on écrit dans un champ (le tchat du village) : les lettres
+## vont au texte, pas aux pieds du personnage.
+static var saisie := false
 
 static func direction() -> Vector2:
 	if pilote_automatique:
 		return direction_simulee
+	if saisie:
+		return Vector2.ZERO
 	if Tactile.actif() and Tactile.direction != Vector2.ZERO:
 		return Tactile.direction_de_marche()
 	var d := Vector2.ZERO

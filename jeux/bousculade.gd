@@ -72,6 +72,7 @@ func etat_joueur() -> String:
 
 func preparer() -> void:
 	Tactile.mode = Tactile.MARCHE
+	Maquette.poser(self, 0.52, 5.0)
 	_eclairer()
 	_camera = Camera3D.new()
 	_camera.fov = 42.0
