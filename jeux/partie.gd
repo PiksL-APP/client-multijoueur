@@ -101,6 +101,9 @@ func classement_final() -> Array:
 # ------------------------------------------------------- cycle
 
 func demarrer() -> void:
+	# Le thème s'arrête ici : en ville, ce sont les moteurs, les klaxons et
+	# les sirènes qui font la bande-son. Il reprend à l'écran des résultats.
+	Sons.musique("")
 	jeu = String(donnees.get("jeu", "carnage"))
 	titre = String(donnees.get("titre", jeu.to_upper()))
 	code = String(donnees.get("code", "0"))

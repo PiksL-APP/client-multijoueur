@@ -3,6 +3,7 @@ extends Ecran
 ## écran ne fait que montrer, sinon quatre clients déposeraient quatre fois.
 
 func demarrer() -> void:
+	Sons.musique(Sons.THEME)
 	UI.fond(interface())
 	var titre := String(donnees.get("titre", "Manche terminée"))
 	var lignes: Array = donnees.get("classement", [])

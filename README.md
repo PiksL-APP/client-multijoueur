@@ -31,7 +31,17 @@ rendu, le plein écran, et chaque touche du clavier. Les trois valent partout,
 menu ET Piks Theft Auto : `Commandes` lit toutes ses touches dans les
 réglages, et `MatieresCarnage.ambiance()` y prend son halo et ses ombres.
 L'interface sonne, elle aussi — neuf bruitages de menu dans `sons/interface/`,
-sur le bus « Effets ».
+sur le bus « Effets » — et le thème *Vice City Drift* tourne sous le menu, la
+création, les options et le salon, puis se tait quand la manche commence.
+
+**Un vrai chargement.** Les vingt-cinq morceaux de ville ne sont plus bâtis
+d'un bloc : ils partent en file, du plus proche du centre au plus lointain, un
+par image, derrière le lettrage et une barre qui avance. Puis le voile se fond
+et le menu paraît. Et la ville VIT : trente-quatre voitures et seize passants
+suivent les axes de la trame — pas la simulation du jeu, une circulation
+taillée pour être vue de très haut, qui boucle au bord du champ. Plus de trait
+à l'horizon non plus : la moitié basse de la voûte a désormais exactement la
+couleur de l'horizon, et c'est l'écart entre les deux qui dessinait la ligne.
 
 **Un mur ne stoppe pas, il fait glisser.** Une collision ne coûte que la part
 de vitesse mise dans la façade, et la voiture se réaligne dessus quand on la

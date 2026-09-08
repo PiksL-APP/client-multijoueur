@@ -19,6 +19,9 @@ var _info: Label
 var _etat: HBoxContainer
 
 func demarrer() -> void:
+	# Le salon est encore une salle d'attente : le thème y tient jusqu'au
+	# lancement de la manche.
+	Sons.musique(Sons.THEME)
 	_jeu = String(donnees.get("jeu", "carnage"))
 	_titre = String(donnees.get("titre", _jeu.to_upper()))
 	UI.fond(interface())

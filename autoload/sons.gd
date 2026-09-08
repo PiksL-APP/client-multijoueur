@@ -26,7 +26,10 @@ var _musique: AudioStreamPlayer
 var _ambiance: AudioStreamPlayer
 var _musique_en_cours := ""
 var _ambiance_en_cours := ""
-const MUSIQUE_DB := -10.0
+## Le thème du menu doit s'entendre : à -10 dB derrière un bus « Musique » à
+## soixante pour cent, il ne restait qu'un murmure. C'est le curseur des
+## options qui décide du reste.
+const MUSIQUE_DB := -5.0
 const AMBIANCE_DB := -14.0
 
 ## Les sons d'INTERFACE, tirés du jeu de bruitages de la maison
@@ -35,6 +38,12 @@ const AMBIANCE_DB := -14.0
 ## prototype, et celui-ci ne l'est plus.
 const INTERFACE := ["haut", "bas", "gauche", "droite", "valider", "retour",
 	"effacer", "frappe", "special"]
+
+## Le thème du jeu, celui qui tourne sous le menu et tant qu'on n'est pas
+## descendu en ville. Il est nommé ici et pas dans chaque écran : trois écrans
+## qui demandent la même piste ne la redémarrent pas (`musique` compare au nom
+## en cours), mais il faut encore que ce soit le MÊME nom des trois côtés.
+const THEME := "vice-city-drift"
 
 var _clavier: Array[AudioStreamPlayer] = []
 var _prochain_clavier := 0
@@ -50,6 +59,23 @@ func interface(nom: String, volume_db: float = -8.0) -> void:
 	lecteur.stream = load("res://sons/interface/%s.ogg" % nom)
 	lecteur.volume_db = volume_db
 	lecteur.play()
+
+## Les navigateurs interdisent au son de partir avant que l'utilisateur n'ait
+## touché la page : la musique lancée au démarrage du menu jouait dans un
+## contexte audio suspendu — elle avançait, muette, et restait muette une fois
+## le contexte réveillé. On la RELANCE donc au premier geste, quel qu'il soit.
+var _debloque := false
+
+func _input(evenement: InputEvent) -> void:
+	if _debloque:
+		return
+	if not (evenement is InputEventKey or evenement is InputEventMouseButton
+			or evenement is InputEventScreenTouch):
+		return
+	if not evenement.is_pressed():
+		return
+	_debloque = true
+	_reprendre_musiques()
 
 func _ready() -> void:
 	_charger_preference()

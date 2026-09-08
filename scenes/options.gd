@@ -16,6 +16,7 @@ var _cases: Dictionary = {}        ## action -> Button
 
 func demarrer() -> void:
 	_retour = String(donnees.get("retour", "menu"))
+	Sons.musique(Sons.THEME)
 	_fond()
 
 	var marge := MarginContainer.new()
