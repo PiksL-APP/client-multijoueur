@@ -656,6 +656,42 @@ static func epave() -> Node3D:
 	racine.add_child(braise)
 	return racine
 
+## LA CHAUSSÉE vient du City Kit: Roads. Une tuile du kit est une dalle de
+## 1 × 1 unité posée au sol, trottoirs compris : on la POSE À L'ÉCHELLE de nos
+## rues (deux tuiles de large, une de long), sans la déformer visiblement — une
+## route droite s'étire dans son sens sans que rien ne se voie.
+##
+## ⚠ La route du modèle court selon X et ses trottoirs bordent en Z ; une rue
+## verticale de la ville demande donc un quart de tour. Les carrefours, eux,
+## sont symétriques et ne se tournent pas.
+const CHEMIN_ROUTES := "res://modeles/kenney/routes/"
+## ⚠ L'asphalte du kit est GRIS TRÈS CLAIR — posé tel quel, la ville entière
+## passait au blanc. La teinte l'assombrit sans toucher au modèle, comme pour
+## les lampadaires.
+const TEINTE_ROUTE := Color("#8e929c")
+
+static var _tapis: Dictionary = {}
+static var _matiere_route: Material
+
+## Le tapis d'une tuile de rue. Le modèle est déjà une dalle unité centrée : il
+## n'y a rien à normaliser, l'instance porte la taille voulue.
+static func maillage_route(nom: String) -> ArrayMesh:
+	if _tapis.has(nom):
+		return _tapis[nom]
+	_tapis[nom] = maillage_kenney(CHEMIN_ROUTES + nom + ".glb", 0.0, Vector3.AXIS_X, 0.0)
+	return _tapis[nom]
+
+static func matiere_route() -> Material:
+	if _matiere_route != null:
+		return _matiere_route
+	var m := matiere_kenney(CHEMIN_ROUTES + "road-straight.glb").duplicate()
+	if m is ShaderMaterial:
+		(m as ShaderMaterial).set_shader_parameter("teinte", TEINTE_ROUTE)
+	elif m is BaseMaterial3D:
+		(m as BaseMaterial3D).albedo_color = TEINTE_ROUTE
+	_matiere_route = m
+	return _matiere_route
+
 # ------------------------------------------------------------ personnages
 
 ## LES HABITANTS viennent du casting partagé (`commun/personnages.gd`) : un

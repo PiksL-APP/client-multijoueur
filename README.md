@@ -12,11 +12,8 @@ bâti au couchant et tournant lentement sous l'effet maquette. Quand la ville
 change, le menu change avec elle. « Commencer » demande un pseudo et un
 personnage, « Options » règle le son, l'image et les touches, « Quitter »
 renvoie sur piks-l.com. La pochette du jeu est posée à gauche, dans une vraie boîte 3D qui se retourne au survol pour montrer son dos.
-**Le village n'existe plus.** Il a été l'écran d'accueil — une place, cinq
-maisons, des habitants, des portails — et Pikstown a pris sa place : c'est la
-ville, maintenant, qui est le hub. `scenes/hub.gd` et `scenes/accueil.gd` sont
-supprimés, avec les modèles qui ne servaient qu'à eux ; ce qui savait les
-bâtir dort encore dans `outils/voxel.py`, sous `VILLAGE = False`.
+Le village en voxels reste joignable par `--ecran=hub` le temps que les
+bâtiments de la ville ouvrent les autres jeux.
 
 **Le casting vient de Kenney** (`modeles/kenney/`, CC0) : un seul maillage
 articulé de 58 os, `characterMedium.fbx`, et douze images de peau tirées des
@@ -26,22 +23,9 @@ propres fichiers, sans maillage, et se greffent sur le squelette à la volée
 (`commun/personnages.gd`). Douze personnages pour le poids d'un.
 
 **Tout se règle** (`autoload/reglages.gd`, gardé dans `user://`) : trois
-volumes sur trois bus audio, les effets d'image, les ombres, la finesse du
-rendu, le plein écran, et chaque touche du clavier. Les trois valent partout,
-menu ET Piks Theft Auto : `Commandes` lit toutes ses touches dans les
-réglages, et `MatieresCarnage.ambiance()` y prend son halo et ses ombres.
-L'interface sonne, elle aussi — neuf bruitages de menu dans `sons/interface/`,
-sur le bus « Effets » — et le thème *Vice City Drift* tourne sous le menu, la
-création, les options et le salon, puis se tait quand la manche commence.
-
-**Un vrai chargement.** Les vingt-cinq morceaux de ville ne sont plus bâtis
-d'un bloc : ils partent en file, du plus proche du centre au plus lointain, un
-par image, derrière le lettrage et une barre qui avance. Puis le voile se fond
-et le menu paraît. Et la ville VIT : trente-quatre voitures et seize passants
-suivent les axes de la trame — pas la simulation du jeu, une circulation
-taillée pour être vue de très haut, qui boucle au bord du champ. Plus de trait
-à l'horizon non plus : la moitié basse de la voûte a désormais exactement la
-couleur de l'horizon, et c'est l'écart entre les deux qui dessinait la ligne.
+volumes sur trois bus audio, l'effet maquette, les ombres, la finesse du rendu,
+le plein écran, et chaque touche du clavier — que `Commandes` lit désormais
+sans exception.
 
 **Un mur ne stoppe pas, il fait glisser.** Une collision ne coûte que la part
 de vitesse mise dans la façade, et la voiture se réaligne dessus quand on la
@@ -298,6 +282,26 @@ tuiles sur une la faisait déborder en travers de la rue. La nuit, les fenêtres
 les carreaux à leur bleu franc dans l'atlas — ⚠ seulement sur les faces
 VERTICALES, sans quoi le gris-bleu des toitures passait pour du vitrage et
 les toits luisaient.
+
+**Les rues viennent du kit.** Depuis la v13, la chaussée des rues de la GRILLE
+est pavée avec le City Kit: Roads (`modeles/kenney/routes/`) : bitume,
+marquage médian, passages piétons et surtout **trottoirs en relief** — c'est ce
+relief qui manquait le plus, un trottoir peint à plat ne borde rien. Une tuile
+du kit est une dalle de 1 × 1 unité posée au sol ; nos rues font DEUX tuiles de
+large, on pose donc une dalle par PAIRE de tuiles, depuis sa tuile ouest (ou
+nord), étirée à vingt unités en travers et dix dans le sens de la marche — une
+route droite s'étire dans son sens sans que rien ne se voie. Les carrefours
+prennent une seule dalle pour leurs quatre tuiles. ⚠ La route du modèle court
+selon X et ses trottoirs bordent en Z : une rue verticale demande un quart de
+tour, et l'échelle s'applique AVANT la rotation — tournée d'abord, la dalle
+emportait sa largeur en travers de la rue. ⚠ L'asphalte du kit est gris TRÈS
+clair : posé tel quel il passait toute la ville au blanc, d'où `TEINTE_ROUTE`.
+Ce qui n'est PAS pavé : les boulevards, les places en étoile et les
+esplanades — leur géométrie est libre et ne se pave pas en tuiles carrées ;
+elles gardent le sol peint par le shader. Les dalles sont posées deux
+centimètres au-dessus de lui, pour que les deux surfaces ne se disputent pas
+le même plan, et ne projettent pas d'ombre — plate, elle tomberait sur
+elle-même en un damier sale.
 
 **La ville est un ARCHIPEL.** Depuis la v13, trois bras d'eau (`PlanVille.BRAS`)
 la découpent en six îles : un bras d'ouest en est — l'ancienne rivière — et

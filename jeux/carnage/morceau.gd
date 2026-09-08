@@ -55,6 +55,9 @@ var _a_mailler: Array = []            ## les groupes qui attendent leur premier 
 const BUDGET_MAILLAGE_USEC := 6000
 var _cellules := 0                    ## cellules pleines d'immeubles, pour le journal
 var _props_kenney: Dictionary = {}    ## nom de prop -> [Transform3D] (une nappe par modèle)
+## nom de tuile de route -> [Transform3D] : la chaussée du City Kit: Roads,
+## une nappe par modèle et par morceau, comme les props.
+var _routes_kenney: Dictionary = {}
 var _bats_kenney: Dictionary = {}     ## chemin de modèle -> [{t, id}] : les immeubles intacts
 ## style -> dernier modèle posé : de quoi ne jamais mettre deux fois de suite
 ## le même immeuble. Les tuiles se parcourent dans le même ordre chez tous les
@@ -80,6 +83,7 @@ func commencer(plan: PlanVille, cle_du_morceau: Vector2i, reveillees: Dictionary
 	_reveillees = reveillees
 	_detruits = detruits
 	_dernier_bat.clear()
+	_routes_kenney.clear()
 	_etape = 0
 	_lumineux = SurfaceTool.new()
 	_lumineux.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -192,6 +196,7 @@ func _lire_les_fiches() -> void:
 		for c in range(c0, c0 + PlanVille.MORCEAU):
 			var fiche := _plan.tuile(c, l)
 			_fiches.append(fiche)
+			_poser_la_chaussee(fiche)
 			if bool(fiche.get("pont", false)):
 				_poser_le_pont(fiche)
 			var rang := 0
@@ -413,35 +418,16 @@ func _instance(centre: Vector3, taille: Vector3, couleur: Color) -> void:
 
 # ------------------------------------------------------------ étape 1 : le sol
 
-## L'EAU : la dalle du fond reste dans le maillage du sol (c'est la vase), et
-## la nappe vive part dans un maillage à part, découpée menu — sans quoi le
-## shader n'aurait que quatre sommets par tuile à lever, et pas une facette.
-const EAU_FOND := -1.6            ## la vase, sous la nappe
-const EAU_NAPPE := -0.55          ## le niveau au repos ; les vagues font ±0,45
-const EAU_DECOUPE := 4            ## carreaux par côté de tuile (2,5 unités)
-
 func _poser_le_sol() -> void:
 	var sol := SurfaceTool.new()
 	sol.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var eau := SurfaceTool.new()
-	eau.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var quelque_eau := false
 	for fiche in _fiches:
 		_dalle(sol, fiche)
-		if int(fiche["sol"]) == PlanVille.S_EAU:
-			_nappe_eau(eau, fiche)
-			quelque_eau = true
 	var noeud_sol := MeshInstance3D.new()
 	noeud_sol.mesh = sol.commit()
 	noeud_sol.material_override = MatieresCarnage.sol()
 	noeud_sol.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(noeud_sol)
-	if quelque_eau:
-		var noeud_eau := MeshInstance3D.new()
-		noeud_eau.mesh = eau.commit()
-		noeud_eau.material_override = MatieresCarnage.eau()
-		noeud_eau.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(noeud_eau)
 
 # ------------------------------------------------------------ étape 2 : les cubes
 
@@ -496,6 +482,7 @@ func _poser_les_voitures() -> void:
 		noeud_v.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		add_child(noeud_v)
 
+	_poser_les_routes_kenney()
 	_poser_les_props_kenney()
 	_poser_les_batiments_kenney()
 
@@ -722,6 +709,86 @@ func rez_de_chaussee_restant(id: int) -> float:
 				pleins += 1
 	return float(pleins) / float(max(1, nx * nz))
 
+## LA CHAUSSÉE du City Kit: Roads, posée sur les rues de la GRILLE — pas sur
+## les boulevards ni sur les places, dont la géométrie est libre et ne se pave
+## pas en tuiles carrées : celles-là gardent le sol peint par le shader.
+##
+## Une rue fait DEUX tuiles de large et les tuiles du kit sont carrées : on
+## pose donc une dalle pour la PAIRE, depuis sa tuile ouest (ou nord), étirée
+## à vingt unités en travers et dix dans le sens de la marche. ⚠ Le morceau
+## commence toujours sur une tuile de rang 0 (vingt est un multiple de cinq),
+## donc une paire n'est jamais coupée entre deux morceaux.
+func _poser_la_chaussee(fiche: Dictionary) -> void:
+	var sol := int(fiche["sol"])
+	if not (sol in [PlanVille.S_ROUTE, PlanVille.S_CARREFOUR,
+			PlanVille.S_PASSAGE_A, PlanVille.S_PASSAGE_B]):
+		return
+	var c := int(fiche["c"])
+	var l := int(fiche["l"])
+	var pc := posmod(c, PlanVille.PERIODE)
+	var pl := posmod(l, PlanVille.PERIODE)
+	var vc := PlanVille.est_voie(c)
+	var vl := PlanVille.est_voie(l)
+	var demi := PlanVille.TUILE * 0.5
+	var base := Decor.vers3d(PlanVille.centre_tuile(c, l), 0.0)
+	var nom := ""
+	var taille := Vector3.ONE
+	var angle := 0.0
+	var centre_r := base
+	if vc and vl:
+		# Le carrefour : une seule dalle pour les quatre tuiles, depuis son coin
+		# nord-ouest. Le modèle est symétrique, il ne se tourne pas.
+		if pc != 0 or pl != 0:
+			return
+		nom = "road-crossroad"
+		taille = Vector3(PlanVille.TUILE * 2.0, 1.0, PlanVille.TUILE * 2.0)
+		centre_r = base + Vector3(demi, 0, demi)
+	elif vc:
+		# Rue verticale : la paire est ouest + est, la route court selon Z.
+		if pc != 0:
+			return
+		nom = "road-crossing" if sol in [PlanVille.S_PASSAGE_A, PlanVille.S_PASSAGE_B] else "road-straight"
+		taille = Vector3(PlanVille.TUILE, 1.0, PlanVille.TUILE * 2.0)
+		angle = PI * 0.5
+		centre_r = base + Vector3(demi, 0, 0)
+	else:
+		# Rue horizontale : la paire est nord + sud, la route court selon X.
+		if pl != 0:
+			return
+		nom = "road-crossing" if sol in [PlanVille.S_PASSAGE_A, PlanVille.S_PASSAGE_B] else "road-straight"
+		taille = Vector3(PlanVille.TUILE, 1.0, PlanVille.TUILE * 2.0)
+		centre_r = base + Vector3(0, 0, demi)
+	if nom == "":
+		return
+	if not _routes_kenney.has(nom):
+		_routes_kenney[nom] = []
+	# ⚠ L'échelle s'applique AVANT la rotation : tournée d'abord, la dalle
+	# emportait sa largeur en travers de la rue.
+	var pose := Basis(Vector3.UP, angle) * Basis().scaled(taille)
+	# Deux centimètres au-dessus du sol peint : la dalle le couvre sans que les
+	# deux surfaces se disputent le même plan.
+	_routes_kenney[nom].append(Transform3D(pose, centre_r + Vector3(0, 0.02, 0)))
+
+func _poser_les_routes_kenney() -> void:
+	for nom in _routes_kenney:
+		var poses: Array = _routes_kenney[nom]
+		if poses.is_empty():
+			continue
+		var multi := MultiMesh.new()
+		multi.transform_format = MultiMesh.TRANSFORM_3D
+		multi.mesh = FormesCarnage.maillage_route(String(nom))
+		multi.instance_count = poses.size()
+		for i in poses.size():
+			multi.set_instance_transform(i, poses[i])
+		var noeud := MultiMeshInstance3D.new()
+		noeud.multimesh = multi
+		noeud.material_override = FormesCarnage.matiere_route()
+		# Une chaussée ne projette pas d'ombre : elle est plate, et son ombre
+		# tomberait sur elle-même en un damier sale.
+		noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(noeud)
+	_routes_kenney.clear()
+
 ## LE PONT. Jusqu'à la v13 une tuile de pont était une dalle de bitume posée
 ## sur l'eau, sans plus : on franchissait un bras de mer comme on traverse une
 ## rue, et rien ne disait qu'il y avait le vide dessous. On lui donne donc ce
@@ -772,7 +839,7 @@ func _dalle(st: SurfaceTool, fiche: Dictionary) -> void:
 	var c := int(fiche["c"])
 	var l := int(fiche["l"])
 	var sol := int(fiche["sol"])
-	var y := EAU_FOND if sol == PlanVille.S_EAU else 0.0
+	var y := -0.3 if sol == PlanVille.S_EAU else 0.0
 	var rot := int(fiche["rot"])
 	var teinte: Color = fiche["teinte"]
 	# La graine : du bruit pour le shader, et ≥ 0,5 sur une avenue (le shader y
@@ -788,29 +855,6 @@ func _dalle(st: SurfaceTool, fiche: Dictionary) -> void:
 		st.set_uv2(Vector2(float(sol), graine))
 		st.set_normal(Vector3.UP)
 		st.add_vertex(p)
-
-## La NAPPE d'eau d'une tuile : une grille plate de EAU_DECOUPE carreaux de
-## côté. Elle ne porte ni UV ni couleur — le shader EAU lève chaque sommet
-## d'après sa position dans le monde, et prend la normale à la dérivée de la
-## face. La grille est calée sur la tuile, donc deux tuiles d'eau voisines
-## posent leurs sommets aux mêmes points : ils se lèvent pareil, sans une
-## fente entre les deux. Sur la rive, la nappe s'arrête net au bord de la
-## tuile, un mètre sous le quai : c'est le quai qui cache la couture.
-func _nappe_eau(st: SurfaceTool, fiche: Dictionary) -> void:
-	var c := int(fiche["c"])
-	var l := int(fiche["l"])
-	var pas := PlanVille.TUILE / float(EAU_DECOUPE)
-	var x0 := c * PlanVille.TUILE
-	var z0 := l * PlanVille.TUILE
-	for i in EAU_DECOUPE:
-		for j in EAU_DECOUPE:
-			var a := Vector3(x0 + i * pas, EAU_NAPPE, z0 + j * pas)
-			var b := a + Vector3(pas, 0.0, 0.0)
-			var d := a + Vector3(pas, 0.0, pas)
-			var e := a + Vector3(0.0, 0.0, pas)
-			for p in [a, b, d, a, d, e]:
-				st.set_normal(Vector3.UP)
-				st.add_vertex(p)
 
 ## Les coordonnées de texture d'un coin de tuile dont le dessin a été tourné de
 ## `rot` quarts de tour dans le sens horaire : on défait la rotation.
