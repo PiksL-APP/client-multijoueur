@@ -975,6 +975,7 @@ const GABARITS := {
 	15: {"l": 22, "w": 8, "hc": 4, "cab": [2, 21], "ch": 4, "forme": "fourgon"},    # ambulance
 	16: {"l": 13, "w": 3, "hc": 3, "cab": [4, 9], "ch": 2, "forme": "moto"},        # moto de rue
 	17: {"l": 14, "w": 3, "hc": 3, "cab": [3, 10], "ch": 2, "forme": "moto"},       # moto de course
+	18: {"l": 27, "w": 9, "hc": 4, "cab": [19, 25], "ch": 3, "forme": "camion"},    # camion de pompiers
 }
 
 ## Le maillage d'une voiture, en couleurs de sommet. La caisse est BLANCHE :
@@ -1190,6 +1191,8 @@ static func voiture(indice: int) -> ArrayMesh:
 		"camion", "benne":
 			# La caisse arrière : pleine largeur, plus haute que la cabine.
 			var couleur_caisse := Color(0.94, 0.94, 0.92, BRUT) if forme == "camion" else Color(0.25, 0.26, 0.28, BRUT)
+			if indice == 18:
+				couleur_caisse = Color(0.72, 0.12, 0.09, BRUT)
 			for x in range(1, cab0 - 1):
 				for z in W:
 					for y in range(HC, caisse_h + 2):
@@ -1235,6 +1238,23 @@ static func voiture(indice: int) -> ArrayMesh:
 				poser.call(cx, caisse_h + 1, W / 2 + d, Color(0.85, 0.12, 0.12, BRUT))
 			poser.call(cab1 - 2, caisse_h + 1, W / 2 - 1, Color(0.3, 0.5, 1.0, LUMIERE))
 			poser.call(cab1 - 2, caisse_h + 1, W / 2, Color(0.3, 0.5, 1.0, LUMIERE))
+		18:
+			# Le camion de pompiers : l'échelle couchée sur la caisse, la bande
+			# blanche réfléchissante, deux gyrophares et le pare-buffle.
+			for x in range(2, cab0 - 2):
+				poser.call(x, caisse_h + 2, 2, sombre)
+				poser.call(x, caisse_h + 2, W - 3, sombre)
+				if posmod(x, 3) == 0:
+					for z in range(2, W - 2):
+						poser.call(x, caisse_h + 2, z, sombre)
+			for x in range(1, L - 1):
+				poser.call(x, 2, 0, blanc)
+				poser.call(x, 2, W - 1, blanc)
+			poser.call(cab1 - 2, caisse_h + 1, 2, Color(0.3, 0.5, 1.0, LUMIERE))
+			poser.call(cab1 - 2, caisse_h + 1, W - 3, Color(1.0, 0.25, 0.2, LUMIERE))
+			# La lance : un tuyau enroulé à l'arrière.
+			for z in range(2, W - 2):
+				poser.call(1, HC, z, Color(0.82, 0.78, 0.2, BRUT))
 		7:
 			pass
 
@@ -1352,6 +1372,7 @@ static func peinture(indice: int, graine: int) -> Color:
 		13: return Color("#e6dcb0") if graine % 2 == 0 else Color("#3f7a5a")
 		14: return Color("#141418") if graine % 3 != 0 else Color("#f0f0f2")
 		15: return Color("#f4f4f2")
+		18: return Color("#c8261a")
 	return PEINTURES[posmod(graine, PEINTURES.size())]
 
 # ------------------------------------------------------------ les personnages

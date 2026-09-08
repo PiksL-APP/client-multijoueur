@@ -15,7 +15,7 @@ extends RefCounted
 const MODELES_VOITURES := ["berline", "berline sport", "compacte", "4x4", "4x4 de luxe",
 	"taxi", "fourgon", "camion de livraison", "camion", "police",
 	"coupé", "break", "pick-up", "bus", "limousine", "ambulance",
-	"moto", "moto de course"]
+	"moto", "moto de course", "camion de pompiers"]
 ## Les deux-roues : ils accélèrent et tournent mieux, mais on n'a pas de tôle
 ## autour de soi — un choc, et on est à terre.
 const MODELES_MOTOS := [16, 17]
@@ -433,6 +433,14 @@ static func cabine(numero: int) -> Node3D:
 	vitre.material_override = Decor.matiere_voile(Palette.SERIE, 0.4)
 	vitre.position = Vector3(0, 1.7, 0)
 	racine.add_child(vitre)
+	# L'ENSEIGNE dit d'un coup d'œil ce que le gang du quartier pense de vous :
+	# verte il vous embauche, jaune il tolère, rouge il vous tire dessus. C'est
+	# ce qui rend la jauge de respect lisible depuis la rue.
+	var enseigne := Decor.boite(Vector3(1.3, 0.34, 1.3), Palette.AVERTISSEMENT, false)
+	enseigne.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 1.4)
+	enseigne.position = Vector3(0, 2.6, 0)
+	enseigne.name = "Enseigne"
+	racine.add_child(enseigne)
 	var halo := Decor.anneau(PlanVille.RAYON_CABINE * Decor.ECHELLE, 0.14, Palette.AVERTISSEMENT, 1.0)
 	halo.rotation_degrees = Vector3(90, 0, 0)
 	halo.position = Vector3(0, 0.06, 0)
@@ -616,6 +624,142 @@ static func explosion() -> CPUParticles3D:
 	p.material_override = m
 	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return p
+
+## UN BRASIER : ce qu'on voit d'un incendie, réglé pour une caméra presque à
+## la VERTICALE — c'est tout le problème du feu vu de dessus. Une colonne de
+## fumée qui monte droit masque le quartier et rien d'autre ne se lit ; un
+## brasier lisible d'en haut, c'est un cœur orange au sol qui bat, des langues
+## courtes qui lèchent autour, et un filet de fumée qui part EN BIAIS pour
+## sortir du champ au lieu de faire un couvercle.
+static func brasier() -> Node3D:
+	var racine := Node3D.new()
+
+	# Le CŒUR : quatre cubes émissifs posés au sol, animés par `regler_brasier`.
+	# En plein jour, des particules additives ne se voient pas ; ça, si.
+	var coeur := Node3D.new()
+	coeur.name = "Coeur"
+	for i in 4:
+		var braise := Decor.boite(Vector3(1.5, 0.9, 1.5), Color(1.0, 0.55, 0.12), false)
+		braise.material_override = Decor.matiere_lumineuse(Color(1.0, 0.52 - 0.1 * float(i % 2), 0.12), 2.2)
+		braise.position = Vector3(cos(TAU * float(i) / 4.0) * 1.1, 0.5, sin(TAU * float(i) / 4.0) * 1.1)
+		braise.name = "Braise%d" % i
+		coeur.add_child(braise)
+	racine.add_child(coeur)
+
+	var flammes := CPUParticles3D.new()
+	flammes.name = "Flammes"
+	flammes.amount = 22
+	flammes.lifetime = 0.6
+	flammes.local_coords = false
+	var grain := BoxMesh.new()
+	grain.size = Vector3(0.7, 0.7, 0.7)
+	flammes.mesh = grain
+	flammes.direction = Vector3(0, 1, 0)
+	flammes.spread = 34.0
+	flammes.initial_velocity_min = 2.0
+	flammes.initial_velocity_max = 4.5
+	flammes.gravity = Vector3(0, 0.8, 0)
+	flammes.damping_min = 2.0
+	flammes.damping_max = 4.0
+	flammes.scale_amount_min = 0.5
+	flammes.scale_amount_max = 1.3
+	flammes.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE_SURFACE
+	flammes.emission_sphere_radius = 1.2
+	var chaud := Gradient.new()
+	chaud.add_point(0.0, Color(1.0, 0.95, 0.62, 1.0))
+	chaud.set_color(1, Color(1.0, 0.5, 0.1, 0.95))
+	chaud.add_point(0.6, Color(0.95, 0.28, 0.07, 0.75))
+	chaud.add_point(1.0, Color(0.4, 0.14, 0.06, 0.0))
+	flammes.color_ramp = chaud
+	var mf := StandardMaterial3D.new()
+	mf.vertex_color_use_as_albedo = true
+	mf.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mf.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	flammes.material_override = mf
+	flammes.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	racine.add_child(flammes)
+
+	# La fumée : peu nombreuse, translucide, et surtout COUCHÉE — elle file sur
+	# le côté comme sous le vent, et le joueur voit toujours sa rue.
+	var fumee := CPUParticles3D.new()
+	fumee.name = "Fumee"
+	fumee.amount = 18
+	fumee.lifetime = 1.9
+	fumee.local_coords = false
+	var bouffee := BoxMesh.new()
+	bouffee.size = Vector3(0.6, 0.6, 0.6)
+	fumee.mesh = bouffee
+	fumee.direction = Vector3(0.9, 0.9, 0.35)
+	fumee.spread = 12.0
+	fumee.initial_velocity_min = 4.0
+	fumee.initial_velocity_max = 7.0
+	fumee.gravity = Vector3(3.2, 1.4, 1.2)
+	fumee.scale_amount_min = 0.6
+	fumee.scale_amount_max = 1.6
+	fumee.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE_SURFACE
+	fumee.emission_sphere_radius = 1.0
+	# ⚠ La rampe d'un CPUParticles MULTIPLIE la couleur de base : une rampe
+	# sombre sur une base blanche ne suffisait pas — la fumée sortait blanche.
+	# On peint la suie dans `color` et la rampe ne fait plus que l'alpha.
+	fumee.color = Color(0.13, 0.12, 0.12)
+	var suie := Gradient.new()
+	suie.set_color(0, Color(1, 1, 1, 0.55))
+	suie.set_color(1, Color(1, 1, 1, 0.0))
+	fumee.color_ramp = suie
+	var ms := StandardMaterial3D.new()
+	ms.vertex_color_use_as_albedo = true
+	ms.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ms.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fumee.material_override = ms
+	fumee.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	racine.add_child(fumee)
+
+	# La lueur au sol : le même quadrilatère additif que les lampadaires.
+	var lueur := MeshInstance3D.new()
+	lueur.name = "Lueur"
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_flaque(st, Vector3(0, 0.05, 0), Vector3(5.0, 0, 0), Vector3(0, 0, 5.0), Color(1.0, 0.5, 0.16, 0.9))
+	st.generate_normals()
+	lueur.mesh = st.commit()
+	lueur.material_override = MatieresCarnage.flaque()
+	lueur.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	racine.add_child(lueur)
+	return racine
+
+## La force du foyer, de 0 à 1 : le cœur bat, les flammes et la fumée suivent.
+## ⚠ `amount_ratio` n'existe que sur les GPUParticles : sur des CPUParticles on
+## module la TAILLE et la durée de vie, jamais le nombre (le changer réalloue
+## tout le tableau à chaque image).
+static func regler_brasier(brasier_noeud: Node3D, force: float, temps: float) -> void:
+	var f: float = clampf(force, 0.0, 1.0)
+	var coeur := brasier_noeud.get_node_or_null("Coeur") as Node3D
+	if coeur != null:
+		coeur.visible = f > 0.05
+		for i in coeur.get_child_count():
+			var braise := coeur.get_child(i) as Node3D
+			# Chaque braise bat à son rythme : un feu régulier est un décor.
+			var bat: float = 0.62 + 0.38 * sin(temps * (5.0 + 1.7 * float(i)) + float(i) * 2.1)
+			var e: float = (0.45 + 0.85 * f) * bat
+			braise.scale = Vector3(e, e * (0.7 + 0.7 * bat), e)
+			braise.rotation.y = temps * (0.7 + 0.3 * float(i))
+	var flammes := brasier_noeud.get_node_or_null("Flammes") as CPUParticles3D
+	if flammes != null:
+		flammes.emitting = f > 0.08
+		flammes.scale_amount_min = 0.3 + 0.4 * f
+		flammes.scale_amount_max = 0.7 + 1.1 * f
+		flammes.lifetime = 0.4 + 0.35 * f
+	var fumee := brasier_noeud.get_node_or_null("Fumee") as CPUParticles3D
+	if fumee != null:
+		fumee.emitting = f > 0.05
+		fumee.scale_amount_min = 0.4 + 0.4 * f
+		fumee.scale_amount_max = 1.0 + 1.0 * f
+	var lueur := brasier_noeud.get_node_or_null("Lueur") as Node3D
+	if lueur != null:
+		# Le vacillement : la flaque respire, sinon la lueur est une décalcomanie.
+		var vacille: float = 0.86 + 0.14 * sin(temps * 7.3) + 0.06 * sin(temps * 3.1)
+		var echelle: float = (0.5 + 1.1 * f) * vacille
+		lueur.scale = Vector3(echelle, 1.0, echelle)
 
 ## Un anneau posé à plat. Répété six fois dans ce fichier avant d'être extrait :
 ## la rotation de 90° s'oublie une fois sur deux et l'anneau part debout.

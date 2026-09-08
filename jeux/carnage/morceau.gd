@@ -450,7 +450,8 @@ func _poser_les_lieux(plan: PlanVille, c0: int, l0: int) -> void:
 		var poste := FormesCarnage.cabine(int(c["id"]))
 		poste.position = Decor.vers3d(c["p"])
 		add_child(poste)
-		cabines.append({"n": poste, "id": int(c["id"])})
+		cabines.append({"n": poste, "id": int(c["id"]),
+			"gang": _plan.territoire(Vector2(c["p"]))})
 	for h in lieux["hopitaux"]:
 		var coin_h := PlanVille.coin_pate(h["pate"])
 		if not rect.has_point(PlanVille.centre_tuile(coin_h.x, coin_h.y)):

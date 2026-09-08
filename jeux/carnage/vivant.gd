@@ -22,7 +22,7 @@ extends RefCounted
 # ------------------------------------------------------------ les genres
 
 enum { PIETON, GANG, FLIC }                        ## `genre` d'un passant
-enum { CIVILE, PATROUILLE, VOITURE_GANG, EPAVE }   ## `genre` d'un véhicule
+enum { CIVILE, PATROUILLE, VOITURE_GANG, EPAVE, POMPIER, AMBULANCE }   ## `genre` d'un véhicule
 
 const GENS_MAX := 90            ## de jour ; la nuit, la ville se vide à moitié
 const AUTOS_MOBILES_MAX := 44   ## celles qui roulent ; les garées ne comptent pas
@@ -120,6 +120,21 @@ var barrages: Array = []          ## {id,p}
 var helicos: Array = []           ## {id,p,cible,recharge} — un par joueur à cinq étoiles
 var chaleur: Dictionary = {}      ## cle -> points de recherche
 var respect: Dictionary = {}      ## cle -> [respect gang 0, 1, 2]
+
+# ------------------------------------------------------------ le feu
+#
+## LE FEU est ce qui donne des conséquences à une explosion : une voiture qui
+## saute allume un brasier, le brasier allume les voitures d'à côté, noircit
+## puis emporte les cubes du mur qu'il lèche, blesse qui reste dedans — et
+## appelle les pompiers. Il vit chez l'HÔTE comme le reste de la ville, et
+## voyage dans l'instantané : deux joueurs voient le même incendie.
+var feux: Array = []              ## {id, p, force 0..1, t, propage, ronge}
+const FEUX_MAX := 26              ## au-delà, la ville entière brûlerait
+const DUREE_FEU := 26.0           ## un foyer s'épuise tout seul
+const RAYON_FEU := 62.0           ## px : ce qu'un foyer chauffe
+const DEGAT_FEU := 26.0           ## points de vie par seconde au cœur
+const PROPAGATION := 3.2          ## secondes entre deux tentatives de propagation
+const RONGE := 1.6                ## secondes entre deux cubes emportés par un foyer
 var contrats: Dictionary = {}     ## cle -> {genre,employeur,rival,objectif,fait,reste,texte}
 var sortants: Array = []          ## événements à diffuser : {"e": nom, "c": charge}
 
@@ -217,6 +232,8 @@ func paniquer(autour: Vector2, rayon: float, duree: float) -> void:
 func simuler(delta: float, temps: float, joueurs: Dictionary) -> void:
 	_refroidir(delta, joueurs)
 	_recycler(delta, joueurs)
+	_animer_les_feux(delta, joueurs)
+	_depecher_les_secours(delta, joueurs)
 	_peupler(delta, temps, joueurs)
 	_animer_les_gens(delta, joueurs)
 	_animer_les_autos(delta, joueurs)
@@ -395,6 +412,10 @@ func _nombre_de(genre_cherche: int) -> int:
 		if int(a["genre"]) == genre_cherche:
 			total += 1
 	return total
+
+## Un identifiant neuf, pour un objet fabriqué côté client (un feu reçu).
+func prochain_id() -> int:
+	return _id()
 
 func _autour_d_un_joueur(joueurs: Dictionary) -> Vector2:
 	var cles := joueurs.keys()
@@ -647,6 +668,8 @@ func _animer_les_autos(delta: float, joueurs: Dictionary) -> void:
 
 		if int(auto["genre"]) == PATROUILLE:
 			_conduire_patrouille(auto, delta, joueurs)
+		elif int(auto["genre"]) in [POMPIER, AMBULANCE]:
+			_conduire_service(auto, delta, joueurs)
 		else:
 			_conduire_civile(auto, delta, joueurs)
 		restantes.append(auto)
@@ -1096,6 +1119,9 @@ func detruire_auto(auto: Dictionary, cle: String) -> void:
 	crime(cle, "auto")
 	_compter(cle, Vector2(auto["p"]), int(POINTS["auto"]), "auto", false)
 	emettre("boum", {"x": int(auto["p"].x), "y": int(auto["p"].y)})
+	# Une carcasse brûle : c'est de là que part tout le reste (la propagation,
+	# les pompiers, la fumée qu'on voit de trois rues).
+	allumer(Vector2(auto["p"]), 1.0)
 
 ## Les enchaînements. C'est le seul endroit où le jeu récompense le rythme
 ## plutôt que la précision — sans lui, la meilleure façon de marquer serait de
@@ -1123,6 +1149,196 @@ func _compter(cle: String, ou: Vector2, base: int, quoi: String, avec_combo: boo
 ## que le reste pour que le tableau et les effets soient identiques.
 func compter_frag(cle: String, ou: Vector2) -> void:
 	_compter(cle, ou, int(POINTS["joueur"]), "joueur", false)
+
+# ------------------------------------------------------------ le feu
+
+## Allumer un foyer. `force` 1 = un réservoir qui vient de partir, 0,5 = une
+## flaque d'essence. Les foyers trop proches se fondent (leur force monte) :
+## sinon une roquette dans un embouteillage en posait dix au même endroit.
+func allumer(point: Vector2, force: float = 1.0) -> void:
+	for f in feux:
+		if Vector2(f["p"]).distance_to(point) < 34.0:
+			f["force"] = minf(1.0, float(f["force"]) + force * 0.5)
+			f["t"] = 0.0
+			return
+	if feux.size() >= FEUX_MAX:
+		return
+	feux.append({"id": _id(), "p": point, "force": clampf(force, 0.2, 1.0), "t": 0.0,
+		"propage": _rng.randf_range(0.5, PROPAGATION), "ronge": RONGE})
+	emettre("feu", {"x": int(point.x), "y": int(point.y), "f": int(force * 100.0)})
+
+## Éteindre ce qui brûle autour d'un point (la lance d'un camion de pompiers).
+func arroser(point: Vector2, rayon: float, delta: float) -> void:
+	for f in feux:
+		if Vector2(f["p"]).distance_to(point) <= rayon:
+			f["force"] = float(f["force"]) - delta * 0.85
+
+func feu_le_plus_proche(point: Vector2) -> Dictionary:
+	var meilleur: Dictionary = {}
+	var distance := INF
+	for f in feux:
+		var d: float = Vector2(f["p"]).distance_to(point)
+		if d < distance:
+			distance = d
+			meilleur = f
+	return meilleur
+
+## La vie d'un incendie : il monte, il brûle ce qu'il touche, il essaie de
+## sauter sur une voiture voisine, il ronge le mur d'à côté, puis il meurt.
+func _animer_les_feux(delta: float, joueurs: Dictionary) -> void:
+	if feux.is_empty():
+		return
+	var restants: Array = []
+	for f in feux:
+		f["t"] = float(f["t"]) + delta
+		# La courbe : plein feu pendant les deux tiers, puis il baisse.
+		var age := float(f["t"]) / DUREE_FEU
+		if age > 0.62:
+			f["force"] = float(f["force"]) - delta / (DUREE_FEU * 0.5)
+		if float(f["force"]) <= 0.05 or age > 1.4:
+			emettre("eteint", {"x": int(f["p"].x), "y": int(f["p"].y)})
+			continue
+		restants.append(f)
+		var p: Vector2 = f["p"]
+		var force := float(f["force"])
+		var rayon := RAYON_FEU * (0.55 + 0.45 * force)
+
+		# Ce qui est dedans souffre : passants, joueurs, voitures.
+		for personne in gens:
+			if Vector2(personne["p"]).distance_to(p) < rayon:
+				personne["pv"] = int(personne["pv"]) - int(DEGAT_FEU * force * delta)
+				if int(personne["pv"]) <= 0:
+					_abattre(personne, "", true)
+					break
+		paniquer(p, rayon + 90.0, 1.2)
+
+		# Sauter sur une voiture voisine : elle explose et allume son propre
+		# foyer. C'est ce qui fait qu'un carambolage part en chaîne.
+		f["propage"] = float(f["propage"]) - delta
+		if float(f["propage"]) <= 0.0:
+			f["propage"] = PROPAGATION * _rng.randf_range(0.7, 1.5)
+			for auto in autos:
+				if int(auto["genre"]) == EPAVE or String(auto["pilote"]) != "":
+					continue
+				if Vector2(auto["p"]).distance_to(p) < rayon * 1.15 and _rng.randf() < 0.55 * force:
+					detruire_auto(auto, "")
+					allumer(Vector2(auto["p"]), 0.9)
+					break
+
+		# Ronger le mur : un cube part, la façade se noircit là où ça brûle.
+		f["ronge"] = float(f["ronge"]) - delta
+		if float(f["ronge"]) <= 0.0:
+			f["ronge"] = RONGE * _rng.randf_range(0.8, 1.4)
+			var trouve := plan.immeuble_a(p, 26.0)
+			if not trouve.is_empty():
+				var hauteur := 1.0 + float(f["t"]) * 0.12   # le feu monte le long du mur
+				var cibles := VoxelsCarnage.voxels_autour_de(trouve["b"], Decor.vers3d(p, hauteur), 1.6)
+				if not cibles.is_empty():
+					_casser(int(trouve["id"]), [cibles[_rng.randi_range(0, cibles.size() - 1)]])
+	feux = restants
+
+# ------------------------------------------------------------ les secours
+
+## Les services d'urgence : un camion de pompiers pour les incendies, un
+## Medicar pour les blessés. Ils ne sont pas décoratifs — le camion ÉTEINT
+## (sinon un quartier entier finirait par brûler), le Medicar relève un joueur
+## à terre bien plus vite que l'attente. Un seul de chaque à la fois : deux
+## camions au même feu, c'est un embouteillage, pas une caserne.
+const PORTEE_LANCE := 150.0       ## px : la lance porte de loin, on la voit arroser
+const PORTEE_SOIN := 90.0
+const ATTENTE_SECOURS := 5.0      ## le temps qu'ils mettent à être prévenus
+var _depuis_pompier := 0.0
+var _depuis_medicar := 0.0
+
+func _depecher_les_secours(delta: float, joueurs: Dictionary) -> void:
+	_depuis_pompier += delta
+	_depuis_medicar += delta
+	var pompiers := 0
+	var medicars := 0
+	for auto in autos:
+		if int(auto["genre"]) == POMPIER:
+			pompiers += 1
+		elif int(auto["genre"]) == AMBULANCE:
+			medicars += 1
+
+	# Un camion par tranche de trois foyers, deux au plus : au-delà c'est un
+	# convoi qui se gêne lui-même dans les rues.
+	var camions_voulus: int = clampi(int(ceil(float(feux.size()) / 3.0)), 0, 2)
+	if pompiers < camions_voulus and _depuis_pompier >= ATTENTE_SECOURS:
+		_depuis_pompier = 0.0
+		_naitre_secours(joueurs, POMPIER, 18)
+
+	if medicars == 0 and _depuis_medicar >= ATTENTE_SECOURS and _un_blesse(joueurs):
+		_depuis_medicar = 0.0
+		_naitre_secours(joueurs, AMBULANCE, 15)
+
+func _un_blesse(joueurs: Dictionary) -> bool:
+	for cle in joueurs:
+		if float(joueurs[cle].get("vie", 100.0)) <= 0.0:
+			return true
+	return false
+
+func _naitre_secours(joueurs: Dictionary, genre: int, modele: int) -> void:
+	var autour := _autour_d_un_joueur(joueurs)
+	var pose := plan.point_de_chaussee(_rng, autour, NAISSANCE_MIN, NAISSANCE_MAX)
+	if not _degage_des_autos(pose["p"]):
+		return
+	var direction: Vector2 = pose["d"]
+	autos.append({
+		"id": _id(), "p": pose["p"], "a": direction.angle(), "d": direction,
+		"vitesse": 0.0, "genre": genre, "gang": -1,
+		"pv": PV_AUTO * 2, "pilote": "", "cible": "", "minuterie": 0.0, "recharge": 0.0,
+		"modele": modele, "garee": false, "service": 0.0,
+	})
+
+## Un véhicule de service roule vers ce qu'il doit traiter et agit sur place.
+## Il conduit comme une patrouille (tout droit, en longeant les murs) : un
+## camion qui respecte les sens interdits n'arrive jamais.
+func _conduire_service(auto: Dictionary, delta: float, joueurs: Dictionary) -> void:
+	var cible := Vector2.ZERO
+	var trouve := false
+	if int(auto["genre"]) == POMPIER:
+		var f := feu_le_plus_proche(auto["p"])
+		if not f.is_empty():
+			cible = f["p"]
+			trouve = true
+			if Vector2(auto["p"]).distance_to(cible) <= PORTEE_LANCE:
+				arroser(cible, PORTEE_LANCE, delta)
+				auto["service"] = float(auto.get("service", 0.0)) + delta
+	else:
+		var meilleure := INF
+		for cle in joueurs:
+			if float(joueurs[cle].get("vie", 100.0)) > 0.0:
+				continue
+			var d: float = Vector2(joueurs[cle]["p"]).distance_to(auto["p"])
+			if d < meilleure:
+				meilleure = d
+				cible = joueurs[cle]["p"]
+				trouve = true
+				if d <= PORTEE_SOIN:
+					emettre("secours", {"j": String(cle)})
+	if not trouve:
+		# Plus rien à faire : le véhicule reprend la circulation ordinaire et
+		# se fera oublier par le recyclage.
+		auto["genre"] = CIVILE
+		return
+	var vers: Vector2 = cible - Vector2(auto["p"])
+	# À l'arrêt devant le feu : on ne lui roule pas dedans.
+	var freine: bool = vers.length() < (PORTEE_LANCE * 0.55 if int(auto["genre"]) == POMPIER else PORTEE_SOIN * 0.6)
+	var direction := vers.normalized()
+	auto["vitesse"] = move_toward(float(auto["vitesse"]), 0.0 if freine else 340.0, 460.0 * delta)
+	var suivant: Vector2 = Vector2(auto["p"]) + direction * float(auto["vitesse"]) * delta
+	var degage := plan.degager(suivant, RAYON_AUTO)
+	if bool(degage[1]):
+		var tangente := Vector2(-direction.y, direction.x)
+		suivant = plan.degager(Vector2(auto["p"]) + tangente * float(auto["vitesse"]) * delta, RAYON_AUTO)[0]
+		auto["vitesse"] = float(auto["vitesse"]) * 0.8
+	else:
+		suivant = degage[0]
+	auto["p"] = suivant
+	if not freine:
+		auto["d"] = direction
+		auto["a"] = direction.angle()
 
 # ------------------------------------------------------------ les contrats
 
@@ -1432,7 +1648,12 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 			int(respect_de(String(cle))[0]), int(respect_de(String(cle))[1]),
 			int(respect_de(String(cle))[2])]
 
-	return {"g": vus_gens, "a": vus_autos, "c": vues_caisses, "b": vus_barrages, "h": vus_helicos, "e": etats}
+	var vus_feux: Array = []
+	for f in feux:
+		vus_feux.append([int(f["id"]), int(f["p"].x), int(f["p"].y), int(float(f["force"]) * 100.0)])
+
+	return {"g": vus_gens, "a": vus_autos, "c": vues_caisses, "b": vus_barrages, "h": vus_helicos,
+		"f": vus_feux, "e": etats}
 
 func _regarde(point: Vector2, joueurs: Dictionary) -> bool:
 	for cle in joueurs:
@@ -1507,6 +1728,10 @@ func appliquer_instantane(charge: Dictionary) -> void:
 	helicos = _fusionner(helicos, charge.get("h", []), func(entree: Array) -> Dictionary:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
 			"cible": "", "recharge": 0.0, "cap": float(entree[3]) / 100.0 if entree.size() > 3 else 0.0})
+
+	feux = _fusionner(feux, charge.get("f", []), func(entree: Array) -> Dictionary:
+		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
+			"force": float(entree[3]) / 100.0, "t": 0.0, "propage": PROPAGATION, "ronge": RONGE})
 
 	var etats = charge.get("e", {})
 	if typeof(etats) == TYPE_DICTIONARY:

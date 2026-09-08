@@ -140,6 +140,7 @@ const CARACTERES := {
 	15: {"v": 1.0, "a": 0.95, "t": 1.3},    # ambulance
 	16: {"v": 1.24, "a": 1.45, "t": 0.35},  # moto : file et tourne, mais rien autour de soi
 	17: {"v": 1.34, "a": 1.55, "t": 0.3},   # moto de course
+	18: {"v": 0.86, "a": 0.74, "t": 2.0},   # camion de pompiers
 }
 
 ## Le butin qui n'est pas une arme : une trousse rend cinquante points de vie,
@@ -388,6 +389,12 @@ func preparer() -> void:
 	# qui bloque le fil principal plusieurs secondes fait tomber le socket.
 	print("[carnage] ville prête en %d ms — %d morceaux, %d fiches en cache" % [
 		Time.get_ticks_msec() - chrono, _morceaux.size(), carte.fiches_en_cache()])
+
+	# `--banc-feu=N` : allumer N foyers autour du départ. Un incendie ne se
+	# commande pas au pilote automatique, et c'est ce qu'il faut photographier.
+	for argument in OS.get_cmdline_args():
+		if String(argument).begins_with("--banc-feu="):
+			_feux_de_banc = int(String(argument).substr(11))
 
 	# `--banc-etoiles=N` : partir déjà recherché. Attendre qu'un pilote au hasard
 	# gagne cinq étoiles pour voir l'hélicoptère, c'est attendre une manche sur
@@ -687,9 +694,13 @@ func _piloter_pour_le_banc() -> void:
 		for cle in _morceaux:
 			cubes += (_morceaux[cle] as MorceauVille).cubes_poses()
 		print("[banc] $%d sur soi, $%d au coffre, planque %d" % [_argent, _banque, _planque])
-		print("[banc] t=%ds fps=%d gens=%d autos=%d morceaux=%d cubes=%d quads=%d maillage_max=%.1fms fiches=%d noeuds=%d %s" % [int(temps),
-			Engine.get_frames_per_second(), ville.gens.size(), ville.autos.size(), _morceaux.size(), cubes,
-			MorceauVille.quads_total, MorceauVille.maillage_max_ms,
+		var secours := 0
+		for a in ville.autos:
+			if int(a["genre"]) in [VilleVivante.POMPIER, VilleVivante.AMBULANCE]:
+				secours += 1
+		print("[banc] t=%ds fps=%d gens=%d autos=%d feux=%d secours=%d morceaux=%d cubes=%d quads=%d maillage_max=%.1fms fiches=%d noeuds=%d %s" % [int(temps),
+			Engine.get_frames_per_second(), ville.gens.size(), ville.autos.size(), ville.feux.size(), secours,
+			_morceaux.size(), cubes, MorceauVille.quads_total, MorceauVille.maillage_max_ms,
 			carte.fiches_en_cache(), get_tree().get_node_count(), "hôte" if est_hote() else "client"])
 	# ⚠ L'action se PULSE. Maintenue, elle ne produit qu'un seul front : le
 	# pilote descendait de voiture et ne remontait jamais, et la moitié du jeu
@@ -1527,11 +1538,36 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 			# Un joueur s'est fait ramasser : sa fortune baisse d'autant.
 			if est_hote():
 				ajouter_score(String(charge.get("j", "")), -int(charge.get("m", 0)))
+		"feu":
+			# L'hôte a allumé un foyer : chez le client, il ne s'agit que de le
+			# dessiner — la vie du feu (propagation, dégâts) reste chez l'hôte.
+			if not est_hote():
+				ville.feux.append({"id": ville.prochain_id(), "f": float(charge.get("f", 100)) / 100.0,
+					"p": Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
+					"force": float(charge.get("f", 100)) / 100.0, "t": 0.0,
+					"propage": 99.0, "ronge": 99.0})
+			Sons.jouer("choc", 0.55, -8.0)
+		"eteint":
+			if not est_hote():
+				var ou_eteint := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
+				var gardes: Array = []
+				for f in ville.feux:
+					if Vector2(f["p"]).distance_to(ou_eteint) > 40.0:
+						gardes.append(f)
+				ville.feux = gardes
+		"secours":
+			# Le Medicar est arrivé : on se relève tout de suite, à moitié
+			# soigné. C'est ce qui rend l'ambulance utile plutôt que jolie.
+			if String(charge.get("j", "")) == Session.cle and _hors_service > 0.0:
+				_hors_service = min(_hors_service, 0.6)
+				_vie = max(_vie, VIE_MAX * 0.5)
+				_dire_affaire("le Medicar vous relève")
 		"boum":
 			var ou_boum := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
 			_effet_explosion(ou_boum)
 			if est_hote():
 				ville.exploser(ou_boum)
+				ville.allumer(ou_boum, 1.0)
 				_vider_les_evenements()
 		"casse":
 			# Des cubes d'immeuble s'en vont : chez tout le monde, dans le décor
@@ -1894,6 +1930,7 @@ func rafraichir_scene(delta: float) -> void:
 	_placer_les_helicos(delta)
 	_animer_effets(delta)
 	_placer_camera(delta)
+	_animer_les_feux(delta)
 	_animer_les_cabines()
 	_faire_hurler_la_police(delta)
 	_rafraichir_contrat(delta)
@@ -1955,6 +1992,64 @@ func _rafraichir_radar() -> void:
 
 ## Le halo d'une cabine clignote tant qu'on n'a pas de contrat en main. Une
 ## cabine qui appelle alors qu'on est déjà pris ferait faire un détour pour rien.
+## Les brasiers : un nœud par foyer, apparu et retiré au fil de ce que dit
+## l'hôte. Les dégâts du feu, eux, sont locaux — chacun s'inflige la brûlure
+## qu'il traverse, comme pour les balles : attendre l'aller-retour de l'hôte
+## rendrait le feu inoffensif à haute vitesse.
+var _brasiers: Dictionary = {}        ## id du feu -> Node3D
+var _feux_de_banc := 0                ## `--banc-feu=N` : foyers à rallumer autour du pilote
+var _depuis_feu_banc := 0.0
+var _depuis_brulure := 0.0
+
+func _animer_les_feux(delta: float) -> void:
+	# `--banc-feu=N` : N foyers autour de soi, RENOUVELÉS toutes les huit
+	# secondes — un incendie s'éteint (ou les pompiers l'éteignent) avant la
+	# photo suivante, et on ne photographierait jamais la ville qui brûle.
+	if _feux_de_banc > 0 and est_hote() and temps > 3.0:
+		_depuis_feu_banc -= delta
+		if _depuis_feu_banc <= 0.0:
+			_depuis_feu_banc = 5.0
+			for i in _feux_de_banc:
+				var loin := _position + Vector2.RIGHT.rotated(TAU * float(i) / float(_feux_de_banc) + temps) * _rng.randf_range(40.0, 120.0)
+				ville.allumer(carte.degager(loin, 20.0)[0], 1.0)
+
+	var vus: Dictionary = {}
+	for f in ville.feux:
+		var id := int(f["id"])
+		vus[id] = true
+		var ou: Vector2 = f["p"]
+		if ou.distance_to(_position) > 2200.0:
+			continue
+		var noeud: Node3D = _brasiers.get(id)
+		if noeud == null:
+			noeud = FormesCarnage.brasier()
+			noeud.position = Decor.vers3d(ou, 0.6)
+			monde().add_child(noeud)
+			_brasiers[id] = noeud
+		FormesCarnage.regler_brasier(noeud, float(f["force"]), temps + float(id))
+	for id in _brasiers.keys():
+		if not vus.has(id):
+			(_brasiers[id] as Node3D).queue_free()
+			_brasiers.erase(id)
+
+	# Rester dans les flammes coûte cher : on brûle une fois par demi-seconde.
+	_depuis_brulure -= delta
+	if _depuis_brulure > 0.0 or _hors_service > 0.0:
+		return
+	for f in ville.feux:
+		var d: float = Vector2(f["p"]).distance_to(_position)
+		var portee: float = VilleVivante.RAYON_FEU * (0.55 + 0.45 * float(f["force"]))
+		if d < portee:
+			_depuis_brulure = 0.5
+			_encaisser(VilleVivante.DEGAT_FEU * 0.5 * float(f["force"]), "feu", "")
+			_secousse = max(_secousse, 0.18)
+			break
+
+## La cabine annonce sa couleur : ce que le gang du quartier pense de vous.
+const CABINE_HOSTILE := Color("#d0402c")
+const CABINE_NEUTRE := Color("#e0b23a")
+const CABINE_AMIE := Color("#4cc25a")
+
 func _animer_les_cabines() -> void:
 	var libre := _contrat.is_empty()
 	for cle in _morceaux:
@@ -1966,6 +2061,19 @@ func _animer_les_cabines() -> void:
 			var mot := poste.get_node_or_null("Mot") as Node3D
 			if mot:
 				mot.visible = libre
+			var enseigne := poste.get_node_or_null("Enseigne") as MeshInstance3D
+			if enseigne == null:
+				continue
+			var gang := int(entree.get("gang", -1))
+			var couleur := CABINE_NEUTRE
+			if gang >= 0:
+				if ville.gang_hostile(Session.cle, gang):
+					couleur = CABINE_HOSTILE
+				elif ville.gang_ami(Session.cle, gang):
+					couleur = CABINE_AMIE
+			if entree.get("teinte") != couleur:
+				entree["teinte"] = couleur
+				enseigne.material_override = Decor.matiere_lumineuse(couleur, 1.4)
 
 ## Une poursuite s'entend avant de se voir : c'est la sirène qui dit qu'il faut
 ## tourner tout de suite, pas la voiture aperçue trois rues plus loin.

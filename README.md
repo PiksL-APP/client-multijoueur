@@ -210,6 +210,47 @@ autre (`_degage_des_autos`), et le parvis d'une place est un mur pour les
 voitures — sinon elles y entraient par les axes de la grille et la place
 devenait un parking.
 
+**Ça brûle.** Une voiture qui saute laisse un BRASIER, et un brasier est une
+chose vivante : il chauffe ce qui l'entoure (passants, joueurs, tôle), il
+essaie toutes les trois secondes de sauter sur une voiture voisine — qui
+explose et allume le sien, c'est ainsi qu'un carambolage part en chaîne —, il
+ronge le mur qu'il lèche un cube à la fois en montant le long de la façade,
+puis il s'épuise en une trentaine de secondes (`VilleVivante.allumer`,
+`_animer_les_feux`, au plus vingt-six foyers). Les feux vivent chez l'hôte
+comme le reste de la ville et voyagent dans l'instantané : deux joueurs voient
+le même incendie. Chacun s'inflige localement la brûlure qu'il traverse —
+attendre l'aller-retour de l'hôte rendrait le feu inoffensif à pleine vitesse.
+Le rendu est réglé pour une caméra presque à la VERTICALE, ce qui est tout le
+problème du feu vu de dessus : une colonne de fumée droite ferait un couvercle
+sur le quartier. Un brasier, ici, c'est un cœur de braises émissives qui bat
+au sol (des particules additives ne se voient pas en plein jour, ça si), des
+langues courtes qui lèchent autour, un filet de suie qui part EN BIAIS pour
+sortir du champ, et une flaque de lumière qui vacille — la nuit, un incendie
+éclaire sa rue. ⚠ Deux pièges : `amount_ratio` n'existe pas sur des
+`CPUParticles3D` (on module la taille et la durée de vie, jamais le nombre,
+qui réalloue tout le tableau), et la rampe de couleur MULTIPLIE la couleur de
+base — une rampe grise sur une base blanche sort blanche, la suie se peint
+dans `color`. `--banc-feu=N` allume N foyers autour du pilote et les
+renouvelle toutes les huit secondes : sans ça on ne photographie jamais la
+ville qui brûle.
+
+**Les secours viennent.** Un camion de pompiers par tranche de trois foyers
+(deux au plus, sinon c'est un convoi qui se gêne dans les rues) et un Medicar
+quand un joueur est à terre : ils naissent au bord du champ cinq secondes
+après l'alerte, roulent droit sur ce qu'ils doivent traiter en longeant les
+murs comme les patrouilles — un camion qui respecte les sens interdits
+n'arrive jamais —, puis le camion ARROSE (le foyer perd sa force sous la
+lance, à cent cinquante pixels) et le Medicar RELÈVE (le joueur se remet
+debout tout de suite, à moitié soigné, au lieu d'attendre). Quand il n'y a
+plus rien à faire, le véhicule redevient civil et se fait oublier. Le camion
+de pompiers est le dix-neuvième gabarit : caisse rouge, échelle couchée sur le
+toit, bande blanche, deux gyrophares, tuyau enroulé à l'arrière.
+
+**La cabine dit ce que le gang pense de vous.** L'enseigne au-dessus de chaque
+téléphone est verte quand le gang du quartier vous embauche (respect ≥ 50),
+jaune quand il tolère, rouge quand il vous tire dessus (respect ≤ −60) : la
+jauge de respect se lit depuis la rue, sans ouvrir un menu.
+
 **Le jour et la nuit.** La même horloge que le village : un cycle de quinze
 minutes (`MatieresCarnage.nuit()`), neuf de jour, une de crépuscule, quatre de
 nuit, une d'aube. Le ciel, le brouillard, le soleil et la lune s'interpolent

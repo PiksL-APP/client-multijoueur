@@ -79,6 +79,20 @@ rendu et l'interface ; le reste est à côté :
   les morceaux, un pâté sale par image) le remaille ; `ville.detruits` est
   rejoué quand un morceau se rebâtit. Le banc affiche `quads=` et
   `maillage_max=` (statiques `quads_total`, `maillage_max_ms`).
+- LE FEU (`vivant.gd`, section « le feu ») : `feux` [{id,p,force,t,propage,
+  ronge}], `allumer(p, force)` (les foyers proches fusionnent), `arroser(p, r,
+  delta)`, `feu_le_plus_proche`, `_animer_les_feux` (dégâts, propagation aux
+  voitures, cubes rongés, extinction). Diffusé par l'événement `feu`/`eteint`
+  ET par la clé `f` de l'instantané. Rendu : `FormesCarnage.brasier()` +
+  `regler_brasier(noeud, force, temps)` (cœur de braises émissives, flammes,
+  suie en biais, flaque qui vacille), `carnage.gd` `_animer_les_feux` tient
+  `_brasiers` (id → nœud) et inflige la brûlure locale. ⚠ `amount_ratio`
+  n'existe pas sur CPUParticles3D ; la rampe MULTIPLIE `color`.
+- LES SECOURS : genres `POMPIER` et `AMBULANCE` (gabarits 18 et 15),
+  `_depecher_les_secours` (un camion par trois foyers, deux au plus ; un
+  Medicar dès qu'un joueur est à terre) et `_conduire_service` (roule droit,
+  longe les murs, arrose ou soigne, puis redevient `CIVILE`). L'événement
+  `secours` relève le joueur chez lui. `--banc-feu=N` pour les photographier.
 - Les VOIES LIBRES du plan (`voie_libre`, `voie_libre_en`, `_voie_libre_a`) :
   places en étoile, avenues en diagonale, anneaux — une fonction pure du point,
   mise en cache par tuile. Une tuile libre l'emporte sur la grille dans `tuile`
