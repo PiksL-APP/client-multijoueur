@@ -790,6 +790,7 @@ func _lieux_du_secteur(secteur: Vector2i) -> Dictionary:
 	var h: Vector2i = choisir.call(candidats)
 	if h.x >= 0:
 		var coin_h := coin_pate(h)
+		# Au CENTRE du pâté : la tuile que `_lieu_visitable` laisse en dalle.
 		fiche["hopitaux"].append({"p": centre_tuile(coin_h.x + 1, coin_h.y + 1), "id": indice_pate(h), "pate": h})
 	# La PLANQUE : la maison qu'on achète. Une par secteur, en périphérie du
 	# pâté (on s'y gare devant), jamais dans le même pâté qu'un repaire.
@@ -1297,6 +1298,11 @@ func _amenager_pate(pate: Vector2i) -> Array:
 			_repaire(fiches, pate, quartier, gang)
 		"garages", "cabines":
 			_simple(fiches, pate, quartier, gang, lieu == "garages")
+		"hopitaux", "planques":
+			# Le pâté d'un lieu qu'on VISITE se bâtit en petit, et sa tuile
+			# centrale (hôpital) ou son coin (planque) reste dégagé : sinon le
+			# bâti se pose dessus et on ne voit plus ni la croix ni la porte.
+			_lieu_visitable(fiches, pate, quartier, gang, lieu)
 		_:
 			match quartier:
 				CENTRE: _centre(fiches, pate)
@@ -1718,6 +1724,27 @@ func _bordure(fiches: Array, pate: Vector2i, quartier: int, _gang: int) -> void:
 				continue
 			var basse := 7.0 if quartier in [CENTRE, AFFAIRES, COMMERCE] else 5.5
 			_immeuble(fiches, i, j, 1, 1, _hauteur(pate, sel, basse, basse + 5.0), style, pate, sel)
+
+## Le pâté d'un HÔPITAL ou d'une PLANQUE : des immeubles d'une tuile tout
+## autour, et la tuile du lieu laissée en dalle — c'est le parvis où l'on entre.
+func _lieu_visitable(fiches: Array, pate: Vector2i, quartier: int, _gang: int, lieu: String) -> void:
+	var style := F_LOGEMENTS
+	match quartier:
+		COMMERCE, CENTRE: style = F_COMMERCE
+		AFFAIRES: style = F_BUREAUX
+		VIEUX: style = F_VIEUX
+		INDUSTRIE, PORT: style = F_HANGAR
+		BANLIEUE: style = F_MAISON
+	var libre := Vector2i(1, 1) if lieu == "hopitaux" else Vector2i(0, 2)
+	for j in 3:
+		for i in 3:
+			if i == libre.x and j == libre.y:
+				var fiche: Dictionary = _f(fiches, i, j)
+				fiche["sol"] = S_BETON if lieu == "hopitaux" else S_PAVES
+				continue
+			var sel := 360 + j * 3 + i
+			var basse := 6.0 if lieu == "hopitaux" else 4.5
+			_immeuble(fiches, i, j, 1, 1, _hauteur(pate, sel, basse, basse + 3.5), style, pate, sel)
 
 ## Un pâté SIMPLE : des immeubles d'une tuile, pour que le garage ou la cabine
 ## qu'il porte en (0,0) ne se retrouve pas sous une tour de quatre tuiles.
