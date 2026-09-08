@@ -1,6 +1,6 @@
 # Piks Theft Auto
 
-Une ville qu'on parcourt à plusieurs — **Sunport City** — et des parties de 2 à
+Une ville qu'on parcourt à plusieurs — **Pikstown** — et des parties de 2 à
 4 joueurs avec leur score. Le tout tourne dans le navigateur : Godot 4.5
 exporté en WebAssembly, Supabase Realtime pour le réseau, Vercel pour
 l'hébergement.
@@ -11,7 +11,7 @@ n'est pas une image, c'est `PlanVille` + `MorceauVille`, le générateur du jeu,
 bâti au couchant et tournant lentement sous l'effet maquette. Quand la ville
 change, le menu change avec elle. « Commencer » demande un pseudo et un
 personnage, « Options » règle le son, l'image et les touches, « Quitter »
-renvoie sur piks-l.com. La pochette du jeu est posée à gauche, dans sa boîte.
+renvoie sur piks-l.com. La pochette du jeu est posée à gauche, dans une vraie boîte 3D qui se retourne au survol pour montrer son dos.
 Le village en voxels reste joignable par `--ecran=hub` le temps que les
 bâtiments de la ville ouvrent les autres jeux.
 

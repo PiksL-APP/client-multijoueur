@@ -66,7 +66,7 @@ func demarrer() -> void:
 	gauche.add_child(_lot)
 	gauche.add_child(_bande())
 
-	_bouton = UI.bouton("Entrer à Sunport", true)
+	_bouton = UI.bouton("Entrer à Pikstown", true)
 	_bouton.pressed.connect(_entrer)
 	gauche.add_child(_bouton)
 

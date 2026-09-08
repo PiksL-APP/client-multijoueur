@@ -12,12 +12,15 @@ extends Ecran
 ## quartier, celui qui présente bien. Tirer au sort donnerait un jour un port
 ## désert, un jour un échangeur.
 
-## Le titre, en trois lignes empilées comme sur l'affiche. Une seule ligne
-## « PIKS THEFT AUTO » tiendrait en petit ou déborderait ; empilé, il occupe
-## le tiers gauche de l'écran et laisse la ville respirer à droite.
-const TITRE := ["PIKS", "THEFT", "AUTO"]
+## Le vrai lettrage du jeu, détouré sur fond transparent (lettres blanches,
+## liseré noir compris) : la police pixel de la maison ne sait pas le dessiner,
+## et une approximation à côté de la jaquette se serait vue tout de suite.
+const LOGO := "res://images/logo.png"
+## Le lettrage occupe trois lignes : au-delà de cette largeur, la colonne
+## déborde la hauteur de l'écran et emporte la boîte avec elle.
+const LOGO_LARGEUR := 320.0
 
-const VITRINE := "SUNPORT"          ## le code de ville montré au menu — et son nom
+const VITRINE := "PIKSTOWN"         ## le code de ville montré au menu — et son nom
 const CREPUSCULE := 0.50            ## 0 plein jour, 1 nuit noire — 0,5 est le couchant
 const MORCEAUX_LARGE := 3           ## côté du carré bâti, pour tenir jusqu'à l'horizon
 const HAUTEUR := 54.0               ## altitude de la caméra, en unités monde
@@ -84,8 +87,12 @@ func _batir_la_ville() -> void:
 	sol.set_shader_parameter("etoiles", _carte.etoiles_libres())
 
 	# On se place au cœur de la ville : c'est là que les tours sont hautes.
+	# Le carré est CENTRÉ sur ce cœur, il n'en part pas : bâti vers le sud-est,
+	# la caméra visait un morceau et demi plus loin et tombait sur la banlieue
+	# ou sur l'eau selon le code de la ville.
 	var centre_tuiles := Vector2i(PlanVille.COLONNES / 2, PlanVille.LIGNES / 2)
-	var m0 := Vector2i(centre_tuiles.x / PlanVille.MORCEAU, centre_tuiles.y / PlanVille.MORCEAU)
+	var m0 := Vector2i(centre_tuiles.x / PlanVille.MORCEAU, centre_tuiles.y / PlanVille.MORCEAU) \
+		- Vector2i.ONE * (MORCEAUX_LARGE / 2)
 	for j in MORCEAUX_LARGE:
 		for i in MORCEAUX_LARGE:
 			var morceau := MorceauVille.new()
@@ -167,32 +174,38 @@ func _poser_l_interface() -> void:
 
 	var surtitre := UI.texte("Piks-l · multijoueur", 15, ROSE)
 	colonne.add_child(surtitre)
-	# Le titre est cerné de noir : sur une ville qui tourne, un lettrage blanc
-	# nu se perd dès qu'un toit clair passe dessous. C'est le contour qui le
-	# tient, exactement comme sur l'affiche.
-	var pile := VBoxContainer.new()
-	pile.add_theme_constant_override("separation", -6)
-	colonne.add_child(pile)
-	for mot in TITRE:
-		var ligne := UI.titre(String(mot), 56)
-		ligne.add_theme_color_override("font_color", Color("#fffaf2"))
-		ligne.add_theme_color_override("font_outline_color", Color("#120a18"))
-		ligne.add_theme_constant_override("outline_size", 14)
-		pile.add_child(ligne)
-	var sous := UI.texte("Sunport City. La ville est le jeu — chaque bâtiment ouvre une partie.",
+	# Le lettrage porte déjà son liseré noir : sur une ville qui tourne, un
+	# titre blanc nu se perd dès qu'un toit clair passe dessous.
+	var logo := TextureRect.new()
+	logo.texture = load(LOGO)
+	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	logo.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var t: Texture2D = logo.texture
+	logo.custom_minimum_size = Vector2(LOGO_LARGEUR,
+		LOGO_LARGEUR * float(t.get_height()) / float(t.get_width()))
+	colonne.add_child(logo)
+	var sous := UI.texte("Pikstown. Une ville sans limites — chaque bâtiment ouvre une partie.",
 		17, Palette.ENCRE_DOUCE)
 	sous.add_theme_color_override("font_outline_color", Color("#120a18"))
 	sous.add_theme_constant_override("outline_size", 6)
 	colonne.add_child(sous)
 
 	var espace := Control.new()
-	espace.custom_minimum_size = Vector2(0, 34)
+	espace.custom_minimum_size = Vector2(0, 26)
 	colonne.add_child(espace)
 
 	for i in ENTREES.size():
 		var b := _entree(String(ENTREES[i]["libelle"]), i)
 		colonne.add_child(b)
 		_boutons.append(b)
+
+	# La boîte se cale sur la HAUTEUR de la colonne, pas sur celle de l'écran :
+	# les deux blocs se répondent alors, au lieu que l'un flotte dans le vide.
+	colonne.resized.connect(func() -> void:
+		if _cadre_boite != null and is_instance_valid(_cadre_boite):
+			_cadre_boite.custom_minimum_size.y = maxf(320.0, colonne.size.y))
 
 	var espace2 := Control.new()
 	espace2.custom_minimum_size = Vector2(0, 22)
@@ -223,14 +236,29 @@ func _poser_l_interface() -> void:
 ## là et non comme un cartouche d'interface. Elle vit dans sa propre petite
 ## fenêtre 3D, au fond transparent, pour ne pas se mêler à la ville.
 const POCHETTE := "res://images/pochette.jpg"
-const BOITE := Vector3(1.30, 1.96, 0.26)   ## un boîtier de jeu, en unités
+const POCHETTE_DOS := "res://images/pochette-dos.jpg"
+## Un boîtier de jeu. Le rapport 1 : 1,45 est celui auquel les DEUX jaquettes
+## sont calées (l'affiche est plus élancée, le dos plus trapu) : les caler à
+## la même forme, avec une bande sombre là où il en manque, vaut mieux que de
+## les étirer chacune à la sienne — un dos déformé de douze pour cent se voit.
+const BOITE := Vector3(1.34, 1.94, 0.26)
+const LARGEUR_BOITE := 360.0               ## largeur du panneau, en pixels
 
 func _boite_du_jeu() -> SubViewportContainer:
 	var cadre := SubViewportContainer.new()
 	cadre.stretch = true
-	cadre.custom_minimum_size = Vector2(300, 430)
+	cadre.custom_minimum_size = Vector2(LARGEUR_BOITE, 460)
 	cadre.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	cadre.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# La boîte se retourne au survol : il lui faut donc les événements de
+	# souris, que le reste de l'habillage laisse passer.
+	cadre.mouse_filter = Control.MOUSE_FILTER_STOP
+	cadre.mouse_entered.connect(func(): _retournee = true)
+	cadre.mouse_exited.connect(func(): _retournee = false)
+	_cadre_boite = cadre
+	# `--pochette-dos` : forcer le demi-tour, pour photographier le dos au banc
+	# — une ligne de commande ne survole rien.
+	if "--pochette-dos" in OS.get_cmdline_args():
+		_retournee = true
 	var fenetre := SubViewport.new()
 	fenetre.transparent_bg = true
 	fenetre.own_world_3d = true
@@ -288,14 +316,41 @@ func _boite_du_jeu() -> SubViewportContainer:
 	jaquette.material_override = papier
 	_boite.add_child(jaquette)
 
+	# Le dos, sur l'autre face : les vues du jeu, le texte de jaquette et le
+	# code-barres. Un quad retourné d'un demi-tour — sans quoi on le verrait
+	# en miroir.
+	var dos := MeshInstance3D.new()
+	dos.mesh = carte
+	dos.position = Vector3(0, 0, -BOITE.z * 0.5 - 0.002)
+	dos.rotation_degrees = Vector3(0, 180, 0)
+	var verso := StandardMaterial3D.new()
+	verso.albedo_texture = load(POCHETTE_DOS)
+	verso.roughness = 0.6
+	verso.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
+	# Le dos ne reçoit que la lumière rasante d'en face : retourné, il tombait
+	# dans le noir et son texte devenait illisible. Une émission discrète de sa
+	# propre image le tient à niveau sans le faire briller.
+	verso.emission_enabled = true
+	verso.emission = Color.WHITE
+	verso.emission_texture = load(POCHETTE_DOS)
+	verso.emission_energy_multiplier = 0.42
+	dos.material_override = verso
+	_boite.add_child(dos)
+
 	var camera := Camera3D.new()
 	camera.fov = 36.0
 	fenetre.add_child(camera)
-	camera.position = Vector3(0, 0, 4.6)
+	# Assez près pour que le boîtier remplisse presque la hauteur du panneau :
+	# la caméra garde la hauteur (`KEEP_HEIGHT`), donc la boîte grandit avec
+	# le panneau et jamais avec sa largeur.
+	camera.position = Vector3(0, 0, 3.8)
 	camera.look_at(Vector3.ZERO)
 	return cadre
 
 var _boite: Node3D
+var _cadre_boite: Control
+var _retournee := false
+var _demi_tour := 0.0
 
 const ROSE := Color("#ff4f9a")
 const ORANGE := Color("#ffa441")
@@ -368,7 +423,13 @@ func _process(delta: float) -> void:
 	# Le boîtier se balance sur trois quarts, sans jamais se retourner : on
 	# doit pouvoir lire l'affiche à tout instant.
 	if _boite != null and is_instance_valid(_boite):
-		_boite.rotation.y = deg_to_rad(-22.0) + sin(_t * 0.42) * 0.16
+		# Au survol, le boîtier fait un demi-tour et montre son dos. La
+		# rotation est amortie plutôt que commutée : une boîte qui se retourne
+		# d'un coup se lit comme un changement d'image, pas comme un objet
+		# qu'on retourne dans la main.
+		_demi_tour = move_toward(_demi_tour, 1.0 if _retournee else 0.0, delta * 2.4)
+		var adouci := smoothstep(0.0, 1.0, _demi_tour)
+		_boite.rotation.y = deg_to_rad(-22.0 + adouci * 202.0) + sin(_t * 0.42) * 0.16 * (1.0 - adouci)
 		_boite.rotation.x = deg_to_rad(4.0) + sin(_t * 0.31 + 1.2) * 0.05
 	# La ligne de netteté vise le bas de l'écran, là où la ville est proche :
 	# le lointain reste dans le flou, et c'est lui qui fait la maquette.
