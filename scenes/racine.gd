@@ -6,7 +6,11 @@ const ECRANS := {
 	"hub": "res://scenes/hub.gd",
 	"salon": "res://scenes/salon.gd",
 	"carnage": "res://jeux/carnage.gd",
-	"enigme": "res://jeux/enigme.gd",
+	# ÉNIGME, c'est désormais la ferme (voir CONCEPTION-ENIGME.md) : le portail
+	# du village y mène. Les anciennes chambres restent jouables sous un autre
+	# nom, le temps de les refondre en salles de test à la Portal.
+	"enigme": "res://scenes/ferme.gd",
+	"enigme-chambres": "res://jeux/enigme.gd",
 	"bousculade": "res://jeux/bousculade.gd",
 	"resultats": "res://scenes/resultats.gd",
 	"ferme": "res://scenes/ferme.gd",
@@ -65,6 +69,7 @@ static func _arguments_depuis_url(arguments: PackedStringArray) -> PackedStringA
 			"etoiles": copie.append("--banc-etoiles=" + String(paire[1]))
 			"position": copie.append("--banc-position=" + String(paire[1]))
 			"nuit": copie.append("--nuit=" + String(paire[1]))
+			"feu": copie.append("--banc-feu=" + String(paire[1]))
 	return copie
 
 static func _argument(arguments: PackedStringArray, nom: String, defaut: String = "") -> String:
