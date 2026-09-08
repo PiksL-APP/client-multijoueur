@@ -28,9 +28,9 @@ func _ready() -> void:
 	env.environment = e; add_child(env)
 	var l := DirectionalLight3D.new(); l.rotation_degrees = Vector3(-55, -35, 0); l.shadow_enabled = true; l.light_energy = 1.1; add_child(l)
 	var cam := Camera3D.new(); add_child(cam)
-	var centre := Vector3((x - ecart) * 0.5, 1.0, 0)
-	var dist := maxf(5.0, x * 0.5)
-	cam.position = centre + Vector3(0, dist * 0.7, dist * 0.8)
+	var centre := Vector3((x - ecart) * 0.5, 1.1, 0)
+	var dist := maxf(4.0, x * 0.5)
+	cam.position = centre + Vector3(0, dist * 0.34, dist * 0.94)
 	cam.look_at(centre)
 	await get_tree().create_timer(1.0).timeout
 	await RenderingServer.frame_post_draw

@@ -899,140 +899,343 @@ for x in range(-4, 4):
 ecrire("arene_centre", centre_arene, centrer=False)
 
 # ------------------------------------------------------------------ personnages
-# Seize voxels de haut, six de large : jambes, corps, bras, tête, chacun un
-# nœud à part pour que le moteur les balance en marchant. Le visage regarde
-# vers +z (le sud, la caméra).
-def personnage(peau, cheveux, haut, bas, coiffe=None, tenue=None):
-    """`coiffe` et `tenue` sont des fonctions qui ajoutent casque, chapeau,
-    tablier… `haut`/`bas` : couleurs du buste et des jambes (une robe se
-    fait en donnant la même). Tout est en coordonnées absolues : le sol est
-    y = 0, la tête va de 12 à 17 ; chaque partie a son pivot."""
-    tete = Modele()
-    tete.boite(-3, 12, -3, 2, 17, 2, peau)
-    tete.boite(-3, 16, -3, 2, 17, 2, cheveux)              # le dessus des cheveux
-    tete.boite(-3, 13, -3, 2, 17, -3, cheveux)             # la nuque
-    tete.boite(-3, 15, -2, -3, 17, 2, cheveux)
-    tete.boite(2, 15, -2, 2, 17, 2, cheveux)
-    tete.poser(-2, 14, 2, P["noir"])                       # les yeux
-    tete.poser(1, 14, 2, P["noir"])
-    corps = Modele()
-    corps.boite(-3, 6, -1, 2, 11, 1, haut)
-    bras_g = Modele()
-    bras_g.boite(-5, 6, -1, -4, 11, 0, haut)
-    bras_g.boite(-5, 6, -1, -4, 7, 0, peau)
-    bras_d = Modele()
-    bras_d.boite(3, 6, -1, 4, 11, 0, haut)
-    bras_d.boite(3, 6, -1, 4, 7, 0, peau)
-    jambe_g = Modele()
-    jambe_g.boite(-3, 0, -1, -1, 5, 1, bas)
-    jambe_g.boite(-3, 0, -1, -1, 0, 1, P["cuir"])
-    jambe_d = Modele()
-    jambe_d.boite(0, 0, -1, 2, 5, 1, bas)
-    jambe_d.boite(0, 0, -1, 2, 0, 1, P["cuir"])
-    parties = {"tete": tete, "corps": corps, "bras_g": bras_g, "bras_d": bras_d, "jambe_g": jambe_g, "jambe_d": jambe_d}
+# Deux fois plus fins que le reste — des voxels de 1/16 d'unité, trente-deux
+# de haut pour deux unités. À la moitié de cette résolution, un personnage
+# n'a que six voxels de large : pas de main, pas de nez, pas d'épaule, et
+# tous les héros ont la même silhouette sous leur chapeau. Le pack de
+# personnages « blocky » de Kenney (CC0) a été examiné : ce sont six cubes
+# habillés d'une texture, sans volume — moins que ce qui suit.
+#
+# Les pivots restent aux mêmes hauteurs EN UNITÉS que la version grossière
+# (hanches et buste à 0,75 ; épaules à 1,4375 ; cou à 1,5), donc le moteur
+# n'a rien à savoir de ce changement.
+FIN2 = 1 / 16
+CORPS_Y, EPAULE_Y, COU_Y = 12, 23, 24
+
+
+def _tete(m, peau, cheveux, coupe="courte"):
+    """Une tête de huit voxels : le crâne, les oreilles, le nez, les yeux, la
+    bouche, une chevelure qui déborde. C'est le nez et la frange qui font
+    qu'on lit un visage, plutôt qu'un cube avec deux points."""
+    y0 = COU_Y
+    m.boite(-4, y0, -4, 3, y0 + 6, 3, peau)               # le crâne
+    for x in (-5, 4):                                      # les oreilles
+        m.boite(x, y0 + 2, -1, x, y0 + 3, 0, peau)
+    m.boite(-1, y0 + 2, 4, 0, y0 + 2, 4, peau)             # le nez
+    for x in (-3, 1):                                      # les yeux, blanc et pupille
+        m.boite(x, y0 + 3, 4, x + 1, y0 + 4, 4, P["blanc"])
+        m.boite(x + (1 if x < 0 else 0), y0 + 3, 4, x + (1 if x < 0 else 0), y0 + 4, 4, P["noir"])
+    m.boite(-1, y0, 4, 0, y0, 4, nuance(peau, 0.72))       # la bouche
+    if coupe == "chauve":
+        return
+    for x in range(-4, 4):                                 # la chevelure
+        for z in range(-4, 5):
+            for y in range(y0 + 5, y0 + 8):
+                n = bruit(x, y, z, 3.0, 41)
+                if z == 4 and (y > y0 + 6 or n < 0.42):
+                    continue                               # la frange, échancrée
+                m.poser(x, y, z, cheveux if n > 0.4 else nuance(cheveux, 0.82))
+    m.boite(-4, y0 + 1, -5, 3, y0 + 7, -4, cheveux)        # la nuque
+    for x in (-5, 4):
+        m.boite(x, y0 + 4, -4, x, y0 + 7, 1, cheveux)
+    if coupe == "longue":
+        m.boite(-5, y0 - 6, -5, 4, y0 + 4, -4, cheveux)
+        for x in (-5, 4):
+            m.boite(x, y0 - 3, -4, x, y0 + 4, 0, cheveux)
+
+
+def _buste(m, haut, ceinture=True):
+    """Un buste qui s'évase aux épaules et se resserre à la taille."""
+    for y in range(CORPS_Y, EPAULE_Y + 1):
+        large = 4 if y >= EPAULE_Y - 5 else 3
+        profond = 3 if y >= EPAULE_Y - 5 else 2
+        m.boite(-large - 1, y, -profond, large, y, profond, haut)
+    m.boite(-2, EPAULE_Y + 1, -2, 1, EPAULE_Y + 1, 1, P["peau"])       # le cou
+    if ceinture:
+        m.boite(-4, CORPS_Y + 1, -3, 3, CORPS_Y + 2, 3, P["cuir"])
+        m.boite(-1, CORPS_Y + 1, 3, 0, CORPS_Y + 2, 3, P["or"])
+
+
+def _bras(m, cote, haut, peau, manche=6):
+    """Un bras : l'épaule, la manche, l'avant-bras nu, la main."""
+    x = 5 if cote > 0 else -8
+    m.boite(x, EPAULE_Y - 1, -2, x + 2, EPAULE_Y, 1, haut)          # l'épaule
+    m.boite(x, EPAULE_Y - manche, -2, x + 2, EPAULE_Y - 2, 1, haut)
+    m.boite(x, CORPS_Y + 2, -2, x + 2, EPAULE_Y - manche - 1, 1, peau)
+    m.boite(x, CORPS_Y, -2, x + 2, CORPS_Y + 1, 1, peau)            # la main
+    m.poser(x + (0 if cote > 0 else 2), CORPS_Y + 1, 2, peau)       # le pouce
+
+
+def _jambe(m, cote, bas, botte=P["cuir"]):
+    x = 0 if cote > 0 else -5
+    m.boite(x, 4, -2, x + 4, CORPS_Y - 1, 1, bas)
+    m.boite(x, 0, -2, x + 4, 3, 2, botte)                            # la botte
+    m.boite(x, 0, 3, x + 4, 1, 3, botte)                             # la pointe du pied
+
+
+def personnage(peau, cheveux, haut, bas, coiffe=None, tenue=None, coupe="courte"):
+    """Les six pièces d'un pantin, chacune exprimée en coordonnées absolues
+    et tournant autour de son pivot. `coiffe` habille la tête, `tenue` le
+    reste : c'est là que chaque héros prend sa silhouette."""
+    tete = Modele(FIN2)
+    _tete(tete, peau, cheveux, coupe)
+    corps = Modele(FIN2)
+    _buste(corps, haut)
+    bras_g = Modele(FIN2)
+    _bras(bras_g, -1, haut, peau)
+    bras_d = Modele(FIN2)
+    _bras(bras_d, 1, haut, peau)
+    jambe_g = Modele(FIN2)
+    _jambe(jambe_g, -1, bas)
+    jambe_d = Modele(FIN2)
+    _jambe(jambe_d, 1, bas)
+    parties = {"tete": tete, "corps": corps, "bras_g": bras_g, "bras_d": bras_d,
+               "jambe_g": jambe_g, "jambe_d": jambe_d}
     if coiffe:
         coiffe(tete)
     if tenue:
         tenue(parties)
     return {
-        "jambe_g": (jambe_g, (-1.5, 6, 0.5)), "jambe_d": (jambe_d, (1.5, 6, 0.5)),
-        "corps": (corps, (0, 6, 0.5)),
-        "bras_g": (bras_g, (-4, 11.5, 0)), "bras_d": (bras_d, (4, 11.5, 0)),
-        "tete": (tete, (0, 12, 0)),
+        "jambe_g": (jambe_g, (-2.5, CORPS_Y, 0)), "jambe_d": (jambe_d, (2.5, CORPS_Y, 0)),
+        "corps": (corps, (0, CORPS_Y, 0)),
+        "bras_g": (bras_g, (-6.5, EPAULE_Y, 0)), "bras_d": (bras_d, (6.5, EPAULE_Y, 0)),
+        "tete": (tete, (0, COU_Y, 0)),
     }
 
 
+# -------------------------------------------------- coiffes
 def casque(tete):
-    tete.boite(-3, 12, -3, 2, 18, 2, P["acier"])
-    tete.boite(-3, 14, 2, 2, 14, 2, P["noir"])             # la fente du heaume
-    tete.boite(-2, 13, 3, 1, 13, 3, P["acier2"])
-    tete.boite(0, 18, -3, 0, 20, 1, P["plume"])            # le cimier
-    tete.boite(0, 21, -3, 0, 21, -1, P["plume"])
+    """Un heaume fermé : la calotte, la fente en T, la bavière, le cimier."""
+    y0 = COU_Y
+    tete.boite(-4, y0 - 1, -5, 3, y0 + 7, 4, P["acier"])
+    tete.boite(-5, y0 + 1, -3, -5, y0 + 4, 3, P["acier"])
+    tete.boite(4, y0 + 1, -3, 4, y0 + 4, 3, P["acier"])
+    tete.boite(-4, y0 + 6, -5, 3, y0 + 7, 4, P["acier2"])
+    tete.boite(-4, y0 + 3, 5, 3, y0 + 4, 5, P["noir"])        # la fente des yeux
+    tete.boite(-1, y0 + 1, 5, 0, y0 + 4, 5, P["noir"])        # la fente du nez
+    tete.boite(-5, y0 + 2, 5, -5, y0 + 5, 5, P["acier2"])
+    tete.boite(4, y0 + 2, 5, 4, y0 + 5, 5, P["acier2"])
+    for y in range(y0 + 7, y0 + 11):                          # le cimier
+        tete.boite(-1, y, -4 + (y - y0 - 7), 0, y, 2, P["plume"])
 
 
 def capuche(tete):
-    tete.boite(-4, 12, -4, 3, 18, 2, P["capuche"])
-    tete.creux(-2, 12, 2, 1, 15, 2)                        # l'ouverture sur le visage
-    tete.boite(-2, 12, 2, 1, 13, 2, P["capuche2"])         # le masque
-    tete.poser(-2, 14, 2, P["noir"])
-    tete.poser(1, 14, 2, P["noir"])
+    """Une capuche pointue : rien du visage sauf deux éclats dans l'ombre."""
+    y0 = COU_Y
+    tete.boite(-5, y0 - 2, -6, 4, y0 + 7, 5, P["capuche"])
+    tete.boite(-5, y0 + 6, -6, 4, y0 + 7, 5, P["capuche2"])
+    for i, y in enumerate(range(y0 + 7, y0 + 11)):            # la pointe, vers l'arrière
+        tete.boite(-2, y, -6 - i, 1, y, -2 - i, P["capuche2"])
+    tete.boite(-4, y0, 5, 3, y0 + 5, 6, P["noir"])            # l'ombre du capuchon
+    for x in (-3, 1):
+        tete.boite(x, y0 + 3, 5, x + 1, y0 + 3, 5, P["blanc"])
+    tete.boite(-5, y0 - 2, -5, 4, y0 - 1, 4, P["capuche2"])   # le col
 
 
 def chapeau_pointu(tete):
-    tete.boite(-3, 12, 2, 2, 13, 2, P["blanc"])            # la barbe
-    tete.boite(-2, 12, 3, 1, 12, 3, P["blanc"])
-    tete.poser(-2, 14, 2, P["noir"])
-    tete.poser(1, 14, 2, P["noir"])
-    tete.boite(-5, 17, -5, 4, 17, 4, P["robe"])            # le bord du chapeau
-    tete.boite(-3, 18, -3, 2, 19, 2, P["robe2"])
-    tete.boite(-2, 20, -2, 1, 21, 1, P["robe"])
-    tete.boite(-1, 22, -1, 0, 23, 0, P["robe2"])
-    tete.poser(0, 24, 0, P["etoile"])
-    tete.poser(-2, 18, 2, P["etoile"])
-    tete.poser(1, 20, 1, P["etoile"])
+    """Un chapeau de mage : large bord, cône penché, étoiles ; et la barbe."""
+    y0 = COU_Y
+    tete.boite(-4, y0 - 6, 2, 3, y0 + 1, 4, P["blanc"])       # la barbe
+    tete.boite(-3, y0 - 8, 3, 2, y0 - 7, 4, P["blanc"])
+    tete.boite(-2, y0 + 2, 5, 1, y0 + 2, 5, P["blanc"])       # la moustache
+    tete.boite(-8, y0 + 5, -8, 7, y0 + 6, 7, P["robe"])       # le large bord
+    tete.boite(-7, y0 + 6, -7, 6, y0 + 6, 6, P["robe2"])
+    rayon = 6.0
+    for i, y in enumerate(range(y0 + 7, y0 + 18)):
+        rayon *= 0.89
+        penche = i // 3
+        r = max(1, int(rayon))
+        tete.boite(-r - penche, y, -r + penche, r - 1 - penche, y, r - 1 + penche,
+                   P["robe"] if i % 3 else P["robe2"])
+    tete.poser(-2, y0 + 17, 3, P["etoile"])
+    tete.boite(-4, y0 + 9, 4, -3, y0 + 9, 4, P["etoile"])
+    tete.boite(3, y0 + 12, -1, 3, y0 + 12, 0, P["etoile"])
 
 
 def chignon(couleur):
     def f(tete):
-        tete.boite(-1, 17, -4, 0, 18, -3, couleur)
+        tete.boule(0, COU_Y + 6, -6, 2.8, couleur)
+        tete.boite(-1, COU_Y + 5, -6, 0, COU_Y + 6, -5, nuance(couleur, 0.85))
+    return f
+
+
+def foulard(couleur):
+    """Un fichu noué derrière la tête : la coiffe des habitantes."""
+    def f(tete):
+        y0 = COU_Y
+        tete.boite(-5, y0 + 3, -5, 4, y0 + 7, 4, couleur)
+        tete.boite(-5, y0 + 3, -5, 4, y0 + 4, -5, couleur)
+        tete.boite(-2, y0 + 3, -7, 1, y0 + 4, -6, nuance(couleur, 0.85))
     return f
 
 
 def crane(tete):
-    tete.boite(-3, 12, -3, 2, 17, 2, P["os"])
-    tete.boite(-2, 14, 2, -2, 15, 2, P["noir"])
-    tete.boite(1, 14, 2, 1, 15, 2, P["noir"])
-    tete.boite(-1, 12, 2, 0, 12, 2, P["os2"])
+    """Un crâne : orbites creuses, mâchoire, dents."""
+    y0 = COU_Y
+    tete.boite(-4, y0, -4, 3, y0 + 6, 3, P["os"])
+    tete.boite(-1, y0 + 2, 4, 0, y0 + 3, 4, P["os2"])
+    for x in (-3, 1):
+        tete.boite(x, y0 + 3, 4, x + 1, y0 + 4, 4, P["noir"])
+        tete.poser(x, y0 + 3, 5, P["noir"])
+    tete.boite(-3, y0, 4, 2, y0 + 1, 4, P["os2"])            # la mâchoire
+    for x in range(-3, 3, 2):
+        tete.poser(x, y0 + 1, 5, P["os"])
+    tete.boite(-4, y0 + 5, -4, 3, y0 + 6, 3, P["os2"])
+
+
+# -------------------------------------------------- tenues
+def cotte(parties):
+    """Une cotte de mailles : plastron, spallières, tabard, gantelets."""
+    c = parties["corps"]
+    for y in range(CORPS_Y, EPAULE_Y + 1):
+        large = 4 if y >= EPAULE_Y - 5 else 3
+        profond = 3 if y >= EPAULE_Y - 5 else 2
+        c.boite(-large - 1, y, -profond, large, y, profond,
+                P["acier"] if (y % 2) else P["acier2"])
+    c.boite(-1, CORPS_Y + 3, 3, 0, EPAULE_Y - 4, 3, P["plume"])      # le tabard
+    c.boite(-1, CORPS_Y + 6, 4, 0, CORPS_Y + 7, 4, P["or"])
+    c.boite(-5, CORPS_Y + 1, -3, 4, CORPS_Y + 2, 3, P["cuir"])
+    for cote, bras in ((-1, "bras_g"), (1, "bras_d")):
+        b = parties[bras]
+        x = 5 if cote > 0 else -8
+        b.boite(x - 1, EPAULE_Y - 1, -3, x + 3, EPAULE_Y + 1, 2, P["acier"])   # la spallière
+        b.boite(x, CORPS_Y, -2, x + 2, CORPS_Y + 2, 1, P["acier2"])            # le gantelet
 
 
 def epee(parties):
+    """Une épée tenue droite dans la main droite, et un écu au bras gauche."""
     b = parties["bras_d"]
-    b.boite(4, 5, 1, 4, 6, 1, P["cuir"])                   # la poignée
-    b.boite(3, 7, 1, 5, 7, 1, P["or"])
-    b.boite(4, 8, 1, 4, 18, 1, P["acier"])                 # la lame, dressée
-
-
-def baton(parties):
-    b = parties["bras_g"]
-    b.boite(-5, 4, 1, -5, 21, 1, P["tronc"])
-    b.boite(-6, 21, 0, -4, 23, 2, P["etoile"])
-
-
-def tablier(parties):
-    parties["corps"].boite(-2, 6, 2, 1, 10, 2, P["tablier"])
-    parties["jambe_g"].boite(-3, 3, 2, -1, 5, 2, P["tablier"])
-    parties["jambe_d"].boite(0, 3, 2, 2, 5, 2, P["tablier"])
-
-
-def plateau(parties):
-    b = parties["bras_g"]
-    b.creux(-5, 6, -1, -4, 8, 0)
-    b.boite(-5, 9, 1, -4, 9, 3, P["peau"])                 # l'avant-bras levé
-    b.boite(-7, 10, 2, -2, 10, 4, P["bois"])               # le plateau
-    b.boite(-6, 11, 3, -5, 12, 3, P["biere"])
-    b.boite(-3, 11, 3, -3, 12, 3, P["biere"])
-
-
-def cotte(parties):
-    c = parties["corps"]
-    c.boite(-3, 6, -1, 2, 11, 1, P["acier"])
-    c.boite(-3, 11, -1, 2, 11, 1, P["acier2"])
-    c.boite(-1, 8, 2, 0, 10, 2, P["plume"])                # le tabard
+    b.boite(6, CORPS_Y - 4, -1, 6, CORPS_Y + 1, 0, P["cuir"])        # la poignée
+    b.poser(6, CORPS_Y - 5, -1, P["or"])
+    b.poser(6, CORPS_Y - 5, 0, P["or"])
+    b.boite(4, CORPS_Y + 2, -1, 8, CORPS_Y + 2, 0, P["or"])          # la garde
+    for y in range(CORPS_Y + 3, CORPS_Y + 20):
+        maigre = y > CORPS_Y + 17
+        b.boite(5 + (1 if maigre else 0), y, -1, 7 - (1 if maigre else 0), y, 0, P["acier"])
+        b.boite(6, y, -1, 6, y, 0, P["acier2"])                      # la gouttière
+    g = parties["bras_g"]
+    for y in range(CORPS_Y + 1, CORPS_Y + 11):                       # l'écu
+        biseau = 2 if y < CORPS_Y + 3 else 0
+        g.boite(-10, y, -3 + biseau, -8, y, 3 - biseau, P["acier2"] if y % 3 else P["acier"])
+    g.boite(-10, CORPS_Y + 4, -1, -10, CORPS_Y + 7, 0, P["plume"])
 
 
 def cape(parties):
-    parties["corps"].boite(-3, 6, -2, 2, 11, -2, P["capuche2"])
-    parties["bras_d"].boite(4, 4, 1, 4, 6, 1, P["acier"])  # la dague
+    """Une cape qui s'évase, des sangles croisées, une dague."""
+    c = parties["corps"]
+    for y in range(CORPS_Y - 6, EPAULE_Y):
+        large = 4 + max(0, (CORPS_Y + 1 - y) // 2)
+        c.boite(-large - 1, y, -4, large, y, -3,
+                P["capuche"] if y % 3 else P["capuche2"])
+    for x in (-5, 4):
+        c.boite(x, EPAULE_Y - 3, -4, x, EPAULE_Y - 1, 2, P["capuche2"])
+    for i in range(6):                                                # les sangles
+        c.poser(-3 + i, CORPS_Y + 3 + i, 3, P["cuir"])
+        c.poser(2 - i, CORPS_Y + 3 + i, 3, P["cuir"])
+    d = parties["bras_d"]
+    d.boite(6, CORPS_Y - 3, -1, 6, CORPS_Y + 1, 0, P["cuir"])
+    for y in range(CORPS_Y + 2, CORPS_Y + 9):
+        d.boite(6, y, -1, 6, y, 0, P["acier"] if y % 2 else P["acier2"])
 
 
-ecrire_parties("heros_knight", personnage(P["peau"], P["cheveux"], P["acier"], P["fer2"], casque, lambda p: (cotte(p), epee(p))))
-ecrire_parties("heros_rogue", personnage(P["peau2"], P["cheveux3"], P["capuche"], P["cuir"], capuche, cape))
-ecrire_parties("heros_wizzard", personnage(P["peau"], P["blanc"], P["robe"], P["robe2"], chapeau_pointu, baton))
-ecrire_parties("pnj_paysanne", personnage(P["peau"], P["cheveux2"], P["robe_paysanne"], P["robe_paysanne"], chignon(P["cheveux2"]), tablier))
-ecrire_parties("pnj_taverniere", personnage(P["peau"], P["cheveux"], P["robe_taverne"], P["robe_taverne"], chignon(P["cheveux"]), tablier))
-ecrire_parties("pnj_aubergiste", personnage(P["peau2"], P["cheveux3"], P["robe_auberge"], P["robe_auberge"], chignon(P["cheveux3"]), tablier))
-ecrire_parties("pnj_serveuse", personnage(P["peau"], P["cheveux2"], P["robe_taverne"], P["robe_taverne"], None, lambda p: (tablier(p), plateau(p))))
-ecrire_parties("pnj_squelette", personnage(P["os"], P["os"], P["os2"], P["os2"], crane))
+def robe(parties):
+    """Une robe longue : le buste s'évase en jupe jusqu'aux pieds, les
+    manches pendent. Elle tient sur le BUSTE et non sur les jambes — les
+    jambes tournent en marchant, une jupe qui bat les mollets, non."""
+    c = parties["corps"]
+    for y in range(0, CORPS_Y):
+        large = 3 + (CORPS_Y - y) // 5
+        profond = 2 + (CORPS_Y - y) // 6
+        c.boite(-large - 1, y, -profond, large, y, profond,
+                P["robe"] if bruit(0, y, 0, 3.0, 44) > 0.45 else P["robe2"])
+    c.boite(-1, CORPS_Y + 3, 3, 0, EPAULE_Y - 4, 3, P["robe2"])
+    for cote, bras in ((-1, "bras_g"), (1, "bras_d")):
+        b = parties[bras]
+        x = 5 if cote > 0 else -8
+        for y in range(CORPS_Y + 2, EPAULE_Y):                       # la manche évasée
+            evase = max(0, (CORPS_Y + 6 - y) // 2)
+            b.boite(x - evase, y, -2 - evase, x + 2 + evase, y, 1 + evase,
+                    P["robe"] if y % 3 else P["robe2"])
+
+
+def baton(parties):
+    """Un bâton noueux à cristal, tenu dans la main gauche."""
+    b = parties["bras_g"]
+    for y in range(CORPS_Y - 6, CORPS_Y + 22):
+        b.boite(-7, y, -1, -7, y, 0, P["tronc"] if y % 4 else P["tronc2"])
+    b.boite(-8, CORPS_Y + 20, -2, -6, CORPS_Y + 22, 1, P["tronc2"])
+    b.boule(-7, CORPS_Y + 24, 0, 2.4, P["etoile"])
+    b.boite(-8, CORPS_Y + 12, -1, -8, CORPS_Y + 13, 0, P["tronc2"])
+
+
+def tablier(parties):
+    """Un tablier sur une robe de travail, et des manches retroussées."""
+    c = parties["corps"]
+    c.boite(-2, CORPS_Y + 2, 3, 1, EPAULE_Y - 4, 3, P["tablier"])       # la bavette
+    c.boite(-3, 2, 3, 2, CORPS_Y + 2, 4, P["tablier"])                  # le pan de jupe
+    c.boite(-4, CORPS_Y + 1, 3, 3, CORPS_Y + 2, 4, P["tablier"])        # la ceinture nouée
+    c.boite(-2, EPAULE_Y - 4, 2, -2, EPAULE_Y - 3, 3, P["tablier"])     # les bretelles
+    c.boite(1, EPAULE_Y - 4, 2, 1, EPAULE_Y - 3, 3, P["tablier"])
+
+
+def jupe(couleur):
+    """Une jupe qui tombe aux chevilles, posée sur le buste."""
+    def f(parties):
+        c = parties["corps"]
+        for y in range(1, CORPS_Y):
+            large = 3 + (CORPS_Y - y) // 5
+            profond = 2 + (CORPS_Y - y) // 6
+            c.boite(-large - 1, y, -profond, large, y, profond,
+                    couleur if bruit(0, y, 0, 3.0, 45) > 0.45 else nuance(couleur, 0.86))
+    return f
+
+
+def plateau(parties):
+    """Un plateau porté à hauteur d'épaule, avec ses chopes."""
+    b = parties["bras_g"]
+    b.creux(-8, CORPS_Y, -2, -6, EPAULE_Y - 4, 1)
+    b.boite(-8, EPAULE_Y - 6, -2, -6, EPAULE_Y - 4, 1, P["peau"])
+    b.boite(-8, EPAULE_Y - 4, 2, -6, EPAULE_Y - 3, 4, P["peau"])     # l'avant-bras levé
+    b.boite(-12, EPAULE_Y - 2, 2, -3, EPAULE_Y - 2, 8, P["bois"])    # le plateau
+    b.boite(-12, EPAULE_Y - 1, 2, -12, EPAULE_Y - 1, 8, P["bois2"])
+    for (x, z) in ((-10, 4), (-6, 6)):
+        b.boite(x, EPAULE_Y - 1, z, x + 1, EPAULE_Y + 1, z + 1, P["biere"])
+        b.poser(x + 2, EPAULE_Y, z, P["bois2"])
+
+
+def os_apparents(parties):
+    """Une cage thoracique et des membres décharnés."""
+    c = parties["corps"]
+    for y in range(CORPS_Y, EPAULE_Y - 1):
+        if y % 2 == 0:
+            c.boite(-4, y, -2, 3, y, 2, P["os"])
+        else:
+            c.boite(-4, y, -2, -3, y, 2, P["os2"])
+            c.boite(2, y, -2, 3, y, 2, P["os2"])
+            c.boite(-1, y, -2, 0, y, 2, P["os2"])                    # la colonne
+    for bras in ("bras_g", "bras_d"):
+        b = parties[bras]
+        for x in (5, -8):
+            b.creux(x, CORPS_Y + 2, -2, x + 2, EPAULE_Y - 2, 1)
+            b.boite(x + 1, CORPS_Y + 2, -1, x + 1, EPAULE_Y - 2, 0, P["os2"])
+
+
+ecrire_parties("heros_knight", personnage(P["peau"], P["cheveux"], P["acier"], P["fer2"],
+    casque, lambda p: (cotte(p), epee(p))))
+ecrire_parties("heros_rogue", personnage(P["peau2"], P["cheveux3"], P["capuche"], P["cuir"],
+    capuche, cape))
+ecrire_parties("heros_wizzard", personnage(P["peau"], P["blanc"], P["robe"], P["robe2"],
+    chapeau_pointu, lambda p: (robe(p), baton(p))))
+ecrire_parties("pnj_paysanne", personnage(P["peau"], P["cheveux2"], P["robe_paysanne"], P["cuir"],
+    foulard(P["tablier"]), lambda p: (jupe(P["robe_paysanne"])(p), tablier(p))))
+ecrire_parties("pnj_taverniere", personnage(P["peau"], P["cheveux"], P["robe_taverne"], P["cuir"],
+    chignon(P["cheveux"]), lambda p: (jupe(P["robe_taverne"])(p), tablier(p)), coupe="longue"))
+ecrire_parties("pnj_aubergiste", personnage(P["peau2"], P["cheveux3"], P["robe_auberge"], P["cuir"],
+    chignon(P["cheveux3"]), lambda p: (jupe(P["robe_auberge"])(p), tablier(p))))
+ecrire_parties("pnj_serveuse", personnage(P["peau"], P["cheveux2"], P["robe_taverne"], P["cuir"],
+    None, lambda p: (jupe(P["robe_taverne"])(p), tablier(p), plateau(p)), coupe="longue"))
+ecrire_parties("pnj_squelette", personnage(P["os"], P["os"], P["os2"], P["os2"],
+    crane, os_apparents, coupe="chauve"))
 
 # ------------------------------------------------------------------ le plan
 # Le village est dessiné sur une grille de cases (16 pixels dans la
