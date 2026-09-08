@@ -346,12 +346,12 @@ func _eclairer(dehors: bool) -> void:
 	_soleil.light_color = Color("#fff3df")
 	_soleil.light_energy = 1.5
 	_soleil.rotation_degrees = Vector3(-58, -34, 0)
-	_soleil.shadow_enabled = true
-	_soleil.directional_shadow_max_distance = 60.0
-	_soleil.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	_soleil.directional_shadow_split_1 = 0.35
-	_soleil.shadow_bias = 0.06
-	_soleil.shadow_normal_bias = 2.5
+	_soleil.shadow_enabled = not ("--sans-ombres" in OS.get_cmdline_args())
+	_soleil.directional_shadow_max_distance = 48.0
+	_soleil.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	_soleil.shadow_bias = 0.8
+	_soleil.shadow_normal_bias = 6.0
+	_soleil.shadow_blur = 1.6
 	monde().add_child(_soleil)
 	_contre_jour = DirectionalLight3D.new()
 	_contre_jour.light_color = Color("#9fb8e0")
