@@ -346,12 +346,12 @@ func _eclairer(dehors: bool) -> void:
 	_soleil.light_color = Color("#fff3df")
 	_soleil.light_energy = 1.5
 	_soleil.rotation_degrees = Vector3(-58, -34, 0)
-	_soleil.shadow_enabled = true
-	_soleil.directional_shadow_max_distance = 60.0
-	_soleil.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	_soleil.directional_shadow_split_1 = 0.35
-	_soleil.shadow_bias = 0.06
-	_soleil.shadow_normal_bias = 2.5
+	_soleil.shadow_enabled = not ("--sans-ombres" in OS.get_cmdline_args())
+	_soleil.directional_shadow_max_distance = 48.0
+	_soleil.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	_soleil.shadow_bias = 0.8
+	_soleil.shadow_normal_bias = 6.0
+	_soleil.shadow_blur = 1.6
 	monde().add_child(_soleil)
 	_contre_jour = DirectionalLight3D.new()
 	_contre_jour.light_color = Color("#9fb8e0")
@@ -550,16 +550,22 @@ func _nappe_d_eau(mare: Dictionary) -> MeshInstance3D:
 		var x0 := float(c[0])
 		var z0 := float(c[1])
 		var coins := [Vector3(x0, y, z0), Vector3(x0 + 1, y, z0), Vector3(x0 + 1, y, z0 + 1), Vector3(x0, y, z0 + 1)]
-		st.set_normal(Vector3.UP)
 		for i in [0, 2, 1, 0, 3, 2]:
+			st.set_normal(Vector3.UP)       # avant CHAQUE sommet : l'attribut se pose, il ne se retient pas
 			st.add_vertex(coins[i])
 	var eau := MeshInstance3D.new()
 	eau.mesh = st.commit()
 	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.29, 0.57, 0.84, 0.72)
+	# Une eau peu profonde : on voit le sable au fond, la surface ajoute sa
+	# couleur plutôt qu'elle ne l'éteint. Sans un peu d'émission, une nappe
+	# transparente sans réflexion tombe au noir dès qu'elle n'est pas au
+	# soleil — et la mare devient un trou.
+	# Une nappe d'eau SANS éclairage : le sable du fond transparaît, la
+	# couleur reste la même au soleil comme sous les arbres. Éclairée, une
+	# mare à l'ombre de la forêt tourne au gris de flaque — et c'était le cas.
+	m.albedo_color = Color(0.36, 0.66, 0.80, 0.62)
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.roughness = 0.15
-	m.metallic = 0.2
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	eau.material_override = m
 	eau.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

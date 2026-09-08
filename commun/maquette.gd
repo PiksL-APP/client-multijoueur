@@ -57,6 +57,9 @@ var _voile: ColorRect
 ## haut, 1 en bas) — celle où se tient le joueur.
 static func poser(ecran: Node, centre: float = 0.6, force: float = 6.0) -> Maquette:
 	var m := Maquette.new()
+	# `--sans-effets` : pour photographier l'image brute au banc.
+	if "--sans-effets" in OS.get_cmdline_args():
+		return m
 	m.layer = 0
 	if _shader == null:
 		_shader = Shader.new()

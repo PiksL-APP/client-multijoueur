@@ -36,26 +36,26 @@ GROS = 1 / 4                # taille d'un gros voxel (arbres, rochers)
 # monde en cubes reste lisible. Chaque teinte a une variante claire/sombre
 # obtenue par `nuance`.
 P = {
-    "herbe": (98, 170, 74), "herbe2": (92, 162, 70), "herbe3": (104, 176, 78),
-    "terre": (172, 128, 82), "terre2": (160, 118, 74),
-    "pierre": (156, 148, 134), "pierre2": (150, 142, 128), "pierre3": (162, 154, 140),
+    "herbe": (108, 158, 76), "herbe2": (94, 142, 66), "herbe3": (124, 172, 88),
+    "terre": (170, 132, 90), "terre2": (152, 116, 78),
+    "pierre": (162, 156, 142), "pierre2": (146, 140, 127), "pierre3": (176, 170, 156),
     "brique": (128, 104, 92), "brique2": (118, 96, 84),
-    "fond_mare": (58, 92, 112), "eau": (74, 146, 214),
+    "fond_mare": (186, 172, 132), "fond_mare2": (166, 152, 116), "sable": (206, 188, 146), "sable2": (188, 170, 130), "eau": (74, 146, 214),
     "falaise": (118, 106, 98), "falaise2": (104, 94, 86), "falaise3": (132, 120, 110),
-    "tronc": (112, 74, 42), "tronc2": (96, 62, 34),
-    "feuille": (72, 152, 62), "feuille2": (58, 132, 52), "feuille3": (96, 172, 70),
-    "feuille_jaune": (206, 176, 54), "feuille_jaune2": (182, 152, 42),
-    "feuille_rousse": (214, 116, 42), "feuille_rousse2": (188, 96, 34),
-    "feuille_rouge": (176, 62, 44), "feuille_rouge2": (150, 50, 36),
-    "pin": (44, 112, 74), "pin2": (36, 96, 62), "pin3": (56, 128, 86),
-    "rocher": (128, 126, 122), "rocher2": (108, 106, 102), "rocher3": (148, 146, 140),
-    "platre": (234, 222, 198), "poutre": (110, 74, 42), "rondin": (142, 98, 56), "rondin2": (124, 84, 48),
-    "moellon": (142, 136, 126), "moellon2": (128, 122, 112),
-    "toit_brun": (152, 82, 42), "toit_brun2": (134, 70, 36),
-    "toit_vert": (62, 150, 118), "toit_vert2": (52, 130, 102),
-    "toit_rouge": (172, 72, 52), "toit_rouge2": (150, 60, 44),
+    "tronc": (122, 88, 56), "tronc2": (96, 66, 40),
+    "feuille": (84, 138, 62), "feuille2": (60, 104, 48), "feuille3": (128, 176, 84),
+    "feuille_jaune": (204, 172, 76), "feuille_jaune2": (166, 134, 54),
+    "feuille_rousse": (206, 130, 62), "feuille_rousse2": (166, 96, 44),
+    "feuille_rouge": (172, 88, 66), "feuille_rouge2": (134, 60, 46),
+    "pin": (62, 110, 78), "pin2": (44, 84, 60), "pin3": (92, 142, 100),
+    "rocher": (136, 132, 126), "rocher2": (110, 106, 102), "rocher3": (162, 158, 150),
+    "platre": (236, 226, 206), "poutre": (108, 76, 50), "rondin": (154, 112, 70), "rondin2": (130, 92, 56),
+    "moellon": (156, 150, 138), "moellon2": (134, 128, 118),
+    "toit_brun": (168, 96, 58), "toit_brun2": (136, 72, 44),
+    "toit_vert": (78, 142, 122), "toit_vert2": (58, 112, 96),
+    "toit_rouge": (176, 92, 68), "toit_rouge2": (142, 68, 50),
     "porte": (92, 60, 30), "cadre": (84, 56, 30), "vitre": (154, 204, 232), "vitre_nuit": (255, 214, 120),
-    "cheminee": (120, 114, 108), "bois": (168, 118, 66), "bois2": (146, 100, 54), "bois_clair": (204, 160, 100),
+    "cheminee": (150, 96, 78), "cheminee2": (126, 78, 62), "socle": (144, 138, 128), "socle2": (124, 118, 110), "bois": (168, 118, 66), "bois2": (146, 100, 54), "bois_clair": (204, 160, 100),
     "fer": (92, 96, 104), "fer2": (70, 74, 82), "feu": (255, 150, 40), "braise": (220, 60, 20),
     "carotte": (232, 120, 40), "radis": (214, 56, 84), "chou": (120, 190, 90), "laitue": (150, 210, 90),
     "fleur_rouge": (226, 70, 70), "fleur_jaune": (244, 210, 70), "fleur_bleue": (90, 130, 230), "fleur_blanche": (240, 240, 236),
@@ -72,6 +72,33 @@ P = {
     "lueur": (255, 180, 80),
 }
 P = {k: tuple(v) for k, v in P.items()}
+
+
+def _hache(i, j, k, graine):
+    n = (i * 73856093) ^ (j * 19349663) ^ (k * 83492791) ^ (graine * 2654435761)
+    n &= 0xFFFFFFFF
+    n = ((n ^ (n >> 13)) * 1274126177) & 0xFFFFFFFF
+    return ((n ^ (n >> 16)) & 0xFFFF) / 65535.0
+
+
+def bruit(x, y, z, maille, graine=0):
+    """Un bruit de valeur lissé, entre 0 et 1. Tiré au sort case par case, un
+    feuillage grésille comme de la neige de télévision ; interpolé sur une
+    maille de quelques voxels, il fait des taches — c'est ce qu'on voit sur
+    un arbre, une pelouse, une pierre."""
+    fx, fy, fz = x / maille, y / maille, z / maille
+    i, j, k = math.floor(fx), math.floor(fy), math.floor(fz)
+    tx, ty, tz = fx - i, fy - j, fz - k
+    tx = tx * tx * (3 - 2 * tx)
+    ty = ty * ty * (3 - 2 * ty)
+    tz = tz * tz * (3 - 2 * tz)
+    def coin(a, b, c):
+        return _hache(i + a, j + b, k + c, graine)
+    x00 = coin(0, 0, 0) * (1 - tx) + coin(1, 0, 0) * tx
+    x10 = coin(0, 1, 0) * (1 - tx) + coin(1, 1, 0) * tx
+    x01 = coin(0, 0, 1) * (1 - tx) + coin(1, 0, 1) * tx
+    x11 = coin(0, 1, 1) * (1 - tx) + coin(1, 1, 1) * tx
+    return (x00 * (1 - ty) + x10 * ty) * (1 - tz) + (x01 * (1 - ty) + x11 * ty) * tz
 
 
 def nuance(couleur, facteur):
@@ -147,9 +174,17 @@ class Modele:
         return (min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs))
 
     # -------------------------------------------------- maillage
-    def maillage(self, decalage=(0.0, 0.0, 0.0)):
-        """Faces visibles seulement, fusionnées en rectangles par couleur
-        (maillage glouton), en couleurs par sommet. Retourne un Trimesh."""
+    ## L'occlusion ambiante cuite dans les sommets : la seule chose qui fasse
+    ## vraiment lire un monde de cubes. Un coin rentrant s'assombrit, une
+    ## arête sortante reste claire — sans elle, deux faces perpendiculaires
+    ## de même teinte se confondent et tout paraît plat. Quatre niveaux,
+    ## comptés comme partout : deux voisins de côté qui se touchent ferment
+    ## le coin, sinon on retire un cran par voisin.
+    AO = (0.52, 0.70, 0.86, 1.0)
+
+    def maillage(self, decalage=(0.0, 0.0, 0.0), occlusion=True):
+        """Faces visibles seulement, fusionnées en rectangles de même couleur
+        ET de même occlusion (maillage glouton), en couleurs par sommet."""
         if not self.v:
             return None
         (x0, y0, z0), (x1, y1, z1) = self.bornes()
@@ -162,15 +197,13 @@ class Modele:
                 index[c] = len(index) + 1
                 couleurs[index[c]] = c
             grille[x - x0, y - y0, z - z0] = index[c]
+        # Une copie bordée d'un vide : les voisins d'une face de bord se
+        # lisent alors sans test d'appartenance.
+        plein = np.zeros((dims[0] + 2, dims[1] + 2, dims[2] + 2), dtype=bool)
+        plein[1:-1, 1:-1, 1:-1] = grille > 0
+
         sommets, faces, teintes = [], [], []
         s = self.taille
-
-        def quad(points, couleur):
-            b = len(sommets)
-            sommets.extend(points)
-            teintes.extend([couleur + (255,)] * 4)
-            faces.append((b, b + 1, b + 2))
-            faces.append((b, b + 2, b + 3))
 
         for d in range(3):
             u, w = [a for a in range(3) if a != d]      # les axes restants, dans l'ordre de la tranche
@@ -184,22 +217,50 @@ class Modele:
                         masque = np.where(voisin == 0, tranche, 0)
                     else:
                         masque = tranche.copy()
-                    # Glouton : rectangles de même couleur.
+                    if not masque.any():
+                        continue
                     n_u, n_w = masque.shape
+                    # L'occlusion se calcule d'un coup pour toute la tranche :
+                    # la couche que la face regarde, décalée dans les huit
+                    # directions du plan.
+                    if occlusion:
+                        dehors = np.take(plein, k + 1 + sens, axis=d)      # (n_u + 2, n_w + 2)
+                        ombres = []
+                        for (di, dj) in ((0, 0), (1, 0), (1, 1), (0, 1)):
+                            pu = 2 if di else 0
+                            pw = 2 if dj else 0
+                            cote_u = dehors[pu:pu + n_u, 1:1 + n_w]
+                            cote_w = dehors[1:1 + n_u, pw:pw + n_w]
+                            coin = dehors[pu:pu + n_u, pw:pw + n_w]
+                            ombres.append(np.where(cote_u & cote_w, 0,
+                                3 - (cote_u.astype(np.int32) + cote_w + coin)))
+                        # La clé fusionne couleur et occlusion : deux cases ne
+                        # se rejoignent que si les quatre coins concordent,
+                        # sinon le dégradé d'un coin baverait sur ses voisins.
+                        cle = masque.astype(np.int64) << 8
+                        for n, ombre in enumerate(ombres):
+                            cle |= ombre.astype(np.int64) << (2 * (3 - n))
+                        cle[masque == 0] = 0
+                    else:
+                        cle = masque.astype(np.int64) << 8
+                        cle[masque == 0] = 0
+
                     for i in range(n_u):
                         j = 0
                         while j < n_w:
-                            c = masque[i, j]
+                            c = cle[i, j]
                             if c == 0:
                                 j += 1
                                 continue
                             largeur = 1
-                            while j + largeur < n_w and masque[i, j + largeur] == c:
+                            while j + largeur < n_w and cle[i, j + largeur] == c:
                                 largeur += 1
                             hauteur = 1
-                            while i + hauteur < n_u and all(masque[i + hauteur, j:j + largeur] == c):
+                            while i + hauteur < n_u and all(cle[i + hauteur, j:j + largeur] == c):
                                 hauteur += 1
-                            masque[i:i + hauteur, j:j + largeur] = 0
+                            cle[i:i + hauteur, j:j + largeur] = 0
+                            teinte = couleurs[int(c) >> 8]
+                            lumieres = [Modele.AO[(int(c) >> (2 * (3 - n))) & 3] for n in range(4)]
                             # Les quatre coins, dans le repère (d, u, w).
                             kd = k + (1 if sens == 1 else 0)
                             coins = [(i, j), (i + hauteur, j), (i + hauteur, j + largeur), (i, j + largeur)]
@@ -208,14 +269,26 @@ class Modele:
                             # pour la face opposée.
                             if (sens == -1) != (d == 1):
                                 coins.reverse()
-                            points = []
-                            for (a, b) in coins:
+                                lumieres.reverse()
+                            base = len(sommets)
+                            for n, (a, b) in enumerate(coins):
                                 p = [0.0, 0.0, 0.0]
                                 p[d] = kd
                                 p[u] = a
                                 p[w] = b
-                                points.append(((p[0] + x0) * s + decalage[0], (p[1] + y0) * s + decalage[1], (p[2] + z0) * s + decalage[2]))
-                            quad(points, couleurs[c])
+                                sommets.append(((p[0] + x0) * s + decalage[0],
+                                    (p[1] + y0) * s + decalage[1],
+                                    (p[2] + z0) * s + decalage[2]))
+                                teintes.append(tuple(int(round(v * lumieres[n])) for v in teinte) + (255,))
+                            # Le pli du quadrilatère suit la diagonale la plus
+                            # claire : coupé dans l'autre sens, un coin sombre
+                            # déteint en travers de la face.
+                            if lumieres[0] + lumieres[2] < lumieres[1] + lumieres[3]:
+                                faces.append((base + 1, base + 2, base + 3))
+                                faces.append((base + 1, base + 3, base))
+                            else:
+                                faces.append((base, base + 1, base + 2))
+                                faces.append((base, base + 2, base + 3))
                             j += largeur
         return trimesh.Trimesh(vertices=np.array(sommets, dtype=np.float32), faces=np.array(faces),
                                vertex_colors=np.array(teintes, dtype=np.uint8), process=False)
@@ -263,47 +336,133 @@ def ecrire_parties(nom, parties):
 hasard = random.Random(20260907)
 
 
+def _feuillage(m, boules, teintes, graine, creux=0.30):
+    """Une cime : plusieurs boules fondues, puis peintes. La teinte ne vient
+    pas du hasard case par case — elle vient de la HAUTEUR (le dessus prend
+    le jour, le dessous reste dans l'ombre) mêlée à un bruit de taches. Et
+    l'on ronge la surface au même bruit : une cime parfaitement lisse est le
+    seul détail qui trahisse une boule mathématique."""
+    cime = {}
+    for (cx, cy, cz, r) in boules:
+        R = int(math.ceil(r)) + 1
+        for x in range(int(cx) - R, int(cx) + R + 1):
+            for y in range(int(cy) - R, int(cy) + R + 1):
+                for z in range(int(cz) - R, int(cz) + R + 1):
+                    dx, dy, dz = x + 0.5 - cx, (y + 0.5 - cy) / 0.88, z + 0.5 - cz
+                    d = math.sqrt(dx * dx + dy * dy + dz * dz)
+                    if d <= r:
+                        cime[(x, y, z)] = min(cime.get((x, y, z), 9.9), r - d)
+    if not cime:
+        return
+    ys = [p[1] for p in cime]
+    bas, haut = min(ys), max(ys)
+    echelle = max(1, haut - bas)
+    for (x, y, z), profondeur in cime.items():
+        n = bruit(x, y, z, 3.2, graine)
+        if profondeur < 1.0 and n < creux:
+            continue                                   # une échancrure dans la masse
+        valeur = 0.55 * ((y - bas) / echelle) + 0.45 * n
+        if valeur < 0.34:
+            c = teintes[0]
+        elif valeur < 0.66:
+            c = teintes[1]
+        else:
+            c = teintes[2]
+        m.poser(x, y, z, c)
+
+
+def _tronc(m, hauteur, teintes, graine, epaisseur=1):
+    """Un fût qui s'évase au pied, avec quelques départs de branche."""
+    h = random.Random(graine)
+    e = epaisseur
+    for y in range(hauteur):
+        c = teintes[0] if bruit(0, y, 0, 2.5, graine) > 0.45 else teintes[1]
+        m.boite(-e, y, -e, e - 1, y, e - 1, c)
+    m.boite(-e - 1, 0, -e, e, 1, e - 1, teintes[1])        # les contreforts
+    m.boite(-e, 0, -e - 1, e - 1, 1, e, teintes[1])
+    for _ in range(2):
+        y = h.randrange(max(1, hauteur - 4), hauteur)
+        dx, dz = h.choice(((1, 0), (-1, 0), (0, 1), (0, -1)))
+        for i in range(1, h.randrange(2, 4)):
+            m.poser(dx * (e - 1 + i), y + i - 1, dz * (e - 1 + i), teintes[1])
+
+
 def arbre_feuillu(couleurs, rayon=6.0, tronc=7, graine=0):
-    """Un feuillu : tronc, trois boules de feuillage décalées, grain léger.
+    """Un feuillu : un fût, une cime faite de quatre masses décalées.
     En gros voxels (1/4 d'unité) : une cime de rayon 6 fait 3 unités."""
     h = random.Random(graine)
     m = Modele(GROS)
-    m.boite(-1, 0, -1, 0, tronc, 0, P["tronc"], 0.1, h)
-    haut = tronc
-    m.boule(0, haut + rayon * 0.7, 0, rayon, couleurs[0], 0.1, h, aplat=0.85)
-    m.boule(-rayon * 0.45, haut + rayon * 0.5, rayon * 0.3, rayon * 0.7, couleurs[1], 0.07, h)
-    m.boule(rayon * 0.5, haut + rayon * 0.9, -rayon * 0.25, rayon * 0.65, couleurs[2], 0.07, h)
-    m.boule(0.2, haut + rayon * 1.25, 0.3, rayon * 0.55, couleurs[2], 0.07, h)
+    epaisseur = 1 if rayon < 7 else 2
+    _tronc(m, tronc + 1, (P["tronc"], P["tronc2"]), graine, epaisseur)
+    y = tronc
+    _feuillage(m, [
+        (0, y + rayon * 0.72, 0, rayon),
+        (-rayon * 0.5, y + rayon * 0.5, rayon * 0.34, rayon * 0.66),
+        (rayon * 0.54, y + rayon * 0.92, -rayon * 0.28, rayon * 0.62),
+        (rayon * 0.1, y + rayon * 1.24, rayon * 0.2, rayon * 0.52),
+    ], couleurs, graine, 0.34)
     return m
 
 
 def pin(couleurs, etages=3, base=5.0, tronc=4, graine=0):
-    h = random.Random(graine)
+    """Un conifère : des étages de branches, plus larges en bas, chacun
+    éclairci sur son dessus — c'est ce qui donne les strates d'un sapin."""
     m = Modele(GROS)
-    m.boite(-1, 0, -1, 0, tronc + etages * 3, 0, P["tronc2"], 0.05, h)
+    total = tronc + etages * 3 + 4
+    _tronc(m, total, (P["tronc"], P["tronc2"]), graine, 1)
     y = tronc
     r = base
-    for e in range(etages):
-        m.cone(0, y, 0, r, 5, couleurs[e % len(couleurs)], 0.06, h)
+    for e in range(etages + 1):
+        rayon = r if e < etages else max(1.6, r * 0.7)
+        pique = 5 if e < etages else 4
+        for j in range(pique):
+            ry = rayon * (1.0 - j / float(pique))
+            for x in range(int(-rayon) - 1, int(rayon) + 2):
+                for z in range(int(-rayon) - 1, int(rayon) + 2):
+                    if (x + 0.5) ** 2 + (z + 0.5) ** 2 > ry * ry:
+                        continue
+                    n = bruit(x, y + j, z, 2.6, graine)
+                    haut = j / float(pique)
+                    valeur = 0.5 * haut + 0.5 * n
+                    if valeur < 0.32:
+                        c = couleurs[1]
+                    elif valeur < 0.68:
+                        c = couleurs[0]
+                    else:
+                        c = couleurs[2]
+                    m.poser(x, y + j, z, c)
         y += 3
         r *= 0.78
-    m.cone(0, y, 0, max(1.5, r), 4, couleurs[0], 0.06, h)
     return m
 
 
 def buisson(couleur, rayon=3.0, graine=0):
-    h = random.Random(graine)
     m = Modele(GROS)
-    m.boule(0, rayon * 0.6, 0, rayon, couleur, 0.08, h, aplat=0.75)
-    m.boule(rayon * 0.6, rayon * 0.5, rayon * 0.4, rayon * 0.6, nuance(couleur, 1.1), 0.08, h, aplat=0.8)
+    teintes = (nuance(couleur, 0.78), couleur, nuance(couleur, 1.16))
+    _feuillage(m, [
+        (0, rayon * 0.62, 0, rayon),
+        (rayon * 0.62, rayon * 0.5, rayon * 0.4, rayon * 0.62),
+        (-rayon * 0.5, rayon * 0.45, -rayon * 0.3, rayon * 0.55),
+    ], teintes, graine, 0.28)
     return m
 
 
 def rocher(rayon=2.5, graine=0):
-    h = random.Random(graine)
+    """Un rocher : une masse cabossée, plus claire sur le dessus. Le bruit
+    déforme le rayon lui-même — une boule reste une boule, une pierre non."""
     m = Modele(GROS)
-    m.boule(0, rayon * 0.35, 0, rayon, P["rocher"], 0.08, h, aplat=0.6)
-    m.boule(rayon * 0.5, rayon * 0.45, -rayon * 0.3, rayon * 0.6, P["rocher3"], 0.08, h, aplat=0.7)
+    R = int(math.ceil(rayon)) + 2
+    for x in range(-R, R + 1):
+        for y in range(-1, R + 1):
+            for z in range(-R, R + 1):
+                dx, dy, dz = x + 0.5, (y + 0.5) / 0.82, z + 0.5
+                n = bruit(x, y, z, 2.4, graine + 5)
+                if math.sqrt(dx * dx + dy * dy + dz * dz) > rayon * (0.78 + 0.42 * n):
+                    continue
+                if y < 0:
+                    m.poser(x, y, z, P["rocher2"])
+                    continue
+                m.poser(x, y, z, P["rocher3"] if n > 0.62 else (P["rocher"] if n > 0.3 else P["rocher2"]))
     return m
 
 
@@ -355,6 +514,7 @@ ecrire("touffe", touffe())
 # en ont. Le plan retient les vitres (elles s'allument la nuit) et la
 # cheminée (elle fume).
 LARGEUR_MAISON, PROFONDEUR_MAISON, HAUT_MUR = 48, 32, 22
+SOCLE = 3                                  # hauteur de l'assise de pierre, en voxels
 DETAILS = {}
 
 
@@ -364,6 +524,7 @@ def maison(nom, mur, toit, cheminee=True, grange=False):
     L, D, H = LARGEUR_MAISON, PROFONDEUR_MAISON, HAUT_MUR
     x0, x1 = -L // 2, L // 2 - 1
     z0, z1 = -D // 2, D // 2 - 1
+
     # Les murs, selon leur nature.
     if mur == "platre":
         m.boite(x0, 0, z0, x1, H - 1, z1, P["platre"])
@@ -459,12 +620,29 @@ def maison(nom, mur, toit, cheminee=True, grange=False):
     # La cheminée : une souche de pierre sur le flanc droit, qui dépasse du toit.
     fumee = None
     if cheminee:
-        m.boite(x1 - 4, 0, -3, x1 + 2, H + HP + 3, 3, P["cheminee"])
-        m.boite(x1 - 5, H + HP + 3, -4, x1 + 3, H + HP + 4, 4, nuance(P["cheminee"], 0.85))
-        m.creux(x1 - 3, H + HP + 3, -2, x1 + 1, H + HP + 4, 2)
+        for y in range(-2, H + HP + 3):
+            c = P["cheminee"] if (y // 2) % 2 == 0 else P["cheminee2"]
+            m.boite(x1 - 3, y, -2, x1 + 1, y, 2, c)
+        m.boite(x1 - 4, H + HP + 3, -3, x1 + 2, H + HP + 4, 3, P["socle"])   # la mitre
+        m.creux(x1 - 2, H + HP + 3, -1, x1, H + HP + 4, 1)
         fumee = ((x1 - 1) * FIN, (H + HP + 5) * FIN, 0.0)
-    DETAILS[nom] = {"fenetres": [(x * FIN, y * FIN, z * FIN) for (x, y, z) in vitres], "fumee": fumee}
-    ecrire(f"maison_{nom}", m, centrer=False)
+    # Le socle : la maison monte de trois voxels sur une assise de pierre qui
+    # déborde d'un cran. Sans elle, le mur naît à même l'herbe — rien
+    # n'accroche l'ombre, et la maison a l'air posée sur un décalque.
+    assise = Modele(FIN)
+    for y in range(SOCLE):
+        marge = 2 if y == 0 else 1
+        for x in range(x0 - marge, x1 + marge + 1):
+            for z in range(z0 - marge, z1 + marge + 1):
+                assise.poser(x, y, z, P["socle"] if (x // 3 + z // 3 + y) % 2 else P["socle2"])
+    for y in range(SOCLE):                                  # le perron, devant la porte
+        for x in range(-5, 5):
+            for z in range(z1 + 1 + marge, z1 + 4 + marge - y):
+                assise.poser(x, y - 1, z, P["socle2"] if y else P["socle"])
+    assise.fusion(m, 0, SOCLE, 0)
+    DETAILS[nom] = {"fenetres": [(x * FIN, (y + SOCLE) * FIN, z * FIN) for (x, y, z) in vitres],
+                    "fumee": None if fumee is None else (fumee[0], fumee[1] + SOCLE * FIN, fumee[2])}
+    ecrire(f"maison_{nom}", assise, centrer=False)
 
 
 maison("taverne", "platre", "brun")
@@ -890,6 +1068,32 @@ zone("terre", 10, 20, 12, 28)                               # le sentier de la m
 zone("terre", 10, 26, 16, 28)
 zone("terre", 51, 20, 53, 26)                               # le sentier de la grange
 zone("terre", 48, 24, 53, 26)
+# Le relief : hors de la clairière, le sol se soulève en douceur. La
+# clairière, elle, reste rigoureusement plate — c'est là qu'on marche, et un
+# terrain accidenté sous des collisions plates se verrait aussitôt.
+# L'amplitude s'éteint au bord de la clairière : pas de mur surgi de nulle
+# part à l'endroit précis où le joueur bute.
+def _hors_clairiere(x, y):
+    x0, y0, x1, y1 = CLAIRIERE
+    dx = max(x0 - x, x - (x1 - 1), 0)
+    dy = max(y0 - y, y - (y1 - 1), 0)
+    if 29 <= x <= 34 and y >= y1:                 # la grand-rue sort au sud
+        return 0
+    return max(dx, dy)
+
+
+def _relief(x, y):
+    if y < FALAISE + 1:
+        return None                                # la falaise a déjà sa hauteur
+    marge = _hors_clairiere(x, y)
+    if marge == 0:
+        return 0.0
+    montee = min(1.0, marge / 5.0)
+    n = bruit(x, 0, y, 9.0, 21)
+    creux = bruit(x, 0, y, 4.0, 22)
+    return round((montee * (0.9 + 2.4 * n) - 0.35 * creux) * 2.0) / 2.0
+
+
 MARE = (8, 37, 8, 7)
 for j in range(MARE[3]):
     retrait = {0: 2, 1: 1, 5: 1, 6: 2}.get(j, 0)
@@ -897,38 +1101,76 @@ for j in range(MARE[3]):
         terrain[(MARE[0] + i, MARE[1] + j)] = "eau"
         hauteur[(MARE[0] + i, MARE[1] + j)] = -1.0
 
+# La grève : l'herbe ne plonge pas dans l'eau, elle passe par le sable.
+for (x, y) in [c for c, t in terrain.items() if t == "eau"]:
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            voisin = (x + dx, y + dy)
+            if terrain.get(voisin) == "herbe":
+                terrain[voisin] = "sable"
+
+for y in range(HAUTEUR):
+    for x in range(LARGEUR):
+        if terrain[(x, y)] != "eau":
+            h_relief = _relief(x, y)
+            if terrain[(x, y)] == "sable":
+                hauteur[(x, y)] = 0.0
+            elif h_relief is not None and h_relief > 0.0:
+                hauteur[(x, y)] = h_relief
+
 COULEURS_SOL = {
     "herbe": (P["herbe"], P["herbe2"], P["herbe3"]),
     "pierre": (P["pierre"], P["pierre2"], P["pierre3"]),
     "brique": (P["brique"], P["brique2"], P["brique"]),
     "terre": (P["terre"], P["terre2"], P["terre"]),
-    "eau": (P["fond_mare"], P["fond_mare"], P["fond_mare"]),
+    "eau": (P["fond_mare"], P["fond_mare2"], P["fond_mare"]),
+    "sable": (P["sable"], P["sable2"], P["sable"]),
 }
 
 
 def maillage_terrain():
     """Le sol en blocs d'une demi-unité : le dessus de chaque case à sa
-    hauteur, et les flancs là où la hauteur change (la falaise, la mare)."""
-    h = random.Random(3)
+    hauteur, et les flancs là où la hauteur change (la falaise, la mare).
+    La teinte suit un bruit de TACHES et non un tirage case par case : une
+    pelouse tirée au sort grésille à l'écran, une pelouse tachée respire."""
     m = Modele(0.5)
     for (x, y), nom in terrain.items():
         alt = hauteur[(x, y)]
         haut = int(round(alt * 2))            # en demi-unités
         teintes = COULEURS_SOL[nom]
+        maille = 7.0 if nom == "herbe" else 4.0
         for i in range(2):
             for j in range(2):
-                r = h.random()
-                c = teintes[0] if r < 0.6 else (teintes[1] if r < 0.8 else teintes[2])
-                m.poser(x * 2 + i, haut - 1, y * 2 + j, c)
+                u, v = x * 2 + i, y * 2 + j
+                n = bruit(u, 0, v, maille, 11)
+                fin = bruit(u, 7, v, 2.0, 12)
+                valeur = 0.72 * n + 0.28 * fin
+                c = teintes[1] if valeur < 0.38 else (teintes[0] if valeur < 0.74 else teintes[2])
+                # Le pourtour d'un dallage se lit plus sombre : sans cette
+                # bordure, la pierre et l'herbe se touchent comme deux aplats
+                # de peinture, et la place n'a pas de contour.
+                if nom in ("pierre", "brique") and any(
+                        terrain.get((x + dx, y + dy), "herbe") not in ("pierre", "brique")
+                        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+                    c = teintes[1]
+                # Les joints du dallage : une trame de grandes dalles. Sans
+                # elle, l'esplanade est une nappe grise dont rien ne donne
+                # l'échelle — c'est ce qui la faisait paraître peinte.
+                if nom == "pierre" and (u % 6 == 0 or v % 6 == 0):
+                    c = nuance(teintes[1], 0.9)
+                # Les ornières du chemin : deux traces creusées par les roues.
+                if nom == "terre" and (u % 8 in (2, 3) or v % 8 in (2, 3)):
+                    c = teintes[1]
+                m.poser(u, haut - 1, v, c)
                 # Sous la surface : la roche de la falaise, la vase de la mare.
                 if haut > 0:
                     for k in range(0, haut - 1):
-                        r2 = h.random()
-                        cf = P["falaise"] if r2 < 0.6 else (P["falaise2"] if r2 < 0.85 else P["falaise3"])
-                        m.poser(x * 2 + i, k, y * 2 + j, cf)
+                        r = bruit(u, k, v, 3.0, 13)
+                        cf = P["falaise2"] if r < 0.36 else (P["falaise"] if r < 0.76 else P["falaise3"])
+                        m.poser(u, k, v, cf)
                 elif haut < 0:
                     for k in range(haut - 1, -1):
-                        m.poser(x * 2 + i, k, y * 2 + j, P["falaise2"])
+                        m.poser(u, k, v, P["falaise2"])
     return m
 
 
@@ -1388,9 +1630,16 @@ class Piece:
         for x in range(L):
             for z in range(D):
                 if sol == "bois":
-                    c = P["plancher"] if ((z // 8) + (x // 24)) % 2 == 0 else P["plancher2"]
+                    # Des LAMES, pas un damier : un plancher se lit à ses
+                    # joints, et un damier de bois ne ressemble à rien.
+                    lame = z // 3
+                    c = P["plancher"] if bruit(x, 0, lame * 9, 7.0, 31) > 0.45 else P["plancher2"]
+                    if z % 3 == 0 or (x + lame * 5) % 17 == 0:
+                        c = nuance(c, 0.88)
                 else:
-                    c = P["dalle"] if ((x // 8) + (z // 8)) % 2 == 0 else P["dalle2"]
+                    c = P["dalle"] if ((x // 6) + (z // 6)) % 2 == 0 else P["dalle2"]
+                    if x % 6 == 0 or z % 6 == 0:
+                        c = nuance(c, 0.9)
                 self.m.poser(x, -1, z, c)
         # Les murs : nord, ouest, est ; le sud n'a qu'une plinthe.
         c1, c2 = (P["mur_int"], P["mur_int2"]) if mur == "platre" else ((P["rondin"], P["rondin2"]) if mur == "rondins" else (P["moellon"], P["moellon2"]))

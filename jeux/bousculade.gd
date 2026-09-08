@@ -152,10 +152,11 @@ func _eclairer() -> void:
 	soleil.light_energy = 1.5
 	soleil.rotation_degrees = Vector3(-58, -34, 0)
 	soleil.shadow_enabled = true
-	soleil.directional_shadow_max_distance = 60.0
-	soleil.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	soleil.shadow_bias = 0.06
-	soleil.shadow_normal_bias = 2.5
+	soleil.directional_shadow_max_distance = 48.0
+	soleil.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	soleil.shadow_bias = 0.8
+	soleil.shadow_normal_bias = 6.0
+	soleil.shadow_blur = 1.6
 	monde().add_child(soleil)
 	var contre := DirectionalLight3D.new()
 	contre.light_color = Color("#9fb8e0")
