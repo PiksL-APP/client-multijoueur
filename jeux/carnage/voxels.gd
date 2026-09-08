@@ -973,6 +973,8 @@ const GABARITS := {
 	13: {"l": 34, "w": 9, "hc": 3, "cab": [1, 34], "ch": 5, "forme": "bus"},
 	14: {"l": 27, "w": 8, "hc": 3, "cab": [8, 22], "ch": 3, "forme": "berline"},    # limousine
 	15: {"l": 22, "w": 8, "hc": 4, "cab": [2, 21], "ch": 4, "forme": "fourgon"},    # ambulance
+	16: {"l": 13, "w": 3, "hc": 3, "cab": [4, 9], "ch": 2, "forme": "moto"},        # moto de rue
+	17: {"l": 14, "w": 3, "hc": 3, "cab": [3, 10], "ch": 2, "forme": "moto"},       # moto de course
 }
 
 ## Le maillage d'une voiture, en couleurs de sommet. La caisse est BLANCHE :
@@ -1024,6 +1026,32 @@ static func voiture(indice: int) -> ArrayMesh:
 	var chrome := Color(0.72, 0.73, 0.76, BRUT)
 	var utilitaire := forme in ["fourgon", "camion", "benne", "bus"]
 	var caisse_h := HC + CH                      # le rang du toit
+
+	# ---- la MOTO : pas de caisse, un cadre. Deux roues dans l'axe, un
+	# réservoir, une selle, un guidon, un phare. Trois voxels de large : elle
+	# se faufile, et on la reconnaît d'un coup d'œil de là-haut.
+	if forme == "moto":
+		var milieu := W / 2
+		for x in range(3, L - 3):
+			poser.call(x, 1, milieu, sombre)                       # le cadre
+		for x in range(4, L - 5):
+			for z in W:
+				poser.call(x, 2, z, caisse)                        # le réservoir et la selle
+		for x in range(L - 5, L - 3):
+			poser.call(x, 3, milieu, caisse)                       # la bosse du réservoir
+		# Le guidon, en travers.
+		for z in W:
+			poser.call(L - 4, 3, z, sombre)
+		poser.call(L - 3, 3, milieu, phare)
+		poser.call(1, 2, milieu, feu)
+		# Les deux roues, dans l'axe, deux voxels de haut.
+		for rx in [2, L - 3]:
+			for dx in [-1, 0, 1]:
+				for y in 2:
+					poser.call(rx + dx, y, milieu, pneu)
+			poser.call(rx, 1, milieu, jante)
+		var origine_m := Vector3(-float(L) * 0.5 * v - marge * v, 0.16, -float(W) * 0.5 * v - marge * v)
+		return mailler_grille(nx, ny, nz, grille, teintes, origine_m, v)
 
 	# ---- la caisse : une boîte, puis on sculpte.
 	for x in L:

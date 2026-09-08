@@ -16,7 +16,8 @@ const LARGEUR_SCORES := 250.0
 const LARGEUR_FICHE := 262.0
 const HAUTEUR_JAUGE := 16.0
 
-var chrono := 0.0                 ## secondes restantes
+var chrono := 0.0                 ## secondes restantes — ou écoulées si `sans_limite`
+var sans_limite := false          ## le chrono monte au lieu de descendre
 var chrono_critique := false
 var scores: Array = []            ## [{pseudo, score, couleur: Color, moi: bool}]
 var message := ""                 ## au centre de l'écran : décompte, attente, fin
@@ -63,8 +64,9 @@ func _peindre_les_scores() -> void:
 	var texte_chrono := "%d:%02d" % [minutes, secondes]
 	var couleur_chrono := Palette.CRITIQUE if chrono_critique and fmod(temps, 0.6) < 0.35 else Palette.ENCRE
 	draw_string(UI.TITRE_POLICE, Vector2(x, y + 22.0), texte_chrono, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, couleur_chrono)
-	draw_string(UI.TEXTE_POLICE, Vector2(rect.end.x - 12.0 - UI.TEXTE_POLICE.get_string_size("restant", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x,
-		y + 20.0), "restant", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_FAIBLE)
+	var libelle_chrono := "en ville" if sans_limite else "restant"
+	draw_string(UI.TEXTE_POLICE, Vector2(rect.end.x - 12.0 - UI.TEXTE_POLICE.get_string_size(libelle_chrono, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x,
+		y + 20.0), libelle_chrono, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_FAIBLE)
 	y += 34.0
 	var maximum := 1
 	for s in scores:
@@ -76,7 +78,8 @@ func _peindre_les_scores() -> void:
 		var pseudo := String(s.get("pseudo", "?")).to_upper().left(12)
 		draw_string(UI.TITRE_POLICE, Vector2(x + 18.0, y + 13.0), pseudo, HORIZONTAL_ALIGNMENT_LEFT, -1, 8,
 			Palette.ENCRE if moi else Palette.ENCRE_DOUCE)
-		var points := str(int(s.get("score", 0)))
+		# La fortune, en dollars : c'est de l'argent, pas des points.
+		var points := "$" + str(int(s.get("score", 0)))
 		var largeur := UI.TITRE_POLICE.get_string_size(points, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
 		draw_string(UI.TITRE_POLICE, Vector2(rect.end.x - 12.0 - largeur, y + 15.0), points,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Palette.ENCRE if moi else Palette.ENCRE_DOUCE)
@@ -128,9 +131,12 @@ func _peindre_la_fiche(bas: float) -> float:
 	var jauges: Array = fiche.get("jauges", [])
 	var puces: Array = fiche.get("puces", [])
 	var arme: Dictionary = fiche.get("arme", {})
+	var argent: Dictionary = fiche.get("argent", {})
 	var hauteur := 12.0 + jauges.size() * (HAUTEUR_JAUGE + 6.0)
 	if not arme.is_empty():
 		hauteur += 24.0
+	if not argent.is_empty():
+		hauteur += 22.0
 	if not puces.is_empty():
 		hauteur += 22.0
 	hauteur += 6.0
@@ -153,6 +159,21 @@ func _peindre_la_fiche(bas: float) -> float:
 			draw_string(UI.TITRE_POLICE, Vector2(rect.end.x - 12.0 - l, y + 16.0), munitions,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Palette.AVERTISSEMENT)
 		y += 24.0
+	if not argent.is_empty():
+		# Sur soi en gros — c'est ce qu'on perd — et le coffre à côté, en petit.
+		var sur_soi := "$%d" % int(argent.get("sur_soi", 0))
+		draw_string(UI.TITRE_POLICE, Vector2(x, y + 15.0), sur_soi, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Palette.AVERTISSEMENT)
+		if bool(argent.get("planque", false)):
+			var coffre := "coffre $%d" % int(argent.get("banque", 0))
+			var lc := UI.TEXTE_POLICE.get_string_size(coffre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+			draw_string(UI.TEXTE_POLICE, Vector2(rect.end.x - 12.0 - lc, y + 14.0), coffre,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.BON)
+		else:
+			var sans := "pas de planque"
+			var ls := UI.TEXTE_POLICE.get_string_size(sans, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+			draw_string(UI.TEXTE_POLICE, Vector2(rect.end.x - 12.0 - ls, y + 14.0), sans,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_FAIBLE)
+		y += 22.0
 	if not puces.is_empty():
 		var px := x
 		for p in puces:

@@ -118,13 +118,19 @@ func demarrer() -> void:
 	_construire_hud()
 	preparer()
 
-	canal = Reseau.rejoindre("mj-jeu-%s-%s" % [jeu, code], {"pseudo": Session.pseudo, "id": Session.id, "heros": Session.heros_affiche()})
+	canal = Reseau.rejoindre("mj-jeu-%s-%s" % [jeu, code], {"pseudo": Session.pseudo, "id": Session.id})
 	canal.presences_changees.connect(_sur_presences)
 	canal.diffusion.connect(_sur_diffusion)
 
 func _exit_tree() -> void:
 	if canal:
 		canal.quitter()
+
+## Une manche SANS LIMITE : elle ne s'arrête pas au chrono. C'est le mode de
+## Carnage — une ville où l'on reste tant qu'on veut, où l'on rentre chez soi
+## déposer son argent, et d'où l'on sort par le hub quand on a fini. Le banc
+## (`duree_forcee`) garde une fin, sinon il ne rendrait jamais la main.
+var sans_limite := false
 
 func duree_reelle() -> float:
 	return duree_forcee if duree_forcee > 0.0 else duree_manche()
@@ -145,8 +151,6 @@ func _sur_presences(presences: Dictionary) -> void:
 			joueurs[cle] = {"pseudo": "?", "id": cle, "place": 0, "score": 0}
 		joueurs[cle]["pseudo"] = String(presences[cle].get("pseudo", "?"))
 		joueurs[cle]["id"] = String(presences[cle].get("id", joueurs[cle].get("id", cle)))
-		# Le héros choisi au village suit le joueur dans les jeux qui le montrent.
-		joueurs[cle]["heros"] = String(presences[cle].get("heros", ""))
 	for cle in joueurs:
 		var place := cles.find(cle)
 		if place >= 0:
@@ -196,7 +200,7 @@ func _process(delta: float) -> void:
 			simuler_local(delta)
 			if est_hote():
 				simuler_hote(delta)
-				if temps >= duree_reelle():
+				if not sans_limite and temps >= duree_reelle():
 					terminer("Temps écoulé.")
 	_rafraichir_hud()
 	rafraichir_scene(delta)
@@ -267,8 +271,9 @@ func _rafraichir_hud() -> void:
 	_hud.reseau_couleur = couleur_reseau
 	_hud.son_actif = Sons.actif
 	var restant: float = max(0.0, duree_reelle() - temps)
-	_hud.chrono = restant
-	_hud.chrono_critique = restant <= 15.0 and phase == JEU
+	_hud.sans_limite = sans_limite
+	_hud.chrono = temps if sans_limite else restant
+	_hud.chrono_critique = not sans_limite and restant <= 15.0 and phase == JEU
 	_hud.temps = Time.get_ticks_msec() / 1000.0
 
 	var lignes: Array = []

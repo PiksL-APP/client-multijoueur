@@ -97,14 +97,16 @@ const RESPECT_GAGNE := 12.0
 const RESPECT_HOSTILE := -60.0    ## en dessous, le gang tire à vue
 const RESPECT_AMI := 50.0         ## au-dessus, il laisse passer
 
+## Ce que rapporte chaque chose, en DOLLARS : c'est de l'argent qu'on ramasse,
+## pas des points — il s'achète une planque, un coffre, un garage.
 const POINTS := {
-	"pieton": 10, "gang": 30, "flic": 60, "auto": 45, "joueur": 250,
+	"pieton": 20, "gang": 60, "flic": 120, "auto": 90, "joueur": 500,
 }
 ## Les contrats. Un gang décroche son téléphone et paie pour un service rendu
 ## chez le voisin. C'est ce qui donne une DIRECTION à une manche : sans eux, la
 ## ville est un bac à sable où l'on tourne en rond jusqu'au chrono.
 const DUREE_CONTRAT := {"nettoyage": 55.0, "livraison": 45.0, "chasse": 32.0}
-const PRIME_CONTRAT := {"nettoyage": 260, "livraison": 300, "chasse": 340}
+const PRIME_CONTRAT := {"nettoyage": 620, "livraison": 700, "chasse": 800}
 const RESPECT_CONTRAT := 26.0
 
 const COMBO_FENETRE := 3.0
@@ -214,6 +216,7 @@ func paniquer(autour: Vector2, rayon: float, duree: float) -> void:
 ## `joueurs` : cle -> {p, a, v, pied, vie, arene, seuil, vehicule}
 func simuler(delta: float, temps: float, joueurs: Dictionary) -> void:
 	_refroidir(delta, joueurs)
+	_recycler(delta, joueurs)
 	_peupler(delta, temps, joueurs)
 	_animer_les_gens(delta, joueurs)
 	_animer_les_autos(delta, joueurs)
@@ -221,6 +224,41 @@ func simuler(delta: float, temps: float, joueurs: Dictionary) -> void:
 	_depecher_la_police(delta, joueurs)
 	_animer_les_helicos(delta, joueurs)
 	_avancer_contrats(delta, joueurs)
+
+## Au-delà de cette distance de TOUS les joueurs, un passant ou une voiture
+## civile disparaît : le plafond se libère et la ville se repeuple devant soi.
+## Sans ça, la population naissait autour du point de départ, y restait, et au
+## bout de cent mètres on ne croisait plus personne.
+const OUBLI := 2100.0
+var _depuis_recyclage := 0.0
+
+func _recycler(delta: float, joueurs: Dictionary) -> void:
+	_depuis_recyclage += delta
+	if _depuis_recyclage < 0.5 or joueurs.is_empty():
+		return
+	_depuis_recyclage = 0.0
+	var gardes: Array = []
+	for personne in gens:
+		# Les membres attachés à un repaire y restent : le repaire se vide sinon.
+		if personne.has("attache") or _pres_d_un_joueur(personne["p"], joueurs, OUBLI):
+			gardes.append(personne)
+	gens = gardes
+	var restantes: Array = []
+	for auto in autos:
+		var civile := String(auto["pilote"]) == "" and not bool(auto.get("garee", false)) and int(auto["genre"]) in [CIVILE, VOITURE_GANG]
+		if not civile or _pres_d_un_joueur(auto["p"], joueurs, OUBLI):
+			restantes.append(auto)
+		else:
+			var noeud = auto.get("noeud")
+			if noeud != null:
+				(noeud as Node3D).queue_free()
+	autos = restantes
+
+func _pres_d_un_joueur(point: Vector2, joueurs: Dictionary, distance: float) -> bool:
+	for cle in joueurs:
+		if Vector2(joueurs[cle]["p"]).distance_to(point) <= distance:
+			return true
+	return false
 
 func _refroidir(delta: float, joueurs: Dictionary) -> void:
 	for cle in joueurs:
@@ -380,9 +418,17 @@ func _naitre_passant(joueurs: Dictionary, large: bool) -> void:
 		return
 	if quartier == PlanVille.EAU:
 		return
+	# Sur le territoire d'un gang, un passant sur DEUX en porte les couleurs —
+	# et près de leur repaire, presque tous. Un quartier tenu doit se sentir
+	# tenu : c'est ce qui donne envie d'y entrer, ou de l'éviter.
 	var genre := PIETON
-	if gang >= 0 and _rng.randf() < 0.22:
-		genre = GANG
+	if gang >= 0:
+		var part := 0.45
+		var repaire := plan.repaire_le_plus_proche(p, gang)
+		if not repaire.is_empty() and Vector2(repaire["p"]).distance_to(p) < PlanVille.RAYON_REPAIRE * 2.0:
+			part = 0.8
+		if _rng.randf() < part:
+			genre = GANG
 	gens.append({
 		"id": _id(), "p": p, "d": Vector2.RIGHT.rotated(_rng.randf() * TAU),
 		"genre": genre, "gang": gang, "pv": PV_GANG if genre == GANG else PV_PIETON,
@@ -453,7 +499,7 @@ func retirer_caisse(id: int, cle: String = "") -> String:
 			var ou: Vector2 = c["p"]
 			caisses.erase(c)
 			if arme == "argent" and cle != "":
-				_compter(cle, ou, 40, "argent", false)
+				_compter(cle, ou, 120, "argent", false)
 			return arme
 	return ""
 

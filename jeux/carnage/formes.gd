@@ -14,21 +14,28 @@ extends RefCounted
 ## être vu dans un taxi par les trois autres, pas dans une berline générique.
 const MODELES_VOITURES := ["berline", "berline sport", "compacte", "4x4", "4x4 de luxe",
 	"taxi", "fourgon", "camion de livraison", "camion", "police",
-	"coupé", "break", "pick-up", "bus", "limousine", "ambulance"]
+	"coupé", "break", "pick-up", "bus", "limousine", "ambulance",
+	"moto", "moto de course"]
+## Les deux-roues : ils accélèrent et tournent mieux, mais on n'a pas de tôle
+## autour de soi — un choc, et on est à terre.
+const MODELES_MOTOS := [16, 17]
+
+static func est_moto(indice: int) -> bool:
+	return indice in MODELES_MOTOS
 const MODELE_POLICE := 9
 ## Ce que chaque quartier gare et fait rouler. Le centre roule en taxi, la zone
 ## industrielle en fourgon, la banlieue en break : c'est ce qui fait qu'on sait
 ## où l'on est en regardant ce qui passe.
 const VOITURES_PAR_QUARTIER := {
-	PlanVille.CENTRE: [0, 1, 4, 5, 5, 5, 1, 14, 13, 10],
-	PlanVille.AFFAIRES: [0, 1, 4, 4, 5, 1, 0, 14, 13, 10],
-	PlanVille.COMMERCE: [0, 0, 1, 4, 5, 6, 2, 11, 13, 15],
-	PlanVille.VIEUX: [0, 2, 2, 0, 5, 3, 6, 10, 11],
-	PlanVille.RESIDENCES: [0, 0, 2, 3, 6, 0, 2, 11, 12, 13],
-	PlanVille.INDUSTRIE: [6, 6, 7, 7, 8, 8, 3, 12, 12],
-	PlanVille.PORT: [7, 8, 8, 6, 3, 7, 6, 12],
-	PlanVille.BANLIEUE: [0, 0, 3, 3, 2, 6, 4, 11, 11, 12, 10],
-	PlanVille.PARC: [0, 2, 3, 13],
+	PlanVille.CENTRE: [0, 1, 4, 5, 5, 5, 1, 14, 13, 10, 16, 17],
+	PlanVille.AFFAIRES: [0, 1, 4, 4, 5, 1, 0, 14, 13, 10, 16],
+	PlanVille.COMMERCE: [0, 0, 1, 4, 5, 6, 2, 11, 13, 15, 16, 16],
+	PlanVille.VIEUX: [0, 2, 2, 0, 5, 3, 6, 10, 11, 16],
+	PlanVille.RESIDENCES: [0, 0, 2, 3, 6, 0, 2, 11, 12, 13, 16],
+	PlanVille.INDUSTRIE: [6, 6, 7, 7, 8, 8, 3, 12, 12, 16],
+	PlanVille.PORT: [7, 8, 8, 6, 3, 7, 6, 12, 17],
+	PlanVille.BANLIEUE: [0, 0, 3, 3, 2, 6, 4, 11, 11, 12, 10, 17],
+	PlanVille.PARC: [0, 2, 3, 13, 17],
 	PlanVille.EAU: [0],
 }
 
@@ -351,6 +358,49 @@ static func dalle_garage() -> Node3D:
 	var enseigne := Decor.etiquette("PEINTURE", Palette.SERIE, 30)
 	enseigne.position = Vector3(0, 3.2, 0)
 	racine.add_child(enseigne)
+	return racine
+
+## L'HÔPITAL : une dalle blanche, une croix rouge posée à plat (on la voit de
+## la caméra) et l'enseigne. On y est recousu contre argent, et c'est là qu'on
+## rouvre les yeux quand on tombe.
+static func dalle_hopital() -> Node3D:
+	var racine := Node3D.new()
+	var rayon := PlanVille.RAYON_HOPITAL * Decor.ECHELLE
+	racine.add_child(racine_anneau(rayon, Color("#e8f0f4"), 0.2))
+	var dalle := Decor.cylindre(rayon, 0.1, Color("#e8f0f4"), false)
+	dalle.material_override = Decor.matiere_lumineuse(Color("#e8f0f4"), 0.35, 0.4)
+	dalle.position = Vector3(0, 0.05, 0)
+	racine.add_child(dalle)
+	# La croix, en cubes couchés : deux barres qui se croisent.
+	var croix: Array = []
+	for d in range(-2, 3):
+		croix.append([Vector3(float(d) * 0.62, 0.14, 0.0), 0.6, Color(0.85, 0.12, 0.12, VoxelsCarnage.LUMIERE)])
+		if d != 0:
+			croix.append([Vector3(0.0, 0.14, float(d) * 0.62), 0.6, Color(0.85, 0.12, 0.12, VoxelsCarnage.LUMIERE)])
+	racine.add_child(cubes(croix))
+	var mot := Decor.etiquette("HÔPITAL", Color("#f4a0a0"), 30)
+	mot.position = Vector3(0, 3.2, 0)
+	racine.add_child(mot)
+	return racine
+
+## La PLANQUE : le pas de porte de la maison qu'on peut acheter. Un tapis, une
+## porte lumineuse, et l'écriteau qui dit le prix — ou le nom du propriétaire.
+static func porte_planque(prix: int) -> Node3D:
+	var racine := Node3D.new()
+	var rayon := PlanVille.RAYON_PLANQUE * Decor.ECHELLE
+	var couleur := Color("#b070d0")
+	racine.add_child(racine_anneau(rayon, couleur, 0.18))
+	var tapis := Decor.cylindre(rayon, 0.1, couleur, false)
+	tapis.material_override = Decor.matiere_lumineuse(couleur, 0.3, 0.35)
+	tapis.position = Vector3(0, 0.05, 0)
+	racine.add_child(tapis)
+	var porte := cubes([[Vector3(0, 0.9, 0), 1.8, Color(couleur.darkened(0.45), VoxelsCarnage.MUR)],
+		[Vector3(0, 2.0, 0), 1.0, Color(couleur, VoxelsCarnage.LUMIERE)]])
+	racine.add_child(porte)
+	var mot := Decor.etiquette("À VENDRE  $%d" % prix, couleur, 28)
+	mot.name = "Mot"
+	mot.position = Vector3(0, 3.4, 0)
+	racine.add_child(mot)
 	return racine
 
 ## L'enceinte d'une arène : un anneau au sol, quatre bornes, et le mot. Le tir

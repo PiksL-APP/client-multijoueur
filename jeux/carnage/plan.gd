@@ -144,6 +144,17 @@ const RAYON_ARENE := 190.0
 const RAYON_GARAGE := 60.0
 const RAYON_CABINE := 68.0
 const RAYON_REPAIRE := 230.0
+const RAYON_HOPITAL := 90.0
+const RAYON_PLANQUE := 70.0
+## Le prix d'une planque : trois gammes, du studio à la villa. Le pâté décide,
+## comme tout le reste — même prix chez tout le monde, sans rien diffuser.
+## Les prix sont calés sur ce qu'on gagne : un contrat rapporte quelques
+## centaines de dollars, une planque de quartier s'atteint en une dizaine de
+## minutes, la villa demande une vraie soirée.
+const PRIX_PLANQUE := [2500, 6000, 12000]
+## Le prix des améliorations, dans l'ordre : coffre (garde plus d'argent),
+## arsenal (garde les armes), garage (garde un véhicule).
+const PRIX_AMELIORATION := {"coffre": 1800, "arsenal": 3200, "garage": 5000}
 
 ## Identifiant de la première voiture dormante. Une voiture garée par le plan
 ## n'existe chez l'hôte qu'une fois RÉVEILLÉE (volée, percutée, tirée) : son
@@ -709,7 +720,7 @@ func _fermable(a: Vector2i, b: Vector2i) -> bool:
 func _lieux_du_secteur(secteur: Vector2i) -> Dictionary:
 	if _secteurs.has(secteur):
 		return _secteurs[secteur]
-	var fiche := {"garages": [], "cabines": [], "arenes": [], "repaires": []}
+	var fiche := {"garages": [], "cabines": [], "arenes": [], "repaires": [], "hopitaux": [], "planques": []}
 	var par_pate := SECTEUR / PERIODE
 	var candidats: Array = []
 	var frontieres: Array = []
@@ -774,6 +785,19 @@ func _lieux_du_secteur(secteur: Vector2i) -> Dictionary:
 		if r.x >= 0 and territoire_du_pate(r) >= 0:
 			fiche["repaires"].append({"p": centre_pate(r), "gang": territoire_du_pate(r),
 				"id": indice_pate(r), "pate": r})
+	# L'HÔPITAL : un par secteur, jamais dans l'industrie ni au port. On y est
+	# recousu contre argent — et c'est là qu'on rouvre les yeux quand on tombe.
+	var h: Vector2i = choisir.call(candidats)
+	if h.x >= 0:
+		var coin_h := coin_pate(h)
+		fiche["hopitaux"].append({"p": centre_tuile(coin_h.x + 1, coin_h.y + 1), "id": indice_pate(h), "pate": h})
+	# La PLANQUE : la maison qu'on achète. Une par secteur, en périphérie du
+	# pâté (on s'y gare devant), jamais dans le même pâté qu'un repaire.
+	var pl: Vector2i = choisir.call(candidats)
+	if pl.x >= 0:
+		var coin_p := coin_pate(pl)
+		fiche["planques"].append({"p": centre_tuile(coin_p.x, coin_p.y + 2), "id": indice_pate(pl), "pate": pl,
+			"prix": PRIX_PLANQUE[posmod(indice_pate(pl), PRIX_PLANQUE.size())]})
 	_secteurs[secteur] = fiche
 	return fiche
 
@@ -783,7 +807,7 @@ func _secteur_de(point: Vector2) -> Vector2i:
 ## Tous les lieux à moins de `rayon` d'un point : on ne regarde que les
 ## secteurs que le cercle touche.
 func lieux_autour(point: Vector2, rayon: float) -> Dictionary:
-	var resultat := {"garages": [], "cabines": [], "arenes": [], "repaires": []}
+	var resultat := {"garages": [], "cabines": [], "arenes": [], "repaires": [], "hopitaux": [], "planques": []}
 	var s0 := _secteur_de(point - Vector2(rayon, rayon))
 	var s1 := _secteur_de(point + Vector2(rayon, rayon))
 	for sy in range(max(0, s0.y), min(LIGNES / SECTEUR, s1.y + 1)):
@@ -797,7 +821,7 @@ func lieux_autour(point: Vector2, rayon: float) -> Dictionary:
 
 func _lieu_du_pate(pate: Vector2i) -> String:
 	var fiche := _lieux_du_secteur(Vector2i(pate.x * PERIODE / SECTEUR, pate.y * PERIODE / SECTEUR))
-	for genre in ["arenes", "repaires", "garages", "cabines"]:
+	for genre in ["arenes", "repaires", "garages", "cabines", "hopitaux", "planques"]:
 		for lieu in fiche[genre]:
 			if Vector2i(lieu["pate"]) == pate:
 				return genre
@@ -810,6 +834,30 @@ func arene_de(point: Vector2) -> int:
 
 func garage_de(point: Vector2) -> int:
 	return _lieu_de(point, "garages", RAYON_GARAGE)
+
+func hopital_de(point: Vector2) -> int:
+	return _lieu_de(point, "hopitaux", RAYON_HOPITAL)
+
+func planque_de(point: Vector2) -> int:
+	return _lieu_de(point, "planques", RAYON_PLANQUE)
+
+## La fiche complète d'une planque (son prix, sa position) par identifiant.
+func planque_par_id(point_indicatif: Vector2, id: int) -> Dictionary:
+	for pl in lieux_autour(point_indicatif, SECTEUR * PAS * 2.0)["planques"]:
+		if int(pl["id"]) == id:
+			return pl
+	return {}
+
+## L'hôpital ou la planque la plus proche : c'est là qu'on rouvre les yeux.
+func hopital_le_plus_proche(point: Vector2) -> Dictionary:
+	var meilleur := {}
+	var distance := INF
+	for h in lieux_autour(point, SECTEUR * PAS * 1.6)["hopitaux"]:
+		var d: float = Vector2(h["p"]).distance_to(point)
+		if d < distance:
+			distance = d
+			meilleur = h
+	return meilleur
 
 func cabine_de(point: Vector2) -> int:
 	return _lieu_de(point, "cabines", RAYON_CABINE)
@@ -872,7 +920,7 @@ func _fiches_du_pate(pate: Vector2i) -> Array:
 	return _pates[pate]
 
 func _vierge(colonne: int, ligne: int, sol: int) -> Dictionary:
-	return {"c": colonne, "l": ligne, "sol": sol, "rot": 0, "bloc": false, "rect": null,
+	return {"c": colonne, "l": ligne, "sol": sol, "rot": 0, "bloc": false, "rect": null, "rects": [],
 		"batis": [], "props": [], "places": [], "teinte": Color.WHITE, "neons": [], "graine": 0.0}
 
 ## Une tuile de voie ferrée : du ballast, les rails tracés par le shader en
@@ -922,8 +970,7 @@ func _boulevard(colonne: int, ligne: int, libre: Dictionary) -> Dictionary:
 			# L'îlot : une dalle qu'on ne traverse pas, un monument au milieu —
 			# l'obélisque sur la grande place, une fontaine sur les autres — et
 			# des arbres autour.
-			fiche["bloc"] = true
-			fiche["rect"] = Rect2(centre_px - Vector2(PAS, PAS) * 0.5, Vector2(PAS, PAS))
+			_bloquer(fiche, Rect2(centre_px - Vector2(PAS, PAS) * 0.5, Vector2(PAS, PAS)))
 			if r < 0.5:
 				_prop(fiche, "monument" if int(libre["e"]) == 0 else "fontaine", centre_place * PAS)
 			elif r > ilot - 0.8 and _bruit(colonne, ligne, 339) < 0.55:
@@ -973,8 +1020,13 @@ func _bati(fiche: Dictionary, p: Vector2, largeur: float, profondeur: float, hau
 	if bloque:
 		_bloquer(fiche, Rect2(p - Vector2(largeur, profondeur) * 0.5, Vector2(largeur, profondeur)))
 
+## Bloque un rectangle de la tuile. ⚠ On garde CHAQUE rectangle (`rects`) :
+## l'ancienne union en un seul rectangle par tuile faisait, d'un arbre et d'un
+## banc aux deux coins d'une cour, un mur invisible sur toute la tuile — les
+## « hitbox mal faites ». `rect` (l'union) ne sert plus qu'à la peinture.
 func _bloquer(fiche: Dictionary, rect: Rect2) -> void:
 	fiche["bloc"] = true
+	(fiche["rects"] as Array).append(rect)
 	if fiche["rect"] == null:
 		fiche["rect"] = rect
 	else:
@@ -1809,6 +1861,15 @@ func rectangle_tuile(colonne: int, ligne: int) -> Rect2:
 		return fiche["rect"]
 	return Rect2(Vector2(colonne, ligne) * PAS + Vector2(RETRAIT, RETRAIT), Vector2(PAS - RETRAIT * 2.0, PAS - RETRAIT * 2.0))
 
+## Les rectangles qui bloquent une tuile, un par volume posé : c'est contre eux
+## qu'on cogne, pas contre leur union.
+func rectangles_tuile(colonne: int, ligne: int) -> Array:
+	var fiche := tuile(colonne, ligne)
+	var rects: Array = fiche["rects"]
+	if not rects.is_empty():
+		return rects
+	return [rectangle_tuile(colonne, ligne)]
+
 ## Les tuiles bloquées susceptibles de toucher un cercle. Au plus quatre : c'est
 ## ce qui remplace le balayage de milliers de rectangles.
 func _tuiles_autour(point: Vector2, rayon: float) -> Array:
@@ -1825,8 +1886,9 @@ func _tuiles_autour(point: Vector2, rayon: float) -> Array:
 
 func dans_un_batiment(point: Vector2, marge: float = 0.0) -> bool:
 	for t: Vector2i in _tuiles_autour(point, marge):
-		if rectangle_tuile(t.x, t.y).grow(marge).has_point(point):
-			return true
+		for r in rectangles_tuile(t.x, t.y):
+			if (r as Rect2).grow(marge).has_point(point):
+				return true
 	return false
 
 ## Repousse un point hors des murs par le plus petit chevauchement.
@@ -1835,19 +1897,20 @@ func degager(point: Vector2, rayon: float) -> Array:
 	var corrige := point
 	var touche := false
 	for t: Vector2i in _tuiles_autour(point, rayon):
-		var etendu := rectangle_tuile(t.x, t.y).grow(rayon)
-		if not etendu.has_point(corrige):
-			continue
-		var gauche := corrige.x - etendu.position.x
-		var droite := etendu.end.x - corrige.x
-		var haut := corrige.y - etendu.position.y
-		var bas := etendu.end.y - corrige.y
-		var minimum: float = min(min(gauche, droite), min(haut, bas))
-		if minimum == gauche: corrige.x = etendu.position.x
-		elif minimum == droite: corrige.x = etendu.end.x
-		elif minimum == haut: corrige.y = etendu.position.y
-		else: corrige.y = etendu.end.y
-		touche = true
+		for r in rectangles_tuile(t.x, t.y):
+			var etendu := (r as Rect2).grow(rayon)
+			if not etendu.has_point(corrige):
+				continue
+			var gauche := corrige.x - etendu.position.x
+			var droite := etendu.end.x - corrige.x
+			var haut := corrige.y - etendu.position.y
+			var bas := etendu.end.y - corrige.y
+			var minimum: float = min(min(gauche, droite), min(haut, bas))
+			if minimum == gauche: corrige.x = etendu.position.x
+			elif minimum == droite: corrige.x = etendu.end.x
+			elif minimum == haut: corrige.y = etendu.position.y
+			else: corrige.y = etendu.end.y
+			touche = true
 	return [corrige, touche]
 
 # ------------------------------------------------------------ points utiles
@@ -1973,6 +2036,7 @@ func eventrer(id: int) -> void:
 			var f := tuile(cc, ll)
 			f["bloc"] = false
 			f["rect"] = null
+			f["rects"] = []
 
 # ------------------------------------------------------------ la carte
 

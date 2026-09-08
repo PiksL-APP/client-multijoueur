@@ -13,15 +13,10 @@ extends RefCounted
 static var pilote_automatique := false
 static var direction_simulee := Vector2.ZERO
 static var tir_simule := false
-## Vrai pendant qu'on écrit dans un champ (le tchat du village) : les lettres
-## vont au texte, pas aux pieds du personnage.
-static var saisie := false
 
 static func direction() -> Vector2:
 	if pilote_automatique:
 		return direction_simulee
-	if saisie:
-		return Vector2.ZERO
 	if Tactile.actif() and Tactile.direction != Vector2.ZERO:
 		return Tactile.direction_de_marche()
 	var d := Vector2.ZERO
@@ -59,6 +54,23 @@ static func action_declenchee() -> bool:
 	var maintenant := action_tenue()
 	var front := maintenant and not _action_avant
 	_action_avant = maintenant
+	return front
+
+## L'AFFAIRE : F. Acheter une planque, y déposer son argent, l'améliorer, se
+## faire soigner — tout ce qui se traite avec de l'argent passe par cette
+## touche, jamais par l'action (E) qui sert à monter en voiture.
+static var affaire_simulee := false
+static var _affaire_avant := false
+
+static func affaire_tenue() -> bool:
+	if pilote_automatique:
+		return affaire_simulee
+	return Input.is_physical_key_pressed(KEY_F)
+
+static func affaire_declenchee() -> bool:
+	var maintenant := affaire_tenue()
+	var front := maintenant and not _affaire_avant
+	_affaire_avant = maintenant
 	return front
 
 ## Le klaxon : H, ou le bouton d'action tenu au volant plus d'un instant.

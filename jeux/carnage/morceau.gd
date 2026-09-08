@@ -31,7 +31,8 @@ const LAMPES := {
 
 var cle := Vector2i.ZERO
 var voitures: Dictionary = {}     ## id de voiture dormante -> [MultiMesh, indice]
-var cabines: Array = []           ## nœuds de cabine posés dans ce morceau, {n, id}
+var cabines: Array = []               ## nœuds de cabine posés dans ce morceau, {n, id}
+var planques: Array = []              ## [{n: Node3D, id, prix}] — l'écriteau change quand on l'achète
 
 ## Le chantier : le morceau se bâtit en ÉTAPES, une par image. Tout d'un coup,
 ## c'était soixante millisecondes dans le navigateur — quatre images perdues,
@@ -46,8 +47,12 @@ var _fiches: Array = []
 var _tampon := PackedFloat32Array()
 var _n := 0
 var _immeubles: Dictionary = {}       ## id d'immeuble -> {"v": voxels}
-var _groupes: Dictionary = {}         ## pâté -> {ids, noeud: MeshInstance3D, sale}
+var _groupes: Dictionary = {}         ## pâté -> {ids, noeud: MeshInstance3D, sale, tampons: id -> tableaux}
 var _a_mailler: Array = []            ## les groupes qui attendent leur premier maillage
+## Le budget de maillage par image, en microsecondes : au-delà, on reprend à
+## l'image suivante. Un pâté entier faisait cinquante millisecondes dans le
+## navigateur — une saccade à chaque morceau qui entre dans le champ.
+const BUDGET_MAILLAGE_USEC := 6000
 var _cellules := 0                    ## cellules pleines d'immeubles, pour le journal
 var _multi: MultiMesh
 var _places: Dictionary = {}          ## modele -> Array[{t, c, id}]
@@ -107,13 +112,52 @@ func avancer() -> bool:
 			_places.clear()
 			_tampon = PackedFloat32Array()
 		_:
-			if not _a_mailler.is_empty():
-				var groupe: Vector2i = _a_mailler.pop_front()
-				_mailler_groupe(groupe)
-				for id in _groupes[groupe]["ids"]:
-					_cellules += int(_immeubles[id]["v"]["nx"]) * int(_immeubles[id]["v"]["nz"]) * int(_immeubles[id]["v"]["ny"]) - (_immeubles[id]["v"]["trous"] as PackedInt32Array).size()
+			# Les maillages : immeuble par immeuble, dans le budget de l'image ;
+			# un pâté est posé quand tous ses immeubles sont prêts.
+			_mailler_dans_le_budget(_a_mailler, BUDGET_MAILLAGE_USEC)
 	_etape += 1
 	return fini()
+
+## Avance le maillage des groupes de `file` (premier d'abord) tant qu'il reste
+## du budget ; retire de la file ceux qui sont posés. Renvoie vrai s'il a
+## travaillé.
+func _mailler_dans_le_budget(file: Array, budget_usec: int) -> bool:
+	var depart := Time.get_ticks_usec()
+	var travaille := false
+	while not file.is_empty():
+		var groupe: Vector2i = file[0]
+		var entree: Dictionary = _groupes[groupe]
+		var tampons: Dictionary = entree["tampons"]
+		var reste := false
+		for id in entree["ids"]:
+			if tampons.has(id):
+				continue
+			var t0 := Time.get_ticks_usec()
+			tampons[id] = _mailler_immeuble(id)
+			travaille = true
+			maillage_max_ms = maxf(maillage_max_ms, float(Time.get_ticks_usec() - t0) / 1000.0)
+			if Time.get_ticks_usec() - depart > budget_usec:
+				reste = true
+				break
+		if reste:
+			return true
+		_poser_groupe(groupe)
+		file.pop_front()
+		travaille = true
+		if Time.get_ticks_usec() - depart > budget_usec:
+			break
+	return travaille
+
+## Les tableaux (sommets, normales, couleurs, UV, indices) d'UN immeuble.
+func _mailler_immeuble(id: int) -> Array:
+	var v: Dictionary = _immeubles[id]["v"]
+	var sommets := PackedVector3Array()
+	var normales := PackedVector3Array()
+	var couleurs := PackedColorArray()
+	var uvs := PackedVector2Array()
+	var indices := PackedInt32Array()
+	VoxelsCarnage.mailler(v, sommets, normales, couleurs, uvs, indices)
+	return [sommets, normales, couleurs, uvs, indices]
 
 # ------------------------------------------------------------ étape 0 : les fiches
 
@@ -203,9 +247,10 @@ func _poser_immeuble(b: Dictionary, id: int) -> void:
 	var tuile := tuile_d_immeuble(id)
 	var groupe := Vector2i(tuile.x / PlanVille.PERIODE, tuile.y / PlanVille.PERIODE)
 	if not _groupes.has(groupe):
-		_groupes[groupe] = {"ids": [], "noeud": null, "sale": true}
+		_groupes[groupe] = {"ids": [], "noeud": null, "sale": true, "tampons": {}}
 		_a_mailler.append(groupe)
 	(_groupes[groupe]["ids"] as Array).append(id)
+	_cellules += int(v["nx"]) * int(v["nz"]) * int(v["ny"]) - (v["trous"] as PackedInt32Array).size()
 	# Les ornements — corniches, balcons, stores, toits — hors de la grille :
 	# ils ne se cassent pas, mais ils font la différence entre une boîte et
 	# un immeuble. Eux restent des instances.
@@ -217,23 +262,38 @@ func _poser_immeuble(b: Dictionary, id: int) -> void:
 func cubes_poses() -> int:
 	return _n + _cellules
 
-## Le maillage fusionné d'un groupe (un pâté) : tous ses immeubles dans un
-## seul ArrayMesh. Appelé au chantier (un groupe par image) et après une casse.
-## Le maillage le plus long de la session, en millisecondes : le banc l'affiche,
-## c'est la saccade maximale qu'une casse ou un chantier peut causer.
+## Le maillage le plus long de la session, en millisecondes (UN immeuble) : le
+## banc l'affiche, c'est la saccade maximale qu'une casse ou un chantier peut
+## causer par image.
 static var maillage_max_ms := 0.0
 static var quads_total := 0
 
-func _mailler_groupe(groupe: Vector2i) -> void:
-	var depart := Time.get_ticks_usec()
+## Pose le maillage fusionné d'un groupe (un pâté) à partir des tableaux de ses
+## immeubles, cousus bout à bout (les indices décalés). Coudre est du C++ :
+## quelques millisecondes pour un pâté, là où mailler en prenait cinquante.
+func _poser_groupe(groupe: Vector2i) -> void:
 	var entree: Dictionary = _groupes[groupe]
+	var tampons: Dictionary = entree["tampons"]
 	var sommets := PackedVector3Array()
 	var normales := PackedVector3Array()
 	var couleurs := PackedColorArray()
 	var uvs := PackedVector2Array()
 	var indices := PackedInt32Array()
 	for id in entree["ids"]:
-		VoxelsCarnage.mailler(_immeubles[id]["v"], sommets, normales, couleurs, uvs, indices)
+		var t: Array = tampons[id]
+		var decalage := sommets.size()
+		sommets.append_array(t[0])
+		normales.append_array(t[1])
+		couleurs.append_array(t[2])
+		uvs.append_array(t[3])
+		var ind: PackedInt32Array = t[4]
+		if decalage == 0:
+			indices.append_array(ind)
+		else:
+			var n0 := indices.size()
+			indices.resize(n0 + ind.size())
+			for q in ind.size():
+				indices[n0 + q] = ind[q] + decalage
 	entree["sale"] = false
 	var maillage := VoxelsCarnage.maillage_depuis(sommets, normales, couleurs, uvs, indices)
 	var noeud: MeshInstance3D = entree["noeud"]
@@ -246,17 +306,20 @@ func _mailler_groupe(groupe: Vector2i) -> void:
 	noeud.mesh = maillage
 	quads_total += sommets.size() / 4 - int(entree.get("quads", 0))
 	entree["quads"] = sommets.size() / 4
-	maillage_max_ms = maxf(maillage_max_ms, float(Time.get_ticks_usec() - depart) / 1000.0)
 
-## Refait le maillage d'UN groupe sali par une casse — un par image, pour
-## qu'une rafale ne fasse pas dix maillages dans la même image. Renvoie vrai
-## s'il a travaillé.
+## Refait les immeubles salis par une casse, dans le budget de l'image — le
+## reste du pâté est recousu depuis ses tableaux gardés. Renvoie vrai s'il a
+## travaillé.
+var _a_rafraichir: Array = []
+
 func rafraichir() -> bool:
-	for groupe in _groupes:
-		if bool(_groupes[groupe]["sale"]) and _groupes[groupe]["noeud"] != null:
-			_mailler_groupe(groupe)
-			return true
-	return false
+	if _a_rafraichir.is_empty():
+		for groupe in _groupes:
+			if bool(_groupes[groupe]["sale"]) and _groupes[groupe]["noeud"] != null:
+				_a_rafraichir.append(groupe)
+	if _a_rafraichir.is_empty():
+		return false
+	return _mailler_dans_le_budget(_a_rafraichir, BUDGET_MAILLAGE_USEC)
 
 func _centre_voxel(v: Dictionary, i: int, j: int, k: int) -> Vector3:
 	var t := float(v["taille"])
@@ -388,6 +451,21 @@ func _poser_les_lieux(plan: PlanVille, c0: int, l0: int) -> void:
 		poste.position = Decor.vers3d(c["p"])
 		add_child(poste)
 		cabines.append({"n": poste, "id": int(c["id"])})
+	for h in lieux["hopitaux"]:
+		var coin_h := PlanVille.coin_pate(h["pate"])
+		if not rect.has_point(PlanVille.centre_tuile(coin_h.x, coin_h.y)):
+			continue
+		var croix := FormesCarnage.dalle_hopital()
+		croix.position = Decor.vers3d(h["p"])
+		add_child(croix)
+	for pl in lieux["planques"]:
+		var coin_pl := PlanVille.coin_pate(pl["pate"])
+		if not rect.has_point(PlanVille.centre_tuile(coin_pl.x, coin_pl.y)):
+			continue
+		var porte := FormesCarnage.porte_planque(int(pl["prix"]))
+		porte.position = Decor.vers3d(pl["p"])
+		add_child(porte)
+		planques.append({"n": porte, "id": int(pl["id"]), "prix": int(pl["prix"])})
 	for a in lieux["arenes"]:
 		var coin_a := PlanVille.coin_pate(a["pate"])
 		if not rect.has_point(PlanVille.centre_tuile(coin_a.x, coin_a.y)):
@@ -439,6 +517,7 @@ func casser(id: int, locale: int) -> Dictionary:
 	var groupe := Vector2i(tuile.x / PlanVille.PERIODE, tuile.y / PlanVille.PERIODE)
 	if _groupes.has(groupe):
 		_groupes[groupe]["sale"] = true
+		(_groupes[groupe]["tampons"] as Dictionary).erase(id)   # cet immeuble seul est à remailler
 	return {"p": _centre_voxel(v, c.x, c.y, c.z), "c": couleur, "taille": float(v["taille"])}
 
 ## Le voxel PLEIN d'un immeuble le plus proche d'un point 3D (en unités), pour

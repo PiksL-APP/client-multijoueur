@@ -107,6 +107,16 @@ func _draw() -> void:
 		var ou := _vers_radar(c["p"], centre)
 		if cadre.has_point(ou):
 			_pastille(ou, 3.0, Palette.AVERTISSEMENT)
+	for h in lieux["hopitaux"]:
+		var ou := _vers_radar(h["p"], centre)
+		if cadre.has_point(ou):
+			# Une petite croix : on la distingue d'une pastille au premier regard.
+			draw_line(ou - Vector2(4, 0), ou + Vector2(4, 0), Color("#f0f4f8"), 2.0)
+			draw_line(ou - Vector2(0, 4), ou + Vector2(0, 4), Color("#f0f4f8"), 2.0)
+	for pl in lieux["planques"]:
+		var ou := _vers_radar(pl["p"], centre)
+		if cadre.has_point(ou):
+			_pastille(ou, 4.0, Color("#b070d0"))
 
 	# La cible du contrat : le repaire du gang à nettoyer ou le garage où livrer.
 	# Dans le cadre, elle clignote ; hors du cadre, une flèche au bord dit où

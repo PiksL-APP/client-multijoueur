@@ -632,10 +632,13 @@ void vertex() {
 
 void fragment() {
 	vec2 demi = c.rg * 100.0;
+	// Une ombre de contact DISCRETE : le soleil projette deja la vraie ombre ;
+	// celle-ci ne fait que sceller le pied du mur au sol. Plus large et plus
+	// sombre, elle dessinait un cadre noir autour de chaque immeuble.
 	vec2 p = (uvl - vec2(0.5)) * 2.0 * (demi + vec2(3.0));
 	vec2 dd = abs(p) - demi;
 	float d = max(dd.x, dd.y);
-	float a = (1.0 - smoothstep(0.0, 3.0, max(d, 0.0))) * (0.5 - 0.25 * nuit);
+	float a = (1.0 - smoothstep(-0.5, 1.6, d)) * (0.16 - 0.06 * nuit);
 	ALBEDO = vec3(1.0 - a);
 }
 """

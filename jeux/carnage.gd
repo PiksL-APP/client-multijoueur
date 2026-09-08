@@ -28,7 +28,19 @@ const FREIN := 1550.0
 const VITESSE_MAX := 760.0
 const VITESSE_ARRIERE := -270.0
 const FROTTEMENT := 1.6
-const BRAQUAGE := 3.6
+const BRAQUAGE := 2.9              ## rad/s au braquage plein ; 3,6 rendait la voiture nerveuse comme un kart
+## La voiture a du POIDS : sa trajectoire suit son cap avec un retard qui
+## grandit avec la vitesse — à fond, elle dérive dans les virages ; au pas,
+## elle tourne sur place. C'est l'inertie qui manquait pour que la conduite
+## se sente, sans rien enlever du contrôle.
+const ADHERENCE_LENTE := 11.0
+const ADHERENCE_RAPIDE := 3.4
+## La collision de la voiture est une CAPSULE — deux cercles à l'avant et à
+## l'arrière — et non un cercle de sa demi-longueur : celui-ci cognait un mur
+## situé à dix pixels du flanc, et toute la conduite en rue étroite s'en
+## sentait.
+const RAYON_CAPSULE := 13.0
+const DEMI_EMPATTEMENT := 15.0
 const PRISE_PLEINE := 165.0        ## vitesse à partir de laquelle on braque à fond
 const RAYON_VOITURE := 26.0
 const PV_VOITURE := 100.0
@@ -126,10 +138,12 @@ const CARACTERES := {
 	13: {"v": 0.72, "a": 0.6, "t": 2.2},    # bus
 	14: {"v": 0.95, "a": 0.8, "t": 1.4},    # limousine
 	15: {"v": 1.0, "a": 0.95, "t": 1.3},    # ambulance
+	16: {"v": 1.24, "a": 1.45, "t": 0.35},  # moto : file et tourne, mais rien autour de soi
+	17: {"v": 1.34, "a": 1.55, "t": 0.3},   # moto de course
 }
 
 ## Le butin qui n'est pas une arme : une trousse rend cinquante points de vie,
-## un billet vaut quarante dollars — comptés par l'hôte, comme tout le reste.
+## un billet vaut cent vingt dollars — comptés par l'hôte, comme tout le reste.
 const COULEURS_BUTIN := {"vie": Palette.BON, "argent": Palette.AVERTISSEMENT}
 const SOIN_TROUSSE := 50.0
 const KLAXON_DELAI := 0.9
@@ -151,6 +165,34 @@ var _cachees: Dictionary = {}        ## id dormante -> vrai : déjà effacée de
 var _position := Vector2.ZERO
 var _angle := 0.0
 var _vitesse := 0.0
+var _glisse := Vector2.RIGHT          ## la direction réelle du mouvement (l'inertie)
+# ------------------------------------------------------- l'argent et la planque
+#
+# Les points sont des DOLLARS. Ce qu'on a sur soi (`_argent`) se perd quand on
+# tombe : la police ramasse. Ce qu'on a déposé à la planque (`_banque`) est à
+# l'abri, et c'est lui qui donne une raison de rentrer chez soi vivant plutôt
+# que de foncer jusqu'à la mort. Le score du classement reste la FORTUNE
+# totale (sur soi + en banque) : le tableau ne change pas de sens.
+var _argent := 0
+var _banque := 0
+var _planque := -1                 ## l'identifiant de la planque possédée, ou -1
+var _ameliorations: Dictionary = {"coffre": false, "arsenal": false, "garage": false}
+var _garage_perso := -1            ## le modèle de véhicule rangé à la planque, ou -1
+var _planque_en_cours := -1        ## la planque dans laquelle on se tient
+var _hopital_en_cours := -1
+var _affaire := ""                 ## ce que F ferait ici, pour la ligne du HUD
+var _mot_affaire := ""             ## le dernier message d'affaire, affiché deux secondes
+var _mot_affaire_reste := 0.0
+
+## Le tarif de l'hôpital : on ressort debout, la note est salée.
+const SOIN := 400
+## Ce que la police ramasse quand on tombe : TOUT ce qu'on a sur soi quand on
+## a une planque où l'on aurait pu le mettre à l'abri — la moitié seulement
+## tant qu'on n'en a pas, sinon le premier achat est hors de portée et la
+## mécanique ne démarre jamais.
+const SAISIE := 1.0
+const SAISIE_SANS_PLANQUE := 0.5
+
 var _pied := false
 var _vehicule := 0
 var _genre_vehicule: int = VilleVivante.CIVILE
@@ -211,12 +253,16 @@ func duree_manche() -> float:
 	return DUREE
 
 func aide() -> String:
-	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · H : klaxon · TAB : carte · caisse = arme, trousse ou billet · garage bleu = étoiles effacées · cabine jaune = contrat · cercle rouge = tir ami"
+	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · F : affaires (planque, hôpital) · H : klaxon · TAB : carte · caisse = arme, trousse ou billet · garage bleu = étoiles effacées · cabine jaune = contrat · maison violette = planque à acheter · croix blanche = hôpital"
 
 # ------------------------------------------------------- mise en place
 
 func preparer() -> void:
 	var chrono := Time.get_ticks_msec()
+	# Carnage n'a plus de chrono : on reste en ville tant qu'on veut, on rentre
+	# déposer son argent, et on sort par le hub. Le banc garde une fin
+	# (`duree_forcee`), sinon il ne rendrait jamais la main.
+	sans_limite = Partie.duree_forcee <= 0.0
 	_rng.randomize()
 	carte = PlanVille.new(code)
 	ville = VilleVivante.new(carte, _rng)
@@ -511,6 +557,7 @@ func _dessiner_le_plan() -> void:
 	var x := cadre.position.x
 	var y := cadre.end.y + 24.0
 	for entree in [["garage", Palette.SERIE], ["cabine", Palette.AVERTISSEMENT], ["arène", Palette.CRITIQUE],
+			["planque", Color("#b070d0")], ["hôpital", Color("#f0f4f8")],
 			["repaire", Palette.ENCRE], ["parc", Color("#50a050")], ["eau", Color("#3a6a9c")], ["voie ferrée", Color("#404040")],
 			["boulevard", Color("#8a8a90")]]:
 		_plan_vue.draw_rect(Rect2(Vector2(x - 4.0, y - 9.0), Vector2(8, 8)), entree[1], true)
@@ -639,6 +686,7 @@ func _piloter_pour_le_banc() -> void:
 		var cubes := 0
 		for cle in _morceaux:
 			cubes += (_morceaux[cle] as MorceauVille).cubes_poses()
+		print("[banc] $%d sur soi, $%d au coffre, planque %d" % [_argent, _banque, _planque])
 		print("[banc] t=%ds fps=%d gens=%d autos=%d morceaux=%d cubes=%d quads=%d maillage_max=%.1fms fiches=%d noeuds=%d %s" % [int(temps),
 			Engine.get_frames_per_second(), ville.gens.size(), ville.autos.size(), _morceaux.size(), cubes,
 			MorceauVille.quads_total, MorceauVille.maillage_max_ms,
@@ -672,6 +720,10 @@ func _piloter_pour_le_banc() -> void:
 	Commandes.direction_simulee = _viser(_but_du_banc())
 	Commandes.tir_simule = true
 	Commandes.klaxon_simule = fmod(temps, 9.0) < 0.3
+	# Le pilote traite ses affaires : devant une planque ou un hôpital, il
+	# appuie sur F. Sans ça, l'achat, le dépôt et le soin ne seraient jamais
+	# exercés avant livraison.
+	Commandes.affaire_simulee = _affaire != "" and _pulsation
 	# La carte pendant trois secondes : c'est ainsi qu'on la photographie.
 	Commandes.carte_simulee = temps > 8.0 and temps < 11.0
 
@@ -832,10 +884,21 @@ func _conduire(delta: float) -> void:
 		# des rues de cent quarante pixels. Il se resserre ensuite un peu à
 		# haute vitesse, ce qui donne le poids sans enlever le contrôle.
 		var prise: float = clamp(abs(_vitesse) / PRISE_PLEINE, 0.0, 1.0) * signf(_vitesse)
-		var tenue: float = lerp(1.0, 0.74, clamp(abs(_vitesse) / VITESSE_MAX, 0.0, 1.0))
-		_angle += commande.x * BRAQUAGE * delta * prise * tenue
+		var tenue: float = lerp(1.0, 0.62, clamp(abs(_vitesse) / VITESSE_MAX, 0.0, 1.0))
+		# Une moto tourne court et ne dérive presque pas : c'est tout son
+		# intérêt dans des rues de deux tuiles.
+		var vif := 1.45 if FormesCarnage.est_moto(_modele_vehicule) else 1.0
+		_angle += commande.x * BRAQUAGE * vif * delta * prise * tenue
 
-	_position += Vector2.RIGHT.rotated(_angle) * _vitesse * delta
+	var cap := Vector2.RIGHT.rotated(_angle)
+	if abs(_vitesse) < 40.0:
+		_glisse = cap
+	else:
+		var adherence: float = lerp(ADHERENCE_LENTE, ADHERENCE_RAPIDE, clamp(abs(_vitesse) / VITESSE_MAX, 0.0, 1.0))
+		if FormesCarnage.est_moto(_modele_vehicule):
+			adherence *= 1.8
+		_glisse = _glisse.slerp(cap, clamp(delta * adherence, 0.0, 1.0)).normalized()
+	_position += _glisse * _vitesse * delta
 	_marquer_le_bitume(delta)
 	_heurter_les_murs()
 	_heurter_les_voitures()
@@ -890,11 +953,22 @@ func _klaxonner(delta: float) -> void:
 ## vitesse et clouait la voiture — dans une ville, c'est toutes les trois
 ## secondes.
 func _heurter_les_murs() -> void:
-	var resultat := carte.degager(_position, RAYON_VOITURE)
-	if not bool(resultat[1]):
+	var direction0 := Vector2.RIGHT.rotated(_angle)
+	var correction := Vector2.ZERO
+	var touche := false
+	var moto := FormesCarnage.est_moto(_modele_vehicule)
+	var rayon_c := RAYON_CAPSULE * (0.6 if moto else 1.0)
+	var empattement := DEMI_EMPATTEMENT * (0.7 if moto else 1.0)
+	for signe in [1.0, -1.0]:
+		var bout: Vector2 = _position + direction0 * empattement * signe
+		var resultat := carte.degager(bout, rayon_c)
+		if bool(resultat[1]):
+			var c: Vector2 = (resultat[0] as Vector2) - bout
+			_position += c
+			correction += c
+			touche = true
+	if not touche:
 		return
-	var correction: Vector2 = (resultat[0] as Vector2) - _position
-	_position = resultat[0]
 	var normale := correction.normalized()
 	if normale == Vector2.ZERO:
 		return
@@ -926,7 +1000,8 @@ func _heurter_les_murs() -> void:
 	var tangente := Vector2(-normale.y, normale.x)
 	if tangente.dot(direction) < 0.0:
 		tangente = -tangente
-	_angle = lerp_angle(_angle, tangente.angle(), (1.0 - frontal) * 0.4)
+	_angle = lerp_angle(_angle, tangente.angle(), (1.0 - frontal) * 0.22)
+	_glisse = Vector2.RIGHT.rotated(_angle)
 
 ## Une voiture garée n'est pas un mur, mais on ne la traverse pas non plus :
 ## on est repoussé hors de sa silhouette et on perd la part de vitesse qu'on a
@@ -983,7 +1058,9 @@ func _surveiller_la_friche(delta: float) -> void:
 ## Les lieux qui font quelque chose quand on s'y arrête : le garage de
 ## peinture. Il ne se déclenche qu'en voiture — repeindre un piéton n'a
 ## jamais effacé un casier.
-func _surveiller_les_lieux(_delta: float) -> void:
+func _surveiller_les_lieux(delta: float) -> void:
+	_mot_affaire_reste = max(0.0, _mot_affaire_reste - delta)
+	_surveiller_les_affaires(delta)
 	# Une cabine se décroche à pied comme au volant : obliger à descendre au
 	# milieu d'une avenue pour prendre un contrat, c'est se faire faucher.
 	var cabine := carte.cabine_de(_position)
@@ -1010,6 +1087,122 @@ func _surveiller_les_lieux(_delta: float) -> void:
 	if est_hote():
 		ville.repeindre(Session.cle)
 		_vider_les_evenements()
+
+# ------------------------------------------------------- l'argent
+
+## Ce qu'on peut TRAITER là où l'on est : acheter la planque, y déposer son
+## argent, l'améliorer, se faire recoudre. Une seule touche (F), et la ligne du
+## HUD dit toujours ce qu'elle ferait — un menu, à cette échelle, se lirait
+## moins vite qu'on ne se fait tirer dessus.
+func _surveiller_les_affaires(_delta: float) -> void:
+	_affaire = ""
+	var planque := carte.planque_de(_position)
+	var hopital := carte.hopital_de(_position)
+	if planque >= 0:
+		var fiche := carte.planque_par_id(_position, planque)
+		var prix := int(fiche.get("prix", 0))
+		if _planque < 0:
+			_affaire = "F : acheter cette planque — $%d" % prix
+			if Commandes.affaire_declenchee():
+				_acheter_la_planque(planque, prix)
+		elif planque == _planque:
+			var suivante := _amelioration_suivante()
+			if _argent > 0:
+				_affaire = "F : déposer $%d" % _argent
+			elif suivante != "":
+				_affaire = "F : %s — $%d" % [_libelle_amelioration(suivante), int(PlanVille.PRIX_AMELIORATION[suivante])]
+			else:
+				_affaire = "chez vous — $%d à l'abri" % _banque
+			if Commandes.affaire_declenchee():
+				_traiter_chez_soi(suivante)
+		else:
+			_affaire = "planque d'un autre"
+		if planque != _planque_en_cours:
+			_planque_en_cours = planque
+			if planque == _planque:
+				_ranger_le_vehicule()
+	elif hopital >= 0:
+		if _vie < VIE_MAX:
+			_affaire = "F : se faire recoudre — $%d" % SOIN
+			if Commandes.affaire_declenchee():
+				_se_faire_soigner()
+		else:
+			_affaire = "hôpital"
+	else:
+		_planque_en_cours = -1
+	_hopital_en_cours = hopital
+
+func _acheter_la_planque(id: int, prix: int) -> void:
+	if _argent < prix:
+		_dire_affaire("il vous manque $%d" % (prix - _argent))
+		return
+	_argent -= prix
+	_planque = id
+	_dire_affaire("planque achetée — rentrez y mettre votre argent")
+	Sons.jouer("portail", 1.0, -6.0)
+	canal.envoyer("planque", {"j": Session.cle, "i": id})
+
+func _traiter_chez_soi(suivante: String) -> void:
+	if _argent > 0:
+		var depose := _argent
+		_banque += depose
+		_argent = 0
+		_dire_affaire("$%d à l'abri" % depose)
+		Sons.jouer("depart", 1.4, -8.0)
+		return
+	if suivante == "":
+		_dire_affaire("rien à améliorer ici")
+		return
+	var prix := int(PlanVille.PRIX_AMELIORATION[suivante])
+	if _banque < prix:
+		_dire_affaire("il manque $%d au coffre" % (prix - _banque))
+		return
+	_banque -= prix
+	_ameliorations[suivante] = true
+	_dire_affaire("%s installé" % _libelle_amelioration(suivante))
+	Sons.jouer("portail", 1.2, -6.0)
+
+## L'ordre des travaux : le coffre d'abord (il double ce qu'on garde), puis
+## l'arsenal (on ne perd plus son arme), puis le garage (on garde sa voiture).
+func _amelioration_suivante() -> String:
+	for cle in ["coffre", "arsenal", "garage"]:
+		if not bool(_ameliorations[cle]):
+			return cle
+	return ""
+
+func _libelle_amelioration(cle: String) -> String:
+	match cle:
+		"coffre": return "coffre"
+		"arsenal": return "arsenal"
+		"garage": return "garage"
+	return cle
+
+func _se_faire_soigner() -> void:
+	if _argent < SOIN:
+		_dire_affaire("il vous manque $%d" % (SOIN - _argent))
+		return
+	_argent -= SOIN
+	_vie = VIE_MAX
+	_dire_affaire("recousu")
+	Sons.jouer("depart", 1.2, -8.0)
+
+## Le véhicule qu'on ramène chez soi est rangé au garage : après la mort, on
+## repart avec — c'est ce qui donne envie de garder la même voiture.
+func _ranger_le_vehicule() -> void:
+	if not bool(_ameliorations["garage"]) or _pied or _modele_vehicule < 0:
+		return
+	if _garage_perso != _modele_vehicule:
+		_garage_perso = _modele_vehicule
+		_dire_affaire("véhicule rangé au garage")
+
+func _dire_affaire(texte: String) -> void:
+	_mot_affaire = texte
+	_mot_affaire_reste = 2.6
+
+## Un gain d'argent : ce qui compte au classement reste la fortune, mais
+## l'argent frais est SUR SOI — donc perdable.
+func _encaisser_argent(montant: int) -> void:
+	_argent = max(0, _argent + montant)
 
 # ------------------------------------------------------- armes
 
@@ -1325,9 +1518,15 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 			var tueur := String(charge.get("j", ""))
 			if est_hote():
 				ajouter_score(tueur, int(charge.get("p", 0)))
+			if tueur == Session.cle:
+				_encaisser_argent(int(charge.get("p", 0)))
 			_effet_gain(Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
 				int(charge.get("p", 0)), int(charge.get("f", 1)), tueur,
 				String(charge.get("q", "")))
+		"saisie":
+			# Un joueur s'est fait ramasser : sa fortune baisse d'autant.
+			if est_hote():
+				ajouter_score(String(charge.get("j", "")), -int(charge.get("m", 0)))
 		"boum":
 			var ou_boum := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
 			_effet_explosion(ou_boum)
@@ -1487,6 +1686,19 @@ func _encaisser(degats: float, cause: String, par: String) -> void:
 func _tomber() -> void:
 	_vie = 0.0
 	_hors_service = HORS_SERVICE
+	# La police ramasse ce qu'on avait sur soi — et l'arme, sauf si on a un
+	# arsenal à la planque. C'est ce qui fait qu'on rentre déposer son argent
+	# au lieu de rouler jusqu'à la mort.
+	if _argent > 0:
+		var saisi := int(round(float(_argent) * (SAISIE if _planque >= 0 else SAISIE_SANS_PLANQUE)))
+		_argent -= saisi
+		if est_hote():
+			ajouter_score(Session.cle, -saisi)
+		else:
+			canal.envoyer("saisie", {"j": Session.cle, "m": saisi})
+		_dire_affaire("la police vous prend $%d" % saisi)
+	if not bool(_ameliorations["arsenal"]):
+		_reprendre_le_pistolet()
 	Sons.jouer("ecrasement", 0.5, -3.0)
 	Sons.arreter_moteur()
 	canal.envoyer("mort", {"j": Session.cle, "par": _dernier_agresseur,
@@ -1534,10 +1746,21 @@ func _relever() -> void:
 	_reprendre_le_pistolet()
 	_eperon = 0.0
 	Tactile.mode = Tactile.MARCHE
-	# Trois à sept rues plus loin : assez pour semer qui vous a eu, pas assez
-	# pour perdre le quartier où l'on jouait. Réapparaître au centre d'une ville
-	# de soixante-huit mille pixels, c'était repartir de zéro à chaque mort.
-	_position = carte.point_de_rue(_rng, _position, 300.0, 700.0)
+	# On rouvre les yeux à l'HÔPITAL le plus proche — et devant chez soi si on a
+	# une planque : c'est ce qui donne un point d'ancrage dans une ville de
+	# soixante-huit mille pixels. À défaut, trois à sept rues plus loin.
+	var reveil := {}
+	if _planque >= 0:
+		reveil = carte.planque_par_id(_position, _planque)
+	if reveil.is_empty():
+		reveil = carte.hopital_le_plus_proche(_position)
+	if not reveil.is_empty():
+		_position = carte.degager(Vector2(reveil["p"]) + Vector2(0.0, PlanVille.PAS * 0.9), RAYON_A_PIED)[0]
+	else:
+		_position = carte.point_de_rue(_rng, _position, 300.0, 700.0)
+	# Le véhicule rangé au garage nous attend devant la porte.
+	if _garage_perso >= 0 and _planque >= 0 and not reveil.is_empty():
+		_dire_affaire("votre véhicule vous attend")
 	Sons.jouer("depart", 0.8, -8.0)
 
 # ------------------------------------------------------- effets
@@ -2012,6 +2235,18 @@ func _placer_camera(delta: float) -> void:
 ## vient — puis les jauges, l'arme, et l'humeur du quartier en puces. La ligne
 ## de texte d'autrefois mettait sept mentions bout à bout ; on ne lisait rien
 ## en conduisant.
+## La fortune : ce qui compte au classement. L'argent sur soi et celui de la
+## planque, plus la valeur de la planque elle-même.
+func fortune() -> int:
+	var valeur := 0
+	if _planque >= 0:
+		var pl := carte.planque_par_id(_position, _planque)
+		valeur = int(pl.get("prix", 0)) if not pl.is_empty() else 0
+		for cle in _ameliorations:
+			if bool(_ameliorations[cle]):
+				valeur += int(PlanVille.PRIX_AMELIORATION[cle])
+	return _argent + _banque + valeur
+
 func fiche_joueur() -> Dictionary:
 	var fiche := {"etoiles": ville.etoiles(Session.cle)}
 	var jauges: Array = []
@@ -2021,8 +2256,13 @@ func fiche_joueur() -> Dictionary:
 			"couleur": Palette.SERIE, "valeur": "%d" % int(_pv_vehicule)})
 	fiche["jauges"] = jauges
 	fiche["arme"] = {"nom": String(ARMES[_arme]["nom"]), "munitions": "" if _munitions < 0 else "%d" % _munitions}
+	fiche["argent"] = {"sur_soi": _argent, "banque": _banque, "planque": _planque >= 0}
 
 	var puces: Array = []
+	if _mot_affaire_reste > 0.0:
+		puces.append({"texte": _mot_affaire, "couleur": Palette.AVERTISSEMENT})
+	elif _affaire != "":
+		puces.append({"texte": _affaire, "couleur": Palette.SERIE})
 	if _hors_service > 0.0:
 		puces.append({"texte": "à terre — %d s" % int(ceil(_hors_service)), "couleur": Palette.CRITIQUE})
 	if _eperon > 0.0:
