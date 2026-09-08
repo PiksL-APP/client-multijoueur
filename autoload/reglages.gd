@@ -178,6 +178,50 @@ func _creer_les_bus() -> void:
 
 # ── Fichier ────────────────────────────────────────────────────────────────
 
+## Les réglages posés dans la PAGE (le kit de la maquette tient les options
+## dans le navigateur). Ses volumes vont de 0 à 100, sa finesse aussi ; ses
+## touches sont des libellés, qu'on retraduit en codes physiques.
+func prendre_de_la_page(choix: Dictionary) -> void:
+	if choix.has("general"):
+		volume_general = clampf(float(choix["general"]) / 100.0, 0.0, 1.0)
+	if choix.has("musique"):
+		volume_musique = clampf(float(choix["musique"]) / 100.0, 0.0, 1.0)
+	if choix.has("effets_son"):
+		volume_effets = clampf(float(choix["effets_son"]) / 100.0, 0.0, 1.0)
+	if choix.has("effets"):
+		effets = bool(choix["effets"])
+	if choix.has("ombres"):
+		ombres = bool(choix["ombres"])
+	if choix.has("finesse"):
+		finesse = clampf(float(choix["finesse"]) / 100.0, 0.5, 1.0)
+	if choix.has("plein_ecran"):
+		plein_ecran = bool(choix["plein_ecran"])
+	var touches_page = choix.get("touches", null)
+	if touches_page is Array:
+		var ordre := ["avancer", "reculer", "gauche", "droite", "tir", "action", "carte"]
+		# Le kit liste : avancer, reculer, gauche, droite, sauter, sprint,
+		# interagir, carte. « Sauter » est notre tir, « interagir » notre
+		# action ; le sprint n'a pas d'équivalent, on le saute.
+		var vers := [0, 1, 2, 3, 4, 6, 7]
+		for i in ordre.size():
+			if vers[i] < (touches_page as Array).size():
+				var code := _code_de_libelle(String((touches_page as Array)[vers[i]]))
+				if code != KEY_NONE:
+					touches[ordre[i]] = code
+	appliquer_tout()
+	ecrire()
+
+## Le chemin inverse de `nom_de_touche` : d'un libellé affiché au code. Le kit
+## affiche les libellés QWERTY (W, S, A, D), qui SONT nos codes physiques —
+## il n'y a donc rien à retourner, seulement à traduire les noms français.
+func _code_de_libelle(libelle: String) -> int:
+	var propre := libelle.strip_edges()
+	for anglais in NOMS_FR:
+		if String(NOMS_FR[anglais]) == propre:
+			propre = anglais
+			break
+	return OS.find_keycode_from_string(propre)
+
 func charger() -> void:
 	var fichier := ConfigFile.new()
 	if fichier.load(FICHIER) != OK:

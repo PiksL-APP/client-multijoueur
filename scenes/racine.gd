@@ -51,7 +51,50 @@ func _ready() -> void:
 	if jeu != "":
 		_banc_partie(jeu, float(_argument(arguments, "--manche", "25")))
 		return
+	# DANS LE NAVIGATEUR, C'EST LA PAGE QUI TIENT LES MENUS : le kit de la
+	# maquette y tourne tel quel, en HTML, au-dessus de la toile du moteur.
+	# On attend qu'il passe la main (`window.PK.depart`) plutôt que d'ouvrir
+	# notre propre menu — deux menus, même dessinés pareil, ne le seraient
+	# jamais tout à fait.
+	if OS.has_feature("web") and _page_tient_les_menus():
+		_attendre_la_page()
+		return
 	aller_a("menu", {})
+
+## Vrai si la page qui nous porte est celle du kit : elle expose `window.PK`.
+## Une page qui ne l'expose pas (un essai, une intégration ailleurs) retombe
+## sur le menu du moteur.
+func _page_tient_les_menus() -> bool:
+	var reponse = JavaScriptBridge.eval("typeof window.PK === 'object' ? '1' : ''", true)
+	return typeof(reponse) == TYPE_STRING and String(reponse) == "1"
+
+## On regarde la page trente fois par seconde jusqu'à ce qu'elle nous donne le
+## départ : le pseudo, le personnage, le jeu, et les réglages qu'on y a posés.
+func _attendre_la_page() -> void:
+	while true:
+		await get_tree().process_frame
+		var brut = JavaScriptBridge.eval(
+			"window.PK.depart ? JSON.stringify(window.PK.depart) : ''", true)
+		if typeof(brut) != TYPE_STRING or String(brut) == "":
+			continue
+		var lu = JSON.parse_string(String(brut))
+		if typeof(lu) != TYPE_DICTIONARY:
+			continue
+		_partir_de_la_page(lu as Dictionary)
+		return
+
+func _partir_de_la_page(choix: Dictionary) -> void:
+	var pseudo := Session.nettoyer_pseudo(String(choix.get("pseudo", "")))
+	if pseudo.length() < 2:
+		pseudo = "Joueur-" + Session.id.substr(0, 4)
+	Session.definir_pseudo(pseudo)
+	# Le kit numérote ses personnages ; nous les nommons. L'indice tombe dans
+	# la liste du casting, et déborde sans casser si le kit en ajoute.
+	var indice := int(choix.get("personnage", 0))
+	Session.definir_personnage(String(Personnages.LISTE[posmod(indice, Personnages.LISTE.size())]["cle"]))
+	Reglages.prendre_de_la_page(choix)
+	var jeu := String(choix.get("jeu", "carnage"))
+	aller_a("salon", {"jeu": jeu, "titre": "PIKS THEFT AUTO" if jeu == "carnage" else jeu.to_upper()})
 
 ## `?pilote=carnage&manche=60&etoiles=5&position=120,110` → `--banc-jeu=carnage
 ## --manche=60 --banc-etoiles=5 --banc-position=120,110`.

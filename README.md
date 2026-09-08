@@ -18,6 +18,15 @@ ville, maintenant, qui est le hub. `scenes/hub.gd` et `scenes/accueil.gd` sont
 supprimés, avec les modèles qui ne servaient qu'à eux ; ce qui savait les
 bâtir dort encore dans `outils/voxel.py`, sous `VILLAGE = False`.
 
+**Dans le navigateur, la page EST la maquette.** Le kit fourni (un `.dc.html`
+de Claude Design) n'est pas réinterprété : il est HÉBERGÉ. `web/kit/` porte son
+moteur de rendu, React, et ses visuels ; la coque d'export de Godot recopie son
+corps et son script à l'identique, et la toile du jeu attend dessous. Le
+chargement, le menu, Commencer et Options sont donc exacts par construction.
+Trois retouches : les neuf fonds au lieu de deux, l'avancement pris sur le vrai
+chargeur du moteur plutôt qu'un minuteur, et « Entrer à Pikstown » qui passe la
+main au jeu. Hors navigateur, ce sont les écrans Godot qui servent.
+
 **L'habillage d'avant-partie suit la maquette** (`Loading GTA Piks Theft
 Auto`) : polices Archivo Black et Barlow Condensed, palette rose `#ff2ea6`,
 cyan `#22e3f2` et orange `#ff9d2e`, capitales très espacées. Tout est

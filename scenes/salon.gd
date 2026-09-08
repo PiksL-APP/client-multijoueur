@@ -24,7 +24,11 @@ func demarrer() -> void:
 	Sons.musique(Sons.THEME)
 	_jeu = String(donnees.get("jeu", "carnage"))
 	_titre = String(donnees.get("titre", _jeu.to_upper()))
-	UI.fond(interface())
+	var fond := ColorRect.new()
+	fond.color = Charte.NUIT
+	fond.set_anchors_preset(Control.PRESET_FULL_RECT)
+	fond.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	interface().add_child(fond)
 	_construire()
 
 	# ⚠ Le banc d'essai fait la queue dans une file À PART. Sans ce suffixe, un
@@ -172,16 +176,24 @@ func _construire() -> void:
 	var ligne_titre := HBoxContainer.new()
 	ligne_titre.add_theme_constant_override("separation", 16)
 	colonne.add_child(ligne_titre)
-	var entete := UI.entete("Salon  " + _titre, "")
+	var entete := Charte.entete("Salon " + _titre, "")
 	entete.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ligne_titre.add_child(entete)
-	_etat = UI.etat_reseau()
+	_etat = Charte.etat_reseau()
 	ligne_titre.add_child(_etat)
 
-	_info = UI.texte("", 15, Palette.ENCRE_DOUCE, true)
+	_info = Charte.texte("", 17, Color(1, 1, 1, 0.6), true)
 	colonne.add_child(_info)
 
-	var panneau := UI.panneau()
+	var panneau := PanelContainer.new()
+	var boite_p := StyleBoxFlat.new()
+	boite_p.bg_color = Color(1, 1, 1, 0.03)
+	boite_p.border_color = Color(1, 1, 1, 0.10)
+	boite_p.set_border_width_all(1)
+	boite_p.border_width_left = 3
+	boite_p.border_color = Charte.ROSE
+	boite_p.set_content_margin_all(20)
+	panneau.add_theme_stylebox_override("panel", boite_p)
 	panneau.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	colonne.add_child(panneau)
 	var defilement := ScrollContainer.new()
@@ -195,20 +207,20 @@ func _construire() -> void:
 	actions.add_theme_constant_override("separation", 12)
 	colonne.add_child(actions)
 
-	_bouton_lancer = UI.bouton("Lancer la manche", true)
+	_bouton_lancer = Charte.bouton("Lancer la manche", true)
 	_bouton_lancer.pressed.connect(_lancer)
 	actions.add_child(_bouton_lancer)
 
-	_bouton_changer = UI.bouton("Changer de table")
+	_bouton_changer = Charte.bouton("Changer de table")
 	_bouton_changer.pressed.connect(func(): _rejoindre_table(_table_libre(_table)))
 	actions.add_child(_bouton_changer)
 
-	var retour := UI.bouton("Retour au hub")
+	var retour := Charte.bouton("Retour au menu")
 	retour.pressed.connect(func(): demande_ecran.emit("menu", {}))
 	actions.add_child(retour)
 
 func _rafraichir() -> void:
-	UI.rafraichir_etat_reseau(_etat)
+	Charte.rafraichir_etat(_etat)
 	for enfant in _liste.get_children():
 		enfant.queue_free()
 
@@ -219,11 +231,11 @@ func _rafraichir() -> void:
 		var membres: Array = groupes[t]
 		var boite := VBoxContainer.new()
 		boite.add_theme_constant_override("separation", 2)
-		var entete := UI.titre("TABLE %d   %d/%d" % [t, membres.size(), PAR_TABLE], 16)
+		var entete := Charte.titre("Table %d   %d/%d" % [t, membres.size(), PAR_TABLE], 22)
 		entete.add_theme_color_override("font_color", Palette.ENCRE if t == _table else Palette.ENCRE_FAIBLE)
 		boite.add_child(entete)
 		if t == _table:
-			boite.add_child(UI.texte("votre table", 13, Palette.SERIE))
+			boite.add_child(Charte.capitales("Votre table", 14, Charte.CYAN))
 		var place := 0
 		for meta in membres:
 			var ligne := HBoxContainer.new()
@@ -235,9 +247,9 @@ func _rafraichir() -> void:
 			carre.custom_minimum_size = Vector2(14, 14)
 			carre.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			ligne.add_child(carre)
-			ligne.add_child(UI.texte(String(meta.get("pseudo", "?")), 22, Palette.ENCRE if t == _table else Palette.ENCRE_DOUCE))
+			ligne.add_child(Charte.texte(String(meta.get("pseudo", "?")), 22, Color.WHITE if t == _table else Color(1, 1, 1, 0.62)))
 			if place == 0:
-				ligne.add_child(UI.texte("hôte", 13, Palette.AVERTISSEMENT))
+				ligne.add_child(Charte.capitales("Hôte", 14, Charte.ORANGE))
 			boite.add_child(ligne)
 			place += 1
 		_liste.add_child(boite)
