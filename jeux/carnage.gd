@@ -334,8 +334,10 @@ func preparer() -> void:
 	noeud_t.material_override = MatieresCarnage.trace()
 	noeud_t.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	monde().add_child(noeud_t)
+	# À pied, on est le personnage choisi à la création : c'est le même casting
+	# dans le menu et dans la rue.
 	_corps_pied = FormesCarnage.pieton(_ma_couleur(), false, Session.pseudo, true,
-		FormesCarnage.PEAU_JOUEUR)
+		Session.personnage_affiche())
 	_corps_pied.visible = false
 	monde().add_child(_corps_pied)
 
@@ -1642,8 +1644,13 @@ func _recevoir_joueur(charge: Dictionary) -> void:
 		var auto := FormesCarnage.voiture(couleur, pseudo)
 		auto.position = Decor.vers3d(cible)
 		monde().add_child(auto)
-		var pieton := FormesCarnage.pieton(couleur, false, pseudo, true,
-			FormesCarnage.PEAU_JOUEUR)
+		# Le personnage d'un autre joueur : celui que le salon annonce, sinon
+		# celui que son identifiant désigne — le calcul est le même chez tous,
+		# donc on le voit pareil des quatre côtés de la table.
+		var perso := String(joueurs.get(cle, {}).get("personnage", ""))
+		if not Personnages.existe(perso):
+			perso = Personnages.par_defaut(cle)
+		var pieton := FormesCarnage.pieton(couleur, false, pseudo, true, perso)
 		pieton.visible = false
 		monde().add_child(pieton)
 		_autres[cle] = {"p": cible, "a": 0.0, "v": 0.0, "vie": VIE_MAX, "cible": cible,
@@ -2265,14 +2272,14 @@ func _placer_les_objets() -> void:
 		if gyro:
 			gyro.visible = fmod(temps, 0.7) > 0.35
 
-## La démarche d'un habitant : ses cuisses et ses bras pivotent quand il
-## marche. Quatre os par image et par personnage, rien de plus — et un
-## décalage tiré de son adresse, sinon toute la rue marche au même pas.
+## La démarche d'un habitant : le lecteur d'animations du casting joue
+## « course » ou « repos ». On ne lui parle que quand l'animation change —
+## rappeler `play` sur celle qui tourne la relance à zéro, et toute la rue
+## piétinerait sur place, un pas commencé et jamais fini.
 func _demarche(porteur: Node3D, nom: String) -> void:
 	var silhouette := porteur.get_node_or_null("Silhouette") as Node3D
 	if silhouette:
-		FormesCarnage.animer_kenney(silhouette, nom == "walk",
-			temps + float(porteur.get_instance_id() % 97))
+		FormesCarnage.animer_kenney(silhouette, nom == "walk")
 
 ## L'hélicoptère : il glisse vers sa dernière position connue, son rotor tourne,
 ## et on entend ses pales quand il est proche — c'est ce qui dit qu'il est là

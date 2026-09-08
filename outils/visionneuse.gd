@@ -16,8 +16,28 @@ func _ready() -> void:
 	var pm := PlaneMesh.new(); pm.size = Vector2(200, 200); sol.mesh = pm
 	var ms := StandardMaterial3D.new(); ms.albedo_color = Color(0.38, 0.66, 0.29); sol.material_override = ms
 	add_child(sol)
+	# `etalon` : un mât de deux unités, gradué chaque demi-unité — c'est lui
+	# qui donne l'échelle d'un modèle qu'on découvre. `k:<peau>` sort un
+	# personnage du casting Kenney plutôt qu'un voxel.
 	var x := 0.0
 	for nom in noms:
+		if String(nom) == "etalon":
+			for k in 4:
+				var barre := MeshInstance3D.new()
+				var bm := BoxMesh.new(); bm.size = Vector3(0.18, 0.5, 0.18); barre.mesh = bm
+				var bmat := StandardMaterial3D.new()
+				bmat.albedo_color = Color.RED if k % 2 == 0 else Color.WHITE
+				barre.material_override = bmat
+				barre.position = Vector3(x, 0.25 + k * 0.5, 0)
+				add_child(barre)
+			x += ecart
+			continue
+		if String(nom).begins_with("k:"):
+			var perso := Personnages.creer(String(nom).substr(2))
+			perso.position = Vector3(x, 0, 0)
+			add_child(perso)
+			x += ecart
+			continue
 		var scene: PackedScene = load("res://modeles/voxel/%s.glb" % nom)
 		var inst := scene.instantiate() as Node3D
 		inst.position = Vector3(x, 0, 0)

@@ -1,9 +1,31 @@
-# Piks-l Multijoueur
+# Piks Theft Auto
 
-Un hub que l'on parcourt à plusieurs, des portails, et derrière chaque portail
-un jeu de 2 à 4 joueurs avec son score. Le tout tourne dans le navigateur :
-Godot 4.5 exporté en WebAssembly, Supabase Realtime pour le réseau, Vercel pour
+Une ville qu'on parcourt à plusieurs — **Pikstown** — et des parties de 2 à
+4 joueurs avec leur score. Le tout tourne dans le navigateur : Godot 4.5
+exporté en WebAssembly, Supabase Realtime pour le réseau, Vercel pour
 l'hébergement.
+
+**On entre par un menu, pas par un village.** `scenes/menu.gd` ouvre sur
+Commencer / Options / Quitter, posés sur la ville elle-même : le fond du menu
+n'est pas une image, c'est `PlanVille` + `MorceauVille`, le générateur du jeu,
+bâti au couchant et tournant lentement sous l'effet maquette. Quand la ville
+change, le menu change avec elle. « Commencer » demande un pseudo et un
+personnage, « Options » règle le son, l'image et les touches, « Quitter »
+renvoie sur piks-l.com. La pochette du jeu est posée à gauche, dans une vraie boîte 3D qui se retourne au survol pour montrer son dos.
+Le village en voxels reste joignable par `--ecran=hub` le temps que les
+bâtiments de la ville ouvrent les autres jeux.
+
+**Le casting vient de Kenney** (`modeles/kenney/`, CC0) : un seul maillage
+articulé de 58 os, `characterMedium.fbx`, et douze images de peau tirées des
+lots *protagonists*, *retro* et *survivors*. Godot 4.5 lit le FBX nativement
+— aucune conversion. Les animations (`idle`, `run`, `jump`) vivent dans leurs
+propres fichiers, sans maillage, et se greffent sur le squelette à la volée
+(`commun/personnages.gd`). Douze personnages pour le poids d'un.
+
+**Tout se règle** (`autoload/reglages.gd`, gardé dans `user://`) : trois
+volumes sur trois bus audio, l'effet maquette, les ombres, la finesse du rendu,
+le plein écran, et chaque touche du clavier — que `Commandes` lit désormais
+sans exception.
 
 **Un mur ne stoppe pas, il fait glisser.** Une collision ne coûte que la part
 de vitesse mise dans la façade, et la voiture se réaligne dessus quand on la
@@ -262,29 +284,27 @@ VERTICALES, sans quoi le gris-bleu des toitures passait pour du vitrage et
 les toits luisaient.
 
 **Les habitants sont des gens.** Depuis la v12, les piétons, les hommes de
-main, les flics à pied et les joueurs descendus de voiture viennent du kit
-« Animated Characters » de Kenney : un maillage habillé
-(`modeles/kenney/personnages/characterMedium.fbx`, cinquante-huit os) et onze
-peaux — huit passants tirés de leur identifiant (le même piéton garde donc la
-même tête tant qu'il vit), trois têtes pour les hommes de main, une pour les
-flics, celle du skateur pour les joueurs. Nos bonshommes en cubes ne tenaient
-plus la comparaison depuis que les voitures et les immeubles sont dessinés :
-`VoxelsCarnage.personnage` a disparu. Deux choix contre-intuitifs, mais tenus
-à l'image. **On n'importe pas les animations du kit** (`idle`, `run`, `jump`
-sont livrés en `.fbx` séparés) : quatre os pivotés par code
-(`FormesCarnage.animer_kenney`) coûtent moins qu'un lecteur d'animation par
-piéton, et la ville en compte cinquante. **Les axes des os ne sont pas les
-mêmes** en haut et en bas : le rig vrille les bras d'un quart de tour, si bien
-qu'une cuisse balance autour de X quand un bras balance autour de Z — le
-tourner autour de X l'écarte en croix, et la rue se remplit d'épouvantails.
-⚠ Et remettre les quatre os à zéro n'est pas neutre : le modèle est livré bras
-écartés (une pose d'atelier), c'est cette remise à zéro qui les ramène le long
-du corps. Ce qui porte la couleur, ce n'est pas le corps — teinter la texture
-d'une tenue teinte aussi la peau et les cheveux — mais une CASQUETTE posée sur
-le crâne : vue de dessus, et la caméra ne voit à peu près que ça, c'est le
-seul endroit du personnage qui se lise. Le fanion des hommes de main se dresse
-maintenant AU-DESSUS de la tête ; planté à hauteur d'épaule comme du temps des
-cubes, il passait devant le visage.
+main, les flics à pied et les joueurs descendus de voiture viennent du CASTING
+partagé (`commun/personnages.gd`) : le maillage habillé du kit « Animated
+Characters » de Kenney, douze peaux, et les trois animations du kit greffées
+dessus. C'est le même casting qu'à la création de personnage — celui qu'on
+choisit dans le menu est celui qui marche en ville
+(`Session.personnage_affiche`), et un autre joueur se voit sous le personnage
+que son identifiant désigne, calculé pareil chez tous. Nos bonshommes en cubes
+ne tenaient plus la comparaison depuis que les voitures et les immeubles sont
+dessinés : `VoxelsCarnage.personnage` a disparu. Trois réglages tenus à
+l'image. L'ÉCHELLE : le casting est réglé pour le village (1,80 unité, la
+taille d'un homme quand la tuile en fait dix) ; en ville la tuile fait le
+triple et une berline dix unités de long, un piéton d'un mètre quatre-vingt y
+serait un insecte — d'où `TAILLE_HABITANT`. L'ANIMATION : on ne parle au
+lecteur que quand l'animation change, sinon `play` relance le pas à zéro à
+chaque image et toute la rue piétine sur place. LA COULEUR : elle ne se met
+pas sur le corps — teinter la texture d'une tenue teint aussi la peau et les
+cheveux — mais sur une CASQUETTE posée sur le crâne : vue de dessus, et la
+caméra ne voit à peu près que ça, c'est le seul endroit du personnage qui se
+lise. Le fanion des hommes de main se dresse maintenant AU-DESSUS de la tête ;
+planté à hauteur d'épaule comme du temps des cubes, il passait devant le
+visage.
 
 **Ça brûle.** Une voiture qui saute laisse un BRASIER, et un brasier est une
 chose vivante : il chauffe ce qui l'entoure (passants, joueurs, tôle), il

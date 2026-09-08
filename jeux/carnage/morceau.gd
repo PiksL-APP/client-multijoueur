@@ -56,6 +56,10 @@ const BUDGET_MAILLAGE_USEC := 6000
 var _cellules := 0                    ## cellules pleines d'immeubles, pour le journal
 var _props_kenney: Dictionary = {}    ## nom de prop -> [Transform3D] (une nappe par modèle)
 var _bats_kenney: Dictionary = {}     ## chemin de modèle -> [{t, id}] : les immeubles intacts
+## style -> dernier modèle posé : de quoi ne jamais mettre deux fois de suite
+## le même immeuble. Les tuiles se parcourent dans le même ordre chez tous les
+## joueurs, donc la ville reste la même des quatre côtés de la table.
+var _dernier_bat: Dictionary = {}
 var _bat_instance: Dictionary = {}    ## id d'immeuble -> [MultiMesh, rang] pour le faire disparaître
 var _multi: MultiMesh
 var _places: Dictionary = {}          ## modele -> Array[{t, c, id}]
@@ -75,6 +79,7 @@ func commencer(plan: PlanVille, cle_du_morceau: Vector2i, reveillees: Dictionary
 	_plan = plan
 	_reveillees = reveillees
 	_detruits = detruits
+	_dernier_bat.clear()
 	_etape = 0
 	_lumineux = SurfaceTool.new()
 	_lumineux.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -277,7 +282,9 @@ func _poser_immeuble(b: Dictionary, id: int) -> void:
 	var chemin := ""
 	if not bool(v["plat"]):
 		chemin = FormesCarnage.batiment_kenney(int(b["style"]),
-			maxf(float(b["w"]), float(b["d"])) * Decor.ECHELLE, float(b["h"]), id)
+			maxf(float(b["w"]), float(b["d"])) * Decor.ECHELLE, float(b["h"]), id,
+			String(_dernier_bat.get(int(b["style"]), "")))
+		_dernier_bat[int(b["style"])] = chemin
 	if chemin != "" and casses.is_empty():
 		if not _bats_kenney.has(chemin):
 			_bats_kenney[chemin] = []
@@ -287,13 +294,28 @@ func _poser_immeuble(b: Dictionary, id: int) -> void:
 		# l'échelle est portée par la base, donc tourner une emprise de trois
 		# tuiles sur une la faisait déborder en travers de la rue — d'où des
 		# immeubles qui se chevauchaient et mordaient sur la chaussée.
-		var quarts: int = posmod(id, 4) if absf(emprise.x - emprise.z) < 0.05 * emprise.x \
-			else posmod(id, 2) * 2
+		var quarts: int = posmod(FormesCarnage._melanger(id + 5), 4) \
+			if absf(emprise.x - emprise.z) < 0.05 * emprise.x \
+			else posmod(FormesCarnage._melanger(id + 5), 2) * 2
 		var tourne := Basis(Vector3.UP, PI * 0.5 * float(quarts)).scaled(emprise)
 		# La teinte du quartier passe en couleur d'instance : les modèles du kit
 		# sont gris-bleu, la ville doit garder ses couleurs de quartier — c'est
 		# ce qui fait qu'on sait où l'on est en regardant une rue.
+		# ⚠ La teinte du quartier seule ne suffit pas : les modèles d'un même
+		# kit partagent leur atlas, donc une rue de pavillons sortait toute
+		# verte, la même façade répétée. On fait donc varier chaque immeuble
+		# autour de la teinte du quartier — un peu plus clair ou plus sombre,
+		# un rien plus chaud ou plus froid — d'après son identifiant. Assez
+		# pour qu'on distingue deux voisins, pas assez pour perdre la couleur
+		# qui dit dans quel quartier on est.
 		var teinte_b: Color = (b["c"] as Color).lerp(Color.WHITE, 0.42)
+		# ⚠ Brassé, comme le choix du modèle : l'identifiant progresse par pas
+		# réguliers d'un immeuble à l'autre, et un simple reste redonnait la
+		# même teinte tout le long de la rue.
+		var brasse := FormesCarnage._melanger(id)
+		var ecart := float(posmod(brasse, 9)) / 8.0 - 0.5
+		teinte_b = teinte_b.lightened(ecart * 0.34) if ecart > 0.0 else teinte_b.darkened(-ecart * 0.4)
+		teinte_b.h = fposmod(teinte_b.h + float(posmod(brasse / 9, 7) - 3) * 0.016, 1.0)
 		_bats_kenney[chemin].append({"t": Transform3D(tourne, Decor.vers3d(b["p"], float(b["y"]))),
 			"id": id, "c": teinte_b})
 		_immeubles[id]["kenney"] = chemin

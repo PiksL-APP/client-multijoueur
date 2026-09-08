@@ -12,6 +12,10 @@ var id: String = ""      ## stable, gardé d'une visite à l'autre : sert aux sc
 var cle: String = ""     ## propre à cet onglet : sert au réseau
 var pseudo: String = ""
 var heros: String = ""   ## knight, rogue ou wizzard ; vide = tiré de l'identifiant
+## Le personnage du casting Kenney, celui qu'on incarne en ville. `heros` est
+## l'ancien trio de pantins voxel du village : les deux cohabitent le temps que
+## le village s'efface, et rien ne se perd pour un joueur déjà installé.
+var personnage: String = ""
 
 func _ready() -> void:
 	var fichier := ConfigFile.new()
@@ -19,6 +23,7 @@ func _ready() -> void:
 		id = String(fichier.get_value("joueur", "id", ""))
 		pseudo = String(fichier.get_value("joueur", "pseudo", ""))
 		heros = String(fichier.get_value("joueur", "heros", ""))
+		personnage = String(fichier.get_value("joueur", "personnage", ""))
 	if id.length() < 8:
 		id = _tirer_identifiant()
 		_ecrire()
@@ -35,6 +40,16 @@ func definir_pseudo(nouveau: String) -> void:
 func definir_heros(nom: String) -> void:
 	heros = nom
 	_ecrire()
+
+func definir_personnage(cle: String) -> void:
+	personnage = cle
+	_ecrire()
+
+## Le personnage affiché : celui qu'on a choisi, sinon celui que l'identifiant
+## désigne — le même calcul chez tous les clients, donc chacun voit l'autre
+## sous le même trait sans qu'on ait rien à diffuser.
+func personnage_affiche() -> String:
+	return personnage if Personnages.existe(personnage) else Personnages.par_defaut(id)
 
 ## Le héros affiché : celui qu'on a choisi, sinon celui que l'identifiant
 ## désigne — le même calcul chez tous les clients.
@@ -69,4 +84,5 @@ func _ecrire() -> void:
 	fichier.set_value("joueur", "id", id)
 	fichier.set_value("joueur", "pseudo", pseudo)
 	fichier.set_value("joueur", "heros", heros)
+	fichier.set_value("joueur", "personnage", personnage)
 	fichier.save(FICHIER)

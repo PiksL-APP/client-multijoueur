@@ -2,6 +2,12 @@ extends Node
 ## Porte un seul écran à la fois et fait la connexion au démarrage.
 
 const ECRANS := {
+	"menu": "res://scenes/menu.gd",
+	"creation": "res://scenes/creation.gd",
+	"options": "res://scenes/options.gd",
+	# L'accueil et le village sont l'entrée d'AVANT : ils ne s'ouvrent plus
+	# d'eux-mêmes, mais `--ecran=hub` y mène encore, le temps que la ville
+	# reprenne ce qu'ils portaient.
 	"accueil": "res://scenes/accueil.gd",
 	"hub": "res://scenes/hub.gd",
 	"salon": "res://scenes/salon.gd",
@@ -50,7 +56,7 @@ func _ready() -> void:
 	if jeu != "":
 		_banc_partie(jeu, float(_argument(arguments, "--manche", "25")))
 		return
-	aller_a("accueil", {})
+	aller_a("menu", {})
 
 ## `?pilote=carnage&manche=60&etoiles=5&position=120,110` → `--banc-jeu=carnage
 ## --manche=60 --banc-etoiles=5 --banc-position=120,110`.
