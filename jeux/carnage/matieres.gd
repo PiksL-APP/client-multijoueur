@@ -19,6 +19,7 @@ extends RefCounted
 ## instance dont on soit sûr dans ce moteur de rendu.
 
 static var _sol: ShaderMaterial
+static var _eau: ShaderMaterial
 static var _facade: ShaderMaterial
 static var _flaque: ShaderMaterial
 static var _lumineux: ShaderMaterial
@@ -201,13 +202,13 @@ void fragment() {
 		if (mod(cel.x, 2.0) < 0.5 && cel.y > 0.5 && fract(uvl.x * CELLULES) < 0.2) col = mix(col, blanc, 0.6);
 		if (cel.y < 0.5 && fract(uvl.y * CELLULES) > 0.8) col = mix(col, blanc, 0.6);
 	} else if (k == 12) {
-		// EAU : sombre, des cellules qui scintillent lentement.
-		float t = floor(TIME * 1.5);
-		float v = hache(celm + vec2(t, -t * 0.5));
-		col = mix(vec3(0.03, 0.09, 0.14), vec3(0.08, 0.20, 0.26), step(0.55, v));
-		emission = vec3(0.10, 0.22, 0.30) * step(0.85, v) * 0.6;
-		rug = 0.12;
-		spec = 0.7;
+		// LE FOND DE L'EAU : de la vase sombre, mate, sans un reflet. L'eau
+		// vive n'est plus peinte ici : c'est une nappe à part, posée un mètre
+		// plus haut avec le shader EAU, qui lève ses sommets et fait facettes.
+		float v = hache(celm + vec2(29.0));
+		col = mix(vec3(0.02, 0.05, 0.08), vec3(0.04, 0.09, 0.12), step(0.5, v));
+		rug = 0.9;
+		spec = 0.05;
 		grain = 0.0;
 	} else if (k == 14) {
 		// RAIL : du ballast, des traverses en travers de la ligne, deux rails.
@@ -321,6 +322,75 @@ void fragment() {
 	ROUGHNESS = rug;
 	SPECULAR = spec;
 	EMISSION = emission;
+}
+"""
+
+# ------------------------------------------------------------ l'eau
+
+## L'EAU, en LOW POLY : une nappe de facettes qui ondulent.
+##
+## D'après le « Low Poly Water » de godotshaders.com : chaque sommet est levé
+## par une fonction de sa propre position, la normale est reprise à la dérivée
+## de la face — d'où un plat par triangle, jamais un dégradé, et cet air de
+## papier plié qui va avec les voxels.
+##
+## DEUX ÉCARTS avec l'original, tous deux pour la ville :
+##  • le déplacement est VERTICAL seulement. L'original pousse aussi le sommet
+##    en x et en z ; sur une mer découpée en tuiles, ça décollerait le bord de
+##    l'eau du quai et ouvrirait une fente à chaque rive.
+##  • pas de `beer_factor` : lire DEPTH_TEXTURE n'est pas sûr en mode
+##    compatibilité (WebGL 2), et la ville s'y joue. La transparence est celle
+##    de la teinte, et le fond de vase se lit au travers.
+const EAU := """
+shader_type spatial;
+render_mode cull_disabled, depth_draw_always, diffuse_lambert, specular_schlick_ggx;
+
+uniform vec4 teinte : source_color = vec4(0.05, 0.26, 0.38, 0.86);
+uniform vec4 ecume : source_color = vec4(0.60, 0.82, 0.88, 1.0);
+uniform float amplitude : hint_range(0.2, 5.0, 0.1) = 0.9;   // hauteur des vagues
+uniform float vitesse : hint_range(0.1, 5.0, 0.1) = 1.0;
+uniform float metal : hint_range(0.0, 1.0) = 0.35;
+uniform float speculaire : hint_range(0.0, 1.0) = 0.6;
+uniform float rugosite : hint_range(0.0, 1.0) = 0.12;
+uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+
+// La hauteur du sommet, ramenée entre -1 et 1 : elle sert à blanchir la crête.
+varying float crete;
+
+float decalage(float x, float z, float v1, float v2, float t) {
+	float rx = ((mod(x + z * x * v1, amplitude) / amplitude)
+		+ (t * vitesse) * mod(x * 0.8 + z, 1.5)) * 2.0 * PI;
+	float rz = ((mod(v2 * (z * x + x * z), amplitude) / amplitude)
+		+ (t * vitesse) * 2.0 * mod(x, 2.0)) * 2.0 * PI;
+	return amplitude * 0.5 * (sin(rz) * cos(rx));
+}
+
+void vertex() {
+	// La position est celle du monde (le maillage est bâti en coordonnées
+	// absolues) : deux morceaux voisins lèvent leur bord au même endroit.
+	float d = decalage(VERTEX.x, VERTEX.z, 0.1, 0.3, TIME * 0.1);
+	VERTEX.y += d;
+	crete = d / max(amplitude * 0.5, 0.001);
+}
+
+void fragment() {
+	// La normale de la FACE, pas du sommet : c'est tout le low poly.
+	vec3 n = normalize(cross(dFdx(VERTEX), dFdy(VERTEX)));
+	NORMAL = faceforward(n, VERTEX, n);
+	METALLIC = metal;
+	SPECULAR = speculaire;
+	ROUGHNESS = rugosite;
+	vec3 col = teinte.rgb;
+	// La crête d'une vague écume un peu, le creux s'assombrit : sans ça les
+	// facettes ne se lisent que par la lumière rasante, et à midi la nappe
+	// redevient un aplat.
+	col = mix(col * 0.72, col, smoothstep(-1.0, 0.2, crete));
+	col = mix(col, ecume.rgb, smoothstep(0.55, 1.0, crete) * 0.35);
+	// La nuit, l'eau se referme et ne garde que la lueur des quais.
+	col *= mix(1.0, 0.34, nuit);
+	ALBEDO = col;
+	EMISSION = ecume.rgb * smoothstep(0.7, 1.0, crete) * 0.08 * nuit;
+	ALPHA = teinte.a;
 }
 """
 
@@ -806,6 +876,11 @@ static func sol() -> ShaderMaterial:
 		_sol = _materiau(SOL)
 	return _sol
 
+static func eau() -> ShaderMaterial:
+	if _eau == null:
+		_eau = _materiau(EAU)
+	return _eau
+
 static func facade() -> ShaderMaterial:
 	if _facade == null:
 		_facade = _materiau(FACADE)
@@ -857,7 +932,7 @@ static var _nuit_courante := 0.5
 
 static func regler_nuit(valeur: float) -> void:
 	_nuit_courante = valeur
-	for m in [sol(), facade(), flaque(), lumineux(), voxel(), voxel_fusionne(), post(), ombre()]:
+	for m in [sol(), eau(), facade(), flaque(), lumineux(), voxel(), voxel_fusionne(), post(), ombre()]:
 		m.set_shader_parameter("nuit", valeur)
 	for cle in _voxels_teintes:
 		(_voxels_teintes[cle] as ShaderMaterial).set_shader_parameter("nuit", valeur)

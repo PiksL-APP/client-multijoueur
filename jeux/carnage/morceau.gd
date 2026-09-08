@@ -418,16 +418,35 @@ func _instance(centre: Vector3, taille: Vector3, couleur: Color) -> void:
 
 # ------------------------------------------------------------ étape 1 : le sol
 
+## L'EAU : la dalle du fond reste dans le maillage du sol (c'est la vase), et
+## la nappe vive part dans un maillage à part, découpée menu — sans quoi le
+## shader n'aurait que quatre sommets par tuile à lever, et pas une facette.
+const EAU_FOND := -1.6            ## la vase, sous la nappe
+const EAU_NAPPE := -0.55          ## le niveau au repos ; les vagues font ±0,45
+const EAU_DECOUPE := 4            ## carreaux par côté de tuile (2,5 unités)
+
 func _poser_le_sol() -> void:
 	var sol := SurfaceTool.new()
 	sol.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var eau := SurfaceTool.new()
+	eau.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var quelque_eau := false
 	for fiche in _fiches:
 		_dalle(sol, fiche)
+		if int(fiche["sol"]) == PlanVille.S_EAU:
+			_nappe_eau(eau, fiche)
+			quelque_eau = true
 	var noeud_sol := MeshInstance3D.new()
 	noeud_sol.mesh = sol.commit()
 	noeud_sol.material_override = MatieresCarnage.sol()
 	noeud_sol.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(noeud_sol)
+	if quelque_eau:
+		var noeud_eau := MeshInstance3D.new()
+		noeud_eau.mesh = eau.commit()
+		noeud_eau.material_override = MatieresCarnage.eau()
+		noeud_eau.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(noeud_eau)
 
 # ------------------------------------------------------------ étape 2 : les cubes
 
@@ -839,7 +858,7 @@ func _dalle(st: SurfaceTool, fiche: Dictionary) -> void:
 	var c := int(fiche["c"])
 	var l := int(fiche["l"])
 	var sol := int(fiche["sol"])
-	var y := -0.3 if sol == PlanVille.S_EAU else 0.0
+	var y := EAU_FOND if sol == PlanVille.S_EAU else 0.0
 	var rot := int(fiche["rot"])
 	var teinte: Color = fiche["teinte"]
 	# La graine : du bruit pour le shader, et ≥ 0,5 sur une avenue (le shader y
@@ -855,6 +874,29 @@ func _dalle(st: SurfaceTool, fiche: Dictionary) -> void:
 		st.set_uv2(Vector2(float(sol), graine))
 		st.set_normal(Vector3.UP)
 		st.add_vertex(p)
+
+## La NAPPE d'eau d'une tuile : une grille plate de EAU_DECOUPE carreaux de
+## côté. Elle ne porte ni UV ni couleur — le shader EAU lève chaque sommet
+## d'après sa position dans le monde, et prend la normale à la dérivée de la
+## face. La grille est calée sur la tuile, donc deux tuiles d'eau voisines
+## posent leurs sommets aux mêmes points : ils se lèvent pareil, sans une
+## fente entre les deux. Sur la rive, la nappe s'arrête net au bord de la
+## tuile, un mètre sous le quai : c'est le quai qui cache la couture.
+func _nappe_eau(st: SurfaceTool, fiche: Dictionary) -> void:
+	var c := int(fiche["c"])
+	var l := int(fiche["l"])
+	var pas := PlanVille.TUILE / float(EAU_DECOUPE)
+	var x0 := c * PlanVille.TUILE
+	var z0 := l * PlanVille.TUILE
+	for i in EAU_DECOUPE:
+		for j in EAU_DECOUPE:
+			var a := Vector3(x0 + i * pas, EAU_NAPPE, z0 + j * pas)
+			var b := a + Vector3(pas, 0.0, 0.0)
+			var d := a + Vector3(pas, 0.0, pas)
+			var e := a + Vector3(0.0, 0.0, pas)
+			for p in [a, b, d, a, d, e]:
+				st.set_normal(Vector3.UP)
+				st.add_vertex(p)
 
 ## Les coordonnées de texture d'un coin de tuile dont le dessin a été tourné de
 ## `rot` quarts de tour dans le sens horaire : on défait la rotation.
