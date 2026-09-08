@@ -220,6 +220,7 @@ var _soleil: DirectionalLight3D
 var _contre_jour: DirectionalLight3D
 var _environnement: Environment
 var _ciel: ProceduralSkyMaterial
+var _maquette: Maquette
 var _lumieres: Array[OmniLight3D] = []
 var _vitres: Array[MeshInstance3D] = []
 var _lucioles: CPUParticles3D
@@ -255,7 +256,7 @@ func demarrer() -> void:
 	_camera.make_current()
 
 	_construire_hud()
-	Maquette.poser(self, 0.6, 4.5)
+	_maquette = Maquette.poser(self, 0.6, 4.5)
 	# `--lieu=taverne` ouvre directement une pièce : c'est ce qui permet de
 	# photographier un intérieur au banc, sans avoir à y marcher.
 	var demande := ""
@@ -923,6 +924,7 @@ func _process(delta: float) -> void:
 			noeud.regarder(vers)
 
 	_camera.position = _camera.position.lerp(_position_camera(), clampf(delta * 6.0, 0.0, 1.0))
+	_suivre_du_regard()
 	if _portail_lueur:
 		var battement := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.0024)
 		(_portail_lueur.material_override as ShaderMaterial).set_shader_parameter("battement", battement)
@@ -934,6 +936,18 @@ func _process(delta: float) -> void:
 		_depuis_envoi = 0.0
 		_depuis_rappel = 0.0
 		_canal.envoyer("p", {"x": int(_position.x), "y": int(_position.y)})
+
+## La bande nette de l'effet maquette se pose sur le joueur, où qu'il soit
+## dans le cadre : près d'un bord de la carte la caméra se bloque et c'est le
+## personnage qui glisse dans l'image — il finissait dans le flou.
+func _suivre_du_regard() -> void:
+	if _maquette == null or _corps == null or not is_instance_valid(_corps):
+		return
+	var haut := get_viewport().get_visible_rect().size.y
+	if haut <= 1.0:
+		return
+	var point := _camera.unproject_position(_corps.global_position + Vector3(0, 1.0, 0))
+	_maquette.viser(point.y / haut)
 
 ## Annule le dernier pas s'il mène dans un meuble ou hors de la zone de
 ## marche. On corrige UN axe à la fois : le joueur glisse le long d'un mur au

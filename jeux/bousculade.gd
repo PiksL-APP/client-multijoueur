@@ -52,6 +52,7 @@ var _anneaux: Array[MeshInstance3D] = []
 var _anneaux_tombes := 0
 var _camera: Camera3D
 var _poussiere: CPUParticles3D
+var _maquette: Maquette
 var _chutes := 0
 var _victimes := 0
 
@@ -72,7 +73,7 @@ func etat_joueur() -> String:
 
 func preparer() -> void:
 	Tactile.mode = Tactile.MARCHE
-	Maquette.poser(self, 0.52, 5.0)
+	_maquette = Maquette.poser(self, 0.52, 5.0)
 	_eclairer()
 	_camera = Camera3D.new()
 	_camera.fov = 42.0
@@ -360,6 +361,12 @@ func rafraichir_scene(delta: float) -> void:
 	_corps.penche = 0.55 if _charge > 0.0 else 0.0
 	_halo.visible = _vivant
 	_halo.position = Vector3(_p.x, 0.04, _p.y)
+	# La netteté suit le joueur, mais au SOL : tombé dans le vide, il
+	# entraînerait la mise au point avec lui jusqu'en bas de l'écran.
+	if _maquette:
+		var haut := get_viewport().get_visible_rect().size.y
+		if haut > 1.0:
+			_maquette.viser(_camera.unproject_position(Vector3(_p.x, 0.9, _p.y)).y / haut)
 
 	for cle in _autres:
 		var a: Dictionary = _autres[cle]

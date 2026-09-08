@@ -77,4 +77,15 @@ static func poser(ecran: Node, centre: float = 0.6, force: float = 6.0) -> Maque
 	return m
 
 func regler(nom: String, valeur: float) -> void:
+	if _voile == null:
+		return
 	(_voile.material as ShaderMaterial).set_shader_parameter(nom, valeur)
+
+## Recale la bande nette sur un point de l'ÉCRAN (0 en haut, 1 en bas).
+## Une ligne de netteté fixe suffit tant que le personnage reste au même
+## endroit de l'image ; dès que la caméra bute sur un bord de la carte, il
+## monte ou descend dans le cadre et se retrouve dans le flou. On la lui
+## accroche donc, en la bornant pour que le ciel et le bas de l'écran
+## gardent toujours leur trouble — c'est lui qui fait la maquette.
+func viser(hauteur_ecran: float) -> void:
+	regler("centre", clampf(hauteur_ecran, 0.30, 0.82))

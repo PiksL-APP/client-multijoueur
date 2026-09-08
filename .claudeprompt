@@ -205,7 +205,14 @@ jeux ne le sont pas, et l'arche assume l'écart au lieu de le cacher. Deux
 pièges vus : la nappe se pose DEVANT le fond noir de l'arche (la case de
 voxels du fond occupe z ∈ [-1/8, 0] — à -0,05 on est dedans, donc caché), et
 `UV.y` part du haut (il faut `1.0 - UV.y` pour que le ciel soit en haut). À
-soixante pixels de haut à l'écran, seules de GRANDES formes se lisent. Le tchat du hub passe par l'événement `chat` du canal `mj-hub` ; `Commandes.saisie` coupe les pas pendant qu'on écrit. Un nouveau jeu, c'est : `jeux/<nom>.gd` héritant
+soixante pixels de haut à l'écran, seules de GRANDES formes se lisent. La
+bande nette de l'effet maquette S'ACCROCHE au joueur (`Maquette.viser`, nourri
+par `unproject_position`) : fixée, elle le laisse dans le flou dès que la
+caméra bute sur un bord de la carte et que le personnage glisse dans le cadre.
+Les SEUILS des portes sont réservés dans `voxel.py` (la case de la porte et
+deux rangées devant, versées dans `occupe`) et un garde-fou refuse d'écrire un
+`plan.json` dont une porte serait bouchée — un étal posé à la main avait rendu
+l'auberge inaccessible sans qu'aucun banc ne s'en aperçoive. Le tchat du hub passe par l'événement `chat` du canal `mj-hub` ; `Commandes.saisie` coupe les pas pendant qu'on écrit. Un nouveau jeu, c'est : `jeux/<nom>.gd` héritant
 de `Partie`, une entrée dans `ECRANS` (racine), un portail dans une pièce
 du hub (`voxel.py` : `porte_portail` + `scores`, `hub.gd` : `LIEUX`), et la
 liste des jeux connus en base — contrainte `jeu_parties_jeu_check` et
