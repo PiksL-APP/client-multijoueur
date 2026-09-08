@@ -213,7 +213,20 @@ pieds du joueur reste plat : les collisions, elles, le sont). Les collisions du 
 pas à la main : elles viennent de `plan.json`. Le pack *Pixel Crawler*
 (`modeles/village/`, `outils/village.py`) ne sert plus qu'à `Pixels.heros_de`
 (le héros par défaut d'un identifiant) — les portraits de l'accueil sont des
-fenêtres 3D sur les pantins. L'effet maquette (`Maquette.poser(ecran, centre, force)`) est un plein écran en couche 0 qui relit l'image (`hint_screen_texture`) : l'interface, en couche 1, reste nette ; sous llvmpipe il coûte cher — photographier en 960 × 540 quand ça rame. Les ombres directionnelles en compatibilité hachurent les faces plates des voxels (acné d'ombre en diagonales) tant que le biais est timide : `shadow_bias` 0.8, `shadow_normal_bias` 6, `shadow_blur` 1.6, carte de 4096 et filtre doux à 2 (`project.godot`) — c'est ce qui a effacé les hachures ; `--sans-ombres` et `--sans-effets` isolent le rendu brut au banc. Le tchat du hub passe par l'événement `chat` du canal `mj-hub` ; `Commandes.saisie` coupe les pas pendant qu'on écrit. Un nouveau jeu, c'est : `jeux/<nom>.gd` héritant
+fenêtres 3D sur les pantins. L'effet maquette (`Maquette.poser(ecran, centre, force)`) est un plein écran en couche 0 qui relit l'image (`hint_screen_texture`) : l'interface, en couche 1, reste nette ; sous llvmpipe il coûte cher — photographier en 960 × 540 quand ça rame. Les ombres directionnelles en compatibilité hachurent les faces plates des voxels (acné d'ombre en diagonales) tant que le biais est timide : `shadow_bias` 0.8, `shadow_normal_bias` 6, `shadow_blur` 1.6, carte de 4096 et filtre doux à 2 (`project.godot`) — c'est ce qui a effacé les hachures ; `--sans-ombres` et `--sans-effets` isolent le rendu brut au banc. Le portail d'une pièce est une FENÊTRE sur le monde d'en face
+(shader `FENETRE` de `hub.gd`, un `monde` par jeu) : le hub est en voxels, les
+jeux ne le sont pas, et l'arche assume l'écart au lieu de le cacher. Deux
+pièges vus : la nappe se pose DEVANT le fond noir de l'arche (la case de
+voxels du fond occupe z ∈ [-1/8, 0] — à -0,05 on est dedans, donc caché), et
+`UV.y` part du haut (il faut `1.0 - UV.y` pour que le ciel soit en haut). À
+soixante pixels de haut à l'écran, seules de GRANDES formes se lisent. La
+bande nette de l'effet maquette S'ACCROCHE au joueur (`Maquette.viser`, nourri
+par `unproject_position`) : fixée, elle le laisse dans le flou dès que la
+caméra bute sur un bord de la carte et que le personnage glisse dans le cadre.
+Les SEUILS des portes sont réservés dans `voxel.py` (la case de la porte et
+deux rangées devant, versées dans `occupe`) et un garde-fou refuse d'écrire un
+`plan.json` dont une porte serait bouchée — un étal posé à la main avait rendu
+l'auberge inaccessible sans qu'aucun banc ne s'en aperçoive. Le tchat du hub passe par l'événement `chat` du canal `mj-hub` ; `Commandes.saisie` coupe les pas pendant qu'on écrit. Un nouveau jeu, c'est : `jeux/<nom>.gd` héritant
 de `Partie`, une entrée dans `ECRANS` (racine), un portail dans une pièce
 du hub (`voxel.py` : `porte_portail` + `scores`, `hub.gd` : `LIEUX`), et la
 liste des jeux connus en base — contrainte `jeu_parties_jeu_check` et

@@ -1494,6 +1494,18 @@ for nom, X, Y in MAISONS:
     if d["fumee"]:
         fumees.append([px / T + d["fumee"][0], d["fumee"][1], py / T + d["fumee"][2]])
 
+# Les SEUILS. La case de chaque porte et les deux rangées devant elle sont
+# réservées : sans cela un étal, un buisson semé au hasard ou un réverbère
+# vient s'y planter, et la maison devient inaccessible sans qu'aucun test ne
+# s'en aperçoive — c'est arrivé à l'auberge.
+SEUILS = set()
+for _p in portes:
+    _cx, _cy = _p["x"] // T, _p["y"] // T
+    for _i in range(_p["l"] // T):
+        for _j in range(-1, 3):
+            SEUILS.add((_cx + _i, _cy + _j))
+occupe |= SEUILS
+
 # Le cœur de l'esplanade : le feu, deux bancs, le marché.
 poser("foyer", 31, 28)
 FEU = (32 * T, 29 * T)
@@ -1502,7 +1514,7 @@ poser("banc", 37, 28)
 poser("caisses", 36, 24)
 for i, nom in enumerate(("carottes", "radis", "choux", "laitues")):
     poser(f"cageot_{nom}", 38 + i, 23)
-poser("etal", 43, 24)
+poser("etal", 45, 27)
 poser("forge", 14, 22)
 poser("fourneau", 13, 19)
 poser("jardiniere", 27, 23)
@@ -1967,6 +1979,16 @@ for nom, p in PIECES.items():
     ecrire(f"piece_{nom}", p["piece"].m, centrer=False)
 
 # ------------------------------------------------------------------ plan.json
+# Le garde-fou : un plan dont une porte est bouchée n'est pas écrit du tout.
+for _p in portes:
+    _cx, _cy = _p["x"] // T, _p["y"] // T
+    for _i in range(_p["l"] // T):
+        for _j in range(0, 2):
+            if (_cx + _i, _cy + _j) in bloque:
+                raise SystemExit(
+                    f"porte bouchée : {_p['lieu']} en ({_cx + _i}, {_cy + _j})")
+
+
 def carte(blocs, largeur, hauteur):
     return ["".join("#" if (x, y) in blocs else "." for x in range(largeur)) for y in range(hauteur)]
 
