@@ -162,6 +162,10 @@ var _tableau: Label3D
 var _affichage: Label3D
 var _journal: Array = []
 var _classements: Dictionary = {}
+var _tchat_lignes: VBoxContainer
+var _tchat_champ: LineEdit
+var _tchat_bouton: Button
+var _depuis_message := 9.0
 
 func demarrer() -> void:
 	_camera = Camera3D.new()
@@ -172,6 +176,7 @@ func demarrer() -> void:
 	_camera.make_current()
 
 	_construire_hud()
+	Maquette.poser(self, 0.6, 4.5)
 	# `--lieu=taverne` ouvre directement une pièce : c'est ce qui permet de
 	# photographier un intérieur au banc, sans avoir à y marcher.
 	var demande := ""
@@ -185,6 +190,9 @@ func demarrer() -> void:
 				depart = Vector2(float(xy[0]), float(xy[1]))
 		elif a.begins_with("--nuit="):
 			nuit_forcee = float(a.substr(7))
+		elif a.begins_with("--tchat="):
+			var texte := a.substr(8).replace("_", " ")
+			get_tree().create_timer(3.0).timeout.connect(func() -> void: _dire(texte))
 		elif a.begins_with("--emote="):
 			var indice := int(a.substr(8))
 			get_tree().create_timer(4.0).timeout.connect(func() -> void:
@@ -782,6 +790,8 @@ func _faire_les_rondes(delta: float) -> void:
 func _process(delta: float) -> void:
 	_faire_les_rondes(delta)
 	_tomber_la_nuit(delta)
+	_depuis_message += delta
+	Commandes.saisie = _tchat_champ != null and _tchat_champ.has_focus()
 	var direction := Commandes.direction()
 	if direction != Vector2.ZERO:
 		var avant := _position
@@ -886,6 +896,8 @@ func _unhandled_input(evenement: InputEvent) -> void:
 	if not (evenement is InputEventKey and evenement.pressed and not evenement.echo):
 		return
 	match evenement.keycode:
+		KEY_ENTER, KEY_KP_ENTER, KEY_T:
+			_ouvrir_le_tchat()
 		KEY_E:
 			_agir()
 		KEY_K:
@@ -935,7 +947,12 @@ func _agir() -> void:
 
 func _sur_diffusion(evenement: String, charge: Dictionary) -> void:
 	var cle := String(charge.get("cle", ""))
-	if cle == "" or cle == Session.cle or not _autres.has(cle):
+	if cle == "" or cle == Session.cle:
+		return
+	if evenement == "chat":
+		_recevoir_message(cle, charge)
+		return
+	if not _autres.has(cle):
 		return
 	match evenement:
 		"p":
@@ -980,6 +997,108 @@ func _titre(pseudo: String) -> String:
 		if not lignes.is_empty() and String(lignes[0].get("pseudo", "")) == pseudo:
 			return "* " + pseudo
 	return pseudo
+
+# ---------------------------------------------------------------- le tchat
+
+const TCHAT_MAX := 140
+const TCHAT_LIGNES := 6
+
+func _ouvrir_le_tchat() -> void:
+	if _tchat_champ == null or _tchat_champ.has_focus():
+		return
+	_tchat_champ.visible = true
+	_tchat_champ.grab_focus()
+	_rafraichir_hud()
+
+func _fermer_le_tchat() -> void:
+	_tchat_champ.release_focus()
+	_tchat_champ.visible = Tactile.actif()
+	Commandes.saisie = false
+	_rafraichir_hud()
+
+## Ce qu'on tape part à tous ceux du hub, quelle que soit leur pièce.
+func _dire(texte: String) -> void:
+	var propre := texte.strip_edges().left(TCHAT_MAX)
+	_tchat_champ.text = ""
+	_fermer_le_tchat()
+	if propre == "" or _depuis_message < 1.2:
+		return
+	_depuis_message = 0.0
+	_ajouter_au_tchat(Session.pseudo, propre, "", true)
+	_bulle(_corps, propre)
+	Sons.jouer("clic", 1.3, -20.0)
+	if _canal:
+		_canal.envoyer("chat", {"t": propre, "l": _lieu})
+
+func _recevoir_message(cle: String, charge: Dictionary) -> void:
+	var texte := String(charge.get("t", "")).strip_edges().left(TCHAT_MAX)
+	if texte == "":
+		return
+	var pseudo := "?"
+	if _canal and _canal.presences.has(cle):
+		pseudo = String(_canal.presences[cle].get("pseudo", "?"))
+	elif _autres.has(cle):
+		pseudo = String(_autres[cle]["pseudo"])
+	var lieu := String(charge.get("l", ""))
+	_ajouter_au_tchat(pseudo, texte, "" if lieu == _lieu else String(LIEUX.get(lieu, {}).get("nom", lieu)), false)
+	if _autres.has(cle):
+		_bulle(_autres[cle]["noeud"], texte)
+	Sons.jouer("clic", 0.9, -22.0)
+
+## Une ligne du fil : « pseudo — texte », l'origine entre crochets si elle
+## parle d'une autre pièce ; la ligne s'efface d'elle-même au bout d'un moment.
+func _ajouter_au_tchat(pseudo: String, texte: String, origine: String, moi: bool) -> void:
+	if _tchat_lignes == null:
+		return
+	var ligne := RichTextLabel.new()
+	ligne.bbcode_enabled = true
+	ligne.fit_content = true
+	ligne.scroll_active = false
+	ligne.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ligne.custom_minimum_size = Vector2(420, 0)
+	ligne.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ligne.add_theme_font_override("normal_font", UI.TEXTE_POLICE)
+	ligne.add_theme_font_size_override("normal_font_size", UI.taille_texte(14))
+	ligne.add_theme_font_override("bold_font", UI.TEXTE_POLICE)
+	ligne.add_theme_font_size_override("bold_font_size", UI.taille_texte(14))
+	var couleur := Palette.SERIE if moi else Palette.AVERTISSEMENT
+	var prefixe := ("[color=#%s][%s][/color] " % [Palette.ENCRE_FAIBLE.to_html(false), origine]) if origine != "" else ""
+	ligne.text = "%s[b][color=#%s]%s[/color][/b] [color=#%s]%s[/color]" % [
+		prefixe, couleur.to_html(false), pseudo, Palette.ENCRE.to_html(false), texte.replace("[", "［")]
+	_tchat_lignes.add_child(ligne)
+	while _tchat_lignes.get_child_count() > TCHAT_LIGNES:
+		_tchat_lignes.get_child(0).free()
+	var tween := create_tween()
+	tween.tween_interval(14.0)
+	tween.tween_property(ligne, "modulate:a", 0.0, 2.0)
+	tween.tween_callback(func() -> void:
+		if is_instance_valid(ligne):
+			ligne.queue_free())
+
+## La bulle au-dessus de la tête : le texte, coupé en lignes courtes.
+func _bulle(porteur: Node3D, texte: String) -> void:
+	if porteur == null or not is_instance_valid(porteur):
+		return
+	var ancienne := porteur.get_node_or_null("bulle")
+	if ancienne:
+		ancienne.queue_free()
+	var mots := texte.split(" ")
+	var lignes: Array[String] = [""]
+	for mot in mots:
+		if lignes[-1].length() + mot.length() > 18 and lignes[-1] != "":
+			lignes.append("")
+		lignes[-1] = (lignes[-1] + " " + mot).strip_edges()
+	var bulle := _etiquette_flottante("\n".join(lignes), 0.34)
+	bulle.name = "bulle"
+	bulle.modulate = Color(1.0, 0.96, 0.8)
+	bulle.outline_modulate = Color(0.06, 0.06, 0.08, 0.95)
+	bulle.outline_size = 10
+	bulle.position = Vector3(0, 3.0 + 0.4 * lignes.size(), 0)
+	porteur.add_child(bulle)
+	var tween := create_tween()
+	tween.tween_interval(6.0)
+	tween.tween_property(bulle, "modulate:a", 0.0, 0.6)
+	tween.tween_callback(bulle.queue_free)
 
 # ---------------------------------------------------------------- émotes
 
@@ -1161,6 +1280,35 @@ func _construire_hud() -> void:
 	bas.add_child(_hud_titre)
 	bas.add_child(_hud_invite)
 
+	# Le tchat : le fil des derniers messages au-dessus du titre, et le champ
+	# de saisie, qui n'apparaît que quand on parle (Entrée ou T).
+	var tchat := VBoxContainer.new()
+	tchat.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	tchat.offset_left = 20
+	tchat.offset_right = 480
+	tchat.offset_top = -330
+	tchat.offset_bottom = -104
+	tchat.alignment = BoxContainer.ALIGNMENT_END
+	tchat.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tchat.add_theme_constant_override("separation", 2)
+	couche.add_child(tchat)
+	_tchat_lignes = VBoxContainer.new()
+	_tchat_lignes.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tchat_lignes.add_theme_constant_override("separation", 2)
+	tchat.add_child(_tchat_lignes)
+	_tchat_champ = UI.champ("Dire quelque chose… (Entrée pour envoyer, Échap pour fermer)")
+	_tchat_champ.custom_minimum_size = Vector2(440, 38)
+	_tchat_champ.add_theme_font_size_override("font_size", UI.taille_texte(15))
+	_tchat_champ.max_length = TCHAT_MAX
+	_tchat_champ.visible = Tactile.actif()
+	_tchat_champ.text_submitted.connect(_dire)
+	_tchat_champ.gui_input.connect(func(e: InputEvent) -> void:
+		if e is InputEventKey and e.pressed and e.keycode == KEY_ESCAPE:
+			_tchat_champ.text = ""
+			_fermer_le_tchat()
+			_tchat_champ.accept_event())
+	tchat.add_child(_tchat_champ)
+
 	var centre := CenterContainer.new()
 	centre.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	centre.offset_top = -210
@@ -1210,7 +1358,7 @@ func _rafraichir_hud() -> void:
 		"sortir": _hud_invite.text = "E — ressortir"
 		"portail": _hud_invite.text = "E — franchir le portail"
 		"parler": _hud_invite.text = "E — parler"
-		_: _hud_invite.text = "Z Q S D pour marcher · K : carnet · 1-4 : émotes"
+		_: _hud_invite.text = "Z Q S D pour marcher · Entrée : parler · K : carnet · 1-4 : émotes"
 
 	var parle := _invite == "parler" and _pnj_proche >= 0 and _phrase >= 0 \
 		and _phrase < (_pnj[_pnj_proche]["phrases"] as Array).size()

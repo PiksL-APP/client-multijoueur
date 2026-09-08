@@ -173,7 +173,7 @@ maillage glouton ne fusionne plus rien). Les collisions du hub ne se codent
 pas à la main : elles viennent de `plan.json`. Le pack *Pixel Crawler*
 (`modeles/village/`, `outils/village.py`) ne sert plus qu'à `Pixels.heros_de`
 (le héros par défaut d'un identifiant) — les portraits de l'accueil sont des
-fenêtres 3D sur les pantins. Un nouveau jeu, c'est : `jeux/<nom>.gd` héritant
+fenêtres 3D sur les pantins. L'effet maquette (`Maquette.poser(ecran, centre, force)`) est un plein écran en couche 0 qui relit l'image (`hint_screen_texture`) : l'interface, en couche 1, reste nette ; sous llvmpipe il coûte cher — photographier en 960 × 540 quand ça rame. Le tchat du hub passe par l'événement `chat` du canal `mj-hub` ; `Commandes.saisie` coupe les pas pendant qu'on écrit. Un nouveau jeu, c'est : `jeux/<nom>.gd` héritant
 de `Partie`, une entrée dans `ECRANS` (racine), un portail dans une pièce
 du hub (`voxel.py` : `porte_portail` + `scores`, `hub.gd` : `LIEUX`), et la
 liste des jeux connus en base — contrainte `jeu_parties_jeu_check` et
