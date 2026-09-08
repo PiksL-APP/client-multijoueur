@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
-"""Fabrique le hub en voxels : les modèles (glTF), le terrain et le plan.
+"""Fabrique les modèles voxel : l'arène de la Bousculade, la végétation, les héros.
 
     python3 outils/voxel.py
 
-Tout est construit ici, cube par cube, à partir d'une palette : le terrain du
-village, les maisons, les arbres, le mobilier, les habitants et les héros,
-les pièces où l'on entre. Rien n'est découpé dans un dessin d'autrui — le
-village est dessiné par ce script, qui est sa seule source.
+LE VILLAGE N'EXISTE PLUS. Il a été l'écran d'accueil du jeu — une place, cinq
+maisons, des habitants, des portails — et la ville de Pikstown a pris sa
+place : c'est elle, maintenant, le hub. Tout ce qui le bâtissait (maisons,
+pièces intérieures, mobilier, habitants, terrain, plan de collisions) est
+encore ICI, sous `VILLAGE`, mais n'est plus ÉCRIT : ce sont des fonctions
+sans appelant, gardées parce qu'elles savent des choses — le maillage
+glouton, l'occlusion cuite, le bruit de taches — qu'on ne veut pas réécrire.
+Mettre `VILLAGE = True` les remet en sortie.
+
+Ce que le jeu charge encore : les anneaux et les îlots de la Bousculade, les
+arbres, pins, buissons, rochers et fleurs qui la décorent, et les trois
+pantins héros. Rien n'est découpé dans un dessin d'autrui.
 
 Échelle : une case du plan fait 16 pixels dans la simulation (inchangée, les
 positions réseau restent compatibles) et UNE unité dans le monde 3D. Un
@@ -14,8 +22,7 @@ modèle fin est bâti en voxels de 1/8 d'unité (un personnage fait seize
 voxels de haut, deux unités) ; les arbres et le terrain en voxels plus gros.
 
 Sortie : `modeles/voxel/*.glb` (maillages à couleurs par sommet, faces
-plates) et `modeles/voxel/plan.json` (cases bloquées, objets posés, portes,
-lumières…) que le moteur lit tel quel.
+plates). Le `plan.json` des collisions du village n'est plus écrit non plus.
 """
 import json
 import math
@@ -24,6 +31,9 @@ from pathlib import Path
 
 import numpy as np
 import trimesh
+
+## Le village n'est plus un écran du jeu : ses modèles ne sont plus écrits.
+VILLAGE = False
 
 SORTIE = Path(__file__).resolve().parent.parent / "modeles" / "voxel"
 SORTIE.mkdir(parents=True, exist_ok=True)
@@ -303,6 +313,13 @@ def centrer_xz(modele):
 ECRITS = []
 
 
+def ecrire_village(nom, modele, centrer=True, decalage=None):
+    """Un modèle qui n'appartenait qu'au village : écrit seulement si on
+    ressuscite celui-ci."""
+    if VILLAGE:
+        ecrire(nom, modele, centrer, decalage)
+
+
 def ecrire(nom, modele, centrer=True, decalage=None):
     """Un modèle → un glTF binaire, appui au sol centré."""
     d = decalage
@@ -313,6 +330,12 @@ def ecrire(nom, modele, centrer=True, decalage=None):
     m.export(SORTIE / f"{nom}.glb")
     ECRITS.append(nom)
     print(f"{nom:28s} {len(m.faces):6d} triangles")
+
+
+def ecrire_parties_village(nom, parties):
+    """Un habitant du village : écrit seulement si on ressuscite celui-ci."""
+    if VILLAGE:
+        ecrire_parties(nom, parties)
 
 
 def ecrire_parties(nom, parties):
@@ -642,7 +665,7 @@ def maison(nom, mur, toit, cheminee=True, grange=False):
     assise.fusion(m, 0, SOCLE, 0)
     DETAILS[nom] = {"fenetres": [(x * FIN, (y + SOCLE) * FIN, z * FIN) for (x, y, z) in vitres],
                     "fumee": None if fumee is None else (fumee[0], fumee[1] + SOCLE * FIN, fumee[2])}
-    ecrire(f"maison_{nom}", assise, centrer=False)
+    ecrire_village(f"maison_{nom}", assise, centrer=False)
 
 
 maison("taverne", "platre", "brun")
@@ -845,22 +868,22 @@ def lanterne():
     return m
 
 
-ecrire("lanterne", lanterne())
-ecrire("banc", banc())
-ecrire("caisses", caisses())
+ecrire_village("lanterne", lanterne())
+ecrire_village("banc", banc())
+ecrire_village("caisses", caisses())
 for nom, c in (("carottes", P["carotte"]), ("radis", P["radis"]), ("choux", P["chou"]), ("laitues", P["laitue"])):
-    ecrire(f"cageot_{nom}", cageot(c))
-    ecrire(f"culture_{nom}", culture(c, 3 if nom in ("carottes", "radis") else 2))
-ecrire("cloture", cloture())
-ecrire("jardiniere", jardiniere())
-ecrire("epouvantail", epouvantail())
-ecrire("foyer", foyer())
-ecrire("forge", forge())
-ecrire("fourneau", fourneau())
-ecrire("rotissoire", rotissoire())
-ecrire("scierie", scierie())
-ecrire("tableau", tableau())
-ecrire("etal", etal())
+    ecrire_village(f"cageot_{nom}", cageot(c))
+    ecrire_village(f"culture_{nom}", culture(c, 3 if nom in ("carottes", "radis") else 2))
+ecrire_village("cloture", cloture())
+ecrire_village("jardiniere", jardiniere())
+ecrire_village("epouvantail", epouvantail())
+ecrire_village("foyer", foyer())
+ecrire_village("forge", forge())
+ecrire_village("fourneau", fourneau())
+ecrire_village("rotissoire", rotissoire())
+ecrire_village("scierie", scierie())
+ecrire_village("tableau", tableau())
+ecrire_village("etal", etal())
 
 # ------------------------------------------------------------------ l'arène
 # L'île de la Bousculade : un disque de terre et d'herbe qui flotte, découpé
@@ -1226,15 +1249,15 @@ ecrire_parties("heros_rogue", personnage(P["peau2"], P["cheveux3"], P["capuche"]
     capuche, cape))
 ecrire_parties("heros_wizzard", personnage(P["peau"], P["blanc"], P["robe"], P["robe2"],
     chapeau_pointu, lambda p: (robe(p), baton(p))))
-ecrire_parties("pnj_paysanne", personnage(P["peau"], P["cheveux2"], P["robe_paysanne"], P["cuir"],
+ecrire_parties_village("pnj_paysanne", personnage(P["peau"], P["cheveux2"], P["robe_paysanne"], P["cuir"],
     foulard(P["tablier"]), lambda p: (jupe(P["robe_paysanne"])(p), tablier(p))))
-ecrire_parties("pnj_taverniere", personnage(P["peau"], P["cheveux"], P["robe_taverne"], P["cuir"],
+ecrire_parties_village("pnj_taverniere", personnage(P["peau"], P["cheveux"], P["robe_taverne"], P["cuir"],
     chignon(P["cheveux"]), lambda p: (jupe(P["robe_taverne"])(p), tablier(p)), coupe="longue"))
-ecrire_parties("pnj_aubergiste", personnage(P["peau2"], P["cheveux3"], P["robe_auberge"], P["cuir"],
+ecrire_parties_village("pnj_aubergiste", personnage(P["peau2"], P["cheveux3"], P["robe_auberge"], P["cuir"],
     chignon(P["cheveux3"]), lambda p: (jupe(P["robe_auberge"])(p), tablier(p))))
-ecrire_parties("pnj_serveuse", personnage(P["peau"], P["cheveux2"], P["robe_taverne"], P["cuir"],
+ecrire_parties_village("pnj_serveuse", personnage(P["peau"], P["cheveux2"], P["robe_taverne"], P["cuir"],
     None, lambda p: (jupe(P["robe_taverne"])(p), tablier(p), plateau(p)), coupe="longue"))
-ecrire_parties("pnj_squelette", personnage(P["os"], P["os"], P["os2"], P["os2"],
+ecrire_parties_village("pnj_squelette", personnage(P["os"], P["os"], P["os2"], P["os2"],
     crane, os_apparents, coupe="chauve"))
 
 # ------------------------------------------------------------------ le plan
@@ -1628,7 +1651,7 @@ for _ in range(2500):
     if len([o for o in objets if o["modele"].startswith(("fleur", "touffe"))]) >= 160:
         break
 
-ecrire("terrain_village", maillage_terrain(), centrer=False)
+ecrire_village("terrain_village", maillage_terrain(), centrer=False)
 
 # ------------------------------------------------------------------ intérieurs
 # Chaque pièce est UN maillage : sol, trois murs (le sud reste ouvert, la
@@ -1976,7 +1999,7 @@ aub.porte_portail(11)
 PIECES["auberge"] = {"piece": aub, "sortie": aub.sortie_sud(), "rondes": {}}
 
 for nom, p in PIECES.items():
-    ecrire(f"piece_{nom}", p["piece"].m, centrer=False)
+    ecrire_village(f"piece_{nom}", p["piece"].m, centrer=False)
 
 # ------------------------------------------------------------------ plan.json
 # Le garde-fou : un plan dont une porte est bouchée n'est pas écrit du tout.
@@ -2024,5 +2047,7 @@ for nom, p in PIECES.items():
         plan[nom]["portail"] = piece.portail
     if piece.tableau:
         plan[nom]["tableau"] = piece.tableau
-(SORTIE / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, separators=(",", ":")))
-print(f"plan.json écrit : {len(objets)} objets, {len(bloque)} cases bloquées, {len(ECRITS)} modèles")
+if VILLAGE:
+    (SORTIE / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, separators=(",", ":")))
+    print(f"plan.json écrit : {len(objets)} objets, {len(bloque)} cases bloquées")
+print(f"{len(ECRITS)} modèles écrits")

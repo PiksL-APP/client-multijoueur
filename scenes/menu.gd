@@ -18,11 +18,15 @@ extends Ecran
 const LOGO := "res://images/logo.png"
 ## Le lettrage occupe trois lignes : au-delà de cette largeur, la colonne
 ## déborde la hauteur de l'écran et emporte la boîte avec elle.
-const LOGO_LARGEUR := 320.0
+const LOGO_LARGEUR := 300.0
 
 const VITRINE := "PIKSTOWN"         ## le code de ville montré au menu — et son nom
 const CREPUSCULE := 0.50            ## 0 plein jour, 1 nuit noire — 0,5 est le couchant
-const MORCEAUX_LARGE := 3           ## côté du carré bâti, pour tenir jusqu'à l'horizon
+## Côté du carré de morceaux bâtis. Cinq sur cinq, soit mille unités : à trois,
+## la ville s'arrêtait net avant l'horizon et on voyait la couture entre le sol
+## et le ciel. Bâtir les vingt-cinq coûte moins d'un dixième de seconde — ce
+## sont des morceaux statiques, sans voitures ni passants à animer.
+const MORCEAUX_LARGE := 5
 const HAUTEUR := 54.0               ## altitude de la caméra, en unités monde
 const RECUL := 168.0
 const TOUR := 150.0                 ## secondes pour un tour complet
@@ -53,6 +57,7 @@ var _chantiers: Array[MorceauVille] = []
 var _t := 0.0
 var _choix := 0
 var _boutons: Array[Button] = []
+var _marques: Array[ColorRect] = []
 var _aide: Label
 var _etat: HBoxContainer
 
@@ -79,6 +84,12 @@ func _batir_la_ville() -> void:
 	# passe à l'orange. On la règle sans toucher `nuit_forcee`, qui appartient
 	# au jeu.
 	MatieresCarnage.regler_heure(_ambiance[0], _ambiance[1], _ambiance[2], heure())
+	# Et une brume plus épaisse qu'en jeu : c'est elle qui noie le dernier
+	# rang d'immeubles dans l'horizon, pour qu'aucune arête ne trahisse le
+	# bord du monde. En jeu on veut voir loin ; ici on veut voir beau.
+	var air: Environment = (_ambiance[0] as WorldEnvironment).environment
+	air.fog_density = 0.0052
+	air.fog_sky_affect = 0.6
 	var sol := MatieresCarnage.sol()
 	sol.set_shader_parameter("rail", _carte.rail())
 	sol.set_shader_parameter("lignes", _carte.lignes_libres())
@@ -106,7 +117,9 @@ func _batir_la_ville() -> void:
 	_camera = Camera3D.new()
 	_camera.fov = 44.0
 	_camera.near = 0.5
-	_camera.far = 900.0
+	# La ville fait mille unités de côté : à neuf cents, le plan lointain
+	# était coupé net au milieu des toits.
+	_camera.far = 1800.0
 	monde().add_child(_camera)
 	_camera.make_current()
 	_placer_la_camera(0.0)
@@ -172,8 +185,6 @@ func _poser_l_interface() -> void:
 	colonne.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	rangee.add_child(colonne)
 
-	var surtitre := UI.texte("Piks-l · multijoueur", 15, ROSE)
-	colonne.add_child(surtitre)
 	# Le lettrage porte déjà son liseré noir : sur une ville qui tourne, un
 	# titre blanc nu se perd dès qu'un toit clair passe dessous.
 	var logo := TextureRect.new()
@@ -186,7 +197,7 @@ func _poser_l_interface() -> void:
 	logo.custom_minimum_size = Vector2(LOGO_LARGEUR,
 		LOGO_LARGEUR * float(t.get_height()) / float(t.get_width()))
 	colonne.add_child(logo)
-	var sous := UI.texte("Pikstown. Une ville sans limites — chaque bâtiment ouvre une partie.",
+	var sous := UI.texte("Pikstown. Une ville sans limites.",
 		17, Palette.ENCRE_DOUCE)
 	sous.add_theme_color_override("font_outline_color", Color("#120a18"))
 	sous.add_theme_constant_override("outline_size", 6)
@@ -205,7 +216,7 @@ func _poser_l_interface() -> void:
 	# les deux blocs se répondent alors, au lieu que l'un flotte dans le vide.
 	colonne.resized.connect(func() -> void:
 		if _cadre_boite != null and is_instance_valid(_cadre_boite):
-			_cadre_boite.custom_minimum_size.y = maxf(320.0, colonne.size.y))
+			_cadre_boite.custom_minimum_size.y = clampf(colonne.size.y, 300.0, HAUTEUR_BOITE_MAX))
 
 	var espace2 := Control.new()
 	espace2.custom_minimum_size = Vector2(0, 22)
@@ -226,7 +237,7 @@ func _poser_l_interface() -> void:
 	_etat = UI.etat_reseau()
 	bas.add_child(_etat)
 	bas.add_child(UI.texte("version " + Config.version, 13, Palette.ENCRE_FAIBLE))
-	bas.add_child(UI.texte("↑ ↓ pour choisir · Entrée pour valider", 13, Palette.ENCRE_FAIBLE))
+	bas.add_child(UI.texte("Haut et bas pour choisir · Entrée pour valider", 13, Palette.ENCRE_FAIBLE))
 
 ## La pochette du jeu, dans sa boîte, posée à gauche du menu.
 ##
@@ -242,12 +253,13 @@ const POCHETTE_DOS := "res://images/pochette-dos.jpg"
 ## la même forme, avec une bande sombre là où il en manque, vaut mieux que de
 ## les étirer chacune à la sienne — un dos déformé de douze pour cent se voit.
 const BOITE := Vector3(1.34, 1.94, 0.26)
-const LARGEUR_BOITE := 360.0               ## largeur du panneau, en pixels
+const LARGEUR_BOITE := 240.0               ## largeur du panneau, en pixels
+const HAUTEUR_BOITE_MAX := 400.0           ## au-delà, la boîte écrase le menu
 
 func _boite_du_jeu() -> SubViewportContainer:
 	var cadre := SubViewportContainer.new()
 	cadre.stretch = true
-	cadre.custom_minimum_size = Vector2(LARGEUR_BOITE, 460)
+	cadre.custom_minimum_size = Vector2(LARGEUR_BOITE, 330)
 	cadre.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	# La boîte se retourne au survol : il lui faut donc les événements de
 	# souris, que le reste de l'habillage laisse passer.
@@ -275,20 +287,16 @@ func _boite_du_jeu() -> SubViewportContainer:
 	monde_env.environment = environnement
 	fenetre.add_child(monde_env)
 
-	# Deux sources, celles du couchant : chaude de face à droite, rose de
-	# l'autre bord — la même lumière que sur la ville derrière.
-	var chaude := DirectionalLight3D.new()
-	chaude.rotation_degrees = Vector3(-26, -34, 0)
-	chaude.light_color = Color("#ffcf9a")
-	chaude.light_energy = 1.6
-	chaude.shadow_enabled = false
-	fenetre.add_child(chaude)
-	var rose := DirectionalLight3D.new()
-	rose.rotation_degrees = Vector3(-8, 128, 0)
-	rose.light_color = ROSE
-	rose.light_energy = 1.1
-	rose.shadow_enabled = false
-	fenetre.add_child(rose)
+	# UNE seule source, blanche et douce, et rien d'autre : elle ne sert qu'à
+	# détacher la tranche du boîtier. La lueur rose du couchant qu'on y avait
+	# mise glissait un reflet coloré sur la jaquette — or une jaquette se
+	# regarde, elle ne brille pas.
+	var douce := DirectionalLight3D.new()
+	douce.rotation_degrees = Vector3(-22, -30, 0)
+	douce.light_color = Color("#ffffff")
+	douce.light_energy = 1.0
+	douce.shadow_enabled = false
+	fenetre.add_child(douce)
 
 	_boite = Node3D.new()
 	fenetre.add_child(_boite)
@@ -298,7 +306,14 @@ func _boite_du_jeu() -> SubViewportContainer:
 	var volume := BoxMesh.new()
 	volume.size = BOITE
 	corps.mesh = volume
-	corps.material_override = Decor.matiere(Color("#14101c"), 0.42)
+	# Noir mat : les tranches d'un boîtier de jeu sont noires, et un plastique
+	# brillant renverrait la ville sur les côtés de l'affiche.
+	var plastique := StandardMaterial3D.new()
+	plastique.albedo_color = Color.BLACK
+	plastique.roughness = 1.0
+	plastique.metallic = 0.0
+	plastique.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	corps.material_override = plastique
 	_boite.add_child(corps)
 
 	# La jaquette : un quad plaqué juste devant la face avant. La boîte n'en
@@ -309,10 +324,12 @@ func _boite_du_jeu() -> SubViewportContainer:
 	carte.size = Vector2(BOITE.x * 0.96, BOITE.y * 0.97)
 	jaquette.mesh = carte
 	jaquette.position = Vector3(0, 0, BOITE.z * 0.5 + 0.002)
+	# Non éclairée : l'affiche s'affiche telle qu'elle est, sans reflet ni
+	# ombre portée qui en changerait les couleurs.
 	var papier := StandardMaterial3D.new()
 	papier.albedo_texture = load(POCHETTE)
-	papier.roughness = 0.55
-	papier.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
+	papier.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	papier.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	jaquette.material_override = papier
 	_boite.add_child(jaquette)
 
@@ -325,15 +342,8 @@ func _boite_du_jeu() -> SubViewportContainer:
 	dos.rotation_degrees = Vector3(0, 180, 0)
 	var verso := StandardMaterial3D.new()
 	verso.albedo_texture = load(POCHETTE_DOS)
-	verso.roughness = 0.6
-	verso.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
-	# Le dos ne reçoit que la lumière rasante d'en face : retourné, il tombait
-	# dans le noir et son texte devenait illisible. Une émission discrète de sa
-	# propre image le tient à niveau sans le faire briller.
-	verso.emission_enabled = true
-	verso.emission = Color.WHITE
-	verso.emission_texture = load(POCHETTE_DOS)
-	verso.emission_energy_multiplier = 0.42
+	verso.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	verso.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	dos.material_override = verso
 	_boite.add_child(dos)
 
@@ -343,8 +353,10 @@ func _boite_du_jeu() -> SubViewportContainer:
 	# Assez près pour que le boîtier remplisse presque la hauteur du panneau :
 	# la caméra garde la hauteur (`KEEP_HEIGHT`), donc la boîte grandit avec
 	# le panneau et jamais avec sa largeur.
+	# Pas de `look_at` : la caméra n'est pas encore DANS l'arbre à cet
+	# instant (la fenêtre est rendue puis ajoutée par l'appelant), et
+	# `look_at` s'en plaint. Posée sur l'axe, elle vise déjà le centre.
 	camera.position = Vector3(0, 0, 3.8)
-	camera.look_at(Vector3.ZERO)
 	return cadre
 
 var _boite: Node3D
@@ -373,17 +385,33 @@ func _entree(libelle: String, indice: int) -> Button:
 	b.add_theme_constant_override("outline_size", 10)
 	b.custom_minimum_size = Vector2(470, 58)
 	b.mouse_entered.connect(func() -> void: _viser(indice))
+	# Le curseur était un « ◆ » posé dans le libellé : la police de titre est
+	# une police pixel qui n'a pas ce caractère, et le moteur affichait le
+	# rectangle du caractère manquant. On le dessine plutôt qu'on ne l'écrit.
+	var marque := ColorRect.new()
+	marque.color = ORANGE
+	marque.size = Vector2(13, 13)
+	marque.pivot_offset = Vector2(6.5, 6.5)
+	marque.rotation = PI * 0.25
+	marque.position = Vector2(4, 22)
+	marque.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(marque)
+	_marques.append(marque)
 	b.pressed.connect(func() -> void:
 		_viser(indice)
 		_valider())
+	# Le survol de la boîte ne doit pas sonner : elle n'est pas un choix.
+
 	return b
 
-func _viser(indice: int) -> void:
+## `vers` dit dans quel sens on s'est déplacé : le son monte ou descend avec
+## le curseur. Un seul « clic » pour les deux, et la liste perd son relief.
+func _viser(indice: int, vers: int = 0) -> void:
 	var vise := posmod(indice, ENTREES.size())
 	if vise == _choix:
 		return
 	_choix = vise
-	Sons.jouer("clic", 1.0, -12.0)
+	Sons.interface("bas" if vers > 0 else ("haut" if vers < 0 else "droite"), -10.0)
 	_rafraichir()
 
 func _rafraichir() -> void:
@@ -393,14 +421,15 @@ func _rafraichir() -> void:
 		var elu := i == _choix
 		# Le losange en tête d'entrée sert de curseur : sur un fond qui bouge,
 		# une simple couleur de texte ne se repère pas assez vite.
-		b.text = ("◆  " if elu else "    ") + String(ENTREES[i]["libelle"]).to_upper()
+		b.text = "     " + String(ENTREES[i]["libelle"]).to_upper()
+		_marques[i].visible = elu
 		var teinte := ORANGE if elu else Color(1, 1, 1, 0.62)
 		for etat in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 			b.add_theme_color_override(etat, teinte)
 	_aide.text = String(ENTREES[_choix]["aide"])
 
 func _valider() -> void:
-	Sons.jouer("depart", 1.0, -8.0)
+	Sons.interface("valider", -5.0)
 	match String(ENTREES[_choix]["cle"]):
 		"commencer": demande_ecran.emit("creation", {})
 		"options": demande_ecran.emit("options", {"retour": "menu"})
@@ -441,7 +470,9 @@ func _input(evenement: InputEvent) -> void:
 	if touche == null or not touche.pressed or touche.echo:
 		return
 	match touche.keycode:
-		KEY_UP: _viser(_choix - 1)
-		KEY_DOWN: _viser(_choix + 1)
+		KEY_UP: _viser(_choix - 1, -1)
+		KEY_DOWN: _viser(_choix + 1, 1)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE: _valider()
-		KEY_ESCAPE: _viser(ENTREES.size() - 1)
+		KEY_ESCAPE:
+			Sons.interface("retour", -8.0)
+			_viser(ENTREES.size() - 1)

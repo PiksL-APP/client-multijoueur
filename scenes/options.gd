@@ -6,7 +6,7 @@ extends Ecran
 ## qui tourne derrière. Un réglage qu'on ne peut pas entendre ni voir avant de
 ## valider ne se règle pas, il se devine.
 ##
-## `donnees.retour` dit où revenir : « menu » depuis l'accueil, mais on pourra
+## `donnees.retour` dit où revenir : « menu » d'ordinaire, mais on pourra
 ## rentrer ici depuis une partie sans se retrouver éjecté au menu.
 
 var _retour := "menu"
@@ -41,6 +41,7 @@ func demarrer() -> void:
 	_onglets.add_child(_page_son())
 	_onglets.add_child(_page_image())
 	_onglets.add_child(_page_touches())
+	_onglets.tab_changed.connect(func(_i: int) -> void: Sons.interface("droite", -10.0))
 	# `--onglet=2` : ouvrir directement les touches, pour les photographier au
 	# banc — on ne peut pas cliquer sur un onglet depuis une ligne de commande.
 	for argument in OS.get_cmdline_args():
@@ -89,21 +90,21 @@ func _gouter() -> void:
 	if maintenant - _dernier_gout < 0.18:
 		return
 	_dernier_gout = maintenant
-	Sons.jouer("bip", 1.0, -8.0)
+	Sons.interface("droite", -6.0)
 
 # ── Image ──────────────────────────────────────────────────────────────────
 
 func _page_image() -> Control:
 	var boite := _page("Graphisme")
 	var page: VBoxContainer = _pages["Graphisme"]
-	page.add_child(_bascule("Effet maquette", Reglages.effets,
-		"Le flou de bascule qui donne à la ville son air de miniature.",
+	page.add_child(_bascule("Effets d'image", Reglages.effets,
+		"Le flou de bascule du menu, et le halo des néons dans Piks Theft Auto.",
 		func(v: bool) -> void:
 			Reglages.effets = v
 			Reglages.ecrire()
 			_refaire_le_fond()))
 	page.add_child(_bascule("Ombres portées", Reglages.ombres,
-		"Le premier réglage à couper si le jeu saccade.",
+		"Dans le menu comme en ville. Le premier réglage à couper si ça saccade.",
 		func(v: bool) -> void:
 			Reglages.ombres = v
 			Reglages.ecrire()
@@ -129,7 +130,7 @@ func _page_image() -> Control:
 func _page_touches() -> Control:
 	var boite := _page("Touches")
 	var page: VBoxContainer = _pages["Touches"]
-	page.add_child(UI.texte("Cliquez sur une touche puis appuyez sur la nouvelle. Les flèches du clavier restent toujours actives pour se déplacer.",
+	page.add_child(UI.texte("Cliquez sur une touche puis appuyez sur la nouvelle. Elles valent pour Piks Theft Auto comme pour les parties courtes. Les flèches du clavier restent toujours actives pour se déplacer.",
 		13, Palette.ENCRE_FAIBLE, true))
 	# Dix actions ne tiennent pas dans la hauteur d'un onglet : la liste défile.
 	var defilement := ScrollContainer.new()
@@ -153,6 +154,7 @@ func _page_touches() -> Control:
 		_cases[String(action)] = b
 	var remise := UI.bouton("Touches par défaut")
 	remise.pressed.connect(func():
+		Sons.interface("special", -8.0)
 		Reglages.remettre_les_touches()
 		_en_attente = ""
 		_rafraichir_les_touches())
@@ -161,6 +163,7 @@ func _page_touches() -> Control:
 	return boite
 
 func _attendre(action: String) -> void:
+	Sons.interface("frappe", -8.0)
 	_en_attente = action
 	_rafraichir_les_touches()
 
@@ -228,7 +231,7 @@ func _bascule(libelle: String, valeur: bool, aide: String, action: Callable) -> 
 	bouton.add_theme_font_override("font", UI.TEXTE_POLICE)
 	bouton.add_theme_font_size_override("font_size", UI.taille_texte(17))
 	bouton.toggled.connect(func(v: bool) -> void:
-		Sons.jouer("clic", 1.0, -12.0)
+		Sons.interface("valider" if v else "retour", -10.0)
 		action.call(v))
 	boite.add_child(bouton)
 	if aide != "":
@@ -315,10 +318,11 @@ func _process(delta: float) -> void:
 ## résultat en trois lignes, et rien ne peut rester en arrière.
 func _remettre_a_zero() -> void:
 	Reglages.remettre_tout()
-	Sons.jouer("clic", 1.0, -10.0)
+	Sons.interface("special", -8.0)
 	demande_ecran.emit("options", {"retour": _retour})
 
 func _sortir() -> void:
+	Sons.interface("retour", -8.0)
 	demande_ecran.emit(_retour, {})
 
 func _input(evenement: InputEvent) -> void:
@@ -333,7 +337,7 @@ func _input(evenement: InputEvent) -> void:
 		Reglages.definir_touche(_en_attente, code)
 		_en_attente = ""
 		_rafraichir_les_touches()
-		Sons.jouer("clic", 1.0, -10.0)
+		Sons.interface("special", -8.0)
 		get_viewport().set_input_as_handled()
 		return
 	if touche.keycode == KEY_ESCAPE:

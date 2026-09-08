@@ -29,6 +29,28 @@ var _ambiance_en_cours := ""
 const MUSIQUE_DB := -10.0
 const AMBIANCE_DB := -14.0
 
+## Les sons d'INTERFACE, tirés du jeu de bruitages de la maison
+## (`sons/interface/`) : ce sont des enregistrements, pas des ondes calculées
+## comme le reste de la banque — un menu qui bipe en carré sonne comme un
+## prototype, et celui-ci ne l'est plus.
+const INTERFACE := ["haut", "bas", "gauche", "droite", "valider", "retour",
+	"effacer", "frappe", "special"]
+
+var _clavier: Array[AudioStreamPlayer] = []
+var _prochain_clavier := 0
+
+## Joue un son d'interface. Le tourniquet est à part de celui des bruitages
+## de jeu : dans le menu des touches, on peut cliquer plus vite que le jeu
+## ne tire, et il ne faut pas que l'un vide les voix de l'autre.
+func interface(nom: String, volume_db: float = -8.0) -> void:
+	if not actif or not nom in INTERFACE or _clavier.is_empty():
+		return
+	var lecteur := _clavier[_prochain_clavier]
+	_prochain_clavier = (_prochain_clavier + 1) % _clavier.size()
+	lecteur.stream = load("res://sons/interface/%s.ogg" % nom)
+	lecteur.volume_db = volume_db
+	lecteur.play()
+
 func _ready() -> void:
 	_charger_preference()
 	_fabriquer_banque()
@@ -50,6 +72,11 @@ func _ready() -> void:
 	_ambiance = AudioStreamPlayer.new()
 	_ambiance.bus = Reglages.BUS_MUSIQUE
 	add_child(_ambiance)
+	for i in 4:
+		var lecteur := AudioStreamPlayer.new()
+		lecteur.bus = Reglages.BUS_EFFETS
+		add_child(lecteur)
+		_clavier.append(lecteur)
 
 ## Lance la musique d'un lieu (`res://sons/<nom>.ogg`, en boucle), en fondu
 ## depuis la précédente. `""` arrête. Rejouer le même nom ne redémarre rien.

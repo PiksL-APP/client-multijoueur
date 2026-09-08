@@ -1,5 +1,5 @@
 extends Node3D
-## Visionneuse de modèles voxel : `outils/voir.sh arbre_0,maison_taverne` — pose
+## Visionneuse de modèles voxel : `outils/voir.sh arbre_0,k:zombieA` — pose
 ## les modèles en ligne sur une pelouse, les éclaire, et capture une image.
 func _ready() -> void:
 	var noms: PackedStringArray = []

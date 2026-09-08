@@ -74,5 +74,5 @@ func demarrer() -> void:
 	actions.add_child(rejouer)
 
 	var hub := UI.bouton("Retour au hub")
-	hub.pressed.connect(func(): demande_ecran.emit("hub", {}))
+	hub.pressed.connect(func(): demande_ecran.emit("menu", {}))
 	actions.add_child(hub)
