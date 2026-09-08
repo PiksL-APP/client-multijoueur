@@ -61,13 +61,7 @@ collines autour de la clairière — restée plate, puisque c'est là qu'on marc
 sont bâtis deux fois plus fin que le décor — trente-deux voxels de haut — ce
 qui leur donne un visage (nez, oreilles, frange), des mains, des épaules, et à
 chaque héros sa silhouette : heaume à cimier et écu, capuche pointue et cape
-évasée, chapeau à large bord et bâton à cristal. Le hub est en voxels et les jeux
-ne le sont pas : plutôt que de cacher l'écart, **l'arche du portail le
-montre** — on y voit un aperçu animé du monde où l'on va (la ville de nuit du
-Carnage et ses fenêtres allumées, la pierre froide et les dalles de l'Énigme,
-le ciel et l'île de la Bousculade), le nom du monde au-dessus, sa couleur dans
-la lueur qui déborde et dans le fondu du passage. Le contraste devient une
-intention plutôt qu'un accident. Le champion d'un jeu porte une étoile devant son nom. |
+évasée, chapeau à large bord et bâton à cristal. Le champion d'un jeu porte une étoile devant son nom. |
 | **CARNAGE** | Un GTA 2 à l'heure bleue. Une ville PROCÉDURALE de six cent quatre-vingts par cinq cent vingt tuiles — cent fois la précédente — tirée du code de la manche et générée À LA DEMANDE, morceau par morceau, autour de chaque joueur : un centre d'affaires neutre et ses tours, des quartiers de bureaux, des rues commerçantes à néons, la vieille ville, les cités, la banlieue pavillonnaire, la zone industrielle, le port, des parcs et des lacs. Trois gangs se partagent tout ça par secteurs aux frontières irrégulières. Les immeubles sont des boîtes dont un shader dessine les étages et allume les fenêtres ; le sol, les trottoirs, les passages piétons et l'eau sont un autre shader. Des dizaines de milliers de voitures dorment le long des rues et se volent toutes ; les taxis roulent au centre, les fourgons dans la zone. On conduit, on **descend** (E), on court, on tire. Les passants rapportent, les gangs plus, les flics encore plus — et tout cela fait monter les **étoiles de recherche**. Chaque secteur a son **garage** qui efface le casier, sa **cabine** qui donne des contrats, ses **repaires** tagués au sol, une **arène** une fois sur deux — le seul endroit où les joueurs peuvent se blesser. Manche de 4 minutes, radar centré sur soi en haut à droite. |
 | **BOUSCULADE** | Une île en voxels qui flotte dans le vide, quatre joueurs qui se poussent. Z Q S D pour courir, **ESPACE** pour charger : un coup d'épaule qui envoie l'autre valser. L'île s'effrite par le bord, anneau après anneau, jusqu'à un disque de trois unités. Tombé ? Repêché au centre trois secondes plus tard — mais celui qui vous a poussé a marqué cent points ; deux points par seconde debout. Chacun simule son propre pantin (pas, charge, poussée reçue, chute) ; l'hôte compte les points. Manche de 90 secondes, portail à l'auberge. |
 | **ÉNIGME** | Coopératif, trois chambres. Une dalle ne reste enfoncée que si quelqu'un — ou une caisse — pèse dessus, et la sortie d'une chambre n'accepte l'équipe qu'au complet. 3 minutes. |
@@ -215,6 +209,31 @@ d'apparition qui s'allongent la nuit, jamais une voiture qui naît sur une
 autre (`_degage_des_autos`), et le parvis d'une place est un mur pour les
 voitures — sinon elles y entraient par les axes de la grille et la place
 devenait un parking.
+
+**Les kits Kenney reprennent du service.** Depuis la v10, ce qui roule et ce
+qui meuble la rue ne sort plus de nos cubes mais des kits CC0 de Kenney
+(`modeles/kenney/`, licence dans `LICENCE-kenney.md`) : dix-sept carrosseries
+du Car Kit (berline, sportive, citadine, 4×4, taxi, van, livraison, camion,
+police, pick-up, ambulance, camion de pompiers…), les lampadaires, feux,
+bennes et panneaux du City Kit: Roads, les arbres, buissons et bancs du Nature
+Kit. Ce que les kits n'ont pas — le bus, la limousine, les motos, les bornes,
+les conteneurs, la fontaine — reste en voxels : mieux vaut deux styles voisins
+qu'un modèle manquant. Trois pièges, tous vus à l'image : un glTF Kenney
+référence son atlas `Textures/colormap.png` en fichier EXTERNE et **chaque kit
+a le sien** (copier les seuls maillages donne des modèles tout blancs, sans le
+moindre message d'erreur) ; un modèle a PLUSIEURS matières (le tronc et le
+feuillage d'un arbre) alors qu'une nappe n'en porte qu'une, donc
+`FormesCarnage.maillage_kenney` fond tout en une surface en écrivant la couleur
+de chaque matière dans la COULEUR DE SOMMET — sans quoi l'arbre entier prenait
+la couleur de son feuillage ; et la palette du Nature Kit est pastel, son
+feuillage TURQUOISE, donc on recolore par nom de matière (`TEINTES_KENNEY`) —
+le modèle reste celui de Kenney, la palette est la nôtre. Les modèles sont
+posés comme le reste : une nappe (`MultiMesh`) par modèle et par morceau, la
+longueur d'une voiture restant celle de son gabarit (les collisions, les places
+de stationnement et le pare-buffle s'y réfèrent). Les IMMEUBLES, eux, restent
+en voxels : sous une caméra presque verticale, les bâtiments du City Kit sont
+de grands toits unis là où les nôtres ont parapets, fenêtres et cheminées — et
+surtout, un modèle glTF ne se casse pas cube par cube.
 
 **Ça brûle.** Une voiture qui saute laisse un BRASIER, et un brasier est une
 chose vivante : il chauffe ce qui l'entoure (passants, joueurs, tôle), il

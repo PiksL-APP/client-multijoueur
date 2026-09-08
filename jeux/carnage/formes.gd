@@ -39,15 +39,44 @@ const VOITURES_PAR_QUARTIER := {
 	PlanVille.EAU: [0],
 }
 
-## Les carrosseries en voxels, un maillage par gabarit, mis en cache : la
-## nappe des dormantes et les nœuds des voitures qui roulent lisent le même.
+## Le PARC AUTOMOBILE vient maintenant du Car Kit de Kenney : dix-sept
+## carrosseries dessinées à la place de nos boîtes de voxels. Ce que le kit n'a
+## pas — le bus, la limousine, les deux motos — reste en voxels : mieux vaut
+## deux styles voisins qu'un bus manquant.
+const KENNEY_VOITURES := {
+	0: "sedan", 1: "sedan-sports", 2: "hatchback-sports", 3: "suv", 4: "suv-luxury",
+	5: "taxi", 6: "van", 7: "delivery", 8: "truck", 9: "police",
+	10: "sedan-sports", 11: "suv", 12: "truck-flat", 15: "ambulance", 18: "firetruck",
+}
+const CHEMIN_VOITURES := "res://modeles/kenney/voitures/"
+
+static func modele_kenney_de(indice: int) -> String:
+	if not KENNEY_VOITURES.has(indice):
+		return ""
+	return CHEMIN_VOITURES + String(KENNEY_VOITURES[indice]) + ".glb"
+
+## Les carrosseries, un maillage par gabarit, mises en cache : la nappe des
+## dormantes et les nœuds des voitures qui roulent lisent le même.
 static var _carrosseries: Dictionary = {}
 
 static func maillage_voiture(indice: int) -> Mesh:
 	var i: int = clamp(indice, 0, MODELES_VOITURES.size() - 1)
 	if not _carrosseries.has(i):
-		_carrosseries[i] = VoxelsCarnage.voiture(i)
+		var chemin := modele_kenney_de(i)
+		if chemin == "":
+			_carrosseries[i] = VoxelsCarnage.voiture(i)
+		else:
+			# La longueur reste celle du gabarit : les collisions, les places de
+			# stationnement et le pare-buffle s'y réfèrent.
+			var gabarit: Dictionary = VoxelsCarnage.GABARITS.get(i, VoxelsCarnage.GABARITS[0])
+			var longueur := float(gabarit["l"]) * VoxelsCarnage.VOXEL_VOITURE
+			_carrosseries[i] = maillage_kenney(chemin, longueur)
 	return _carrosseries[i]
+
+## Vrai si ce gabarit est dessiné par un modèle Kenney (matière texturée) et
+## non par nos voxels (matière à couleurs de sommet).
+static func est_kenney(indice: int) -> bool:
+	return KENNEY_VOITURES.has(clampi(indice, 0, MODELES_VOITURES.size() - 1))
 
 ## Les phares d'une voiture conduite : deux flaques chaudes devant, une lueur
 ## rouge derrière. Au crépuscule, c'est ce qui dit dans quel sens on roule et
@@ -197,6 +226,185 @@ static func nappe(chemin: String, transformations: Array, couleurs: Array,
 		else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return noeud
 
+# ------------------------------------------------------------ les kits Kenney
+
+## Les kits Kenney (CC0, `modeles/kenney/`) remplacent une bonne part des
+## volumes fabriqués en cubes : les voitures, le mobilier de rue, les arbres.
+## Un modèle glTF arrive en SCÈNE (plusieurs `MeshInstance3D`, chacun avec sa
+## transformation) ; nos nappes veulent UN maillage. `maillage_kenney` les
+## fusionne une fois pour toutes, met le résultat à l'échelle du jeu, l'oriente
+## (l'avant des modèles Kenney regarde +Z, le jeu roule vers +X) et le pose sur
+## le sol. ⚠ Les glTF de Kenney référencent leur atlas `Textures/colormap.png`
+## en fichier EXTERNE, et chaque kit a le sien : copier les seuls maillages
+## donne des modèles entièrement blancs, sans le moindre message d'erreur.
+static var _kenney: Dictionary = {}
+
+## ⚠ La palette du Nature Kit est celle d'un jeu de cubes pastel : son feuillage
+## est TURQUOISE (0,16 / 0,79 / 0,67) et son écorce ORANGE. Posés tels quels
+## dans notre ville, les arbres sortaient en étoiles turquoise. On recolore par
+## NOM de matière — le modèle reste celui de Kenney, la palette est la nôtre.
+const TEINTES_KENNEY := {
+	"leafsGreen": Color("#4a7f36"),
+	"grass": Color("#4f8b3c"),
+	"woodBark": Color("#6b4a32"),
+	"wood": Color("#8a6242"),
+	"dirt": Color("#6b5a44"),
+	"stone": Color("#a8a49c"),
+	"stoneDark": Color("#8a8880"),
+	"_defaultMat": Color("#4a7f36"),
+}
+
+static func maillage_kenney(chemin: String, taille_voulue: float = 0.0,
+		axe: int = Vector3.AXIS_Z, tourner: float = -PI * 0.5) -> ArrayMesh:
+	var cle := "%s|%.2f|%d|%.2f" % [chemin, taille_voulue, axe, tourner]
+	if _kenney.has(cle):
+		return _kenney[cle]
+	var scene: PackedScene = load(chemin)
+	if scene == null:
+		push_warning("modèle Kenney introuvable : " + chemin)
+		return ArrayMesh.new()
+	var racine: Node3D = scene.instantiate()
+	var morceaux: Array = []
+	_recolter_maillages(racine, Transform3D.IDENTITY, morceaux)
+	# La boîte du modèle entier, pour l'échelle et pour le poser sur le sol.
+	var boite := AABB()
+	var premier := true
+	for m in morceaux:
+		var b: AABB = (m[1] as Transform3D) * ((m[0] as Mesh).get_aabb())
+		if premier:
+			boite = b
+			premier = false
+		else:
+			boite = boite.merge(b)
+	var facteur := 1.0
+	if taille_voulue > 0.0 and boite.size[axe] > 0.001:
+		facteur = taille_voulue / boite.size[axe]
+	var pose := Transform3D(Basis(Vector3.UP, tourner).scaled(Vector3.ONE * facteur), Vector3.ZERO) \
+		* Transform3D(Basis.IDENTITY, -Vector3(boite.get_center().x, boite.position.y, boite.get_center().z))
+
+	# ⚠ Un modèle Kenney a plusieurs MATIÈRES (le tronc et le feuillage d'un
+	# arbre, la caisse et les vitres d'une voiture) et nos nappes n'en portent
+	# qu'une. On fond donc tout en UNE surface en écrivant la couleur de chaque
+	# matière dans la COULEUR DE SOMMET ; les modèles à atlas gardent du blanc,
+	# leur texture fait le travail. Sans ça, un arbre entier prenait la couleur
+	# de son feuillage et sortait en étoile turquoise.
+	var sommets := PackedVector3Array()
+	var normales := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var couleurs := PackedColorArray()
+	var indices := PackedInt32Array()
+	var texture: Texture2D = null
+	for m in morceaux:
+		var maillage: Mesh = m[0]
+		var t: Transform3D = pose * (m[1] as Transform3D)
+		for si in maillage.get_surface_count():
+			var arrays: Array = maillage.surface_get_arrays(si)
+			var pos: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			if pos.is_empty():
+				continue
+			var nor: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL] if arrays[Mesh.ARRAY_NORMAL] != null else PackedVector3Array()
+			var uv: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV] if arrays[Mesh.ARRAY_TEX_UV] != null else PackedVector2Array()
+			var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] if arrays[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+			var matiere = maillage.surface_get_material(si)
+			var teinte := Color.WHITE
+			if matiere is BaseMaterial3D:
+				var base := matiere as BaseMaterial3D
+				var albedo := base.albedo_texture
+				if albedo != null:
+					if texture == null:
+						texture = albedo
+				else:
+					teinte = TEINTES_KENNEY.get(base.resource_name, base.albedo_color)
+			var decalage := sommets.size()
+			for q in pos.size():
+				sommets.append(t * pos[q])
+				normales.append((t.basis * (nor[q] if q < nor.size() else Vector3.UP)).normalized())
+				uvs.append(uv[q] if q < uv.size() else Vector2.ZERO)
+				couleurs.append(teinte)
+			if idx.is_empty():
+				for q in pos.size():
+					indices.append(decalage + q)
+			else:
+				for q in idx.size():
+					indices.append(decalage + idx[q])
+	racine.queue_free()
+	var surface := []
+	surface.resize(Mesh.ARRAY_MAX)
+	surface[Mesh.ARRAY_VERTEX] = sommets
+	surface[Mesh.ARRAY_NORMAL] = normales
+	surface[Mesh.ARRAY_TEX_UV] = uvs
+	surface[Mesh.ARRAY_COLOR] = couleurs
+	surface[Mesh.ARRAY_INDEX] = indices
+	var fondu := ArrayMesh.new()
+	if not sommets.is_empty():
+		fondu.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, surface)
+	if not _textures_source.has(chemin):
+		_textures_source[chemin] = texture
+	_kenney[cle] = fondu
+	return fondu
+
+static func _recolter_maillages(n: Node, jusqu_ici: Transform3D, sortie: Array) -> void:
+	var ici := jusqu_ici
+	if n is Node3D:
+		ici = jusqu_ici * (n as Node3D).transform
+	if n is MeshInstance3D and (n as MeshInstance3D).mesh != null:
+		sortie.append([(n as MeshInstance3D).mesh, ici])
+	for e in n.get_children():
+		_recolter_maillages(e, ici, sortie)
+
+## La matière d'un kit : l'atlas du kit, la couleur d'instance en teinte (une
+## voiture de gang, une carrosserie repeinte), et le grain mat du reste du jeu.
+static var _matieres_kenney: Dictionary = {}
+static var _textures_source: Dictionary = {}   ## chemin -> l'atlas du kit (ou null)
+
+## La matière d'un kit : son atlas s'il en a un, la couleur de sommet sinon
+## (elle porte la matière d'origine de chaque morceau du modèle), et le grain
+## mat du reste du jeu.
+static func matiere_kenney(chemin_modele: String) -> StandardMaterial3D:
+	if _matieres_kenney.has(chemin_modele):
+		return _matieres_kenney[chemin_modele]
+	maillage_kenney(chemin_modele)          # remplit `_textures_source` au passage
+	var m := StandardMaterial3D.new()
+	var texture = _textures_source.get(chemin_modele)
+	if texture != null:
+		m.albedo_texture = texture
+		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	m.vertex_color_use_as_albedo = true
+	m.roughness = 0.86
+	m.specular = 0.2
+	_matieres_kenney[chemin_modele] = m
+	return m
+
+## LE MOBILIER DE RUE et la NATURE viennent eux aussi des kits : lampadaires,
+## feux, bennes, panneaux, arbres, buissons, bancs. Chaque entrée dit le
+## modèle, la hauteur voulue en unités (les modèles Kenney font moins d'un
+## mètre : ils sont dessinés pour une maquette, pas pour notre échelle) et la
+## rotation qui met leur face vers +X comme le reste du jeu. Ce qui n'a pas de
+## modèle — la borne, les conteneurs, la fontaine, le monument — reste en
+## voxels : un kit ne remplace pas tout, et on ne pose rien d'approximatif.
+const PROPS_KENNEY := {
+	"lampadaire": {"m": "res://modeles/kenney/urbain/light-square.glb", "h": 5.6, "r": 0.0, "c": Color("#5a5f68")},
+	"lampadaire_parc": {"m": "res://modeles/kenney/urbain/light-curved.glb", "h": 4.0, "r": 0.0, "c": Color("#5a5f68")},
+	"feu": {"m": "res://modeles/kenney/urbain/traffic-light.glb", "h": 4.4, "r": 0.0},
+	"poubelle": {"m": "res://modeles/kenney/urbain/dumpster.glb", "h": 1.5, "r": 0.0},
+	"benne": {"m": "res://modeles/kenney/urbain/dumpster.glb", "h": 2.4, "r": 0.0},
+	"arbre": {"m": "res://modeles/kenney/nature/tree_default.glb", "h": 7.6, "r": 0.0},
+	"arbre_petit": {"m": "res://modeles/kenney/nature/tree_oak.glb", "h": 5.2, "r": 0.0},
+	"buisson": {"m": "res://modeles/kenney/nature/plant_bushDetailed.glb", "h": 1.5, "r": 0.0},
+	"banc": {"m": "res://modeles/kenney/nature/bench.glb", "h": 1.3, "r": 0.0},
+	"monument": {"m": "res://modeles/kenney/nature/statue_column.glb", "h": 9.0, "r": 0.0},
+}
+
+static func prop_kenney(nom: String) -> Dictionary:
+	return PROPS_KENNEY.get(nom, {})
+
+## Le maillage d'un prop, mis à la hauteur voulue (l'axe Y, pas la longueur).
+static func maillage_prop(nom: String) -> ArrayMesh:
+	var fiche := prop_kenney(nom)
+	if fiche.is_empty():
+		return ArrayMesh.new()
+	return maillage_kenney(String(fiche["m"]), float(fiche["h"]), Vector3.AXIS_Y, float(fiche["r"]))
+
 # ------------------------------------------------------------ véhicules
 
 ## Une voiture en voxels. `halo` marque celles que quelqu'un conduit — sans
@@ -224,7 +432,15 @@ static func voiture_kit(indice: int, couleur: Color = Color.WHITE, halo_couleur:
 	coque.name = "Coque"
 	coque.mesh = maillage_voiture(i)
 	var peinture := couleur if couleur != Color.WHITE else VoxelsCarnage.peinture(i, 7)
-	coque.material_override = MatieresCarnage.voxel_teinte(peinture)
+	# Un modèle Kenney porte son atlas : la peinture le TEINTE (vitres et pneus
+	# sont sombres dans l'atlas, ils le restent en multipliant). Un modèle voxel
+	# garde la matière à couleurs de sommet.
+	if est_kenney(i):
+		var matiere := matiere_kenney(modele_kenney_de(i)).duplicate() as StandardMaterial3D
+		matiere.albedo_color = peinture if couleur != Color.WHITE else Color.WHITE
+		coque.material_override = matiere
+	else:
+		coque.material_override = MatieresCarnage.voxel_teinte(peinture)
 	coque.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	racine.add_child(coque)
 
@@ -291,7 +507,12 @@ static func epave() -> Node3D:
 	var racine := Node3D.new()
 	var coque := MeshInstance3D.new()
 	coque.mesh = maillage_voiture(0)
-	coque.material_override = MatieresCarnage.voxel_teinte(Color("#141414"))
+	if est_kenney(0):
+		var brulee := matiere_kenney(modele_kenney_de(0)).duplicate() as StandardMaterial3D
+		brulee.albedo_color = Color("#2a2624")
+		coque.material_override = brulee
+	else:
+		coque.material_override = MatieresCarnage.voxel_teinte(Color("#141414"))
 	coque.rotation_degrees = Vector3(0, 0, 6)
 	racine.add_child(coque)
 	var braise := Decor.sphere(0.9, Palette.SERIEUX, false)

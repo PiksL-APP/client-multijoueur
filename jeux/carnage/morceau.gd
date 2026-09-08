@@ -54,6 +54,7 @@ var _a_mailler: Array = []            ## les groupes qui attendent leur premier 
 ## navigateur — une saccade à chaque morceau qui entre dans le champ.
 const BUDGET_MAILLAGE_USEC := 6000
 var _cellules := 0                    ## cellules pleines d'immeubles, pour le journal
+var _props_kenney: Dictionary = {}    ## nom de prop -> [Transform3D] (une nappe par modèle)
 var _multi: MultiMesh
 var _places: Dictionary = {}          ## modele -> Array[{t, c, id}]
 var _lumineux: SurfaceTool
@@ -202,8 +203,18 @@ func _lire_les_fiches() -> void:
 				var nom := String(pr["m"])
 				var graine := hash(Vector3i(c, l, rang_p))
 				rang_p += 1
-				for cube in VoxelsCarnage.mobilier(nom, pr["p"], float(pr["a"]), float(pr.get("s", 1.0)), graine):
-					_cube(cube[0], float(cube[1]), cube[2])
+				if FormesCarnage.prop_kenney(nom).is_empty():
+					for cube in VoxelsCarnage.mobilier(nom, pr["p"], float(pr["a"]), float(pr.get("s", 1.0)), graine):
+						_cube(cube[0], float(cube[1]), cube[2])
+				else:
+					# Un prop du kit : il rejoint la nappe de son modèle. Une
+					# nappe par modèle et par morceau, comme les voitures
+					# dormantes — sinon ce serait un nœud par lampadaire.
+					if not _props_kenney.has(nom):
+						_props_kenney[nom] = []
+					var echelle: float = float(pr.get("s", 1.0))
+					var base_p := Basis(Vector3.UP, -float(pr["a"])).scaled(Vector3.ONE * echelle)
+					_props_kenney[nom].append(Transform3D(base_p, Decor.vers3d(pr["p"])))
 				if LAMPES.has(nom):
 					var lampe: Dictionary = LAMPES[nom]
 					var decal: Vector2 = Vector2(-float(lampe["d"]), 0.0).rotated(float(pr["a"]))
@@ -398,9 +409,42 @@ func _poser_les_voitures() -> void:
 			voitures[int(liste_v[i]["id"])] = [multi_v, i]
 		var noeud_v := MultiMeshInstance3D.new()
 		noeud_v.multimesh = multi_v
-		noeud_v.material_override = MatieresCarnage.voxel()
+		# Un modèle Kenney porte son atlas ; un modèle voxel, ses couleurs de
+		# sommet. Poser la mauvaise matière donne une nappe blanche ou noire.
+		noeud_v.material_override = FormesCarnage.matiere_kenney(FormesCarnage.modele_kenney_de(int(modele))) \
+			if FormesCarnage.est_kenney(int(modele)) else MatieresCarnage.voxel()
 		noeud_v.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		add_child(noeud_v)
+
+	_poser_les_props_kenney()
+
+## Une nappe par modèle de prop : lampadaires, arbres, bancs, bennes. La
+## matière vient du kit (son atlas), les ombres restent allumées — un arbre
+## sans ombre flotte au-dessus du trottoir.
+func _poser_les_props_kenney() -> void:
+	for nom in _props_kenney:
+		var poses: Array = _props_kenney[nom]
+		if poses.is_empty():
+			continue
+		var multi := MultiMesh.new()
+		multi.transform_format = MultiMesh.TRANSFORM_3D
+		multi.mesh = FormesCarnage.maillage_prop(String(nom))
+		multi.instance_count = poses.size()
+		for i in poses.size():
+			multi.set_instance_transform(i, poses[i])
+		var noeud := MultiMeshInstance3D.new()
+		noeud.multimesh = multi
+		var fiche_p: Dictionary = FormesCarnage.prop_kenney(String(nom))
+		var matiere := FormesCarnage.matiere_kenney(String(fiche_p["m"]))
+		if fiche_p.has("c"):
+			# Un lampadaire blanc de six mètres se voit de trop loin : la teinte
+			# du prop assombrit le modèle sans toucher au kit.
+			matiere = matiere.duplicate() as StandardMaterial3D
+			matiere.albedo_color = fiche_p["c"]
+		noeud.material_override = matiere
+		noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		add_child(noeud)
+	_props_kenney.clear()
 
 # ------------------------------------------------------------ étape 4 : les lumières et les lieux
 
