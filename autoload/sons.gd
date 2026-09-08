@@ -32,17 +32,23 @@ const AMBIANCE_DB := -14.0
 func _ready() -> void:
 	_charger_preference()
 	_fabriquer_banque()
+	# Chaque lecteur part sur son bus : le curseur « effets » des options
+	# règle alors un bus, pas seize lecteurs, et un son déjà lancé suit.
 	for i in VOIX:
 		var lecteur := AudioStreamPlayer.new()
+		lecteur.bus = Reglages.BUS_EFFETS
 		add_child(lecteur)
 		_voix.append(lecteur)
 	_moteur = AudioStreamPlayer.new()
 	_moteur.stream = _banque["moteur"]
 	_moteur.volume_db = -24.0
+	_moteur.bus = Reglages.BUS_EFFETS
 	add_child(_moteur)
 	_musique = AudioStreamPlayer.new()
+	_musique.bus = Reglages.BUS_MUSIQUE
 	add_child(_musique)
 	_ambiance = AudioStreamPlayer.new()
+	_ambiance.bus = Reglages.BUS_MUSIQUE
 	add_child(_ambiance)
 
 ## Lance la musique d'un lieu (`res://sons/<nom>.ogg`, en boucle), en fondu

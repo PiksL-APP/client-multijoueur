@@ -8,7 +8,9 @@ extends RefCounted
 ## et personne ne le fait avant chaque livraison.
 ##
 ## Les codes sont PHYSIQUES : W A S D tombent sur Z Q S D d'un clavier AZERTY,
-## sans carte d'entrées à configurer.
+## sans carte d'entrées à configurer. Ils viennent tous de `Reglages`, où le
+## joueur peut les réattribuer depuis l'écran des options ; les flèches, elles,
+## restent câblées en second sur les déplacements — c'est un repli universel.
 
 ## Vrai pendant qu'on écrit dans un champ (le tchat du village) : les lettres
 ## vont au texte, pas aux pieds du personnage.
@@ -26,10 +28,10 @@ static func direction() -> Vector2:
 	if Tactile.actif() and Tactile.direction != Vector2.ZERO:
 		return Tactile.direction_de_marche()
 	var d := Vector2.ZERO
-	if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): d.y -= 1
-	if Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): d.y += 1
-	if Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT): d.x -= 1
-	if Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): d.x += 1
+	if Reglages.enfoncee("avancer") or Input.is_key_pressed(KEY_UP): d.y -= 1
+	if Reglages.enfoncee("reculer") or Input.is_key_pressed(KEY_DOWN): d.y += 1
+	if Reglages.enfoncee("gauche") or Input.is_key_pressed(KEY_LEFT): d.x -= 1
+	if Reglages.enfoncee("droite") or Input.is_key_pressed(KEY_RIGHT): d.x += 1
 	return d.normalized()
 
 ## Tir maintenu : espace, ou le bouton tactile.
@@ -38,7 +40,7 @@ static func tir() -> bool:
 		return tir_simule
 	if Tactile.actif() and Tactile.bouton_tenu:
 		return true
-	return Input.is_physical_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_CTRL)
+	return Reglages.enfoncee("tir") or Input.is_key_pressed(KEY_CTRL)
 
 ## Action ponctuelle : monter dans une voiture, en descendre, décrocher un
 ## téléphone. Elle se lit au FRONT et non à l'état : une touche maintenue
@@ -54,7 +56,7 @@ static func action_tenue() -> bool:
 		return action_simulee
 	if Tactile.actif() and Tactile.bouton_action_tenu:
 		return true
-	return Input.is_physical_key_pressed(KEY_E) or Input.is_key_pressed(KEY_ENTER)
+	return Reglages.enfoncee("action") or Input.is_key_pressed(KEY_ENTER)
 
 static func action_declenchee() -> bool:
 	var maintenant := action_tenue()
@@ -71,7 +73,7 @@ static var _affaire_avant := false
 static func affaire_tenue() -> bool:
 	if pilote_automatique:
 		return affaire_simulee
-	return Input.is_physical_key_pressed(KEY_F)
+	return Reglages.enfoncee("affaire")
 
 static func affaire_declenchee() -> bool:
 	var maintenant := affaire_tenue()
@@ -86,7 +88,7 @@ static var klaxon_simule := false
 static func klaxon() -> bool:
 	if pilote_automatique:
 		return klaxon_simule
-	return Input.is_physical_key_pressed(KEY_H)
+	return Reglages.enfoncee("klaxon")
 
 ## La carte de la ville : TAB tenu. Tenue, pas déclenchée — on la consulte
 ## d'un coup d'œil et on la lâche, comme dans GTA 2.
@@ -95,7 +97,7 @@ static var carte_simulee := false
 static func carte() -> bool:
 	if pilote_automatique:
 		return carte_simulee
-	return Input.is_physical_key_pressed(KEY_TAB)
+	return Reglages.enfoncee("carte")
 
 ## Pour la conduite : x = braquage (-1 à gauche), y = accélération (-1 en
 ## marche arrière). Non normalisé — accélérer en tournant ne doit pas coûter
@@ -107,8 +109,8 @@ static func conduite() -> Vector2:
 		return Tactile.direction_de_conduite()
 	var braquage := 0.0
 	var poussee := 0.0
-	if Input.is_physical_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): poussee += 1.0
-	if Input.is_physical_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): poussee -= 1.0
-	if Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT): braquage -= 1.0
-	if Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): braquage += 1.0
+	if Reglages.enfoncee("avancer") or Input.is_key_pressed(KEY_UP): poussee += 1.0
+	if Reglages.enfoncee("reculer") or Input.is_key_pressed(KEY_DOWN): poussee -= 1.0
+	if Reglages.enfoncee("gauche") or Input.is_key_pressed(KEY_LEFT): braquage -= 1.0
+	if Reglages.enfoncee("droite") or Input.is_key_pressed(KEY_RIGHT): braquage += 1.0
 	return Vector2(braquage, poussee)

@@ -351,7 +351,9 @@ static func lumiere(energie: float = 1.12) -> DirectionalLight3D:
 	# dans lesquelles la voiture du joueur disparaît complètement. On perd un
 	# peu de relief, on gagne de pouvoir se voir.
 	soleil.rotation_degrees = Vector3(-66, -38, 0)
-	soleil.shadow_enabled = true
+	# Les ombres portées sont le premier réglage qu'on coupe sur une
+	# machine lente : elles se décident dans les options, pas ici.
+	soleil.shadow_enabled = Reglages.ombres
 	soleil.directional_shadow_max_distance = 260.0
 	soleil.shadow_bias = 0.04
 	return soleil

@@ -1,9 +1,31 @@
-# Piks-l Multijoueur
+# Piks Theft Auto
 
-Un hub que l'on parcourt à plusieurs, des portails, et derrière chaque portail
-un jeu de 2 à 4 joueurs avec son score. Le tout tourne dans le navigateur :
-Godot 4.5 exporté en WebAssembly, Supabase Realtime pour le réseau, Vercel pour
+Une ville qu'on parcourt à plusieurs — **Sunport City** — et des parties de 2 à
+4 joueurs avec leur score. Le tout tourne dans le navigateur : Godot 4.5
+exporté en WebAssembly, Supabase Realtime pour le réseau, Vercel pour
 l'hébergement.
+
+**On entre par un menu, pas par un village.** `scenes/menu.gd` ouvre sur
+Commencer / Options / Quitter, posés sur la ville elle-même : le fond du menu
+n'est pas une image, c'est `PlanVille` + `MorceauVille`, le générateur du jeu,
+bâti au couchant et tournant lentement sous l'effet maquette. Quand la ville
+change, le menu change avec elle. « Commencer » demande un pseudo et un
+personnage, « Options » règle le son, l'image et les touches, « Quitter »
+renvoie sur piks-l.com. La pochette du jeu est posée à gauche, dans sa boîte.
+Le village en voxels reste joignable par `--ecran=hub` le temps que les
+bâtiments de la ville ouvrent les autres jeux.
+
+**Le casting vient de Kenney** (`modeles/kenney/`, CC0) : un seul maillage
+articulé de 58 os, `characterMedium.fbx`, et douze images de peau tirées des
+lots *protagonists*, *retro* et *survivors*. Godot 4.5 lit le FBX nativement
+— aucune conversion. Les animations (`idle`, `run`, `jump`) vivent dans leurs
+propres fichiers, sans maillage, et se greffent sur le squelette à la volée
+(`commun/personnages.gd`). Douze personnages pour le poids d'un.
+
+**Tout se règle** (`autoload/reglages.gd`, gardé dans `user://`) : trois
+volumes sur trois bus audio, l'effet maquette, les ombres, la finesse du rendu,
+le plein écran, et chaque touche du clavier — que `Commandes` lit désormais
+sans exception.
 
 **Un mur ne stoppe pas, il fait glisser.** Une collision ne coûte que la part
 de vitesse mise dans la façade, et la voiture se réaligne dessus quand on la
