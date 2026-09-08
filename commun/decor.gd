@@ -353,10 +353,23 @@ static func lumiere(energie: float = 1.12) -> DirectionalLight3D:
 	soleil.rotation_degrees = Vector3(-66, -38, 0)
 	# Les ombres portées sont le premier réglage qu'on coupe sur une
 	# machine lente : elles se décident dans les options, pas ici.
-	soleil.shadow_enabled = Reglages.ombres
+	soleil.shadow_enabled = reglage("ombres", true)
 	soleil.directional_shadow_max_distance = 260.0
 	soleil.shadow_bias = 0.04
 	return soleil
+
+## Un réglage des options, lu SANS nommer l'autoload. ⚠ `Reglages` n'existe que
+## dans le jeu : les ateliers et les bancs lancés en `-s script.gd` n'en ont
+## pas, et une référence directe fait tomber `Decor` — donc tout ce qui s'en
+## sert — en panne de compilation, sans que le message dise lequel. On va donc
+## le chercher dans l'arbre, et on retombe sur la valeur d'usine s'il n'y est
+## pas.
+static func reglage(nom: String, defaut: bool) -> bool:
+	var boucle := Engine.get_main_loop()
+	if boucle == null or not (boucle is SceneTree):
+		return defaut
+	var noeud := (boucle as SceneTree).root.get_node_or_null("/root/Reglages")
+	return bool(noeud.get(nom)) if noeud != null else defaut
 
 ## Deuxième source, froide et sans ombre, côté opposé : elle empêche les faces
 ## non éclairées de tomber au noir pur, où l'on ne distingue plus les volumes.

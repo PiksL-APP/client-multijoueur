@@ -59,7 +59,9 @@ static func poser(ecran: Node, centre: float = 0.6, force: float = 6.0) -> Maque
 	var m := Maquette.new()
 	# `--sans-effets` : pour photographier l'image brute au banc. Le réglage
 	# « effets » des options fait la même chose, en permanence.
-	if "--sans-effets" in OS.get_cmdline_args() or not Reglages.effets:
+	# ⚠ Le réglage se lit dans l'arbre : un banc lancé en `-s script.gd` n'a pas
+	# d'autoload, et nommer `Reglages` ici faisait tomber la maquette.
+	if "--sans-effets" in OS.get_cmdline_args() or not Decor.reglage("effets", true):
 		return m
 	m.layer = 0
 	if _shader == null:
