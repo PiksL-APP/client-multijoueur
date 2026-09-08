@@ -214,7 +214,10 @@ devenait un parking.
 qui meuble la rue ne sort plus de nos cubes mais des kits CC0 de Kenney
 (`modeles/kenney/`, licence dans `LICENCE-kenney.md`) : dix-sept carrosseries
 du Car Kit (berline, sportive, citadine, 4×4, taxi, van, livraison, camion,
-police, pick-up, ambulance, camion de pompiers…), les lampadaires, feux,
+police, pick-up, ambulance, camion de pompiers… ⚠ tournées d'un quart de tour
+dans l'AUTRE sens que le reste du kit : les carrosseries regardent +Z quand
+les props regardent −Z, et avec la rotation commune toute la ville roulait en
+marche arrière, phares derrière et calandre au cul), les lampadaires, feux,
 bennes et panneaux du City Kit: Roads, les arbres, buissons et bancs du Nature
 Kit. Ce que les kits n'ont pas — le bus, la limousine, les motos, les bornes,
 les conteneurs, la fontaine — reste en voxels : mieux vaut deux styles voisins
@@ -236,15 +239,52 @@ suburban pour les pavillons. On choisit le modèle dont le rapport
 hauteur/largeur ressemble le plus au volume demandé par le plan, puis on
 l'étire à l'emprise exacte — un modèle bien choisi s'étire peu —, et la teinte
 du quartier passe en couleur d'instance, sinon la ville entière serait
-gris-bleu. **Et ça se casse quand même** : la grille de voxels de chaque
-immeuble existe toujours, invisible, sous le modèle ; au PREMIER cube arraché
-le modèle disparaît et la grille prend le relais, avec ses faces d'intérieur
-et sa ruine (`MorceauVille.casser`). Tant qu'un immeuble est intact, il n'est
-pas maillé du tout : la ville coûte dix fois moins de rectangles qu'en voxels
-pleins. La nuit, les fenêtres s'allument par le shader `KENNEY` : on repère
+gris-bleu. **Et le mur tient** : jusqu'à la v12, la grille de
+voxels attendait sous le modèle et le premier cube arraché la faisait prendre
+le relais — un immeuble dessiné se changeait sous les yeux du joueur en tas de
+cubes, et une rue mitraillée redevenait la ville d'avant. Une façade encaisse
+donc maintenant : `MorceauVille.casser` ne rend plus que le point et la
+couleur touchés, de quoi jouer la poussière, les éclats et le choc. La grille
+reste — elle sert aux collisions et à savoir ce qu'une balle a touché — mais
+elle n'est jamais maillée tant que l'immeuble est debout, et il l'est
+toujours : la ville coûte dix fois moins de rectangles qu'en voxels pleins.
+**Deux voisins ne se ressemblent pas** : on ne prend plus le seul modèle au
+meilleur rapport hauteur/largeur (deux immeubles de même taille — et un pâté
+n'en fait pas d'autres — tombaient forcément sur le même) mais l'un des cinq
+plus proches, tiré par l'identifiant. **Et ils ne se touchent pas** : une
+façade laisse quinze pixels au bord de sa tuile, trente entre deux immeubles ;
+à douze, avec les quartiers qui rognaient encore de moitié, la ville n'était
+plus qu'un bloc. ⚠ Un quart de tour n'est permis qu'à un bâtiment d'emprise
+CARRÉE : l'échelle étant portée par la base, tourner une emprise de trois
+tuiles sur une la faisait déborder en travers de la rue. La nuit, les fenêtres s'allument par le shader `KENNEY` : on repère
 les carreaux à leur bleu franc dans l'atlas — ⚠ seulement sur les faces
 VERTICALES, sans quoi le gris-bleu des toitures passait pour du vitrage et
 les toits luisaient.
+
+**Les habitants sont des gens.** Depuis la v12, les piétons, les hommes de
+main, les flics à pied et les joueurs descendus de voiture viennent du kit
+« Animated Characters » de Kenney : un maillage habillé
+(`modeles/kenney/personnages/characterMedium.fbx`, cinquante-huit os) et onze
+peaux — huit passants tirés de leur identifiant (le même piéton garde donc la
+même tête tant qu'il vit), trois têtes pour les hommes de main, une pour les
+flics, celle du skateur pour les joueurs. Nos bonshommes en cubes ne tenaient
+plus la comparaison depuis que les voitures et les immeubles sont dessinés :
+`VoxelsCarnage.personnage` a disparu. Deux choix contre-intuitifs, mais tenus
+à l'image. **On n'importe pas les animations du kit** (`idle`, `run`, `jump`
+sont livrés en `.fbx` séparés) : quatre os pivotés par code
+(`FormesCarnage.animer_kenney`) coûtent moins qu'un lecteur d'animation par
+piéton, et la ville en compte cinquante. **Les axes des os ne sont pas les
+mêmes** en haut et en bas : le rig vrille les bras d'un quart de tour, si bien
+qu'une cuisse balance autour de X quand un bras balance autour de Z — le
+tourner autour de X l'écarte en croix, et la rue se remplit d'épouvantails.
+⚠ Et remettre les quatre os à zéro n'est pas neutre : le modèle est livré bras
+écartés (une pose d'atelier), c'est cette remise à zéro qui les ramène le long
+du corps. Ce qui porte la couleur, ce n'est pas le corps — teinter la texture
+d'une tenue teinte aussi la peau et les cheveux — mais une CASQUETTE posée sur
+le crâne : vue de dessus, et la caméra ne voit à peu près que ça, c'est le
+seul endroit du personnage qui se lise. Le fanion des hommes de main se dresse
+maintenant AU-DESSUS de la tête ; planté à hauteur d'épaule comme du temps des
+cubes, il passait devant le visage.
 
 **Ça brûle.** Une voiture qui saute laisse un BRASIER, et un brasier est une
 chose vivante : il chauffe ce qui l'entoure (passants, joueurs, tôle), il

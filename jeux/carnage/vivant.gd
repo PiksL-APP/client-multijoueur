@@ -1465,11 +1465,13 @@ func impacter(point: Vector2, arme: String, hauteur: float = 1.4) -> void:
 		_casser(id, VoxelsCarnage.voxels_autour_de(b, p3, RAYON_ROQUETTE))
 		return
 	var locale := VoxelsCarnage.voxel_proche_de(b, p3)
-	if _deja_casse(id, locale):
-		return
 	var cle := id * LOCALES_PAR_IMMEUBLE + locale
 	_coups_voxel[cle] = int(_coups_voxel.get(cle, 0)) + 1
 	if int(_coups_voxel[cle]) >= COUPS_PAR_VOXEL:
+		# ⚠ On remet le compteur à zéro : le mur ne s'ouvrant plus, sans ça il
+		# restait au-dessus du seuil et chaque balle suivante repartait en
+		# événement — une gerbe de poussière par balle, jusqu'au chargeur vide.
+		_coups_voxel[cle] = 0
 		_casser(id, [locale])
 
 ## Une voiture qui explose : tout ce qui est à portée, dans tous les immeubles
@@ -1499,23 +1501,17 @@ func choquer(point: Vector2, direction: Vector2, vitesse: float) -> void:
 			liste.append(locale)
 	_casser(int(trouve["id"]), liste)
 
-func _deja_casse(id: int, locale: int) -> bool:
-	return detruits.has(id) and (detruits[id] as Array).has(locale)
-
+## Un impact sur une façade. ⚠ Depuis la v12 il ne CASSE plus rien : les murs
+## tiennent (voir `MorceauVille.casser`), et cet événement ne sert plus qu'à
+## jouer le même impact chez tout le monde — la poussière et les éclats. On ne
+## garde donc plus la liste des cubes partis (`detruits` reste vide) : elle ne
+## servait qu'à rebâtir un morceau avec ses trous, et il n'y a plus de trous.
 func _casser(id: int, locales: Array) -> void:
-	var neufs: Array = []
-	for locale in locales:
-		if not _deja_casse(id, int(locale)):
-			neufs.append(int(locale))
-			if not detruits.has(id):
-				detruits[id] = []
-			detruits[id].append(int(locale))
-	if neufs.is_empty():
+	if locales.is_empty():
 		return
-	var charge: Array = []
-	for locale in neufs:
-		charge.append([id, locale])
-	emettre("casse", {"v": charge})
+	# Un seul point d'impact suffit à l'effet : une roquette renvoyait
+	# cinquante cubes, donc cinquante gerbes de poussière au même endroit.
+	emettre("casse", {"v": [[id, int(locales[0])]]})
 
 # ------------------------------------------------------------ les véhicules
 

@@ -282,7 +282,14 @@ func _poser_immeuble(b: Dictionary, id: int) -> void:
 		if not _bats_kenney.has(chemin):
 			_bats_kenney[chemin] = []
 		var emprise := Vector3(float(b["w"]) * Decor.ECHELLE, float(b["h"]), float(b["d"]) * Decor.ECHELLE)
-		var tourne := Basis(Vector3.UP, PI * 0.5 * float(posmod(id, 4))).scaled(emprise)
+		# On tourne le modèle pour que deux voisins ne se ressemblent pas de
+		# face. ⚠ Un quart de tour n'est permis que sur une emprise CARRÉE :
+		# l'échelle est portée par la base, donc tourner une emprise de trois
+		# tuiles sur une la faisait déborder en travers de la rue — d'où des
+		# immeubles qui se chevauchaient et mordaient sur la chaussée.
+		var quarts: int = posmod(id, 4) if absf(emprise.x - emprise.z) < 0.05 * emprise.x \
+			else posmod(id, 2) * 2
+		var tourne := Basis(Vector3.UP, PI * 0.5 * float(quarts)).scaled(emprise)
 		# La teinte du quartier passe en couleur d'instance : les modèles du kit
 		# sont gris-bleu, la ville doit garder ses couleurs de quartier — c'est
 		# ce qui fait qu'on sait où l'on est en regardant une rue.
@@ -610,25 +617,15 @@ func casser(id: int, locale: int) -> Dictionary:
 	var idx := (c.x * nz + c.y) * ny + c.z
 	if solide[idx] == 0:
 		return {}
-	var couleur := VoxelsCarnage.couleur_cellule(v, c.x, c.y, c.z)
-	VoxelsCarnage._creuser(v, c.x, c.y, c.z)
-	_cellules -= 1
-	var tuile := tuile_d_immeuble(id)
-	var groupe := Vector2i(tuile.x / PlanVille.PERIODE, tuile.y / PlanVille.PERIODE)
-	if _immeubles[id].has("kenney"):
-		# Premier cube arraché : le modèle s'efface et la grille de voxels prend
-		# le relais. C'est l'instant où un bâtiment dessiné devient un tas de
-		# cubes qu'on peut vider — sans ça, tirer sur une façade ne ferait rien.
-		_immeubles[id].erase("kenney")
-		if _bat_instance.has(id):
-			var place: Array = _bat_instance[id]
-			(place[0] as MultiMesh).set_instance_transform(int(place[1]),
-				Transform3D(Basis().scaled(Vector3.ZERO), (place[2] as Transform3D).origin))
-			_bat_instance.erase(id)
-	if _groupes.has(groupe):
-		_groupes[groupe]["sale"] = true
-		(_groupes[groupe]["tampons"] as Dictionary).erase(id)   # cet immeuble seul est à remailler
-	return {"p": _centre_voxel(v, c.x, c.y, c.z), "c": couleur, "taille": float(v["taille"])}
+	# ⚠ LE MUR NE S'OUVRE PLUS. Jusqu'à la v12, le premier cube arraché
+	# effaçait le modèle du kit et la grille de voxels prenait le relais : un
+	# immeuble dessiné se changeait sous les yeux du joueur en tas de cubes,
+	# et une rue mitraillée redevenait la ville d'avant. La façade encaisse
+	# donc, et ne rend que de quoi jouer l'impact : la poussière, les éclats et
+	# le choc partent, la pierre reste.
+	return {"p": _centre_voxel(v, c.x, c.y, c.z),
+		"c": VoxelsCarnage.couleur_cellule(v, c.x, c.y, c.z),
+		"taille": float(v["taille"])}
 
 ## Le voxel PLEIN d'un immeuble le plus proche d'un point 3D (en unités), pour
 ## savoir ce qu'une balle ou un pare-chocs a touché. Renvoie la clé locale ou -1.

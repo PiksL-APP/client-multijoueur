@@ -40,7 +40,15 @@ const SECTEUR := 40                          ## tuiles par secteur de lieux (8 p
 const TROTTOIR := 20.0                       ## px : la bande piétonne au bord d'une rue
 const FILE := 25.0                           ## px : la voie de circulation, depuis l'axe
 const STATIONNEMENT := 35.0                  ## px : la file de stationnement, depuis le bord
-const RETRAIT := 12.0                        ## px : une façade s'écarte un peu du bord de tuile
+## px : ce qu'une façade laisse au bord de sa tuile. Deux immeubles voisins
+## sont donc séparés du DOUBLE. ⚠ À douze, avec les quartiers qui rognaient
+## encore (le commerce à la moitié, le vieux au tiers), les façades se
+## touchaient et la ville n'était plus qu'un bloc : il faut voir le jour entre
+## deux immeubles pour croire que ce sont deux immeubles.
+const RETRAIT := 15.0
+## Ce qu'un quartier serré garde quand même — aucun réglage ne descend en
+## dessous.
+const RETRAIT_MIN := 11.0
 const RAYON_CENTRE := 8.0                    ## en pâtés : le centre d'affaires, neutre
 
 ## Les quartiers.
@@ -1460,7 +1468,7 @@ func _commerce(fiches: Array, pate: Vector2i) -> void:
 			var sel := 90 + j * 3 + i
 			var haut := _bruit(pate.x * 3 + i, pate.y * 3 + j, sel) < 0.3
 			var b := _immeuble(fiches, i, j, 1, 1, _hauteur(pate, sel, 10.0, 15.0) if haut else _hauteur(pate, sel, 5.0, 9.0),
-				F_COMMERCE, pate, sel, RETRAIT * 0.5)
+				F_COMMERCE, pate, sel, RETRAIT_MIN + 1.0)
 			if _bruit(pate.x * 3 + i, pate.y * 3 + j, sel + 20) < 0.6:
 				_neon(fiches, i, j, b, pate, sel + 40)
 
@@ -1478,7 +1486,7 @@ func _vieux(fiches: Array, pate: Vector2i) -> void:
 			var sel := 120 + j * 3 + i
 			var clocher := _bruit(pate.x * 3 + i, pate.y * 3 + j, sel) < 0.08
 			var b := _immeuble(fiches, i, j, 1, 1, 10.0 if clocher else _hauteur(pate, sel, 4.2, 7.0),
-				F_VIEUX, pate, sel, RETRAIT * 0.4)
+				F_VIEUX, pate, sel, RETRAIT_MIN)
 			if not clocher and _bruit(pate.x * 3 + i, pate.y * 3 + j, sel + 30) < 0.25:
 				_neon(fiches, i, j, b, pate, sel + 50)
 

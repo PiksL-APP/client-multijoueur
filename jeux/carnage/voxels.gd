@@ -1376,102 +1376,11 @@ static func peinture(indice: int, graine: int) -> Color:
 	return PEINTURES[posmod(graine, PEINTURES.size())]
 
 # ------------------------------------------------------------ les personnages
-
-const VOXEL_PERSONNAGE := 0.24
-
-## Un personnage en cubes FINS (un quart d'unité) : jambes articulées (nœuds
-## « JambeG » et « JambeD » pivotés à la hanche, avec pantalon et chaussures),
-## torse de la couleur donnée avec une ceinture, bras qui se balancent (« BrasG »,
-## « BrasD »), tête couleur peau, cheveux, yeux. Il regarde +X. Sa hauteur :
-## environ trois unités et demie, comme avant — seulement plus de cubes.
-static func personnage(couleur: Color, peau: Color = Color(0.9, 0.72, 0.6), cheveux: Color = Color(0.25, 0.18, 0.12)) -> Node3D:
-	var racine := Node3D.new()
-	var v := VOXEL_PERSONNAGE
-	var pantalon := Color(0.2, 0.22, 0.3, MUR)
-	var chaussure := Color(0.12, 0.1, 0.1, MUR)
-	var teinte := Color(couleur, MUR)
-	var hanche := 6.0 * v
-	for cote in [-1.0, 1.0]:
-		var jambe := MeshInstance3D.new()
-		jambe.name = "JambeG" if cote < 0.0 else "JambeD"
-		var st := SurfaceTool.new()
-		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		# Pivot à la hanche : deux voxels de large, six de haut, la chaussure
-		# qui avance d'un voxel.
-		for k in 6:
-			for dz in 2:
-				for dx in 2:
-					_cube(st, Vector3((dx - 0.5) * v, -0.5 * v - k * v, (dz - 0.5) * v), v,
-						pantalon.lightened(0.04 * (k % 2)) if k < 5 else chaussure)
-		for dz in 2:
-			_cube(st, Vector3(1.5 * v, -5.5 * v, (dz - 0.5) * v), v, chaussure)
-		jambe.mesh = st.commit()
-		jambe.material_override = matiere_voxel()
-		jambe.position = Vector3(0, hanche, cote * 1.0 * v)
-		racine.add_child(jambe)
-	for cote in [-1.0, 1.0]:
-		var bras := MeshInstance3D.new()
-		bras.name = "BrasG" if cote < 0.0 else "BrasD"
-		var st := SurfaceTool.new()
-		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		# Pivot à l'épaule : la manche puis la main.
-		for k in 5:
-			_cube(st, Vector3(0, -0.5 * v - k * v, 0), v, teinte.darkened(0.15) if k < 4 else Color(peau, MUR))
-		bras.mesh = st.commit()
-		bras.material_override = matiere_voxel()
-		bras.position = Vector3(0, hanche + 5.5 * v, cote * 2.5 * v)
-		racine.add_child(bras)
-	var corps := MeshInstance3D.new()
-	corps.name = "Corps"
-	var st2 := SurfaceTool.new()
-	st2.begin(Mesh.PRIMITIVE_TRIANGLES)
-	# Le torse : quatre de large, deux d'épais, six de haut ; une ceinture
-	# sombre en bas, un col plus clair en haut.
-	for k in 6:
-		for z in range(-2, 2):
-			for x in range(-1, 1):
-				var c := teinte.lightened(0.05 * (k % 2)) if k > 0 else Color(0.15, 0.12, 0.1, MUR)
-				if k == 5 and abs(z + 0.5) < 1.0:
-					c = teinte.lightened(0.2)
-				_cube(st2, Vector3((x + 0.5) * v, hanche + (k + 0.5) * v, (z + 0.5) * v), v, c)
-	# Les épaules.
-	for z in [-2.5, 2.5]:
-		_cube(st2, Vector3(0, hanche + 5.5 * v, z * v), v, teinte.darkened(0.1))
-	# Le cou, la tête (trois cubes de côté), les cheveux, les yeux, le nez.
-	var y_tete := hanche + 6.0 * v
-	_cube(st2, Vector3(0, y_tete + 0.5 * v, 0), v, Color(peau, MUR))
-	for k in 3:
-		for z in range(-1, 2):
-			for x in range(-1, 2):
-				_cube(st2, Vector3(x * v, y_tete + (1.5 + k) * v, z * v), v, Color(peau, MUR))
-	for z in range(-1, 2):
-		for x in range(-1, 2):
-			_cube(st2, Vector3(x * v, y_tete + 4.5 * v, z * v), v, Color(cheveux, MUR))
-		# La nuque : les cheveux descendent d'un cube à l'arrière.
-		_cube(st2, Vector3(-1.0 * v, y_tete + 3.5 * v, z * v), v * 1.02, Color(cheveux, MUR))
-	for z in [-1, 1]:
-		_cube(st2, Vector3(1.55 * v, y_tete + 3.0 * v, z * 0.6 * v), v * 0.5, Color(0.08, 0.08, 0.1, MUR))
-	_cube(st2, Vector3(1.6 * v, y_tete + 2.4 * v, 0), v * 0.5, Color(peau, MUR).darkened(0.1))
-	corps.mesh = st2.commit()
-	corps.material_override = matiere_voxel()
-	racine.add_child(corps)
-	return racine
-
-## Balance les jambes (et les bras, en opposition) d'un personnage qui
-## marche ; les remet droits sinon.
-static func animer(personnage_noeud: Node3D, marche: bool, temps: float, vitesse: float = 9.0) -> void:
-	var g := personnage_noeud.get_node_or_null("JambeG") as Node3D
-	var d := personnage_noeud.get_node_or_null("JambeD") as Node3D
-	if g == null or d == null:
-		return
-	var angle := sin(temps * vitesse) * 0.7 if marche else 0.0
-	g.rotation.z = angle
-	d.rotation.z = -angle
-	var bg := personnage_noeud.get_node_or_null("BrasG") as Node3D
-	var bd := personnage_noeud.get_node_or_null("BrasD") as Node3D
-	if bg and bd:
-		bg.rotation.z = -angle * 0.8
-		bd.rotation.z = angle * 0.8
+#
+# Il n'y en a plus ici. Les habitants de la ville viennent depuis la v12 du
+# kit « Animated Characters » de Kenney (`FormesCarnage.silhouette_kenney`) :
+# un maillage habillé et onze peaux, à côté desquels nos bonshommes en cubes
+# ne tenaient plus, maintenant que les voitures et les immeubles sont dessinés.
 
 # ------------------------------------------------------------ outils
 

@@ -70,7 +70,11 @@ static func maillage_voiture(indice: int) -> Mesh:
 			# stationnement et le pare-buffle s'y réfèrent.
 			var gabarit: Dictionary = VoxelsCarnage.GABARITS.get(i, VoxelsCarnage.GABARITS[0])
 			var longueur := float(gabarit["l"]) * VoxelsCarnage.VOXEL_VOITURE
-			_carrosseries[i] = maillage_kenney(chemin, longueur)
+			# ⚠ Un quart de tour dans l'AUTRE sens que le reste du kit : les
+			# carrosseries du Car Kit regardent +Z quand les props regardent
+			# -Z. Avec la rotation commune, toute la ville roulait en marche
+			# arrière — les phares derrière, la calandre au cul.
+			_carrosseries[i] = maillage_kenney(chemin, longueur, Vector3.AXIS_Z, PI * 0.5)
 	return _carrosseries[i]
 
 ## Vrai si ce gabarit est dessiné par un modèle Kenney (matière texturée) et
@@ -437,20 +441,25 @@ const BATIMENTS_KENNEY := {
 ## Le modèle qui va le mieux à ce volume : même famille que le style, et le
 ## ratio hauteur/largeur le plus proche (la graine départage les ex æquo, pour
 ## que deux immeubles voisins de même taille ne soient pas jumeaux).
+## Combien de modèles se disputent une emprise donnée. ⚠ Prendre le SEUL
+## meilleur ratio donnait des rues entières du même immeuble : deux voisins de
+## même taille — et un pâté n'en fait pas d'autres — tombaient forcément sur le
+## même modèle. On garde donc les cinq plus proches et on tire dedans par
+## l'identifiant : deux immeubles voisins ont des identifiants voisins, donc
+## des modèles différents, et le ratio reste presque aussi bien respecté.
+const CANDIDATS_BATIMENT := 5
+
 static func batiment_kenney(style: int, largeur: float, hauteur: float, graine: int) -> String:
 	var famille: Array = BATIMENTS_KENNEY.get(style, [])
 	if famille.is_empty() or largeur <= 0.01:
 		return ""
 	var voulu := hauteur / largeur
-	var meilleur := ""
-	var ecart := INF
-	for i in famille.size():
-		var fiche: Array = famille[posmod(i + graine, famille.size())]
-		var e: float = absf(float(fiche[1]) - voulu)
-		if e < ecart:
-			ecart = e
-			meilleur = String(fiche[0])
-	return "res://modeles/kenney/" + meilleur + ".glb"
+	var classement: Array = []
+	for fiche in famille:
+		classement.append([absf(float(fiche[1]) - voulu), String(fiche[0])])
+	classement.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
+	var combien: int = mini(CANDIDATS_BATIMENT, classement.size())
+	return "res://modeles/kenney/" + String(classement[posmod(graine, combien)][1]) + ".glb"
 
 ## Le maillage d'un bâtiment, ramené à une BOÎTE UNITÉ posée sur le sol :
 ## l'instance porte ensuite l'emprise (largeur, hauteur, profondeur) du plan.
@@ -633,17 +642,153 @@ static func epave() -> Node3D:
 
 # ------------------------------------------------------------ personnages
 
-## Un piéton, un membre de gang, un flic ou un joueur à pied : un personnage en
-## cubes, le torse à la couleur donnée. Le fanion est ce qui distingue un membre
-## de gang d'un passant : la couleur seule ne suffit pas, une silhouette de
-## trois pixels dans une rue sombre ne se lit pas. La marche se fait par
-## `VoxelsCarnage.animer` (les jambes pivotent à la hanche).
+## LES HABITANTS viennent du kit « Animated Characters » de Kenney : un seul
+## maillage habillé (`characterMedium.fbx`, cinquante-huit os) et onze peaux —
+## des passants, des skateurs, un truand, une cyborg, des survivants. Nos
+## bonshommes en cubes ne tenaient pas la comparaison avec des voitures et des
+## immeubles dessinés : une ville entière au même trait vaut mieux qu'un
+## personnage « fait maison » au milieu de modèles d'atelier.
+const PERSONNE_KENNEY := "res://modeles/kenney/personnages/characterMedium.fbx"
+const PEAUX_PERSONNES := "res://modeles/kenney/personnages/skins/"
+## Les passants ordinaires : huit têtes, pour qu'un trottoir ne soit pas une
+## file de jumeaux. L'ordre compte — on tire dedans par le reste d'un identifiant.
+const PEAUX_CIVILES := ["humanMaleA", "humanFemaleA", "skaterMaleA", "skaterFemaleA",
+	"survivorFemaleA", "survivorMaleB", "cyborgFemaleA", "criminalMaleA"]
+## Les hommes de main : le truand et les deux survivants. Le fanion et la
+## casquette de couleur disent le gang ; la peau dit seulement « pas un passant ».
+const PEAUX_GANG := ["criminalMaleA", "survivorMaleB", "survivorFemaleA"]
+## Les joueurs : le skateur, pour qu'on se reconnaisse d'un coup d'œil. Le halo
+## et la casquette portent la couleur de place.
+const PEAU_JOUEUR := "skaterMaleA"
+## Les flics à pied : la cyborg, la plus « uniforme » du lot.
+const PEAU_FLIC := "cyborgFemaleA"
+
+## La hauteur du crâne, mesurée sur le modèle posé : la casquette s'y pose et
+## la jauge de vie se lit au-dessus. Une constante vaut mieux qu'un
+## `get_aabb()` par piéton — le maillage est habillé, sa boîte ne veut rien dire.
+const HAUT_TETE := 3.26
+
+static var _scene_personne: PackedScene
+static var _peaux: Dictionary = {}
+static var _casquette: ArrayMesh
+
+## La matière d'une peau : la texture du kit, filtrée en linéaire avec mipmaps
+## — en `nearest`, un personnage à trente mètres scintille à chaque pas.
+static func matiere_peau(peau: String) -> Material:
+	if _peaux.has(peau):
+		return _peaux[peau]
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = load(PEAUX_PERSONNES + peau + ".png")
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	m.roughness = 0.9
+	m.specular = 0.12
+	_peaux[peau] = m
+	return m
+
+## La peau d'un passant, tirée de son identifiant : le même piéton garde la
+## même tête tant qu'il vit, sinon la foule clignote au recyclage.
+static func peau_civile(graine: int) -> String:
+	return PEAUX_CIVILES[posmod(graine, PEAUX_CIVILES.size())]
+
+## Une silhouette habillée, tournée pour regarder +X comme tout le reste du
+## jeu (le modèle du kit regarde -X). Les quatre os qui se balancent sont
+## retenus dans une méta : `find_bone` coûte une recherche par nom, et la
+## démarche s'appelle soixante fois par seconde.
+static func silhouette_kenney(peau: String) -> Node3D:
+	if _scene_personne == null:
+		_scene_personne = load(PERSONNE_KENNEY)
+	var noeud: Node3D = _scene_personne.instantiate()
+	noeud.rotation.y = PI * 0.5
+	var chair: MeshInstance3D = noeud.find_child("characterMedium", true, false)
+	if chair != null:
+		chair.material_override = matiere_peau(peau)
+	var os: Skeleton3D = noeud.find_child("Skeleton3D", true, false)
+	if os != null:
+		noeud.set_meta("os", os)
+		noeud.set_meta("membres", [os.find_bone("LeftUpLeg"), os.find_bone("RightUpLeg"),
+			os.find_bone("LeftArm"), os.find_bone("RightArm")])
+		animer_kenney(noeud, false, 0.0)
+	return noeud
+
+## La démarche : les cuisses et les bras balancent d'avant en arrière. ⚠ Pas
+## autour du même axe : le rig du kit vrille les os des bras d'un quart de
+## tour par rapport à ceux des jambes, si bien qu'une cuisse balance autour de
+## X quand un bras, lui, balance autour de Z. Le tourner autour de X l'écarte
+## en croix, et la rue se remplit d'épouvantails. Quatre quaternions par image
+## et par personnage.
+##
+## ⚠ Remettre les quatre os à zéro n'est pas neutre non plus : le modèle est
+## livré bras écartés (une pose d'atelier, faite pour qu'on voie les manches),
+## et c'est cette remise à zéro qui les ramène le long du corps.
+static func animer_kenney(silhouette: Node3D, marche: bool, temps: float,
+		vitesse: float = 7.5) -> void:
+	if silhouette == null or not silhouette.has_meta("membres"):
+		return
+	var os: Skeleton3D = silhouette.get_meta("os")
+	var membres: Array = silhouette.get_meta("membres")
+	var angle := sin(temps * vitesse) * 0.46 if marche else 0.0
+	var pas := [angle, -angle, -angle * 0.62, angle * 0.62]
+	for i in 4:
+		if int(membres[i]) < 0:
+			continue
+		var v := Vector3(pas[i], 0.0, 0.0) if i < 2 else Vector3(0.0, 0.0, pas[i])
+		os.set_bone_pose_rotation(int(membres[i]), Quaternion.from_euler(v))
+
+## La CASQUETTE : une calotte plate de la couleur du gang (ou de la place du
+## joueur), posée sur le crâne. Vue de dessus — et la caméra ne voit à peu près
+## que ça — c'est le seul endroit du corps qui se lise. Sans elle, un homme de
+## main rouge et un passant se ressemblent trait pour trait.
+static func maillage_casquette() -> ArrayMesh:
+	if _casquette != null:
+		return _casquette
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rayon := 0.62
+	var haut := 0.22
+	var cotes := 10
+	for i in cotes:
+		var a0 := TAU * float(i) / float(cotes)
+		var a1 := TAU * float(i + 1) / float(cotes)
+		var p0 := Vector3(cos(a0) * rayon, 0.0, sin(a0) * rayon)
+		var p1 := Vector3(cos(a1) * rayon, 0.0, sin(a1) * rayon)
+		# Le dessus.
+		for p in [Vector3(0, haut, 0), p0 + Vector3(0, haut * 0.72, 0), p1 + Vector3(0, haut * 0.72, 0)]:
+			st.set_normal(Vector3.UP)
+			st.add_vertex(p)
+		# Le bord.
+		for p in [p0, p1, p1 + Vector3(0, haut * 0.72, 0), p0, p1 + Vector3(0, haut * 0.72, 0), p0 + Vector3(0, haut * 0.72, 0)]:
+			st.set_normal(Vector3(p.x, 0, p.z).normalized())
+			st.add_vertex(p)
+	# La visière, vers l'avant (+X).
+	var v := [Vector3(rayon * 0.5, 0.03, -0.44), Vector3(rayon * 1.45, 0.03, -0.3),
+		Vector3(rayon * 1.45, 0.03, 0.3), Vector3(rayon * 0.5, 0.03, 0.44)]
+	for k in [0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2]:
+		st.set_normal(Vector3.UP)
+		st.add_vertex(v[k])
+	st.generate_tangents()
+	_casquette = st.commit()
+	return _casquette
+
+## Un piéton, un membre de gang, un flic ou un joueur à pied. Le corps vient du
+## kit, la casquette porte la couleur, le fanion distingue un homme de main
+## d'un passant : la couleur seule ne suffit pas, une silhouette de trois pixels
+## dans une rue sombre ne se lit pas.
 static func pieton(couleur: Color, fanion: bool = false, pseudo: String = "",
-		halo: bool = false) -> Node3D:
+		halo: bool = false, peau: String = "") -> Node3D:
 	var racine := Node3D.new()
-	var corps := VoxelsCarnage.personnage(couleur)
+	var corps := silhouette_kenney(peau if peau != "" else PEAUX_CIVILES[0])
 	corps.name = "Silhouette"
 	racine.add_child(corps)
+
+	# La casquette : seuls ceux qui portent une couleur en ont une. Un passant
+	# reste tête nue — c'est ce qui rend les autres repérables.
+	if fanion or halo:
+		var calotte := MeshInstance3D.new()
+		calotte.mesh = maillage_casquette()
+		calotte.material_override = MatieresCarnage.voxel_teinte(couleur)
+		calotte.position = Vector3(0, HAUT_TETE, 0)
+		calotte.name = "Casquette"
+		racine.add_child(calotte)
 
 	if halo:
 		var anneau := Decor.anneau(1.5, 0.16, couleur, 0.95)
@@ -653,12 +798,14 @@ static func pieton(couleur: Color, fanion: bool = false, pseudo: String = "",
 		racine.add_child(anneau)
 
 	if fanion:
-		var hampe := Decor.boite(Vector3(0.1, 1.1, 0.1), Palette.ENCRE_FAIBLE, false)
-		hampe.position = Vector3(-0.5, 3.4, 0)
+		# Le fanion se dresse AU-DESSUS du crâne : planté à hauteur d'épaule,
+		# il passait devant le visage et la rue devenait illisible.
+		var hampe := Decor.boite(Vector3(0.08, 0.9, 0.08), Palette.ENCRE_FAIBLE, false)
+		hampe.position = Vector3(-0.34, 4.0, 0)
 		racine.add_child(hampe)
-		var etoffe := Decor.boite(Vector3(0.08, 0.5, 0.7), couleur, false)
+		var etoffe := Decor.boite(Vector3(0.06, 0.34, 0.5), couleur, false)
 		etoffe.material_override = Decor.matiere_lumineuse(couleur, 1.0)
-		etoffe.position = Vector3(-0.5, 3.7, 0.35)
+		etoffe.position = Vector3(-0.34, 4.3, 0.25)
 		racine.add_child(etoffe)
 
 	var jauge := Decor.barre(1.6)

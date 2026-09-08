@@ -92,12 +92,29 @@ rendu et l'interface ; le reste est à côté :
   [modèle, ratio h/l]), `batiment_kenney(style, largeur, hauteur, graine)`
   choisit par ratio, `maillage_batiment(chemin)` normalise en boîte unité et
   l'instance porte l'emprise ; `_bats_kenney` / `_bat_instance` dans le
-  morceau, et `casser()` efface l'instance (échelle 0) puis laisse la grille
-  voxel prendre le relais — un immeuble intact n'est PAS maillé. Matière :
+  morceau. ⚠ Depuis la v12 `casser()` NE CASSE PLUS : elle rend le point et la
+  couleur touchés (poussière, éclats, choc) sans creuser ni effacer le modèle
+  — `VilleVivante.detruits` reste vide et un immeuble n'est jamais maillé.
+  `batiment_kenney` tire parmi les CANDIDATS_BATIMENT meilleurs ratios (5) par
+  l'identifiant, sinon deux voisins de même taille prenaient le même modèle ;
+  ⚠ le quart de tour d'un bâtiment n'est permis que sur une emprise carrée.
+  ⚠ Les voitures se tournent avec `tourner = +PI*0.5` (les props avec −PI*0.5). Matière :
   `MatieresCarnage.kenney(atlas, fenetres)` (shader KENNEY : atlas × couleur
   d'instance, carreaux allumés la nuit sur les faces verticales seulement).
   ⚠ Chaque kit a SON `Textures/colormap.png`, en fichier externe ;
   ⚠ `SurfaceTool` ne garde pas les matières.
+- LES HABITANTS (v12) : `FormesCarnage.silhouette_kenney(peau)` instancie
+  `modeles/kenney/personnages/characterMedium.fbx` (58 os), pose la texture de
+  tenue (`matiere_peau`, `PEAUX_CIVILES` / `PEAUX_GANG` / `PEAU_FLIC` /
+  `PEAU_JOUEUR`, tirée de l'identifiant par `peau_civile`) et tourne le modèle
+  vers +X. `animer_kenney(silhouette, marche, temps)` pivote QUATRE os
+  (`LeftUpLeg`, `RightUpLeg`, `LeftArm`, `RightArm`, retenus en méta pour
+  éviter `find_bone` par image) — on n'importe PAS les `.fbx` d'animation du
+  kit. ⚠ Les cuisses balancent autour de X, les bras autour de Z (le rig les
+  vrille d'un quart de tour) ; ⚠ remettre les quatre os à zéro n'est pas
+  neutre : c'est ce qui ramène les bras, livrés écartés, le long du corps. La
+  couleur de gang/de place se lit sur la CASQUETTE (`maillage_casquette`,
+  posée à `HAUT_TETE`), pas sur le corps.
 - LE FEU (`vivant.gd`, section « le feu ») : `feux` [{id,p,force,t,propage,
   ronge}], `allumer(p, force)` (les foyers proches fusionnent), `arroser(p, r,
   delta)`, `feu_le_plus_proche`, `_animer_les_feux` (dégâts, propagation aux

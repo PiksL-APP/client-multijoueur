@@ -334,7 +334,8 @@ func preparer() -> void:
 	noeud_t.material_override = MatieresCarnage.trace()
 	noeud_t.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	monde().add_child(noeud_t)
-	_corps_pied = FormesCarnage.pieton(_ma_couleur(), false, Session.pseudo, true)
+	_corps_pied = FormesCarnage.pieton(_ma_couleur(), false, Session.pseudo, true,
+		FormesCarnage.PEAU_JOUEUR)
 	_corps_pied.visible = false
 	monde().add_child(_corps_pied)
 
@@ -571,17 +572,15 @@ func _dessiner_le_plan() -> void:
 		_plan_vue.draw_string(police, Vector2(x + 9.0, y), String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_DOUCE)
 		x += 12.0 + police.get_string_size(String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 16.0
 
-## Un cube d'immeuble part du décor, s'il est bâti : le morceau retire
-## l'instance, dévoile l'intérieur, et on jette quelques débris de sa couleur.
+## Un IMPACT sur une façade. ⚠ Plus rien ne part du décor depuis la v12 : le
+## morceau rend seulement la couleur et le point touchés, et on en tire les
+## éclats, la poussière et le choc. Le mur, lui, tient.
 func _casser_dans_le_decor(id: int, locale: int) -> void:
 	var tuile := MorceauVille.tuile_d_immeuble(id)
 	var cle_morceau := Vector2i(tuile.x / PlanVille.MORCEAU, tuile.y / PlanVille.MORCEAU)
 	if not _morceaux.has(cle_morceau):
 		return
 	var morceau: MorceauVille = _morceaux[cle_morceau]
-	# Le morceau peut être en chantier : s'il porte déjà l'immeuble, la cellule
-	# se vide et le maillage à venir la montrera creuse ; sinon `detruits`,
-	# rejoué en posant l'immeuble, s'en charge.
 	var parti := morceau.casser(id, locale)
 	if parti.is_empty():
 		return
@@ -600,23 +599,6 @@ func _casser_dans_le_decor(id: int, locale: int) -> void:
 	monde().add_child(poussiere)
 	_eclats.append({"noeud": poussiere, "v": Vector3.ZERO, "t": 1.2, "t0": 1.2, "lumiere": true})
 	Sons.jouer("choc", _rng.randf_range(0.6, 0.9), -14.0)
-
-## Un immeuble dont le rez-de-chaussée est parti aux deux tiers ne tient plus
-## personne dehors : on ouvre ses tuiles, on roule dans la ruine.
-func _verifier_la_ruine(id: int) -> void:
-	var tuile := MorceauVille.tuile_d_immeuble(id)
-	var fiche := carte.tuile(tuile.x, tuile.y)
-	var rang := posmod(id, 8)
-	if rang >= (fiche["batis"] as Array).size():
-		return
-	var g := VoxelsCarnage.grille(fiche["batis"][rang])
-	var sol_total := int(g["nx"]) * int(g["nz"])
-	var partis := 0
-	for locale in ville.detruits.get(id, []):
-		if posmod(int(locale), 64) == 0:
-			partis += 1
-	if float(sol_total - partis) / float(max(1, sol_total)) < 0.4:
-		carte.eventrer(id)
 
 ## Une voiture dormante s'est réveillée : on l'efface de la nappe du morceau
 ## qui la porte. Le nœud ordinaire de `_placer_les_autos` prend le relais.
@@ -1578,15 +1560,8 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 				if typeof(entree) != TYPE_ARRAY or (entree as Array).size() != 2:
 					continue
 				var id := int(entree[0])
-				var locale := int(entree[1])
-				if not ville.detruits.has(id):
-					ville.detruits[id] = []
-				if not (locale in (ville.detruits[id] as Array)):
-					ville.detruits[id].append(locale)
 				touches[id] = true
-				_casser_dans_le_decor(id, locale)
-			for id in touches:
-				_verifier_la_ruine(int(id))
+				_casser_dans_le_decor(id, int(entree[1]))
 			if Commandes.pilote_automatique:
 				print("[banc] casse : %d cube(s) dans %d immeuble(s)" % [(charge.get("v", []) as Array).size(), touches.size()])
 		"etoiles":
@@ -1667,7 +1642,8 @@ func _recevoir_joueur(charge: Dictionary) -> void:
 		var auto := FormesCarnage.voiture(couleur, pseudo)
 		auto.position = Decor.vers3d(cible)
 		monde().add_child(auto)
-		var pieton := FormesCarnage.pieton(couleur, false, pseudo, true)
+		var pieton := FormesCarnage.pieton(couleur, false, pseudo, true,
+			FormesCarnage.PEAU_JOUEUR)
 		pieton.visible = false
 		monde().add_child(pieton)
 		_autres[cle] = {"p": cible, "a": 0.0, "v": 0.0, "vie": VIE_MAX, "cible": cible,
@@ -2174,7 +2150,8 @@ func _placer_la_foule() -> void:
 			if (personne["p"] as Vector2).distance_to(_position) > PORTEE_RENDU or _batisses >= BATISSES_PAR_IMAGE:
 				continue
 			_batisses += 1
-			noeud = FormesCarnage.pieton(_couleur_de(personne), int(personne["genre"]) == VilleVivante.GANG)
+			noeud = FormesCarnage.pieton(_couleur_de(personne),
+				int(personne["genre"]) == VilleVivante.GANG, "", false, _peau_de(personne))
 			monde().add_child(noeud)
 			personne["noeud"] = noeud
 		var corps: Node3D = noeud
@@ -2186,6 +2163,19 @@ func _placer_la_foule() -> void:
 		corps.rotation.y = -float(personne.get("a", 0.0))
 		_demarche(corps, "walk")
 		_regler_jauge(corps, float(int(personne["pv"])) / float(_pv_max_de(personne)))
+
+## La tête d'un habitant : les hommes de main ont les leurs, les flics la
+## leur, les passants huit visages tirés de leur identifiant. Tirer sur
+## l'identifiant et non au hasard, c'est ce qui fait qu'un piéton ne change pas
+## de tête entre deux images.
+func _peau_de(personne: Dictionary) -> String:
+	var graine := int(personne.get("id", 0))
+	match int(personne["genre"]):
+		VilleVivante.GANG:
+			return FormesCarnage.PEAUX_GANG[posmod(graine, FormesCarnage.PEAUX_GANG.size())]
+		VilleVivante.FLIC:
+			return FormesCarnage.PEAU_FLIC
+	return FormesCarnage.peau_civile(graine)
 
 func _couleur_de(personne: Dictionary) -> Color:
 	match int(personne["genre"]):
@@ -2275,12 +2265,14 @@ func _placer_les_objets() -> void:
 		if gyro:
 			gyro.visible = fmod(temps, 0.7) > 0.35
 
-## La démarche d'un personnage en cubes : ses jambes pivotent quand il marche.
-## Deux rotations par image et par personnage, rien de plus.
+## La démarche d'un habitant : ses cuisses et ses bras pivotent quand il
+## marche. Quatre os par image et par personnage, rien de plus — et un
+## décalage tiré de son adresse, sinon toute la rue marche au même pas.
 func _demarche(porteur: Node3D, nom: String) -> void:
 	var silhouette := porteur.get_node_or_null("Silhouette") as Node3D
 	if silhouette:
-		VoxelsCarnage.animer(silhouette, nom == "walk", temps + float(porteur.get_instance_id() % 97))
+		FormesCarnage.animer_kenney(silhouette, nom == "walk",
+			temps + float(porteur.get_instance_id() % 97))
 
 ## L'hélicoptère : il glisse vers sa dernière position connue, son rotor tourne,
 ## et on entend ses pales quand il est proche — c'est ce qui dit qu'il est là
