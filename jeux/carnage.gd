@@ -149,6 +149,23 @@ const COULEURS_BUTIN := {"vie": Palette.BON, "argent": Palette.AVERTISSEMENT}
 const SOIN_TROUSSE := 50.0
 const KLAXON_DELAI := 0.9
 
+## Chaque arme a sa détonation. Un pistolet et une mitraillette qui claquent
+## pareil, ce sont deux armes qu'on ne distingue qu'à l'écran — et l'oreille
+## va plus vite que l'œil quand on est trois à tirer dans la même rue.
+const SONS_ARMES := {
+	"pistolet": "tir_pistolet", "mitraillette": "tir_mitraillette",
+	"roquette": "tir_roquette", "eperon": "choc_metal",
+}
+
+## Le grain du moteur suit le châssis : la sportive siffle, le camion gronde.
+## Les modèles absents roulent au moteur standard.
+const MOTEURS_VEHICULE := {
+	1: "sport", 2: "sport", 9: "sport", 10: "super", 14: "super",
+	16: "compact", 17: "sport",
+	3: "van", 4: "van", 6: "van", 12: "van", 15: "van",
+	7: "camion", 8: "camion", 13: "camion", 18: "camion",
+}
+
 ## Identifiant de la voiture de départ. Elle n'appartient à personne dans la
 ## liste de l'hôte tant qu'on ne l'a pas quittée : le premier `sortir` la lui
 ## fait découvrir. Le nombre est haut pour ne jamais croiser un identifiant
@@ -216,6 +233,9 @@ var _contrat: Dictionary = {}
 var _depuis_sirene := 0.0
 var _depuis_klaxon := 0.0
 var _depuis_battement := 0.0
+var _depuis_derapage := 0.0
+var _depuis_pas := 0.0
+var _depuis_radio := 0.0
 var _cible_contrat: Dictionary = {}
 var _contrat_duree := 0.0            ## durée initiale du contrat en main, pour le sablier du HUD
 var _radar: Control
@@ -786,6 +806,7 @@ func _basculer_portiere() -> void:
 	_vehicule = 0
 	Tactile.mode = Tactile.MARCHE
 	Sons.arreter_moteur()
+	Sons.jouer("portiere_ferme", 1.0, -11.0)
 	var angle_rendu := _angle
 	var modele_rendu := _modele_vehicule
 	var genre_rendu := _genre_vehicule
@@ -818,8 +839,13 @@ func _prendre_le_volant(id: int, genre: int, position: Vector2, angle: float, pv
 	_vitesse = 0.0
 	_depuis_portiere = DELAI_PORTIERE
 	Tactile.mode = Tactile.CONDUITE
-	Sons.demarrer_moteur()
-	Sons.jouer("porte", 1.0, -10.0)
+	Sons.demarrer_moteur(_type_moteur())
+	Sons.jouer("portiere_ouvre", 1.0, -10.0)
+	Sons.jouer("demarreur", _rng.randf_range(0.94, 1.08), -13.0)
+
+## Le grain de moteur du véhicule qu'on pilote.
+func _type_moteur() -> String:
+	return String(MOTEURS_VEHICULE.get(_modele_vehicule, "standard"))
 
 # ------------------------------------------------------- déplacement
 
@@ -841,6 +867,12 @@ func _marcher(delta: float) -> void:
 		# touches.
 		_angle = commande.angle()
 		_vitesse = VITESSE_A_PIED
+		# Un pas toutes les 0,34 s. À pied, c'est le seul retour qui dit qu'on
+		# avance : la ville défile trop lentement pour le montrer.
+		_depuis_pas -= delta
+		if _depuis_pas <= 0.0:
+			_depuis_pas = 0.34
+			Sons.jouer("pas_beton", _rng.randf_range(0.94, 1.08), -20.0)
 		var suivant := _position + commande.normalized() * VITESSE_A_PIED * delta
 		_position = carte.degager(suivant, RAYON_A_PIED)[0]
 		# À pied non plus, on ne traverse pas une voiture garée : on la contourne.
@@ -851,6 +883,7 @@ func _marcher(delta: float) -> void:
 				_position = p + vers.normalized() * minimum
 	else:
 		_vitesse = 0.0
+		_depuis_pas = 0.0
 	_surveiller_la_friche(delta)
 
 func _conduire(delta: float) -> void:
@@ -898,6 +931,7 @@ func _conduire(delta: float) -> void:
 			adherence *= 1.8
 		_glisse = _glisse.slerp(cap, clamp(delta * adherence, 0.0, 1.0)).normalized()
 	_position += _glisse * _vitesse * delta
+	_crisser(delta, cap)
 	_marquer_le_bitume(delta)
 	_heurter_les_murs()
 	_heurter_les_voitures()
@@ -936,12 +970,29 @@ func _marquer_le_bitume(delta: float) -> void:
 			if c.a > 0.0:
 				_traces.set_instance_color(i, Color(0, 0, 0, maxf(0.0, c.a - 0.02)))
 
+## Le crissement : il ne se déclenche pas sur la vitesse mais sur l'ÉCART
+## entre le cap de la voiture et sa trajectoire réelle. C'est ce qui fait
+## qu'un virage négocié reste muet et qu'un tête-à-queue s'entend.
+func _crisser(delta: float, cap: Vector2) -> void:
+	_depuis_derapage -= delta
+	if _depuis_derapage > 0.0 or abs(_vitesse) < 260.0:
+		return
+	var ecart: float = abs(_glisse.angle_to(cap))
+	if ecart < 0.22:
+		return
+	_depuis_derapage = 0.55
+	Sons.jouer("derapage", _rng.randf_range(0.92, 1.1),
+		-22.0 + min(10.0, ecart * 22.0))
+
 func _klaxonner(delta: float) -> void:
 	_depuis_klaxon -= delta
 	if _hors_service > 0.0 or not Commandes.klaxon() or _depuis_klaxon > 0.0:
 		return
 	_depuis_klaxon = KLAXON_DELAI
 	Sons.jouer("klaxon", _rng.randf_range(0.96, 1.04), -9.0)
+	# Klaxonner dans une rue pleine, ça se fait répondre.
+	if _rng.randf() < 0.4:
+		Sons.voix("voix_attention", -13.0)
 	canal.envoyer("klx", {"x": int(_position.x), "y": int(_position.y)})
 	if est_hote():
 		ville.paniquer(_position, 280.0, 1.8)
@@ -975,7 +1026,11 @@ func _heurter_les_murs() -> void:
 	var frontal: float = abs(direction.dot(normale))
 
 	if frontal > 0.62 and abs(_vitesse) > 330.0:
-		Sons.jouer("choc", 0.8, -10.0)
+		# Le choc a trois forces : de la tôle froissée au mur pris à pleine
+		# vitesse. Un seul bruit de collision, et un accrochage sonne comme
+		# une sortie de route.
+		Sons.jouer("choc_dur" if abs(_vitesse) > 620.0 else "choc_moyen",
+			_rng.randf_range(0.94, 1.06), -8.0)
 		_secousse = max(_secousse, 0.28)
 		# Une façade prise de face à cette vitesse perd des cubes : l'hôte
 		# tranche lesquels, comme pour les balles.
@@ -1029,8 +1084,13 @@ func _heurter_les_voitures() -> void:
 		_position = p + normale * minimum
 		var frontal: float = abs(direction.dot(normale))
 		if frontal > 0.5 and abs(_vitesse) > 260.0:
-			Sons.jouer("choc", 0.9, -12.0)
+			Sons.jouer("choc_moyen" if abs(_vitesse) > 500.0 else "choc_doux",
+				_rng.randf_range(0.94, 1.06), -10.0)
 			_secousse = max(_secousse, 0.2)
+			# Une carrosserie tapée déclenche son alarme : c'est ce qui fait
+			# qu'un accrochage réveille la rue plutôt que de passer inaperçu.
+			if _rng.randf() < 0.35:
+				Sons.jouer("alarme_vehicule", 1.0, -20.0)
 		_vitesse *= lerp(0.96, 0.45, frontal)
 
 func _solidite() -> float:
@@ -1219,8 +1279,8 @@ func _tirer(delta: float) -> void:
 	canal.envoyer("tir", {"x": int(depart.x), "y": int(depart.y),
 		"a": snapped(_angle, 0.01), "arme": _arme})
 	_creer_projectile(depart, _angle, _arme, Session.cle)
-	Sons.jouer("clic" if _arme != "roquette" else "choc",
-		1.6 if _arme != "roquette" else 0.7, -12.0)
+	Sons.jouer(String(SONS_ARMES.get(_arme, "tir_pistolet")),
+		_rng.randf_range(0.97, 1.05), -10.0)
 	# Tirer en ville, ça s'entend. La police n'a pas besoin de voir le corps.
 	if est_hote():
 		ville.crime(Session.cle, "coup_de_feu")
@@ -1253,6 +1313,12 @@ func _avancer_projectiles(delta: float) -> void:
 		tir["restant"] = float(tir["restant"]) - pas.length()
 		var dans_un_mur := carte.dans_un_batiment(tir["p"])
 		var mort: bool = float(tir["restant"]) <= 0.0 or dans_un_mur
+		# La balle qui mord la pierre s'entend même chez celui qui ne l'a pas
+		# tirée : c'est ce qui dit d'où ça vient quand on ne voit rien.
+		if dans_un_mur and String(tir["arme"]) != "roquette":
+			var loin: float = (tir["p"] as Vector2).distance_to(_position)
+			if loin < 900.0:
+				Sons.jouer("balle_mur", _rng.randf_range(0.9, 1.15), -14.0 - loin * 0.012)
 		if est_hote() and dans_un_mur:
 			# La balle écaille le mur, la roquette le creuse : l'hôte décide
 			# quels cubes partent, et le dit à tous.
@@ -1722,8 +1788,10 @@ func _tomber() -> void:
 		_dire_affaire("la police vous prend $%d" % saisi)
 	if not bool(_ameliorations["arsenal"]):
 		_reprendre_le_pistolet()
-	Sons.jouer("ecrasement", 0.5, -3.0)
+	Sons.jouer("voix_cri", _rng.randf_range(0.9, 1.1), -4.0)
+	Sons.jouer("chute_mortelle", 1.0, -8.0)
 	Sons.arreter_moteur()
+	Sons.sirene(0)
 	canal.envoyer("mort", {"j": Session.cle, "par": _dernier_agresseur,
 		"x": int(_position.x), "y": int(_position.y)})
 	if est_hote() and _dernier_agresseur != "" and carte.arene_de(_position) >= 0:
@@ -1791,11 +1859,19 @@ func _relever() -> void:
 func _effet_gain(position: Vector2, points: int, facteur: int, cle: String, quoi: String) -> void:
 	var couleur := Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 0)))
 	if quoi == "argent" or quoi == "contrat":
-		Sons.jouer("depart", 1.4, -10.0)
+		Sons.jouer("bonus", 1.0, -10.0)
+	elif quoi == "pieton" and not _pied:
+		Sons.jouer("ecrase_pieton", _rng.randf_range(0.9, 1.1), -6.0)
 	else:
-		Sons.jouer("ecrasement", _rng.randf_range(0.85, 1.2), -8.0)
-	if quoi == "pieton":
-		Sons.jouer("cri", _rng.randf_range(0.8, 1.25), -11.0)
+		Sons.jouer("choc_moyen", _rng.randf_range(0.85, 1.2), -8.0)
+	if quoi == "pieton" or quoi == "gang":
+		Sons.voix("voix_cri", -9.0)
+		# Les témoins commentent. Sans eux, une rue qui vient de perdre
+		# quelqu'un sonne exactement comme une rue vide.
+		if _rng.randf() < 0.45:
+			Sons.voix("voix_surprise", -15.0)
+	elif quoi == "flic":
+		Sons.voix("flic_arme", -11.0)
 
 	if quoi == "pieton" or quoi == "gang" or quoi == "flic":
 		# Une flaque au sol, bien plus sombre que la foule : à la même teinte,
@@ -1825,7 +1901,7 @@ func _effet_gain(position: Vector2, points: int, facteur: int, cle: String, quoi
 	_eclats.append({"noeud": mention, "v": Vector3(0, 7.0, 0), "t": 1.1, "t0": 1.1, "texte": true})
 
 func _effet_explosion(position: Vector2) -> void:
-	Sons.jouer("ecrasement", 0.6, -4.0)
+	Sons.jouer("explosion_grande", _rng.randf_range(0.92, 1.06), -4.0)
 	_secousse = max(_secousse, 0.4)
 	# La bouffée de feu, et un éclair orange sur les façades autour : au
 	# crépuscule, une explosion doit ÉCLAIRER, pas seulement projeter des éclats.
@@ -2068,12 +2144,29 @@ func _faire_hurler_la_police(delta: float) -> void:
 	var niveau := ville.etoiles(Session.cle)
 	if niveau <= 0:
 		_depuis_sirene = 0.0
+		_depuis_radio = 0.0
+		Sons.sirene(0)
 		return
+	# La sirène tourne en continu tant qu'on est recherché : une poursuite est
+	# un état. Elle enfle avec les étoiles et passe au régime rapide à trois.
+	Sons.sirene(niveau, -20.0)
+	# Le dispatch, lui, parle par intervalles — assez pour raconter la chasse,
+	# assez peu pour qu'on entende encore le moteur.
+	_depuis_radio -= delta
+	if _depuis_radio <= 0.0:
+		_depuis_radio = _rng.randf_range(9.0, 16.0)
+		Sons.radio_police(niveau, 0, _cap_parle())
 	_depuis_sirene -= delta
 	if _depuis_sirene > 0.0:
 		return
 	_depuis_sirene = max(0.7, 1.6 - 0.18 * float(niveau))
-	Sons.jouer("sirene", 1.0 + 0.06 * float(niveau), -16.0)
+
+## Le point cardinal vers lequel on file, dit comme la radio le dirait.
+func _cap_parle() -> String:
+	var d := _glisse if not _pied else Vector2.RIGHT.rotated(_angle)
+	if abs(d.x) > abs(d.y):
+		return "east" if d.x > 0.0 else "west"
+	return "south" if d.y > 0.0 else "north"
 
 ## Le sablier du contrat descend chez chacun entre deux nouvelles de l'hôte ;
 ## l'affichage lui-même est dans la fiche (`fiche_joueur`).

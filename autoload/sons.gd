@@ -1,6 +1,11 @@
 extends Node
-## Le son du jeu : les bruitages sont synthétisés au démarrage, les musiques
-## et les ambiances viennent de fichiers.
+## Le son du jeu : des échantillons de rue en fichiers, une synthèse en filet
+## de sécurité, les musiques et les ambiances en boucle.
+##
+## Les bruitages de Carnage viennent de `sons/sfx/` : 238 échantillons OGG
+## mono 22 kHz — armes, moteurs, tôle, pas, voix de trottoir, radio de la
+## police. Chacun est chargé au premier usage puis gardé : rien à attendre au
+## démarrage, rien à télécharger pour un son qu'on n'entendra jamais.
 ##
 ## Les bruitages en synthèse : une banque de quelques dizaines de kilo-octets
 ## fabriquée en une trentaine de millisecondes, réglable en changeant un
@@ -15,6 +20,71 @@ extends Node
 const TAUX := 22050
 const VOIX := 12                    ## sons simultanés
 const FICHIER := "user://son.cfg"
+const DOSSIER := "res://sons/sfx/%s.ogg"
+
+## Les familles à variantes : un nom, plusieurs prises. Tirer au sort évite
+## qu'une fusillade sonne comme le même claquement répété quarante fois.
+const VARIANTES := {
+	"alarme_vehicule": 2,
+	"balle_mur": 3,
+	"balle_vehicule": 3,
+	"demarreur": 2,
+	"flic_arme": 4,
+	"flic_insiste": 7,
+	"flic_stop": 7,
+	"foule": 2,
+	"klaxon": 4,
+	"pas_beton": 4,
+	"pas_bois": 4,
+	"pas_herbe": 4,
+	"pas_metal": 4,
+	"voix_aide": 10,
+	"voix_attention": 6,
+	"voix_carjack": 5,
+	"voix_cri": 11,
+	"voix_grognement": 3,
+	"voix_hey": 5,
+	"voix_insulte": 8,
+	"voix_menace": 10,
+	"voix_rire": 4,
+	"voix_surprise": 9,
+}
+
+## Les noms historiques de la banque de synthèse, redirigés vers les
+## échantillons. Les jeux appellent toujours `jouer("choc")` ; ce qui sort a
+## changé. Ce qui n'est pas ici — `clic`, `bip`, `portail` — reste synthétisé :
+## l'ÉNIGME est un jeu abstrait, elle n'a rien à gagner à sonner comme une rue.
+const ALIAS := {
+	"choc": "choc_moyen",
+	"ecrasement": "ecrase_pieton",
+	"sirene": "sirene_lente",
+	"klaxon": "klaxon",
+	"cri": "voix_cri",
+	"pas": "pas_beton",
+	"porte": "portiere_ouvre",
+}
+
+## Ce qui doit tourner sans couture : moteurs, sirènes, alarmes, foule.
+const BOUCLES := ["moteur_compact", "moteur_sport", "moteur_standard",
+	"moteur_super", "moteur_camion", "moteur_van", "sirene_lente",
+	"sirene_rapide", "alarme_banque", "alarme_prison", "alarme_vehicule_1",
+	"alarme_vehicule_2", "foule_1", "foule_2", "feu", "riviere",
+	"lance_flammes", "statique_radio"]
+
+## Chargés d'avance : ceux qu'on entend dans la première seconde de jeu et
+## ceux qui partent en rafale. Charger un fichier pendant un tir s'entend
+## comme un raté d'image.
+const NOYAU := ["tir_pistolet", "tir_mitraillette", "choc_doux", "choc_moyen",
+	"choc_dur", "pas_beton_1", "pas_beton_2", "pas_beton_3", "pas_beton_4",
+	"ecrase_pieton", "balle_mur_1", "balle_mur_2", "balle_mur_3",
+	"moteur_standard"]
+
+## Le moteur selon le châssis : la sportive siffle, le camion gronde.
+const MOTEURS := {
+	"compact": "moteur_compact", "sport": "moteur_sport",
+	"standard": "moteur_standard", "super": "moteur_super",
+	"camion": "moteur_camion", "van": "moteur_van",
+}
 
 var actif := true
 
@@ -24,8 +94,13 @@ var _prochaine := 0
 var _moteur: AudioStreamPlayer
 var _musique: AudioStreamPlayer
 var _ambiance: AudioStreamPlayer
+var _sirene: AudioStreamPlayer
+var _radio: AudioStreamPlayer
+var _echantillons: Dictionary = {}   ## cache fichier : nom -> AudioStream
 var _musique_en_cours := ""
 var _ambiance_en_cours := ""
+var _moteur_en_cours := ""
+var _rng := RandomNumberGenerator.new()
 const MUSIQUE_DB := -10.0
 const AMBIANCE_DB := -14.0
 
@@ -52,8 +127,11 @@ func interface(nom: String, volume_db: float = -8.0) -> void:
 	lecteur.play()
 
 func _ready() -> void:
+	_rng.randomize()
 	_charger_preference()
 	_fabriquer_banque()
+	for nom in NOYAU:
+		_echantillon(nom)
 	# Chaque lecteur part sur son bus : le curseur « effets » des options
 	# règle alors un bus, pas seize lecteurs, et un son déjà lancé suit.
 	for i in VOIX:
@@ -62,10 +140,22 @@ func _ready() -> void:
 		add_child(lecteur)
 		_voix.append(lecteur)
 	_moteur = AudioStreamPlayer.new()
-	_moteur.stream = _banque["moteur"]
+	_moteur.stream = _flux_moteur("standard")
 	_moteur.volume_db = -24.0
 	_moteur.bus = Reglages.BUS_EFFETS
 	add_child(_moteur)
+	# La sirène a son lecteur à elle : une poursuite est un état, pas un
+	# événement. Elle démarre, elle tient, elle s'arrête — sans que la file
+	# des voix ne la coupe au premier coup de feu.
+	_sirene = AudioStreamPlayer.new()
+	_sirene.bus = Reglages.BUS_EFFETS
+	_sirene.volume_db = -18.0
+	add_child(_sirene)
+	# La radio parle en bribes qui s'enchaînent : un lecteur, une file.
+	_radio = AudioStreamPlayer.new()
+	_radio.bus = Reglages.BUS_EFFETS
+	_radio.volume_db = -12.0
+	add_child(_radio)
 	_musique = AudioStreamPlayer.new()
 	_musique.bus = Reglages.BUS_MUSIQUE
 	add_child(_musique)
@@ -119,6 +209,10 @@ func basculer() -> bool:
 	actif = not actif
 	if not actif:
 		arreter_moteur()
+		if _sirene:
+			_sirene.stop()
+		if _radio:
+			_radio.stop()
 		_musique.stop()
 		_ambiance.stop()
 	else:
@@ -135,21 +229,75 @@ func _charger_preference() -> void:
 
 ## `hauteur` multiplie la fréquence de lecture : un même échantillon sert de
 ## grave et d'aigu, ce qui évite d'en fabriquer dix variantes.
+##
+## L'échantillon passe avant la synthèse ; un nom inconnu des deux ne fait
+## rien. Un jeu qui demande un son absent doit rester silencieux, pas tomber.
 func jouer(nom: String, hauteur: float = 1.0, volume_db: float = -6.0) -> void:
-	if not actif or not _banque.has(nom):
+	if not actif:
 		return
+	var flux := _echantillon(_resoudre(nom))
+	if flux == null:
+		if not _banque.has(nom):
+			return
+		flux = _banque[nom]
 	# Tourniquet de voix : couper le son le plus ancien vaut mieux qu'ignorer
 	# le nouveau. Dans Carnage, six écrasements peuvent tomber sur la même
 	# seconde, et c'est le dernier qui porte l'information.
 	var lecteur := _voix[_prochaine]
 	_prochaine = (_prochaine + 1) % VOIX
-	lecteur.stream = _banque[nom]
+	lecteur.stream = flux
 	lecteur.pitch_scale = clamp(hauteur, 0.3, 3.0)
 	lecteur.volume_db = volume_db
 	lecteur.play()
 
-func demarrer_moteur() -> void:
-	if actif and not _moteur.playing:
+## Une réplique de trottoir : même famille, prise au hasard, hauteur dérivée.
+## Deux passants qui crient exactement pareil s'entendent comme un défaut ; un
+## demi-ton d'écart et ce sont deux personnes.
+func voix(famille: String, volume_db: float = -10.0) -> void:
+	jouer(famille, _rng.randf_range(0.9, 1.12), volume_db)
+
+# ------------------------------------------------------------ échantillons
+
+## Charge un échantillon au premier usage et le garde. `null` si le fichier
+## n'existe pas — l'appelant retombe alors sur la synthèse.
+func _echantillon(nom: String) -> AudioStream:
+	if _echantillons.has(nom):
+		return _echantillons[nom]
+	var chemin := DOSSIER % nom
+	var flux: AudioStream = null
+	if ResourceLoader.exists(chemin):
+		flux = load(chemin) as AudioStream
+	if flux is AudioStreamOggVorbis:
+		(flux as AudioStreamOggVorbis).loop = BOUCLES.has(nom)
+	_echantillons[nom] = flux
+	return flux
+
+## Résout un nom d'appel en nom de fichier : l'alias d'abord, puis le tirage
+## de variante. `voix_cri` devient `voix_cri_7`.
+func _resoudre(nom: String) -> String:
+	var vrai: String = ALIAS.get(nom, nom)
+	if VARIANTES.has(vrai):
+		vrai = "%s_%d" % [vrai, _rng.randi_range(1, int(VARIANTES[vrai]))]
+	return vrai
+
+# ------------------------------------------------------------ moteur
+
+func _flux_moteur(type: String) -> AudioStream:
+	var flux := _echantillon(String(MOTEURS.get(type, "moteur_standard")))
+	return flux if flux != null else _banque.get("moteur")
+
+## `type` choisit le grain du moteur : « sport », « camion », « super »…
+## Changer de véhicule change le son, et c'est ce qui fait qu'en voler un
+## autre s'entend avant de se voir au compteur.
+func demarrer_moteur(type: String = "standard") -> void:
+	if not actif or _moteur == null:
+		return
+	if type != _moteur_en_cours:
+		_moteur_en_cours = type
+		var flux := _flux_moteur(type)
+		if flux != null:
+			_moteur.stream = flux
+	if not _moteur.playing:
 		_moteur.play()
 
 func arreter_moteur() -> void:
@@ -160,14 +308,83 @@ func arreter_moteur() -> void:
 ## moteur qui gagne surtout en aigu s'entend comme une accélération, alors
 ## qu'un moteur qui gagne surtout en volume s'entend comme un défaut.
 func regime(part: float) -> void:
-	if not _moteur:
-		return
-	if not actif:
+	if _moteur == null or not actif:
 		return
 	if not _moteur.playing:
-		demarrer_moteur()
+		demarrer_moteur(_moteur_en_cours if _moteur_en_cours != "" else "standard")
 	_moteur.pitch_scale = 0.75 + clamp(part, 0.0, 1.0) * 1.15
 	_moteur.volume_db = -30.0 + clamp(part, 0.0, 1.0) * 11.0
+
+# ------------------------------------------------------------ police
+
+## La sirène d'une poursuite : un état, pas un événement. `niveau` à 0
+## l'éteint ; à trois étoiles elle passe au régime rapide, ce qui s'entend
+## avant que la voiture n'apparaisse au coin de la rue.
+func sirene(niveau: int, volume_db: float = -20.0) -> void:
+	if _sirene == null:
+		return
+	if niveau <= 0 or not actif:
+		if _sirene.playing:
+			_sirene.stop()
+		return
+	var flux := _echantillon("sirene_rapide" if niveau >= 3 else "sirene_lente")
+	if flux == null:
+		return
+	if _sirene.stream != flux:
+		_sirene.stream = flux
+		_sirene.play()
+	elif not _sirene.playing:
+		_sirene.play()
+	_sirene.pitch_scale = 0.94 + 0.04 * float(niveau)
+	_sirene.volume_db = volume_db + min(6.0, 1.5 * float(niveau))
+
+## Le dispatch : la radio de la police assemble des bribes enregistrées mot à
+## mot — « all units », « respond to », un code, une zone, un cap. C'est ainsi
+## qu'elle parlait dans le jeu dont viennent ces bruitages, et c'est ce qui
+## fait qu'une poursuite se RACONTE au lieu de seulement hurler.
+##
+## Les bribes sont montées en `AudioStreamPlaylist` et données au lecteur en
+## une fois. Les enchaîner à la main sur le signal `finished` marchait, mais
+## relancer une lecture au milieu du mixage fait râler le décodeur à chaque
+## mot ; ici, c'est le serveur audio qui enchaîne.
+func radio_police(niveau: int, zone: int = 0, cap: String = "") -> void:
+	if not actif or _radio == null or _radio.playing:
+		return
+	var noms: Array[String] = ["radio_all_units", "radio_spacer_a"]
+	if niveau >= 4:
+		noms.append("radio_swat_team" if niveau == 4 else "radio_armed_forces")
+	noms.append("radio_respond_to")
+	noms.append("radio_a_ten")
+	var codes: Array = [90, 91, 96, 24, 28] if niveau >= 3 else [10, 12, 14, 32]
+	noms.append("radio_code_%d" % int(codes[_rng.randi() % codes.size()]))
+	noms.append("radio_in_vincinity_of")
+	noms.append("radio_zone_%d" % clampi(zone if zone > 0 else _rng.randi_range(1, 12), 1, 12))
+	if cap != "":
+		noms.append("radio_heading")
+		noms.append("radio_%s" % cap)
+	if niveau >= 3:
+		noms.append("radio_suspect")
+		noms.append("radio_is_armed")
+	# Le blanc de fin : la radio raccroche sur son souffle, et la liste ne se
+	# termine pas au milieu d'un mot.
+	noms.append("radio_spacer_b")
+
+	var bribes: Array[AudioStream] = []
+	for nom in noms:
+		var flux := _echantillon(nom)
+		if flux != null:
+			bribes.append(flux)
+	if bribes.is_empty():
+		return
+	var message := AudioStreamPlaylist.new()
+	message.loop = false
+	message.fade_time = 0.0
+	message.shuffle = false
+	message.stream_count = mini(bribes.size(), 64)
+	for i in message.stream_count:
+		message.set_list_stream(i, bribes[i])
+	_radio.stream = message
+	_radio.play()
 
 # ------------------------------------------------------------ synthèse
 

@@ -241,7 +241,7 @@ func simuler_local(delta: float) -> void:
 			_charge = CHARGE_DUREE
 			_recharge = CHARGE_RECHARGE
 			_v = _regard * CHARGE_VITESSE
-			Sons.jouer("pas", 0.7, -8.0)
+			Sons.jouer("voix_grognement", 1.0, -9.0)
 		_tir_avant = tir
 		if _charge > 0.0:
 			_charge -= delta
@@ -289,7 +289,7 @@ func _bousculer() -> void:
 		if bool(a["charge"]):
 			_v += n * POUSSEE_CHARGE
 			_dernier_coup = {"cle": cle, "t": temps}
-			Sons.jouer("pas", 0.5, -4.0)
+			Sons.jouer("coup_poing", randf_range(0.9, 1.15), -5.0)
 			_poussiere.position = Vector3(_p.x, 0.2, _p.y)
 			_poussiere.restart()
 		elif _charge > 0.0:
@@ -301,7 +301,7 @@ func _tomber() -> void:
 	_vivant = false
 	_repechage = REPECHAGE
 	_chutes += 1
-	Sons.jouer("bip", 0.5, -6.0)
+	Sons.jouer("voix_cri", randf_range(0.9, 1.1), -6.0)
 	var par := String(_dernier_coup["cle"]) if temps - float(_dernier_coup["t"]) < 2.5 else ""
 	_dernier_coup = {"cle": "", "t": -99.0}
 	canal.envoyer("chute", {"par": par})
