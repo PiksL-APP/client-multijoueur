@@ -646,7 +646,7 @@ poser("foyer.png", 31, 28)
 poser("banc.png", 24, 28)
 poser("banc.png", 36, 28)
 poser("caisses.png", 36, 24)
-poser("etal.png", 41, 24)          # l'étal du marché, à côté des cageots
+poser("etal.png", 45, 25)          # l'étal du marché — à DROITE de la porte de l'auberge : posé en (41, 24), son toit couvrait la porte et sa base barrait le passage, vu par le client
 for i, nom in enumerate(("carottes", "radis", "choux", "laitues")):
     poser(f"cageot_{nom}.png", 37 + i, 23)
 poser("forge.png", 14, 22)         # l'enclume du forgeron, devant l'armurerie

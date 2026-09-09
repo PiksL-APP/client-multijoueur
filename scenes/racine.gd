@@ -15,6 +15,10 @@ const ECRANS := {
 	"bousculade": "res://jeux/bousculade.gd",
 	"resultats": "res://scenes/resultats.gd",
 	"ferme": "res://scenes/ferme.gd",
+	# L'ÉDITEUR DE CARTE : `--ecran=editeur` en local, `?ecran=editeur` dans le
+	# navigateur. Pas d'entrée dans le menu — c'est un outil d'atelier, pas un
+	# mode de jeu.
+	"editeur": "res://scenes/editeur.gd",
 }
 
 var _ecran: Ecran = null

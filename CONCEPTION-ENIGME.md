@@ -91,39 +91,89 @@ de la maison : sec, faussement bienveillant, et **toujours en français**.
 
 ## 2. Les trois arbitrages techniques
 
-### 2.1 L'image : on reprend le pack du hub
+### 2.1 L'image : Serene Village (CC-BY), et un monde généré
 
-Le hub est déjà un village en pixel art vu de dessus — pack Anokolisa dans
-`modeles/village/`, chargé par `commun/pixels.gd`, trié en profondeur par le
-`y_sort_enabled` de `Ecran.plan()`. Sol, maisons, intérieurs, arbres, rochers,
-héros à six animations, habitants : tout est là et tourne.
+Le pack du village (Anokolisa) n'a pas de tuiles de terrain : son sol est une
+seule grande image. Refaire un sol « à sa manière » en code a été essayé et
+rejeté par le client d'un mot — ça se voyait ; Tiny Town (Kenney, CC0) a
+tenu un jalon, puis a été jugé trop pauvre à côté de Stardew. Les assets de
+Stardew Valley eux-mêmes sont **refusés** : ils appartiennent à ConcernedApe.
+Le client a choisi, sur photos, **Serene Village** de LimeZu, qui a le style
+demandé — contours doux, couleurs pleines, maisons à toit rouge, mare aux
+rives dessinées. Dans `modeles/ferme/`, avec leurs licences :
 
-**Décision : ÉNIGME se construit avec ce pack, en vraie 2D comme le hub**, et
-non en 2,5D comme CARNAGE. Fabriquer une seconde grammaire visuelle pour le
-même jeu serait long, moins beau, et donnerait un hub et une ferme qui ne se
-ressemblent pas alors qu'on passe de l'un à l'autre par une porte.
+- **Serene Village** de LimeZu, **CC-BY 4.0** : herbe, terre, eau, arbres,
+  maisons, clôtures, rochers, fleurs, feu de camp et eau animés. **La licence
+  oblige à créditer LimeZu dans le jeu** (écran d'accueil ou générique) — à
+  faire avant toute mise en ligne ;
+- **Farming Crops 16×16** de josehzz (CC0) : vingt cultures en cinq stades ;
+- deux icônes d'outils de Tiny Town (Kenney, CC0).
 
-Ce que ça implique concrètement :
+Deux pièges de découpe, corrigés après retour du client : les arbres et les
+maisons de la planche ne sont pas sur la grille de 16 (un arbre fait 32 × 38,
+une maison 38 à 69 de large) — ils se découpent au **pixel**, en boîtes
+mesurées sur la planche, pas à la case. Et la planche d'« auto-tuiles » n'en
+est pas une au sens habituel : elle dessine des **îlots d'herbe** dans la
+terre, si bien que le bord se pose sur l'herbe qui touche la terre, pas sur
+la terre (grammaire « îlot », `Terrain.bord`). L'eau, elle, suit la grammaire
+classique avec la mare complète de la planche (`Terrain.eau`, huit voisines,
+angles rentrants) : c'est ce qui arrondit les rives.
 
-- ÉNIGME hérite d'un écran 2D (`plan()`), pas de `monde()`. `commun/decor.gd`
-  ne sert plus pour ce jeu ;
-- les parcelles, les cultures et les outils demandent des tuiles que le pack
-  n'a pas encore : elles se prennent dans le même pack Anokolisa (même main,
-  même palette) plutôt qu'ailleurs ;
-- **l'appareillage Aperture se DESSINE, il ne se pixellise pas.** Portails,
-  gels, ponts lumineux, tunnels, lasers : ce sont des formes lumineuses qui
-  palpitent, et `scenes/lueur_portail.gd` a déjà posé ce précédent dans le
-  hub. Un sprite fixe ne pulserait pas et ne s'accorderait pas à la palette.
-  C'est aussi ce qui fera lire au premier coup d'œil ce qui relève de la ferme
-  et ce qui relève de la machine.
+**Le monde n'est pas dessiné à la main.** Il fait 1024 cases de côté — un
+million de cases, environ quatre fois la carte entière de Stardew Valley —
+et se déduit d'un bruit et d'une graine : forêts, lacs et prairies, la ferme
+dans une clairière au centre. Il se génère par morceaux de 32 cases autour du
+joueur et se libère derrière lui ; un morceau est une fonction pure de ses
+coordonnées. `--carte=fichier.png` en dessine la carte, une case par pixel.
 
-Une piste écartée en route, notée pour ne pas y revenir : fabriquer les
-sprites en **grilles de caractères dans le source** (un caractère = une
-couleur), à la manière de `autoload/sons.gd` pour l'audio. Le procédé marche —
-il a été écrit et photographié — mais le résultat est nettement plus laid que
-le pack, pour beaucoup plus de travail. Il ne se justifierait que si l'on
-devait renoncer aux ressources binaires, ce qui n'est plus le cas depuis que
-le hub en porte.
+Écartés en route : Sprout Lands (la référence du genre) est réservé aux
+projets non commerciaux dans sa version gratuite (la version premium, 3,99 $,
+lève la restriction) ; Pixel Farm de Max_M42 se télécharge par un parcours
+itch.io dont la clé doit être laissée VIDE.
+
+**Le rendu est en VOXELS, en vraie 3D** (demande du client du 07/09 :
+« tout doit être en voxel », pour ÉNIGME ET le hub). Un bloc = une case =
+une unité ; `commun/voxels.gd` transforme un nuage `Vector3i → couleur` en
+un seul maillage, faces cachées retirées, occlusion ambiante cuite dans les
+sommets — un morceau de 16 × 16 cases (sol, arbres, rochers) coûte moins de
+15 ms et un appel de dessin. Les couleurs sont celles de Serene Village,
+relevées sur la planche, converties en linéaire à la construction (lues
+telles quelles par le moteur en mode compatibilité, elles ressortaient
+pastel). Caméra fixe en trois quarts, soleil qui tourne avec l'heure et
+porte des ombres, feu de camp et lanterne en lumières omni la nuit, eau en
+nappe qui ondule. Le héros est un petit personnage en huitièmes de bloc
+(chevalier, voleur ou sorcier, comme au village), qui balance bras et jambes
+à la marche. L'appareillage Aperture (portails, gels, ponts, lasers) sera
+lui aussi en blocs et en matières lumineuses.
+
+**Résolution (07/09, « plus de voxels par objet ») :** un arbre est fait de
+deux à trois mille voxels (quarts de bloc : tronc à écorce striée, racines,
+branches, feuillage en boules rugueuses sur trois verts), la maison en quarts
+de bloc (planches, croisillons, pots de fleurs, auvent, perron, tuiles
+alternées, cheminée à chapeau), le petit mobilier en huitièmes, le héros et
+les plants en seizièmes (yeux, bouche, ceinture, bottes, mains). Les modèles
+sont maillés une fois par variante et instanciés en `MultiMesh` — huit
+arbres, quatre rochers — un arbre pèse trois mille triangles.
+
+**Interface** refaite en interface de jeu : barre d'outils en cases (celle
+en main cerclée de bleu), horloge à arc du jour, jauge d'énergie, pièces, et
+une ligne de CONTEXTE qui dit ce que fera E ici et maintenant ; l'aide
+complète derrière H. Un **portail Aperture** en panneaux blancs et anneau
+bleu attend à l'ouest de la maison (fermé jusqu'au jalon J3), et deux
+**villageois** — Mireille, Anselme — se promènent dans la clairière et
+parlent quand on appuie sur E.
+
+**Salle d'essai 01 (07/09)** : derrière le portail, une première chambre
+d'Aperture dans un coin vide du monde (`CHAMBRE`, cases 16..42 × 16..30) —
+dalles à joints, murs de panneaux, un cube à pousser (on avance contre lui,
+il glisse d'une case), une dalle de pression qui s'allume en vert et fait
+descendre la porte, le portail orange du retour au fond. C'est l'embryon du
+jalon J3 : pas encore de pistolet à portails, mais la boucle « entrer,
+résoudre, revenir » est en place et se joue (`--chambre` la rejoue seule).
+
+Les planches pixel art de Serene Village restent dans `modeles/ferme/`
+(portraits de cultures et icônes de l'interface, et référence de palette) ;
+le crédit LimeZu (CC-BY) reste dû.
 
 ### 2.2 L'identité, sans compte
 
@@ -198,7 +248,7 @@ n'est pas amusante.
 
 | | Jalon | Contenu | Ce qui se joue à la fin |
 | --- | --- | --- | --- |
-| **J0** | Le socle | Scission `socle`/`partie`/`monde` ; écran 2D sur `plan()`, pack du hub, tuiles de ferme | On marche sur une ferme vide, dans le style du village |
+| **J0** | Le socle | Monde en voxels sur `monde()`, généré par morceaux, 1024 cases de côté | On marche sur une ferme en cubes dans un grand monde, caméra à la Stardew |
 | **J1** | La terre | Parcelles, houe, arrosoir, graines, croissance en jours, cycle jour/nuit, énergie | Une saison complète de navets, à plusieurs |
 | **J2** | La persistance | Tables, fonctions SQL, code de ferme, reprise à la reconnexion | On ferme l'onglet, on revient, la ferme est là |
 | **J3** | Le pistolet | Portails, conservation de l'élan, deux chambres qui réutilisent dalles et caisses | La première chambre branche l'irrigation |
