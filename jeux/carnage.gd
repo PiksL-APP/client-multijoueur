@@ -2350,7 +2350,14 @@ func _placer_le_joueur(delta: float) -> void:
 		_regler_jauge(_corps_auto, _pv_vehicule / PV_VOITURE)
 
 	if _corps_pied.visible:
-		_corps_pied.position = _dedans3d(_dedans_p) if _dedans != "" else Decor.vers3d(_position, 0.0)
+		if _dedans != "":
+			# ⚠ Le pantin est taillé pour la VILLE ; un intérieur est à
+			# l'échelle du mètre. Posé tel quel, il dépassait le plafond — la
+			# première photo montrait un géant dans sa cuisine.
+			Interieurs.poser_pantin(_corps_pied, _dedans_p, "joueur", SOUS_SOL)
+		else:
+			_corps_pied.scale = Vector3.ONE
+			_corps_pied.position = Decor.vers3d(_position, 0.0)
 		_corps_pied.rotation.y = -_angle
 		_demarche(_corps_pied, "walk" if abs(_vitesse) > 1.0 else "idle")
 		_regler_jauge(_corps_pied, _vie / VIE_MAX)

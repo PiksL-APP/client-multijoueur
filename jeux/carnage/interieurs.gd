@@ -100,6 +100,56 @@ static func _cumuler(noeud: Node, t: Transform3D, boite: Array) -> void:
 	for enfant in noeud.get_children():
 		_cumuler(enfant, t2, boite)
 
+# ------------------------------------------------------------ le joueur dedans
+
+## ⚠ UN INTÉRIEUR N'EST PAS À L'ÉCHELLE DE LA VILLE.
+##
+## La coque est bâtie à `ECHELLE`, donc une unité de monde y vaut UN MÈTRE : un
+## mur du kit fait 1,29 × 2 = 2,58 m sous plafond. Dehors, la ville est en
+## pixels de jeu ramenés par `Decor.ECHELLE`, et le pantin est taillé pour
+## ELLE. Posé tel quel dans un appartement, il dépasse le plafond — c'est ce
+## qu'on a vu à la première photo : un géant dans sa cuisine.
+##
+## On ne corrige donc pas « à vue » : on MESURE le pantin et on le ramène à sa
+## taille en mètres. Le jour où le casting change de modèle, rien à reprendre.
+const TAILLE_JOUEUR := 1.75
+
+## ⚠ LA BOÎTE D'UN MAILLAGE ANIMÉ EST PLUS GRANDE QUE LE PERSONNAGE. Godot la
+## gonfle pour couvrir toutes les poses du squelette : mesurée sur le pantin de
+## Carnage, elle fait 1,82 de large sur 3,33 de PROFONDEUR — pour un bonhomme
+## qui n'a pas trois mètres d'épaisseur. Ramener bêtement cette boîte à 1,75 m
+## donnait un personnage d'un mètre cinquante, qui avait l'air d'un enfant dans
+## sa cuisine. Le rapport est mesuré sur l'image, contre un plafond de 2,58 m et
+## des lits de deux mètres.
+
+const MARGE_BOITE := 1.20
+
+static var _echelles := {}
+
+## Le facteur à appliquer à un pantin du jeu pour qu'il fasse sa taille dans un
+## intérieur. Mesuré une fois par modèle : parcourir la scène d'un personnage
+## articulé n'est pas gratuit, et on le fait à chaque entrée chez soi.
+static func echelle_du_pantin(pantin: Node3D, cle: String = "") -> float:
+	var k := cle if cle != "" else String(pantin.name)
+	if _echelles.has(k):
+		return _echelles[k]
+	var boite := [AABB(), false]
+	# La jauge de vie flotte au-dessus de la tête : la compter reviendrait à
+	# mesurer le pantin plus son étiquette, et il rentrerait à croupetons.
+	for e in pantin.get_children():
+		if e is Node3D and String((e as Node).name) != "Vie":
+			_cumuler(e, (e as Node3D).transform, boite)
+	var haut: float = maxf(0.01, (boite[0] as AABB).size.y) / MARGE_BOITE
+	_echelles[k] = TAILLE_JOUEUR / haut
+	return _echelles[k]
+
+## Pose un pantin du jeu dans un intérieur : la position est en TUILES, la
+## taille est corrigée. Un seul endroit où les deux conversions se font.
+static func poser_pantin(pantin: Node3D, p: Vector2, cle: String = "",
+		origine: Vector3 = Vector3.ZERO) -> void:
+	pantin.scale = Vector3.ONE * echelle_du_pantin(pantin, cle)
+	pantin.position = origine + Vector3(p.x * ECHELLE, 0.0, p.y * ECHELLE)
+
 # ------------------------------------------------------------ les collisions
 
 ## CE QUI ARRÊTE LE JOUEUR, déduit du MÊME dessin que ce qui se voit.

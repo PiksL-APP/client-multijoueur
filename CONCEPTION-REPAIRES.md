@@ -364,6 +364,22 @@ l'angle de la caméra de Carnage : la photo montre alors ce que le joueur verra.
 Un appartement se juge beau tout seul ; rien ne dit qu'on y tient debout tant
 qu'on n'a mis personne dedans.
 
+⚠ **Un intérieur n'est pas à l'échelle de la ville.** La coque est bâtie à
+`ECHELLE`, donc une unité de monde y vaut **un mètre** (un mur du kit fait
+1,29 × 2 = 2,58 m sous plafond). Dehors, la ville est en pixels de jeu ramenés
+par `Decor.ECHELLE`, et le pantin est taillé pour ELLE : posé tel quel dans un
+appartement, il dépasse le plafond — la première photo montrait un géant dans sa
+cuisine. `Interieurs.poser_pantin()` le MESURE et le ramène à 1,75 m ; le jour
+où le casting change de modèle, il n'y a rien à reprendre.
+
+Une subtilité qui a coûté un aller-retour : la boîte englobante d'un maillage
+**animé** est plus grande que le personnage — Godot la gonfle pour couvrir
+toutes les poses du squelette (1,82 de large sur 3,33 de *profondeur*, pour un
+bonhomme qui n'a pas trois mètres d'épaisseur). Ramenée bêtement à 1,75 m, elle
+donnait un personnage d'un mètre cinquante qui avait l'air d'un enfant. D'où
+`MARGE_BOITE`, mesurée sur l'image contre un plafond de 2,58 m et des lits de
+deux mètres.
+
 Le banc de marche simule aussi le trajet **porte → coffre** au pas réel du jeu,
 à travers `Interieurs.degager` : l'inondation dit qu'un chemin existe, la marche
 dit qu'on l'emprunte avec les vraies constantes. Deux questions différentes, et

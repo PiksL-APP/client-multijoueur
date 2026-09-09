@@ -30,7 +30,7 @@ func _ready() -> void:
 		# Sans halo ni jauge : ici on mesure une TAILLE, et l'anneau du joueur
 		# recouvrait justement les pieds et la tête.
 		var pantin := FormesCarnage.pieton(Color("#ff2ea6"), false, "", false, "")
-		pantin.position = Vector3(ou.x, 0.0, ou.y) * Interieurs.ECHELLE
+		Interieurs.poser_pantin(pantin, ou, "essai")
 		# La jauge de vie suit le joueur en jeu ; sur une photo d'intérieur
 		# c'est une barre verte en travers de la cuisine.
 		for e in pantin.get_children():
