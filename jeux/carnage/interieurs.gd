@@ -100,6 +100,202 @@ static func _cumuler(noeud: Node, t: Transform3D, boite: Array) -> void:
 	for enfant in noeud.get_children():
 		_cumuler(enfant, t2, boite)
 
+# ------------------------------------------------------------ les collisions
+
+## CE QUI ARRÊTE LE JOUEUR, déduit du MÊME dessin que ce qui se voit.
+##
+## C'est le parti du hub (`modeles/voxel/plan.json`) : le décor et les murs
+## sortent d'une seule source, donc ils ne peuvent pas diverger. Une table de
+## collisions écrite à la main à côté du plan aurait vieilli au premier meuble
+## déplacé, et personne ne s'en serait aperçu avant de traverser un canapé.
+##
+## ⚠ TOUT CE QUI SUIT EST EN TUILES, comme le dessin et comme `coffre()` — pas
+## en unités de monde ni en pixels de jeu. L'appelant multiplie par `ECHELLE`.
+## Mélanger les deux repères est l'erreur qui coûte le plus cher ici : elle ne
+## se voit pas, elle donne juste des murs deux fois trop loin.
+
+## Le demi-encombrement du personnage, en tuiles. Une tuile fait deux mètres :
+## 0,14 fait donc un bonhomme de 56 cm de large, épaules comprises — la mesure
+## d'un adulte, pas celle de sa boîte englobante.
+## ⚠ Essayé à 0,22 (88 cm) d'abord, en croyant prendre une marge : le banc a
+## déclaré les huit repaires impraticables, portes comprises. Une porte du kit
+## n'ouvre que sur 0,8 tuile, et le joueur n'y passait plus.
+const RAYON_MARCHE := 0.14
+
+## Un meuble plus bas que ça ne bloque pas : c'est un tapis, un magazine, une
+## assiette. Mesuré sur le modèle, jamais deviné — le kit mélange allègrement
+## les échelles, et lister à la main ce qui bloque, c'est une liste à tenir.
+const HAUTEUR_OBSTACLE := 0.30
+
+## Les arêtes qu'on FRANCHIT. Tout le reste du dessin (mur plein, fenêtre,
+## muret) arrête : on ne saute pas par la fenêtre d'un repaire.
+const PASSAGES := ["D", "A"]
+
+static var _collisions := {}
+
+## L'emprise au sol de chaque meuble bloquant, en tuiles.
+## Les quarts de tour sont les seules rotations du plan : une emprise reste
+## donc TOUJOURS alignée sur les axes — il suffit d'échanger largeur et
+## profondeur pour un quart impair. C'est ce qui permet des `Rect2` partout au
+## lieu de rectangles tournés, et un test dix fois plus court.
+static func obstacles(id: String) -> Array:
+	return _table(id)["obstacles"]
+
+## Les tuiles où l'on a le droit d'être, et les arêtes qui bloquent.
+static func murs(id: String) -> Dictionary:
+	return _table(id)["murs"]
+
+static func _table(id: String) -> Dictionary:
+	if _collisions.has(id):
+		return _collisions[id]
+	var fiche := plan(id)
+	var dessin: Array = fiche["plan"]
+	var haut := (dessin.size() - 1) / 2
+	var large := (String(dessin[0]).length() - 1) / 2
+	var tuiles := {}
+	for l in haut:
+		for c in large:
+			if _car(dessin, 2 * l + 1, 2 * c + 1) != " ":
+				tuiles[Vector2i(c, l)] = true
+	var liste: Array = []
+	for m in fiche.get("meubles", []):
+		var rect: Variant = _emprise(m)
+		if rect != null:
+			liste.append(rect)
+	var t := {"murs": {"tuiles": tuiles, "large": large, "haut": haut, "dessin": dessin},
+		"obstacles": liste}
+	_collisions[id] = t
+	return t
+
+## L'emprise d'une ligne de meuble, ou `null` s'il ne bloque pas.
+static func _emprise(m: Array):
+	var nom := String(m[0])
+	var taille: float = float(m[5]) if m.size() > 5 else 1.0
+	var y: float = float(m[4]) if m.size() > 4 else 0.0
+	var b := gabarit(nom)
+	var hauteur: float = b.size.y * taille
+	# Posé sur une table ou pendu au plafond : on passe dessous ou à côté, et
+	# le bloquer condamnait la moitié d'une cuisine à cause d'une casserole.
+	if y > 0.01 or hauteur < HAUTEUR_OBSTACLE:
+		return null
+	var demi := Vector2(b.size.x, b.size.z) * taille * 0.5
+	if int(m[3]) % 2 == 1:
+		demi = Vector2(demi.y, demi.x)
+	# Un meuble déborde un peu moins que son gabarit : les modèles Kenney
+	# portent des poignées et des coussins dans leur boîte, et s'arrêter à la
+	# boîte fait buter le joueur dix centimètres avant le meuble.
+	demi *= 0.92
+	return Rect2(Vector2(float(m[1]), float(m[2])) - demi, demi * 2.0)
+
+## Peut-on tenir DEBOUT là, avec ce rayon ? C'est la question qu'on pose au
+## dessin ; `degager` s'en sert pour repousser.
+static func libre(id: String, p: Vector2, rayon: float = RAYON_MARCHE) -> bool:
+	var t := _table(id)
+	var m: Dictionary = t["murs"]
+	var c := Vector2i(floori(p.x), floori(p.y))
+	if not (m["tuiles"] as Dictionary).has(c):
+		return false
+	# Les quatre côtés de la tuile : un côté fermé doit rester à plus d'un
+	# rayon. On teste la TUILE et non le monde entier — c'est ce qui rend le
+	# test constant quelle que soit la taille de l'appartement.
+	if _ferme(m, c, 0) and p.y - float(c.y) < rayon: return false
+	if _ferme(m, c, 1) and float(c.y) + 1.0 - p.y < rayon: return false
+	if _ferme(m, c, 2) and p.x - float(c.x) < rayon: return false
+	if _ferme(m, c, 3) and float(c.x) + 1.0 - p.x < rayon: return false
+	for r in t["obstacles"]:
+		if (r as Rect2).grow(rayon).has_point(p):
+			return false
+	return true
+
+## Le côté `k` de la tuile est-il fermé ? 0 nord, 1 sud, 2 ouest, 3 est.
+## Fermé = une arête qui n'est pas une porte, OU le vide de l'autre côté (un
+## dessin peut très bien oublier un mur au bord ; on ne sort pas pour autant).
+static func _ferme(m: Dictionary, c: Vector2i, k: int) -> bool:
+	var dessin: Array = m["dessin"]
+	var voisine: Vector2i = c + [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)][k]
+	if not (m["tuiles"] as Dictionary).has(voisine):
+		return true
+	var car := ""
+	match k:
+		0: car = _car(dessin, 2 * c.y, 2 * c.x + 1)
+		1: car = _car(dessin, 2 * c.y + 2, 2 * c.x + 1)
+		2: car = _car(dessin, 2 * c.y + 1, 2 * c.x)
+		_: car = _car(dessin, 2 * c.y + 1, 2 * c.x + 2)
+	return ARETES.has(car) and not (car in PASSAGES)
+
+## Repousse un point hors des murs et des meubles. Deux passes : la première
+## sort des meubles, la seconde recolle aux murs — dans l'autre ordre, un
+## joueur poussé par une armoire finissait DANS la cloison derrière.
+static func degager(id: String, p: Vector2, rayon: float = RAYON_MARCHE) -> Vector2:
+	var t := _table(id)
+	var m: Dictionary = t["murs"]
+	var point := p
+	for _passe in 2:
+		for r in t["obstacles"]:
+			point = _hors_du_rect(point, r as Rect2, rayon)
+		point = _dans_la_piece(point, m, rayon)
+	return point
+
+static func _hors_du_rect(p: Vector2, r: Rect2, rayon: float) -> Vector2:
+	var g := r.grow(rayon)
+	if not g.has_point(p):
+		return p
+	# On sort par le plus PETIT chevauchement : c'est ce qui fait glisser le
+	# long d'un meuble au lieu de se faire téléporter de l'autre côté.
+	var gauche := p.x - g.position.x
+	var droite := g.end.x - p.x
+	var haut := p.y - g.position.y
+	var bas := g.end.y - p.y
+	var mini_ := minf(minf(gauche, droite), minf(haut, bas))
+	if mini_ == gauche: return Vector2(g.position.x, p.y)
+	if mini_ == droite: return Vector2(g.end.x, p.y)
+	if mini_ == haut: return Vector2(p.x, g.position.y)
+	return Vector2(p.x, g.end.y)
+
+static func _dans_la_piece(p: Vector2, m: Dictionary, rayon: float) -> Vector2:
+	var point := p
+	var c := Vector2i(floori(point.x), floori(point.y))
+	if not (m["tuiles"] as Dictionary).has(c):
+		# Déjà dehors : on rejoint le centre de la tuile habitable la plus
+		# proche. Ça n'arrive qu'au premier pas d'une téléportation ratée,
+		# mais laisser le joueur dehors le fait tomber dans le vide.
+		var mieux := Vector2i.ZERO
+		var trouve := false
+		for k in (m["tuiles"] as Dictionary).keys():
+			var d := Vector2(k) + Vector2(0.5, 0.5)
+			if not trouve or d.distance_to(point) < (Vector2(mieux) + Vector2(0.5, 0.5)).distance_to(point):
+				mieux = k
+				trouve = true
+		return Vector2(mieux) + Vector2(0.5, 0.5) if trouve else point
+	if _ferme(m, c, 0): point.y = maxf(point.y, float(c.y) + rayon)
+	if _ferme(m, c, 1): point.y = minf(point.y, float(c.y) + 1.0 - rayon)
+	if _ferme(m, c, 2): point.x = maxf(point.x, float(c.x) + rayon)
+	if _ferme(m, c, 3): point.x = minf(point.x, float(c.x) + 1.0 - rayon)
+	return point
+
+## PAR OÙ L'ON ENTRE : la première porte du dessin qui donne sur le vide, et la
+## tuile de l'autre côté. Le jeu y pose le joueur, et le banc de marche y
+## commence son inondation.
+static func entree(id: String) -> Vector2:
+	var m: Dictionary = _table(id)["murs"]
+	var dessin: Array = m["dessin"]
+	var tuiles: Dictionary = m["tuiles"]
+	for c: Vector2i in tuiles.keys():
+		for k in 4:
+			var d: Vector2i = [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)][k]
+			if tuiles.has(c + d):
+				continue
+			var car := ""
+			match k:
+				0: car = _car(dessin, 2 * c.y, 2 * c.x + 1)
+				1: car = _car(dessin, 2 * c.y + 2, 2 * c.x + 1)
+				2: car = _car(dessin, 2 * c.y + 1, 2 * c.x)
+				_: car = _car(dessin, 2 * c.y + 1, 2 * c.x + 2)
+			if car in PASSAGES:
+				return Vector2(c) + Vector2(0.5, 0.5)
+	# Pas de porte sur l'extérieur : on entre au milieu, c'est mieux que rien.
+	return Vector2(float(m["large"]) * 0.5, float(m["haut"]) * 0.5)
+
 # ------------------------------------------------------------ écriture d'une fiche
 
 ## Un meuble posé librement : `(x, z)` est le CENTRE de son emprise au sol, en
@@ -398,7 +594,11 @@ static func _taudis() -> Dictionary:
 			pose("cardboardBoxOpen", 1.3, 2.8, 3),
 			pose("cardboardBoxClosed", 1.6, 2.8, 2),
 			pose("cardboardBoxClosed", 1.7, 2.2, 0),
-			pose("coatRackStanding", 0.9, 2.8, 2),
+			# ⚠ DEVANT LA PORTE À L'ORIGINE (0,9 ; 2,8) : le porte-manteau muré
+			# l'entrée, avec l'évier au nord et les cartons à l'est — on entrait
+			# dans un sas de deux pas. Aucune photo ne le montrait ;
+			# `outils/marche.gd` a déclaré 97 % du sol inatteignable.
+			pose("coatRackStanding", 0.28, 2.72, 3),
 			pose("rugDoormat", 0.5, 2.86, 2),
 			pose("lampSquareCeiling", 1.2, 0.7, 2, 1.06),
 			pose("lampSquareCeiling", 2.4, 1.6, 2, 1.06),
@@ -472,7 +672,11 @@ static func _ouvrier() -> Dictionary:
 			contre("bookcaseOpen", "E", 2.05, 3, 0.03),
 			contre("bookcaseClosedWide", "S", 1.00, 4),
 			pose("pottedPlant", 0.35, 3.60, 2),
-			pose("loungeChair", 2.25, 3.45, 2),
+			# ⚠ EN TRAVERS DE LA PORTE DU SÉJOUR à l'origine (2,25 ; 3,45) : avec
+			# le meuble de télé contre le mur est, le salon n'avait plus aucune
+			# issue — 80 % de l'appartement coupé de l'entrée. Ramené du côté du
+			# canapé, face à la télé (r = 3 regarde l'est).
+			pose("loungeChair", 0.85, 3.30, 3),
 			pose("lampRoundFloor", 0.35, 1.80, 2),
 			pose("lampSquareCeiling", 1.40, 2.60, 2, HAUT - 0.23),
 			pose("speakerSmall", 2.80, 3.05, 3),

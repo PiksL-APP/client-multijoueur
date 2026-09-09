@@ -266,12 +266,62 @@ Après tout ajout de modèle maison : `python3 outils/coffre.py`, puis
 `outils/paquet.py`, `outils/empreintes.py` et la planche — sinon l'éditeur web
 et le contrôle ne le connaissent pas.
 
+## Les collisions sortent du dessin
+
+Elles ne sont écrites nulle part : `Interieurs.libre()` et
+`Interieurs.degager()` les déduisent du **même dessin** que les murs qu'on voit,
+et les emprises des meubles sont **mesurées** sur les modèles. C'est le parti du
+hub (`modeles/voxel/plan.json`) : une table de collisions tenue à côté du plan
+aurait vieilli au premier meuble déplacé, sans que personne s'en aperçoive avant
+de traverser un canapé.
+
+Tout est **en tuiles**, comme le dessin et comme `coffre()` — pas en unités de
+monde. L'appelant multiplie par `ECHELLE`. Mélanger les deux repères ne se voit
+pas : ça donne juste des murs deux fois trop loin.
+
+- `RAYON_MARCHE = 0,14` tuile, soit un bonhomme de 56 cm de large. Essayé à 0,22
+  d'abord, en croyant prendre une marge : les huit repaires sont devenus
+  impraticables, portes comprises — une porte du kit n'ouvre que sur 0,8 tuile.
+- Un meuble de moins de 30 cm de haut ne bloque pas (tapis, assiette), ni rien
+  de posé à `y > 0` : bloquer une casserole condamnait la moitié d'une cuisine.
+- Les rotations du plan sont des quarts de tour, donc une emprise reste toujours
+  alignée sur les axes : tout est `Rect2`, jamais un rectangle tourné.
+- `PASSAGES = ["D", "A"]` : on ne saute pas par la fenêtre d'un repaire, et un
+  muret arrête aussi.
+
+## Le banc de marche
+
+```
+godot --headless -s outils/marche.gd            # les huit repaires
+godot --headless -s outils/marche.gd -- --plan  # + la carte de chacun
+```
+
+Il inonde chaque appartement **depuis sa porte**, avec le gabarit du joueur, et
+répond aux trois questions qu'une photo ne pose jamais : entre-t-on, le coffre
+est-il atteignable, reste-t-il du sol coupé du reste. Il mesure la **plus
+grosse** poche perdue, pas leur total — trois recoins de sept cases dans trois
+pièces différentes sonnaient comme une chambre condamnée. Le seuil est d'**une
+tuile** : en dessous c'est le jour entre un lit et un bureau, au-dessus c'est
+une pièce qu'on a condamnée en meublant.
+
+Ce qu'il a trouvé du premier coup, et qu'aucune vitrine ne montrait :
+
+- **Le Taudis** — le porte-manteau était planté devant la porte d'entrée, entre
+  l'évier au nord et les cartons à l'est : 97 % du sol inatteignable, on entrait
+  dans un sas de deux pas. Il est passé contre le mur ouest.
+- **L'Appart ouvrier** — le fauteuil barrait la seule porte du séjour, et le
+  meuble de télé bouchait l'autre côté : 80 % de l'appartement coupé de
+  l'entrée. Il est revenu près du canapé, face à la télé.
+
+Les huit passent (`REPAIRES PRATICABLES.`), à des recoins près qui sont
+affichés, jamais tus.
+
 ## Ce qui reste à faire
 
 - Brancher le catalogue sur la boutique d'un repaire (`PlanVille` pose déjà les
   repaires et les planques par secteur) : liste, prix, achat, et la porte qui
   charge l'intérieur acheté.
-- Les collisions : elles se déduiront du plan (tuiles vides et arêtes murées)
-  comme celles du hub se déduisent de `plan.json`.
+- Poser le joueur dans l'intérieur et brancher sa marche sur `Interieurs.degager`
+  — la table existe, personne ne s'en sert encore.
 - Brancher l'interaction sur le coffre (dépôt et retrait), la garde-robe et le
   garage.
