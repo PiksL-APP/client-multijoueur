@@ -113,9 +113,84 @@ def dans(ms, x, z, durs=True):
     return None
 
 
+def mur_dedans(ms, m):
+    """Le meuble franchit-il le PLAN MÉDIAN d'une cloison ?
+
+    On ne mesure pas le recouvrement de l'épaisseur du mur : celle-ci vaut
+    0.052 tuile, si bien qu'un seuil de 0.055 ne pouvait jamais se déclencher —
+    l'ancien contrôle ne voyait que les meubles traversant de part en part.
+    """
+    if m.get('y', 0) >= 1.2 or PLAT.match(m['m']):
+        return False
+    t = m.get('t', 1) or 1
+    l, p = (m['p'] * t, m['l'] * t) if m['r'] % 2 else (m['l'] * t, m['p'] * t)
+    ax0, ax1, az0, az1 = m['x'] - l / 2, m['x'] + l / 2, m['z'] - p / 2, m['z'] + p / 2
+    E = 0.026
+    for w in ms:
+        if not w['dur']:
+            continue
+        wx0, wx1 = (w['cx'] - 0.5, w['cx'] + 0.5) if w['horiz'] else (w['cx'] - E, w['cx'] + E)
+        wz0, wz1 = (w['cz'] - E, w['cz'] + E) if w['horiz'] else (w['cz'] - 0.5, w['cz'] + 0.5)
+        if min(ax1, wx1) - max(ax0, wx0) <= 0 or min(az1, wz1) - max(az0, wz0) <= 0:
+            continue
+        # Le meuble doit tenir ENTIÈREMENT d'un côté du plan médian, à 3 cm de
+        # débord près. Comparer au seul côté de son centre laisserait passer un
+        # meuble qui a fini de traverser.
+        if w['horiz']:
+            devant, derriere = az1 - w['cz'], w['cz'] - az0
+        else:
+            devant, derriere = ax1 - w['cx'], w['cx'] - ax0
+        if devant > 0.03 and derriere > 0.03:
+            return True
+    return False
+
+
+def pieces(plan):
+    """Une étiquette de pièce par tuile : on ne déplace pas un meuble d'une
+    pièce à l'autre pour le décoller de son voisin — une chaise de table n'a
+    rien à faire dans la chambre, même si la géométrie le permet."""
+    h, l = (len(plan) - 1) // 2, (max(len(x) for x in plan) - 1) // 2
+    ids = [[-1] * l for _ in range(h)]
+    n = 0
+    for z0 in range(h):
+        for x0 in range(l):
+            if ids[z0][x0] != -1 or not plancher(plan, x0 + .5, z0 + .5):
+                continue
+            pile, n = [(x0, z0)], n + 1
+            ids[z0][x0] = n
+            while pile:
+                x, z = pile.pop()
+                for (dx, dz) in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    a, b = x + dx, z + dz
+                    if not (0 <= a < l and 0 <= b < h) or ids[b][a] != -1:
+                        continue
+                    # l'arête qui sépare les deux tuiles : franchissable ou non
+                    r = 2 * z + 1 + dz
+                    c = 2 * x + 1 + dx
+                    ligne = plan[r] if r < len(plan) else ''
+                    ch = ligne[c] if c < len(ligne) else ' '
+                    # Une PORTE sépare deux pièces autant qu'un mur : on ne
+                    # traverse que là où il n'y a aucune arête.
+                    if ch != ' ':
+                        continue
+                    if not plancher(plan, a + .5, b + .5):
+                        continue
+                    ids[b][a] = n
+                    pile.append((a, b))
+    return ids
+
+
+def piece(ids, x, z):
+    c, l = int(x // 1), int(z // 1)
+    if l < 0 or c < 0 or l >= len(ids) or c >= len(ids[0]):
+        return 0
+    return ids[l][c]
+
+
 def controler(id):
     f = cat[id]
     ms = murs(f['plan'])
+    ids = pieces(f['plan'])
     meubles = f['meubles']
     grilles = [cases(m) for m in meubles]
     pb = [None] * len(meubles)
@@ -155,22 +230,28 @@ def controler(id):
             pb[i] = 'hors du plancher'
             continue
         # --- dans un mur
-        if m.get('y', 0) < 1.2 and not PLAT.match(nom):
+        if mur_dedans(ms, m):
+            pb[i] = 'entre dans un mur'
+            continue
+        # --- à cheval sur deux pièces : la façade dessert l'une, le corps est
+        # dans l'autre. Invisible en vue de trois quarts, aberrant en jeu.
+        if not PLAT.match(nom) and m.get('y', 0) < 0.10:
+            nx, nz = NORMALE[m['r']]
+            ori = piece(ids, m['x'] + nx * 0.15, m['z'] + nz * 0.15)
+            if ori <= 0:                       # façade tournée vers l'extérieur
+                ori = piece(ids, m['x'], m['z'])
             t = m.get('t', 1) or 1
             l, p = (m['p'] * t, m['l'] * t) if m['r'] % 2 else (m['l'] * t, m['p'] * t)
-            ax0, ax1, az0, az1 = m['x'] - l / 2, m['x'] + l / 2, m['z'] - p / 2, m['z'] + p / 2
-            for w in ms:
-                if not w['dur']:
-                    continue
-                E = 0.026
-                wx0, wx1 = (w['cx'] - 0.5, w['cx'] + 0.5) if w['horiz'] else (w['cx'] - E, w['cx'] + E)
-                wz0, wz1 = (w['cz'] - E, w['cz'] + E) if w['horiz'] else (w['cz'] - 0.5, w['cz'] + 0.5)
-                dx = min(ax1, wx1) - max(ax0, wx0)
-                dz = min(az1, wz1) - max(az0, wz0)
-                if dx <= 0 or dz <= 0:
-                    continue
-                if (dz if w['horiz'] else dx) > 0.055:
-                    pb[i] = 'entre dans un mur'
+            for sx in (-1, 1):
+                for sz in (-1, 1):
+                    # un coin hors du plan est derrière un mur extérieur :
+                    # `mur_dedans` s'en charge, pas ce contrôle-ci
+                    q = piece(ids, m['x'] + sx * (l / 2 - 0.06),
+                              m['z'] + sz * (p / 2 - 0.06))
+                    if q > 0 and q != ori:
+                        pb[i] = 'à cheval sur deux pièces'
+                        break
+                if pb[i]:
                     break
             if pb[i]:
                 continue

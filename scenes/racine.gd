@@ -118,6 +118,13 @@ static func _arguments_depuis_url(arguments: PackedStringArray) -> PackedStringA
 			"position": copie.append("--banc-position=" + String(paire[1]))
 			"nuit": copie.append("--nuit=" + String(paire[1]))
 			"feu": copie.append("--banc-feu=" + String(paire[1]))
+			# ⚠ `ecran` manquait à cette table : `?ecran=editeur` n'était donc
+			# JAMAIS traduit, et l'adresse ouvrait le menu comme si de rien
+			# n'était. Le défaut ne se voyait que dans le navigateur — en
+			# ligne de commande, `--ecran=` marche sans passer par ici.
+			"ecran": copie.append("--ecran=" + String(paire[1]))
+			"lieu": copie.append("--lieu=" + String(paire[1]))
+			"onglet": copie.append("--onglet=" + String(paire[1]))
 	return copie
 
 static func _argument(arguments: PackedStringArray, nom: String, defaut: String = "") -> String:

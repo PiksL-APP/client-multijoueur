@@ -177,8 +177,18 @@ voit pas à l'œil sur une vue de trois quarts :
 - un meuble mural (placard haut, hotte, miroir, patère) dont le dos ne touche
   aucune cloison ;
 - un siège qui tourne le dos à sa table, un canapé qui tourne le dos à la télé ;
-- deux emprises RÉELLES qui s'interpénètrent de plus de 12 cm de côté, et un
-  meuble qui entre de plus de cinq centimètres dans un mur ;
+- deux emprises RÉELLES qui s'interpénètrent de plus de 12 cm de côté ;
+- un meuble qui FRANCHIT le plan médian d'une cloison. On mesure bien le
+  franchissement du plan médian, et non le recouvrement de l'épaisseur du mur :
+  celle-ci vaut 0,052 tuile, si bien que l'ancien seuil de 0,055 ne pouvait
+  jamais se déclencher — le contrôle ne voyait que les meubles traversant de
+  part en part. Le meuble doit tenir ENTIÈREMENT d'un côté, à 3 cm de débord
+  près : comparer au seul côté de son centre laisserait passer celui qui a
+  fini de traverser ;
+- un meuble À CHEVAL SUR DEUX PIÈCES : sa façade dessert l'une, son corps est
+  dans l'autre. Les pièces viennent d'un remplissage par diffusion sur le plan,
+  où **une porte sépare autant qu'un mur** — sans cela tout le logement ne fait
+  qu'une pièce et le contrôle ne voit rien ;
 - un meuble planté DEVANT UNE PORTE : on garde l'ouverture (0,5 tuile) sur
   0,42 tuile de part et d'autre, soit un mètre de passage. C'est le contrôle
   qui a fait déplacer trois portes de plan et agrandir la salle d'eau du
@@ -194,6 +204,39 @@ englobante couvre le vide de l'angle. C'est le seul faux positif connu.
 Sur la première passe, ce contrôle a trouvé 47 meubles à retourner sur les huit
 intérieurs — dont vingt-quatre rien que dans le Taudis. Aucun ne se voyait sur
 les photos sans les chercher.
+
+## Rien ne fusionne : `outils/decoller.py`
+
+La règle du coffre — il doit rester SEUL, pas fondu dans une file de meubles —
+vaut pour le reste du mobilier. Mais tout contact n'est pas un défaut : une
+file de cuisine, un lit et sa table de chevet, une table et ses chaises, un bar
+et ses tabourets, une télé sur son meuble, une bibliothèque à côté du bureau
+SE LISENT comme un ensemble voulu. Une poubelle contre un meuble télé, une
+bibliothèque contre une baignoire : non — ça fait un bloc informe.
+
+Chaque modèle reçoit donc une FAMILLE (cuisine, bar, lit, repas, bureau, salon,
+rangement, eau, poubelle, déco, coffre) et une MOBILITÉ — qui cède le passage :
+une poubelle bouge, une baignoire est scellée. Deux familles qui se touchent
+sans figurer dans la liste des voisinages admis sont un défaut ; l'outil écarte
+le plus mobile des deux du plus petit décalage qui résout le contact sans rien
+casser d'autre (mur, porte, chevauchement, orientation, dégagement du coffre),
+et exige un vrai vide de 16 cm pour que l'écart se voie.
+
+Deux pièges, corrigés :
+
+- **le contact À TRAVERS UNE CLOISON.** Une bibliothèque et une baignoire dos à
+  dos de part et d'autre d'une paroi ont des emprises voisines dans la grille
+  et passent pour collées. On teste donc si une cloison dure coupe le segment
+  entre les deux centres. Ce seul test a fait tomber la moitié des signalements
+  (18 → 8) ;
+- **le meuble qui change de pièce pour se dégager.** Une chaise de table qui
+  finit de traverser la cloison est « d'un seul côté » et satisfait la
+  géométrie — dans la chambre. Les quatre coins du meuble doivent rester dans
+  la pièce que dessert sa façade.
+
+    python3 outils/decoller.py     # imprime les pose() prêts à recopier
+
+⚠ Un meuble en L (`deskCorner`, `loungeSofaCorner`, `loungeDesignSofaCorner`)
 
 ## Le coffre
 

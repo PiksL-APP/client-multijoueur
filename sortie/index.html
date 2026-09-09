@@ -748,7 +748,7 @@ class Component extends DCLogic {
 
 <script src="index.js"></script>
 <script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":31961412,"index.wasm":38057390},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":33876648,"index.wasm":38057390},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 
@@ -786,6 +786,35 @@ const engine = new Engine(GODOT_CONFIG);
 	}
 }());
 </script>
+<script>
+/* OUTILS D'ATELIER — `?ecran=editeur`, `?banc=…`, `?pilote=…`.
+   En temps normal c'est LA PAGE qui tient les menus : `#pk-kit` couvre la
+   toile du moteur (`#pk-jeu`, en `visibility:hidden`) jusqu'à ce qu'on lance
+   une manche. Quand l'URL demande un écran du moteur, la page n'a plus rien à
+   tenir et doit s'effacer tout de suite — sinon Godot ouvre bien l'écran
+   demandé, mais DERRIÈRE le menu, et on jurerait que le lien ne marche pas.
+   (Vu exactement comme ça sur multijoueur.piks-l.com/?ecran=editeur.)
+   On le refait pendant vingt secondes : le kit se remonte tout seul à la fin
+   du chargement, et il faut le recoucher après. */
+(function () {
+	var p = new URLSearchParams(location.search);
+	if (!p.has("ecran") && !p.has("banc") && !p.has("banc-jeu") && !p.has("pilote")) { return; }
+	function decouvrir() {
+		var jeu = document.getElementById("pk-jeu");
+		var kit = document.getElementById("pk-kit");
+		if (jeu) { jeu.classList.add("en-jeu"); jeu.style.visibility = "visible"; }
+		if (kit && kit.style.display !== "none") { kit.classList.add("parti"); kit.style.display = "none"; }
+	}
+	decouvrir();
+	document.addEventListener("DOMContentLoaded", decouvrir);
+	var fin = Date.now() + 20000;
+	var minuteur = setInterval(function () {
+		decouvrir();
+		if (Date.now() > fin) { clearInterval(minuteur); }
+	}, 250);
+}());
+</script>
 </body>
 </html>
+
 

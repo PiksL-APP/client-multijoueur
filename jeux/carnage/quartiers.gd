@@ -30,6 +30,10 @@ extends RefCounted
 ##   =   pont
 ##   O   rond-point : posé sur son CENTRE, il mange 3 x 3 cases
 ##   ^   bosquet d'arbres        '   buissons et hautes herbes
+##   ~   plan d'eau du port : pas de terre, mais un bateau amarré. LA LONGUEUR
+##       DE LA FILE DE `~` CHOISIT LE BATEAU — cinq cases d'affilée valent un
+##       cargo, deux un remorqueur, une un canot. On dessine un mouillage, pas
+##       un bateau à la fois.
 ##   X   dépôt : conteneurs, cuves, palettes — le sol d'un port
 ##   %   chantier : barrières, cônes, palissade
 ##   P   parking : le sol est pavé et il y a des voitures dessus
@@ -223,7 +227,7 @@ static func carte_de(fiche: Dictionary) -> CarteVille:
 	for j in dessin.size():
 		for i in large:
 			var c := _car(dessin, i, j)
-			if c == ".":
+			if c == "." or c == "~":
 				continue
 			carte.poser_sol(Vector2i(i, j), _niveau(relief, i, j))
 			if c in CHAUSSEE:
@@ -357,6 +361,7 @@ static func batir_fiche(fiche: Dictionary, id: String = "atelier") -> Node3D:
 	_poser_batiments(racine, carte, dessin, fiche, alea)
 	_poser_verdure(racine, carte, dessin, alea)
 	_poser_mobilier(racine, carte, dessin, alea)
+	_poser_bateaux(racine, dessin, alea)
 	return racine
 
 static func _poser_sols(racine: Node3D, carte: CarteVille, dessin: Array, fiche: Dictionary) -> void:
@@ -654,6 +659,74 @@ static func _objet(parent: Node3D, sous_chemin: String, ou: Vector3, hauteur: fl
 	n.material_override = _matiere(chemin, teinte)
 	n.transform = Transform3D(Basis(Vector3.UP, tourne), ou)
 	parent.add_child(n)
+
+# ------------------------------------------------------------ les bateaux
+
+## LE MOUILLAGE. Une file de `~` est une place d'amarrage : sa LONGUEUR dit
+## quel bateau vient s'y mettre. Écrire un modèle par case aurait demandé un
+## caractère par bateau ; là, on dessine l'eau du port et la flotte suit.
+## ⚠ Les coques du Watercraft Pack sont toutes longues selon Z (mesuré,
+## `outils/bateaux.gd`) : on les tourne pour les aligner sur la file.
+const FLOTTE := [
+	# longueur mini de la file (en cases), modèle, longueur en unités de jeu
+	[6, ["bateaux/ship-ocean-liner-small", 220.0], ["bateaux/ship-cargo-a", 200.0],
+		["bateaux/ship-cargo-b", 200.0], ["bateaux/ship-large", 180.0]],
+	[4, ["bateaux/ship-small", 140.0], ["bateaux/ship-cargo-b", 200.0]],
+	[2, ["bateaux/boat-tug-a", 50.0], ["bateaux/boat-tug-b", 46.0],
+		["bateaux/boat-fishing-small", 28.0]],
+	[1, ["bateaux/boat-speed-a", 16.0], ["bateaux/boat-speed-c", 16.0],
+		["bateaux/boat-sail-a", 24.0], ["bateaux/boat-row-large", 12.0],
+		["bateaux/buoy", 5.0], ["bateaux/buoy-flag", 6.0]],
+]
+const NIVEAU_MER := -2.4
+
+static func _poser_bateaux(racine: Node3D, dessin: Array, alea: RandomNumberGenerator) -> void:
+	var vues: Dictionary = {}
+	var large := 0
+	for l in dessin:
+		large = maxi(large, String(l).length())
+	# Les files horizontales, puis les verticales : une place d'amarrage se lit
+	# dans le sens du quai.
+	for j in dessin.size():
+		var i := 0
+		while i < large:
+			if _car(dessin, i, j) != "~" or vues.has(Vector2i(i, j)):
+				i += 1
+				continue
+			var n := 0
+			while _car(dessin, i + n, j) == "~" and not vues.has(Vector2i(i + n, j)):
+				n += 1
+			for k in n: vues[Vector2i(i + k, j)] = true
+			_amarrer(racine, Vector2(float(i) + float(n) * 0.5, float(j) + 0.5), n, true, alea)
+			i += n
+	for i in large:
+		var j := 0
+		while j < dessin.size():
+			if _car(dessin, i, j) != "~" or vues.has(Vector2i(i, j)):
+				j += 1
+				continue
+			var n := 0
+			while _car(dessin, i, j + n) == "~" and not vues.has(Vector2i(i, j + n)):
+				n += 1
+			for k in n: vues[Vector2i(i, j + k)] = true
+			_amarrer(racine, Vector2(float(i) + 0.5, float(j) + float(n) * 0.5), n, false, alea)
+			j += n
+
+static func _amarrer(racine: Node3D, centre: Vector2, longueur: int, selon_x: bool,
+		alea: RandomNumberGenerator) -> void:
+	for fiche in FLOTTE:
+		if longueur < int(fiche[0]): continue
+		var choix: Array = fiche[1 + alea.randi() % (fiche.size() - 1)]
+		var chemin := "res://modeles/kenney/" + String(choix[0]) + ".glb"
+		if not ResourceLoader.exists(chemin): return
+		var n := MeshInstance3D.new()
+		n.mesh = FormesCarnage.maillage_kenney(chemin, float(choix[1]), Vector3.AXIS_Z, 0.0)
+		n.material_override = FormesCarnage.matiere_kenney(chemin)
+		var tour := (PI * 0.5 if selon_x else 0.0) + alea.randf_range(-0.03, 0.03)
+		n.transform = Transform3D(Basis(Vector3.UP, tour),
+			Vector3(centre.x * CASE, NIVEAU_MER, centre.y * CASE))
+		racine.add_child(n)
+		return
 
 # ------------------------------------------------------------ la ville entière
 

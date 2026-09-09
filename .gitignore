@@ -20,3 +20,10 @@ sortie/*.import
 # Ce que `device_bash` ne peut pas effacer : le pont du poste n'a pas le droit
 # de supprimer, on déplace ici et on vide à la main.
 _to_delete/
+
+# ⚠ AUCUNE ARCHIVE dans le dépôt. Un `_transfert_tree.zip` de 226 Mo, laissé
+# par un transfert de fichiers, s'est fait avaler par un `git add -A` : GitHub
+# refuse tout fichier de plus de 100 Mo, et le push entier est bloqué tant que
+# le gros objet est dans l'HISTORIQUE — l'effacer de l'arbre ne suffit pas.
+*.zip
+*.tpz
