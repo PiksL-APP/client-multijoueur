@@ -1300,12 +1300,22 @@ func _marcher_dedans(delta: float) -> void:
 		_depuis_pas = 0.0
 	_regenerer(delta)
 
-## Ce que F fait chez soi : le coffre, ou la porte. Deux endroits, deux gestes,
-## et la ligne du HUD dit toujours lequel — c'est la règle de tout le jeu.
+## Ce que F fait chez soi : le coffre, la garde-robe, ou la porte. Trois
+## endroits, trois gestes, et la ligne du HUD dit toujours lequel — c'est la
+## règle de tout le jeu, et à cette échelle un menu se lirait moins vite qu'on
+## ne se fait tirer dessus dehors.
+##
+## Au coffre, E RETIRE. Il fallait une seconde touche : F y sert déjà à déposer
+## puis à payer les travaux, et empiler un troisième sens dessus rendait le
+## geste imprévisible — on venait chercher de l'argent et on repartait avec un
+## arsenal. E ne fait rien d'autre à l'intérieur (pas de portière chez soi).
 func _affaires_dedans() -> void:
 	_affaire = ""
 	var c: Dictionary = Interieurs.coffre(_dedans)
+	var penderie: Dictionary = Interieurs.poste(_dedans, "garde-robe")
 	var pres_du_coffre: bool = not c.is_empty() and _dedans_p.distance_to(c["p"]) < PORTEE_COFFRE
+	var pres_de_la_penderie: bool = not penderie.is_empty() \
+		and _dedans_p.distance_to(penderie["p"]) < PORTEE_COFFRE
 	var pres_de_la_porte := _dedans_p.distance_to(Interieurs.entree(_dedans)) < PORTEE_PORTE
 	if pres_du_coffre:
 		var suivante := _amelioration_suivante()
@@ -1315,14 +1325,69 @@ func _affaires_dedans() -> void:
 			_affaire = "F : %s — $%d" % [_libelle_amelioration(suivante), int(PlanVille.PRIX_AMELIORATION[suivante])]
 		else:
 			_affaire = "$%d à l'abri" % _banque
+		if _banque > 0:
+			_affaire += "   ·   E : retirer $%d" % _banque
 		if Commandes.affaire_declenchee():
 			_traiter_chez_soi(suivante)
+		elif _banque > 0 and Commandes.action_declenchee():
+			_retirer_du_coffre()
 	elif pres_de_la_porte:
+		# ⚠ LA PORTE PASSE AVANT LA PENDERIE. Dans le Taudis le portemanteau est
+		# à quarante centimètres du paillasson : dans l'autre ordre, on se
+		# changeait au lieu de sortir et on ne pouvait plus quitter le studio.
+		# On se change d'un pas en arrière.
 		_affaire = "F : ressortir"
 		if Commandes.affaire_declenchee():
 			_sortir_de_chez_soi()
+	elif pres_de_la_penderie:
+		_affaire = "F : se changer — %s" % Personnages.nom(Session.personnage_affiche())
+		if Commandes.affaire_declenchee():
+			_changer_de_tenue()
 	else:
 		_affaire = "chez vous — le coffre est au fond"
+
+## RETIRER. Sans ça, le coffre était un puits : l'argent y entrait et n'en
+## sortait plus, et on ne pouvait pas ressortir avec de quoi payer un hôpital
+## ou une planque. On retire TOUT — le joueur choisit son risque, et un menu de
+## montants dans un jeu qui se joue à quatre touches ne se lit pas.
+func _retirer_du_coffre() -> void:
+	if _banque <= 0:
+		return
+	var sorti := _banque
+	_argent += sorti
+	_banque = 0
+	_dire_affaire("$%d repris — ne vous faites pas descendre" % sorti)
+	Sons.jouer("depart", 1.1, -8.0)
+
+## SE CHANGER. C'est le geste de GTA : on rentre chez soi et on ressort avec
+## une autre tête. Le choix est gardé (`Session`), donc il vaut aussi pour les
+## manches suivantes et pour le hub.
+##
+## ⚠ Le changement PART SUR LE RÉSEAU une fois, à l'instant du changement, et
+## pas dans le message de position : celui-là part douze fois par seconde, et y
+## glisser une clé de personnage coûterait cent fois le prix de l'information.
+func _changer_de_tenue() -> void:
+	var liste := Personnages.LISTE
+	var actuel := Session.personnage_affiche()
+	var rang := 0
+	for k in liste.size():
+		if String(liste[k]["cle"]) == actuel:
+			rang = k
+	var suivant := String(liste[(rang + 1) % liste.size()]["cle"])
+	Session.definir_personnage(suivant)
+	_habiller(_corps_pied, suivant)
+	_dire_affaire(String(liste[(rang + 1) % liste.size()]["nom"]))
+	Sons.jouer("portail", 1.3, -10.0)
+	canal.envoyer("tenue", {"j": Session.cle, "p": suivant})
+
+## La peau se change SUR LE PANTIN DÉJÀ POSÉ : le rebâtir couperait la
+## démarche en cours et rechargerait le squelette pour rien.
+func _habiller(porteur: Node3D, cle: String) -> void:
+	if porteur == null:
+		return
+	var silhouette := porteur.get_node_or_null("Silhouette") as Node3D
+	if silhouette != null:
+		Personnages.habiller(silhouette, cle)
 
 func _acheter_la_planque(id: int, prix: int) -> void:
 	if _argent < prix:
@@ -1632,6 +1697,12 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 	match evenement:
 		"j":
 			_recevoir_joueur(charge)
+		"tenue":
+			# Quelqu'un s'est changé chez lui. On ne rebâtit pas son pantin :
+			# on lui change la peau là où il est.
+			var qui := String(charge.get("j", ""))
+			if qui != Session.cle and _autres.has(qui):
+				_habiller(_autres[qui]["pieton"] as Node3D, String(charge.get("p", "")))
 		"n":
 			if not est_hote():
 				ville.appliquer_instantane(charge)

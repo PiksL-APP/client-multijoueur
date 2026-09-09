@@ -100,6 +100,30 @@ static func _cumuler(noeud: Node, t: Transform3D, boite: Array) -> void:
 	for enfant in noeud.get_children():
 		_cumuler(enfant, t2, boite)
 
+# ------------------------------------------------------------ les postes
+
+## LES MEUBLES QUI SE MANIPULENT. On les retrouve dans la liste des meubles par
+## leur MODÈLE, dans l'ordre écrit : pas de caractère à ajouter aux huit plans,
+## pas de table à tenir à côté. Un appartement qui gagne un portemanteau gagne
+## sa garde-robe le jour où on l'y pose.
+##
+## La garde-robe accepte le LIT en dernier recours : deux plans sur huit n'ont
+## pas de portemanteau, et « on se change au pied du lit » se comprend mieux
+## qu'un appartement où l'on ne peut pas se changer.
+const POSTES := {
+	"coffre": ["c:coffre"],
+	"garde-robe": ["coatRackStanding", "coatRack", "bedDouble", "bedSingle", "bedBunk"],
+}
+
+## Où se tient un poste, EN TUILES : {"p": Vector2, "nom": le modèle}, ou {}.
+static func poste(id: String, genre: String) -> Dictionary:
+	var meubles: Array = plan(id).get("meubles", [])
+	for modele in POSTES.get(genre, []):
+		for m in meubles:
+			if String(m[0]) == String(modele):
+				return {"p": Vector2(float(m[1]), float(m[2])), "nom": String(m[0])}
+	return {}
+
 # ------------------------------------------------------------ le joueur dedans
 
 ## ⚠ UN INTÉRIEUR N'EST PAS À L'ÉCHELLE DE LA VILLE.
@@ -188,6 +212,7 @@ static var _collisions := {}
 ## donc TOUJOURS alignée sur les axes — il suffit d'échanger largeur et
 ## profondeur pour un quart impair. C'est ce qui permet des `Rect2` partout au
 ## lieu de rectangles tournés, et un test dix fois plus court.
+## Chaque entrée : {"r": Rect2 (en tuiles), "nom": le modèle}.
 static func obstacles(id: String) -> Array:
 	return _table(id)["obstacles"]
 
@@ -211,7 +236,10 @@ static func _table(id: String) -> Dictionary:
 	for m in fiche.get("meubles", []):
 		var rect: Variant = _emprise(m)
 		if rect != null:
-			liste.append(rect)
+			# Le NOM voyage avec l'emprise : sans lui, un outil qui trouve un
+			# meuble gênant ne peut que dire « il y a quelque chose là », ce qui
+			# ne fait avancer personne.
+			liste.append({"r": rect, "nom": String(m[0])})
 	var t := {"murs": {"tuiles": tuiles, "large": large, "haut": haut, "dessin": dessin},
 		"obstacles": liste}
 	_collisions[id] = t
@@ -252,8 +280,8 @@ static func libre(id: String, p: Vector2, rayon: float = RAYON_MARCHE) -> bool:
 	if _ferme(m, c, 1) and float(c.y) + 1.0 - p.y < rayon: return false
 	if _ferme(m, c, 2) and p.x - float(c.x) < rayon: return false
 	if _ferme(m, c, 3) and float(c.x) + 1.0 - p.x < rayon: return false
-	for r in t["obstacles"]:
-		if (r as Rect2).grow(rayon).has_point(p):
+	for o in t["obstacles"]:
+		if ((o as Dictionary)["r"] as Rect2).grow(rayon).has_point(p):
 			return false
 	return true
 
@@ -281,8 +309,8 @@ static func degager(id: String, p: Vector2, rayon: float = RAYON_MARCHE) -> Vect
 	var m: Dictionary = t["murs"]
 	var point := p
 	for _passe in 2:
-		for r in t["obstacles"]:
-			point = _hors_du_rect(point, r as Rect2, rayon)
+		for o in t["obstacles"]:
+			point = _hors_du_rect(point, (o as Dictionary)["r"] as Rect2, rayon)
 		point = _dans_la_piece(point, m, rayon)
 	return point
 
@@ -1039,13 +1067,16 @@ static func _pavillon() -> Dictionary:
 			# meubles — adossé à côté d'un placard, il se lit comme un placard.
 			# `outils/verifier.py` lui impose soixante centimètres de vide.
 			# ⚠ À UN PAS DE LA PORTE (1,0 tuile) : on ouvre son coffre depuis le
-			# seuil, sans jamais entrer chez soi. `outils/marche.gd --coffre`
-			# ne trouve AUCUNE autre place adossée, dégagée de soixante
-			# centimètres et loin d'un passage : le pavillon est trop meublé.
-			# Essayé contre le mur est (3,7 tuiles) — juste devant la porte de
-			# la chambre — et au nord de la chambre — collé à la table à manger
-			# de l'autre côté de la cloison. Il faudra déplacer un meuble, pas
-			# le coffre.
+			# seuil, sans entrer chez soi. C'EST ASSUMÉ, faute de mieux.
+			# `marche.gd --coffre` ne trouve dans ce plan AUCUNE place — ni
+			# adossée, ni même au milieu d'une pièce — qui laisse au coffre les
+			# soixante centimètres de vide qu'exige le catalogue. Essayés : le
+			# mur est de la cuisine (devant la porte de la chambre), le nord de
+			# la chambre (collé à la table à manger de l'autre côté de la
+			# cloison), l'angle nord-ouest du séjour (collé à l'enceinte, puis
+			# à la bibliothèque). Le pavillon est simplement le plan le plus
+			# meublé des huit : c'est un MEUBLE à retirer, pas le coffre à
+			# déplacer, et l'outil dit lequel.
 			pose("c:coffre", 3.45, 3.81, 2),
 		],
 	}

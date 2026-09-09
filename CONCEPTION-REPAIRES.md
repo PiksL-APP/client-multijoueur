@@ -344,6 +344,41 @@ Deux décisions de mise en œuvre :
   jeu, pour un gain nul : la caméra regarde vers le bas, ce qui est au-dessus
   d'elle n'est jamais dans le cadre.
 
+### Trois postes, une touche chacun
+
+`Interieurs.poste(id, genre)` retrouve les meubles qui se manipulent **par leur
+modèle**, dans l'ordre écrit — pas de caractère à ajouter aux huit plans, pas de
+table à tenir à côté. Un appartement qui gagne un portemanteau gagne sa
+garde-robe le jour où on l'y pose. La garde-robe accepte le **lit** en dernier
+recours : deux plans sur huit n'ont pas de portemanteau, et « on se change au
+pied du lit » se comprend mieux qu'un appartement où l'on ne peut pas se
+changer.
+
+| poste | F | E |
+|---|---|---|
+| le coffre | déposer, puis payer les travaux | **retirer** |
+| la garde-robe | changer de tenue | — |
+| la porte | ressortir | — |
+
+**Retirer** manquait : le coffre était un puits, l'argent y entrait et n'en
+sortait plus, et on ne pouvait pas ressortir avec de quoi payer un hôpital. Il
+a fallu une seconde touche — empiler un troisième sens sur `F` rendait le geste
+imprévisible, on venait chercher de l'argent et on repartait avec un arsenal.
+`E` ne sert à rien d'autre chez soi : il n'y a pas de portière dans un salon.
+
+**Se changer** est le geste de GTA : on rentre chez soi, on ressort avec une
+autre tête. Le choix est gardé dans `Session`, donc il vaut aussi pour les
+manches suivantes et pour le hub. Le changement part sur le réseau **une fois**,
+à l'instant du changement, et pas dans le message de position — celui-là part
+douze fois par seconde, et y glisser une clé de personnage coûterait cent fois
+le prix de l'information. Chez les autres, la peau se change sur le pantin déjà
+posé (`Personnages.habiller`) : le rebâtir couperait sa démarche.
+
+⚠ **La porte passe avant la garde-robe.** Dans le Taudis, le portemanteau est à
+quarante centimètres du paillasson : dans l'autre ordre on se changeait au lieu
+de sortir, et on ne pouvait plus quitter le studio. Le banc de marche signale
+maintenant tout poste à portée de la porte.
+
 La caméra ne suit pas : elle cadre l'appartement entier, comme la vitrine. Un
 six-mètres-sur-huit ne demande pas de suivi, et un plan qui bouge dans une pièce
 donne le mal de mer.
@@ -428,11 +463,15 @@ godot --headless -s outils/marche.gd
 
 ## Ce qui reste à faire
 
-- Le Pavillon : dégager une place de coffre en déplaçant un meuble (voir
-  ci-dessus).
+- Le Pavillon : c'est le plan le plus meublé des huit, et son coffre reste à un
+  pas de l'entrée faute de place. `marche.gd --coffre` n'y trouve rien — ni
+  adossé, ni au milieu d'une pièce — et nomme le meuble à retirer. C'est un
+  meuble de trop, pas un coffre mal posé.
 - La boutique : aujourd'hui la planque s'achète au prix de `PlanVille`, et
   l'appartement suit le quartier. Une vraie boutique montrerait le catalogue,
   ses prix et ses résumés avant l'achat.
-- Brancher l'interaction sur la garde-robe et le garage (le coffre est fait).
+- Le garage : `_ranger_le_vehicule` garde déjà la voiture qu'on ramène chez soi.
+  Il reste à ressortir AU VOLANT quand on possède le garage — aujourd'hui on
+  ressort toujours à pied.
 - Vérifier le tout en partie réelle : le branchement compile et les intérieurs
   sont photographiés à l'angle du jeu, mais aucune manche ne l'a encore joué.

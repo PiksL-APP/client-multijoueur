@@ -37,15 +37,16 @@ func _init() -> void:
 ## comme un placard de plus). Chercher la place à la main dans huit
 ## appartements meublés, c'est trois allers-retours par coffre avec
 ## `outils/verifier.py` — et on finit par le poser où il rentre, pas où il faut.
-## SOIXANTE CENTIMÈTRES de vide autour : la règle du catalogue, telle quelle.
-## Essayée à 90 cm puis 70 « pour prendre une marge », elle ne laissait plus
-## une seule place dans le Pavillon meublé — un outil qui ne répond jamais ne
-## sert à rien, et la marge inventée valait moins que la règle écrite.
-const VIDE_COFFRE := 0.30
+## SOIXANTE CENTIMÈTRES de vide autour du COFFRE — la règle du catalogue, que
+## `outils/verifier.py` applique d'emprise à emprise. Ici on teste depuis le
+## CENTRE du coffre : il faut donc y ajouter son demi-encombrement, sinon
+## l'outil propose des places que le contrôle refuse ensuite. C'est exactement
+## l'aller-retour qu'on s'est infligé une demi-heure durant.
 ## Le demi-encombrement du coffre lui-même. Une place à huit centimètres d'un
 ## angle est « dégagée » et pourtant impossible : le coffre passerait à travers
 ## le mur d'à côté. C'est ce que la première version proposait, benoîtement.
 const DEMI_COFFRE := 0.30
+const VIDE_COFFRE := 0.30 + DEMI_COFFRE
 const CONTRE_LE_MUR := 0.34            ## à quelle distance du mur on est adossé
 const COTES := ["N", "S", "O", "E"]
 
@@ -79,7 +80,12 @@ func _places_de_coffre(id: String) -> void:
 					continue
 				bonnes.append([porte.distance_to(p), p, COTES[k], c])
 	if bonnes.is_empty():
-		print("  ⚠ aucune place adossée et dégagée pour un coffre")
+		print("  ⚠ aucune place ADOSSÉE et dégagée pour un coffre")
+		# Un coffre adossé se lit mieux, mais la règle écrite ne dit que « seul
+		# et dégagé ». Au pied d'un lit, au milieu d'un plateau, il se lit très
+		# bien aussi — et sur un plan très meublé c'est ça ou rien.
+		_libres(id, murs, porte, sauf)
+		_a_deplacer(id, murs, porte, sauf)
 		return
 	bonnes.sort_custom(func(a, b): return float(a[0]) > float(b[0]))
 	print("  places de coffre (les plus éloignées de la porte) :")
@@ -104,10 +110,14 @@ func _places_de_coffre(id: String) -> void:
 			return
 
 ## Une place à côté d'une PORTE n'en est pas une : on entre chez soi dans son
-## coffre. Le contrôle (`outils/verifier.py`) le refuse, et la recherche
-## proposait justement ces coins-là — un passage est toujours dégagé, donc
-## toujours bien noté.
-const LOIN_DES_PORTES := 0.75
+## coffre. On reprend ICI LA BOÎTE EXACTE de `outils/verifier.py` — un mètre
+## vingt en travers du passage, un demi-mètre le long — plutôt qu'un rayon de
+## notre cru. Le rayon de 0,75 essayé d'abord était plus sévère SUR LE CÔTÉ que
+## le vrai contrôle : il refusait des places qui longent un mur à côté d'une
+## porte, parfaitement valables, et le Pavillon se retrouvait sans aucune
+## solution. Deux règles pour la même chose, c'est une de trop.
+const PORTE_EN_TRAVERS := 0.42
+const PORTE_LE_LONG := 0.25
 
 func _pres_d_un_passage(murs: Dictionary, c: Vector2i, p: Vector2) -> bool:
 	for k in 4:
@@ -116,9 +126,12 @@ func _pres_d_un_passage(murs: Dictionary, c: Vector2i, p: Vector2) -> bool:
 		var voisine: Vector2i = c + [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)][k]
 		if not (murs["tuiles"] as Dictionary).has(voisine):
 			continue
-		# Le milieu du côté ouvert : c'est par là qu'on passe.
 		var milieu := Vector2(c) + Vector2(0.5, 0.5) + Vector2(voisine - c) * 0.5
-		if p.distance_to(milieu) < LOIN_DES_PORTES:
+		var d := (p - milieu).abs()
+		# En travers du passage = l'axe du déplacement ; le long = l'autre.
+		var travers: float = d.y if k < 2 else d.x
+		var long: float = d.x if k < 2 else d.y
+		if travers < PORTE_EN_TRAVERS + DEMI_COFFRE and long < PORTE_LE_LONG + DEMI_COFFRE:
 			return true
 	return false
 
@@ -136,13 +149,97 @@ func _rentre(murs: Dictionary, c: Vector2i, p: Vector2) -> bool:
 
 ## Loin de tout meuble, sauf de celui qui est en `sauf` (le coffre en place).
 func _degage(id: String, p: Vector2, sauf: Vector2) -> bool:
-	for r in Interieurs.obstacles(id):
-		var rect: Rect2 = r
+	return _gene_par(id, p, sauf) == ""
+
+## Le meuble qui empêche de poser un coffre ici, ou "" si la place est libre.
+## Le NOM est tout l'intérêt : un appartement trop meublé n'a aucune place, et
+## sans le nom on ne sait pas lequel déplacer — on tourne alors autour du
+## coffre pendant une heure au lieu de bouger le buffet.
+func _gene_par(id: String, p: Vector2, sauf: Vector2) -> String:
+	for o in Interieurs.obstacles(id):
+		var fiche: Dictionary = o
+		var rect: Rect2 = fiche["r"]
 		if rect.has_point(sauf):
 			continue
 		if rect.grow(VIDE_COFFRE).has_point(p):
-			return false
-	return true
+			return String(fiche["nom"])
+	return ""
+
+## Les places NON adossées, en dernier recours.
+func _libres(id: String, murs: Dictionary, porte: Vector2, sauf: Vector2) -> void:
+	var large := int(murs["large"])
+	var haut := int(murs["haut"])
+	var bonnes: Array = []
+	for j in haut * FIN:
+		for i in large * FIN:
+			var p := _point(i, j)
+			if not Interieurs.libre(id, p, DEMI_COFFRE):
+				continue
+			var c := Vector2i(floori(p.x), floori(p.y))
+			if _pres_d_un_passage(murs, c, p) or not _degage(id, p, sauf):
+				continue
+			bonnes.append([porte.distance_to(p), p])
+	if bonnes.is_empty():
+		print("    et aucune place libre non plus, même au milieu d'une pièce")
+		return
+	bonnes.sort_custom(func(a, b): return float(a[0]) > float(b[0]))
+	print("    places NON adossées, au milieu d'une pièce :")
+	var dit := {}
+	var n := 0
+	for b in bonnes:
+		var p: Vector2 = b[1]
+		var cle := "%d,%d" % [int(p.x * 2.0), int(p.y * 2.0)]
+		if dit.has(cle):
+			continue
+		dit[cle] = true
+		print('      pose("c:coffre", %.2f, %.2f, 0)   à %.1f tuiles de la porte'
+			% [p.x, p.y, float(b[0])])
+		n += 1
+		if n >= 4:
+			return
+
+## QUEL MEUBLE DÉPLACER. Quand rien ne convient, on refait la recherche SANS la
+## contrainte de dégagement et on compte qui bloque quoi : le meuble qui revient
+## le plus souvent est celui dont le déplacement ouvre le plus de places.
+## C'est la question que se pose vraiment le décorateur, et l'outil la laissait
+## sans réponse — il disait « non » et s'arrêtait là.
+func _a_deplacer(id: String, murs: Dictionary, porte: Vector2, sauf: Vector2) -> void:
+	var large := int(murs["large"])
+	var haut := int(murs["haut"])
+	var comptes := {}
+	var loins := {}
+	for j in haut * FIN:
+		for i in large * FIN:
+			var p := _point(i, j)
+			if not Interieurs.libre(id, p, 0.02):
+				continue
+			var c := Vector2i(floori(p.x), floori(p.y))
+			if _pres_d_un_passage(murs, c, p) or not _rentre(murs, c, p):
+				continue
+			var adosse := false
+			for k in 4:
+				if not Interieurs._ferme(murs, c, k):
+					continue
+				var marge: float = [p.y - float(c.y), float(c.y) + 1.0 - p.y,
+					p.x - float(c.x), float(c.x) + 1.0 - p.x][k]
+				if marge <= CONTRE_LE_MUR:
+					adosse = true
+			if not adosse:
+				continue
+			var gene := _gene_par(id, p, sauf)
+			if gene == "":
+				continue
+			comptes[gene] = int(comptes.get(gene, 0)) + 1
+			loins[gene] = maxf(float(loins.get(gene, 0.0)), porte.distance_to(p))
+	if comptes.is_empty():
+		print("    (et aucune place même en ignorant les meubles : le plan est trop petit)")
+		return
+	var noms := comptes.keys()
+	noms.sort_custom(func(a, b): return float(loins[a]) > float(loins[b]))
+	print("    déplacer l'un de ces meubles libérerait une place :")
+	for n in noms.slice(0, 4):
+		print("      %-28s %d place(s), jusqu'à %.1f tuiles de la porte"
+			% [String(n), int(comptes[n]), float(loins[n])])
 
 func _un(id: String, dessiner: bool) -> int:
 	var murs := Interieurs.murs(id)
@@ -186,19 +283,30 @@ func _un(id: String, dessiner: bool) -> int:
 	else:
 		print("  entrée en (%.1f, %.1f)" % [depart.x, depart.y])
 
-	var c: Dictionary = Interieurs.coffre(id)
-	if c.is_empty():
-		fautes += 1
-	else:
+	# TOUS les postes, pas seulement le coffre : une garde-robe hors d'atteinte
+	# est un bouton qui n'existe pas, et rien dans l'image ne le dirait.
+	for genre in Interieurs.POSTES:
+		var g := String(genre)
+		var poste: Dictionary = Interieurs.poste(id, g)
+		if poste.is_empty():
+			print("  ⚠ PAS DE %s dans ce plan" % g.to_upper())
+			fautes += 1
+			continue
 		var pres := false
 		for k: Vector2i in atteints.keys():
-			if _point(k.x, k.y).distance_to(c["p"]) < 0.9:
+			if _point(k.x, k.y).distance_to(poste["p"]) < PORTEE_COFFRE:
 				pres = true
 				break
 		if pres:
-			print("  coffre atteint")
+			var mot := "  %s atteint (%s)" % [g, String(poste["nom"])]
+			# Deux postes qui se recouvrent, c'est un bouton qui en cache un
+			# autre : le jeu doit choisir, et le joueur ne comprend pas
+			# pourquoi F ne fait pas ce qu'il annonce.
+			if (poste["p"] as Vector2).distance_to(depart) < PORTEE_COFFRE:
+				mot += "   ⚠ à portée de la PORTE : la sortie passera devant"
+			print(mot)
 		else:
-			print("  ⚠ COFFRE INATTEIGNABLE en (%.2f, %.2f)" % [c["p"].x, c["p"].y])
+			print("  ⚠ %s INATTEIGNABLE en (%.2f, %.2f)" % [g.to_upper(), poste["p"].x, poste["p"].y])
 			fautes += 1
 
 	# Une POCHE de quelques cases — le coin derrière un canapé, le dessous d'une
