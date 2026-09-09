@@ -316,12 +316,72 @@ Ce qu'il a trouvé du premier coup, et qu'aucune vitrine ne montrait :
 Les huit passent (`REPAIRES PRATICABLES.`), à des recoins près qui sont
 affichés, jamais tus.
 
+## On entre chez soi
+
+À pied, sur SA planque, `F` ouvre la porte. L'appartement qu'on y trouve se
+déduit du **quartier** de la planque (`Interieurs.pour_quartier`) : même
+planque, même appartement chez tout le monde, sans qu'un octet passe par le
+réseau — c'est la règle de toute la ville. Le centre d'affaires donne le
+penthouse, les cités le taudis, le port l'atelier.
+
+Dedans, `F` sert deux fois et la ligne du HUD dit toujours laquelle : au
+**coffre**, on dépose et on achète les travaux ; à la **porte**, on ressort.
+Déposer depuis le trottoir marchait avant et ne racontait rien — on n'avait
+aucune raison d'avoir un appartement. Au volant, `F` dépose toujours : on ne
+descend pas de voiture pour porter une liasse.
+
+Deux décisions de mise en œuvre :
+
+- **On sort de la boucle.** Chez soi : ni tir, ni portière, ni police, ni
+  heurts. Laisser tourner le reste voulait dire prendre une balle à travers un
+  mur qui n'existe pas dans la simulation extérieure, sans même voir d'où elle
+  vient. `_position` ne bouge pas pendant le séjour, donc les autres joueurs
+  voient quelqu'un d'immobile sur sa planque — ce qui est exactement ce qui se
+  passe.
+- **L'intérieur est bâti loin SOUS la ville** (`Carnage.SOUS_SOL`), pas à sa
+  place. Cacher la ville demanderait de la ranger sous un nœud à elle, soit
+  trois cents `monde().add_child` à reprendre dans le fichier le plus chargé du
+  jeu, pour un gain nul : la caméra regarde vers le bas, ce qui est au-dessus
+  d'elle n'est jamais dans le cadre.
+
+La caméra ne suit pas : elle cadre l'appartement entier, comme la vitrine. Un
+six-mètres-sur-huit ne demande pas de suivi, et un plan qui bouge dans une pièce
+donne le mal de mer.
+
+`--banc-dedans` entre chez soi au coup d'envoi. Une planque s'achète après
+plusieurs minutes de jeu, et sans ce raccourci l'intérieur ne serait jamais
+photographié avant livraison — c'est exactement le trou par lequel les huit
+appartements sont restés invisibles pendant des semaines.
+
+## Juger l'échelle : le pantin
+
+```
+./outils/vitrine.sh taudis "" 0 72 pantin
+```
+
+Le cinquième argument pose le **personnage du jeu** à l'entrée, et `0 72` est
+l'angle de la caméra de Carnage : la photo montre alors ce que le joueur verra.
+Un appartement se juge beau tout seul ; rien ne dit qu'on y tient debout tant
+qu'on n'a mis personne dedans.
+
+Le banc de marche simule aussi le trajet **porte → coffre** au pas réel du jeu,
+à travers `Interieurs.degager` : l'inondation dit qu'un chemin existe, la marche
+dit qu'on l'emprunte avec les vraies constantes. Deux questions différentes, et
+c'est la seconde qui casse — un pas trop long saute par-dessus une porte d'une
+tuile et le joueur rebondit contre le chambranle.
+
+Il signale au passage un **coffre trop près de la porte** (moins d'1,6 tuile) :
+on déposerait sans entrer, et l'appartement ne servirait plus à rien. Le
+Pavillon (1,0) et L'Ancien poste (0,8) sont dans ce cas — à replacer, c'est une
+décision de décoration, pas un défaut de praticabilité.
+
 ## Ce qui reste à faire
 
-- Brancher le catalogue sur la boutique d'un repaire (`PlanVille` pose déjà les
-  repaires et les planques par secteur) : liste, prix, achat, et la porte qui
-  charge l'intérieur acheté.
-- Poser le joueur dans l'intérieur et brancher sa marche sur `Interieurs.degager`
-  — la table existe, personne ne s'en sert encore.
-- Brancher l'interaction sur le coffre (dépôt et retrait), la garde-robe et le
-  garage.
+- Rapprocher le coffre du fond dans le Pavillon et L'Ancien poste (voir
+  ci-dessus), puis repasser `outils/verifier.py`.
+- La boutique : aujourd'hui la planque s'achète au prix de `PlanVille`, et
+  l'appartement suit le quartier. Une vraie boutique montrerait le catalogue,
+  ses prix et ses résumés avant l'achat.
+- Brancher l'interaction sur la garde-robe et le garage (le coffre est fait).
+- Vérifier le tout en partie réelle : le branchement compile et les intérieurs
+  sont photographiés à l'angle du jeu, mais aucune manche ne l'a encore joué.

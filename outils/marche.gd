@@ -96,6 +96,8 @@ func _un(id: String, dessiner: bool) -> int:
 	# sept cases dans trois pièces différentes faisaient sonner l'alarme comme
 	# une chambre condamnée, et c'est le contraire d'un banc utile.
 	var poches := _poches(libre, atteints)
+	_traverser(id, depart, libre, atteints)
+
 	var perdues := libre.size() - atteints.size()
 	# UNE TUILE. En dessous, ce n'est pas un endroit : c'est le jour entre un
 	# lit et un bureau, ou le coin derrière un canapé — deux mètres carrés où
@@ -140,6 +142,95 @@ func _un(id: String, dessiner: bool) -> int:
 				ligne += "·" if atteints.has(k) else ("?" if libre.has(k) else "█")
 			print(ligne)
 	return fautes
+
+## LA MARCHE POUR DE VRAI : on part de la porte et on va au coffre, au pas du
+## jeu, à travers `Interieurs.degager` — la même fonction que Carnage appelle.
+## L'inondation dit qu'un chemin EXISTE ; celle-ci dit qu'on l'emprunte avec les
+## constantes réelles. Deux questions différentes, et c'est la seconde qui
+## casse : un pas trop long saute par-dessus une porte d'une tuile, et le joueur
+## rebondit contre le chambranle sans jamais entrer.
+const PAS_DEDANS := 2.0                ## tuiles/s — la valeur de `Carnage.PAS_DEDANS`
+const PORTEE_COFFRE := 0.9
+const IMAGE := 1.0 / 60.0
+
+func _traverser(id: String, depart: Vector2, libre: Dictionary, atteints: Dictionary) -> void:
+	var c: Dictionary = Interieurs.coffre(id)
+	if c.is_empty():
+		return
+	var but := Vector2(c["p"])
+	# Le chemin : un parcours en largeur sur la grille inondée. Un cap DIRECT
+	# sur le coffre se coince au premier mur, et on mesurerait la bêtise du
+	# guidage au lieu de la praticabilité.
+	var cible := Vector2i(int(but.x * FIN), int(but.y * FIN))
+	if not atteints.has(cible):
+		cible = _plus_proche(atteints, cible)
+	var chemin := _remonter(libre, atteints, Vector2i(int(depart.x * FIN), int(depart.y * FIN)), cible)
+	if chemin.is_empty():
+		print("  ⚠ pas de chemin de la porte au coffre")
+		return
+	var p := Interieurs.degager(id, depart)
+	var t := 0.0
+	var k := 0
+	var cogne := 0
+	while t < 60.0:
+		while k < chemin.size() - 1 and p.distance_to(_point(chemin[k].x, chemin[k].y)) < 0.25:
+			k += 1
+		var vers: Vector2 = _point(chemin[k].x, chemin[k].y) - p
+		if vers.length() < 0.001:
+			k += 1
+			continue
+		var avant := p
+		p = Interieurs.degager(id, p + vers.normalized() * PAS_DEDANS * IMAGE)
+		if p.distance_to(avant) < PAS_DEDANS * IMAGE * 0.4:
+			cogne += 1
+			if cogne > 90:
+				print("  ⚠ COINCÉ en route vers le coffre, vers (%.1f, %.1f)" % [p.x, p.y])
+				return
+		else:
+			cogne = 0
+		t += IMAGE
+		if p.distance_to(but) < PORTEE_COFFRE:
+			# ⚠ Un coffre à portée de la porte, c'est un coffre qu'on ouvre sans
+			# entrer chez soi : l'appartement ne sert plus à rien, et la règle
+			# du catalogue (« jamais dans une file de meubles », au fond) est
+			# perdue. On le signale sans en faire une faute — c'est un choix de
+			# décoration, pas un défaut de praticabilité.
+			var loin := depart.distance_to(but)
+			var mot := "  de la porte au coffre en %.1f s (%.1f tuiles)" % [t, loin]
+			if loin < 1.6:
+				mot += "  ⚠ TROP PRÈS DE LA PORTE : on dépose sans entrer"
+			print(mot)
+			return
+	print("  ⚠ le coffre n'est pas atteint en une minute de marche")
+
+## Le chemin sur la grille inondée, par un parcours en largeur. On le refait ici
+## plutôt que de garder les parents de l'inondation : celle-ci sert à COMPTER,
+## et lui faire porter deux rôles la rendrait fausse le jour où on l'optimise.
+func _remonter(libre: Dictionary, atteints: Dictionary, depart: Vector2i, cible: Vector2i) -> Array:
+	if not atteints.has(depart):
+		depart = _plus_proche(atteints, depart)
+	var parent := {depart: depart}
+	var file: Array = [depart]
+	var tete := 0
+	while tete < file.size():
+		var c: Vector2i = file[tete]
+		tete += 1
+		if c == cible:
+			break
+		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var v: Vector2i = c + d
+			if libre.has(v) and atteints.has(v) and not parent.has(v):
+				parent[v] = c
+				file.append(v)
+	if not parent.has(cible):
+		return []
+	var chemin: Array = []
+	var p := cible
+	while p != depart:
+		chemin.append(p)
+		p = parent[p]
+	chemin.reverse()
+	return chemin
 
 ## Les morceaux de sol libre que l'inondation n'a pas touchés, un tableau par
 ## morceau. C'est la seule mesure qui distingue un recoin d'une pièce perdue.

@@ -520,6 +520,31 @@ static func coffre(id: String) -> Dictionary:
 	push_error("Pas de coffre dans l'intérieur " + id)
 	return {}
 
+## QUEL APPARTEMENT DANS QUEL QUARTIER. C'est le quartier de la planque qui
+## décide, jamais un tirage : deux joueurs qui achètent la même planque doivent
+## y trouver le même appartement, et rien de tout ceci ne circule sur le réseau
+## — c'est la règle de toute la ville (`PlanVille`).
+##
+## Le prix du catalogue et celui de la planque disent la même chose deux fois :
+## un penthouse ne se trouve qu'au centre d'affaires, où les planques sont
+## chères. On garde les deux — le catalogue sert aussi à la vitrine et à
+## l'éditeur web, qui ne connaissent pas `PlanVille`.
+const PAR_QUARTIER := {
+	PlanVille.CENTRE: "penthouse",
+	PlanVille.AFFAIRES: "loft",
+	PlanVille.COMMERCE: "poste",
+	PlanVille.VIEUX: "ouvrier",
+	PlanVille.RESIDENCES: "taudis",
+	PlanVille.BANLIEUE: "pavillon",
+	PlanVille.INDUSTRIE: "planque",
+	PlanVille.PORT: "atelier",
+	PlanVille.PARC: "pavillon",
+	PlanVille.EAU: "taudis",
+}
+
+static func pour_quartier(quartier: int) -> String:
+	return String(PAR_QUARTIER.get(quartier, "taudis"))
+
 ## L'ordre de la boutique : du gratuit au hors de prix.
 static func liste() -> Array:
 	var ids := CATALOGUE.keys()

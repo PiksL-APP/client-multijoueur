@@ -197,6 +197,33 @@ var _planque := -1                 ## l'identifiant de la planque possédée, ou
 var _ameliorations: Dictionary = {"coffre": false, "arsenal": false, "garage": false}
 var _garage_perso := -1            ## le modèle de véhicule rangé à la planque, ou -1
 var _planque_en_cours := -1        ## la planque dans laquelle on se tient
+
+# ------------------------------------------------------- chez soi, à l'intérieur
+
+## ENTRER CHEZ SOI. La planque n'était qu'un disque peint au sol : on s'arrêtait
+## dessus, on appuyait sur F, l'argent partait « à l'abri » et rien ne le
+## montrait. Les huit appartements de `Interieurs` existaient depuis longtemps
+## et ne se voyaient qu'au banc photo — c'est là qu'ils entrent dans le jeu.
+##
+## ⚠ L'INTÉRIEUR EST BÂTI LOIN SOUS LA VILLE, pas à sa place. Cacher la ville
+## demanderait de la ranger sous un nœud à elle, c'est-à-dire de reprendre trois
+## cents `monde().add_child` dans le fichier le plus chargé du jeu, pour un gain
+## nul : la caméra regarde vers le BAS, donc ce qui est au-dessus d'elle n'est
+## jamais dans le cadre. Six cents unités suffisent, la brume fait le reste.
+const SOUS_SOL := Vector3(0.0, -600.0, 0.0)
+## En tuiles. Une tuile fait deux mètres : on ouvre son coffre à un mètre
+## quatre-vingts, et la porte à un mètre quatre-vingts aussi.
+const PORTEE_COFFRE := 0.9
+const PORTEE_PORTE := 0.9
+## Le pas à l'intérieur, en tuiles par seconde. Dehors on marche à 215 px/s,
+## soit 2,15 tuiles de ville ; un appartement fait six tuiles de large, et à
+## cette allure on le traverse en une seconde et demie — c'est trop, on se
+## cogne partout. Deux tuiles par seconde (quatre mètres) se pilote.
+const PAS_DEDANS := 2.0
+
+var _dedans := ""                  ## l'identifiant de l'appartement où l'on est, ou ""
+var _dedans_p := Vector2.ZERO      ## où l'on s'y tient, EN TUILES
+var _dedans_noeud: Node3D
 var _hopital_en_cours := -1
 var _affaire := ""                 ## ce que F ferait ici, pour la ligne du HUD
 var _mot_affaire := ""             ## le dernier message d'affaire, affiché deux secondes
@@ -426,6 +453,16 @@ func preparer() -> void:
 		if String(argument).begins_with("--banc-feu="):
 			_feux_de_banc = int(String(argument).substr(11))
 
+	# `--banc-dedans` : entrer chez soi au coup d'envoi. Une planque s'achète
+	# après plusieurs minutes de jeu et l'intérieur ne se voit qu'une fois
+	# dedans : sans ce raccourci, il ne serait jamais photographié avant
+	# livraison — c'est exactement le trou par lequel les huit appartements
+	# sont restés invisibles pendant des semaines.
+	if "--banc-dedans" in OS.get_cmdline_args():
+		_planque = 0
+		_pied = true
+		_entrer_chez_soi(0)
+
 	# `--banc-etoiles=N` : partir déjà recherché. Attendre qu'un pilote au hasard
 	# gagne cinq étoiles pour voir l'hélicoptère, c'est attendre une manche sur
 	# quatre — la police et l'hélicoptère se vérifient en trente secondes avec ça.
@@ -650,6 +687,15 @@ func simuler_local(delta: float) -> void:
 	# venait de descendre et il restait planté à côté de sa portière.
 	if _depuis_portiere <= 0.0 and _hors_service <= 0.0 and Commandes.action_declenchee():
 		_basculer_portiere()
+
+	# ⚠ Dedans, on SORT de la boucle : ni tir, ni portière, ni police, ni
+	# heurts. Laisser tourner le reste voulait dire prendre une balle à travers
+	# un mur qui n'existe pas dans la simulation extérieure, et le joueur ne
+	# voyait même pas d'où elle venait. Chez soi, on est chez soi.
+	if _dedans != "":
+		_marcher_dedans(delta)
+		_affaires_dedans()
+		return
 
 	if _pied:
 		_marcher(delta)
@@ -1171,15 +1217,25 @@ func _surveiller_les_affaires(_delta: float) -> void:
 			if Commandes.affaire_declenchee():
 				_acheter_la_planque(planque, prix)
 		elif planque == _planque:
-			var suivante := _amelioration_suivante()
-			if _argent > 0:
-				_affaire = "F : déposer $%d" % _argent
-			elif suivante != "":
-				_affaire = "F : %s — $%d" % [_libelle_amelioration(suivante), int(PlanVille.PRIX_AMELIORATION[suivante])]
+			# À PIED, F ouvre la porte ; l'argent se dépose maintenant DANS le
+			# coffre, à l'intérieur. Déposer depuis le trottoir marchait, mais
+			# ça ne racontait rien : on n'avait aucune raison d'avoir un
+			# appartement. Au volant, F dépose toujours — on ne descend pas de
+			# voiture juste pour porter une liasse.
+			if _pied:
+				_affaire = "F : entrer chez vous"
+				if Commandes.affaire_declenchee():
+					_entrer_chez_soi(planque)
 			else:
-				_affaire = "chez vous — $%d à l'abri" % _banque
-			if Commandes.affaire_declenchee():
-				_traiter_chez_soi(suivante)
+				var suivante := _amelioration_suivante()
+				if _argent > 0:
+					_affaire = "F : déposer $%d" % _argent
+				elif suivante != "":
+					_affaire = "F : %s — $%d" % [_libelle_amelioration(suivante), int(PlanVille.PRIX_AMELIORATION[suivante])]
+				else:
+					_affaire = "chez vous — $%d à l'abri" % _banque
+				if Commandes.affaire_declenchee():
+					_traiter_chez_soi(suivante)
 		else:
 			_affaire = "planque d'un autre"
 		if planque != _planque_en_cours:
@@ -1196,6 +1252,77 @@ func _surveiller_les_affaires(_delta: float) -> void:
 	else:
 		_planque_en_cours = -1
 	_hopital_en_cours = hopital
+
+## Ouvrir sa porte. L'appartement se déduit du QUARTIER de la planque
+## (`Interieurs.pour_quartier`) : même planque, même appartement chez tout le
+## monde, sans qu'un octet passe par le réseau.
+func _entrer_chez_soi(planque: int) -> void:
+	var pate := PlanVille.pate_de(int(_position.x / PlanVille.PAS), int(_position.y / PlanVille.PAS))
+	_dedans = Interieurs.pour_quartier(carte.quartier_du_pate(pate))
+	_dedans_p = Interieurs.entree(_dedans)
+	# Un pas vers l'intérieur : posé pile sur le seuil, on ressort au premier
+	# appui sur F, et la porte devient une porte à tambour.
+	_dedans_p = Interieurs.degager(_dedans, _dedans_p)
+	_dedans_noeud = Interieurs.batir(_dedans)
+	_dedans_noeud.position = SOUS_SOL
+	monde().add_child(_dedans_noeud)
+	_pied = true
+	_vitesse = 0.0
+	_dire_affaire("chez vous — %s" % String(Interieurs.CATALOGUE[_dedans]["nom"]))
+	Sons.jouer("portail", 1.0, -8.0)
+	print("[carnage] entré chez soi : %s (planque %d)" % [_dedans, planque])
+
+func _sortir_de_chez_soi() -> void:
+	if _dedans_noeud != null:
+		_dedans_noeud.queue_free()
+		_dedans_noeud = null
+	_dedans = ""
+	# On ressort là où l'on est entré : `_position` n'a pas bougé pendant tout
+	# le séjour, et c'est voulu — les autres joueurs voient quelqu'un d'immobile
+	# sur sa planque, ce qui est exactement ce qui se passe.
+	Sons.jouer("portail", 0.85, -8.0)
+
+## La marche à l'intérieur. Les murs et les meubles viennent de
+## `Interieurs.degager` — donc du DESSIN, le même que celui qu'on regarde.
+func _marcher_dedans(delta: float) -> void:
+	var commande := Commandes.direction()
+	if commande.length() > 0.1:
+		_angle = commande.angle()
+		_vitesse = VITESSE_A_PIED
+		_depuis_pas -= delta
+		if _depuis_pas <= 0.0:
+			_depuis_pas = 0.34
+			Sons.jouer("pas_beton", _rng.randf_range(0.94, 1.08), -22.0)
+		var vise := _dedans_p + commande.normalized() * PAS_DEDANS * delta
+		_dedans_p = Interieurs.degager(_dedans, vise)
+	else:
+		_vitesse = 0.0
+		_depuis_pas = 0.0
+	_regenerer(delta)
+
+## Ce que F fait chez soi : le coffre, ou la porte. Deux endroits, deux gestes,
+## et la ligne du HUD dit toujours lequel — c'est la règle de tout le jeu.
+func _affaires_dedans() -> void:
+	_affaire = ""
+	var c: Dictionary = Interieurs.coffre(_dedans)
+	var pres_du_coffre: bool = not c.is_empty() and _dedans_p.distance_to(c["p"]) < PORTEE_COFFRE
+	var pres_de_la_porte := _dedans_p.distance_to(Interieurs.entree(_dedans)) < PORTEE_PORTE
+	if pres_du_coffre:
+		var suivante := _amelioration_suivante()
+		if _argent > 0:
+			_affaire = "F : déposer $%d au coffre" % _argent
+		elif suivante != "":
+			_affaire = "F : %s — $%d" % [_libelle_amelioration(suivante), int(PlanVille.PRIX_AMELIORATION[suivante])]
+		else:
+			_affaire = "$%d à l'abri" % _banque
+		if Commandes.affaire_declenchee():
+			_traiter_chez_soi(suivante)
+	elif pres_de_la_porte:
+		_affaire = "F : ressortir"
+		if Commandes.affaire_declenchee():
+			_sortir_de_chez_soi()
+	else:
+		_affaire = "chez vous — le coffre est au fond"
 
 func _acheter_la_planque(id: int, prix: int) -> void:
 	if _argent < prix:
@@ -2223,7 +2350,7 @@ func _placer_le_joueur(delta: float) -> void:
 		_regler_jauge(_corps_auto, _pv_vehicule / PV_VOITURE)
 
 	if _corps_pied.visible:
-		_corps_pied.position = Decor.vers3d(_position, 0.0)
+		_corps_pied.position = _dedans3d(_dedans_p) if _dedans != "" else Decor.vers3d(_position, 0.0)
 		_corps_pied.rotation.y = -_angle
 		_demarche(_corps_pied, "walk" if abs(_vitesse) > 1.0 else "idle")
 		_regler_jauge(_corps_pied, _vie / VIE_MAX)
@@ -2427,8 +2554,26 @@ func _regler_jauge(porteur: Node3D, part: float) -> void:
 	if jauge.visible:
 		Decor.remplir(jauge, clamp(part, 0.0, 1.0))
 
+## Une position d'intérieur (en TUILES) dans le monde 3D. Un seul endroit où le
+## facteur passe : `Interieurs.ECHELLE`. La faute qui coûte cher ici est de
+## mélanger tuiles et pixels de jeu — elle ne se voit pas, elle donne juste un
+## personnage dix fois trop loin.
+func _dedans3d(p: Vector2, hauteur: float = 0.0) -> Vector3:
+	return SOUS_SOL + Vector3(p.x * Interieurs.ECHELLE, hauteur, p.y * Interieurs.ECHELLE)
+
 func _placer_camera(delta: float) -> void:
 	if _camera == null:
+		return
+	if _dedans != "":
+		# Chez soi, la caméra ne suit pas : elle cadre l'appartement entier,
+		# comme la vitrine. Un six-mètres-sur-huit ne demande pas de suivi, et
+		# un plan qui bouge dans une pièce donne le mal de mer.
+		var m: Dictionary = Interieurs.murs(_dedans)
+		var centre := Vector2(float(m["large"]), float(m["haut"])) * 0.5
+		var recul: float = maxf(float(m["large"]), float(m["haut"])) * Interieurs.ECHELLE * 1.25
+		var vu := _dedans3d(centre) + Vector3(0.0,
+			sin(deg_to_rad(INCLINAISON)) * recul, cos(deg_to_rad(INCLINAISON)) * recul)
+		_camera.position = _camera.position.lerp(vu, clamp(delta * 7.0, 0, 1))
 		return
 	var distance: float = DISTANCE_PIED if _pied else DISTANCE_AUTO + RECUL_VITESSE * clamp(abs(_vitesse) / VITESSE_MAX, 0.0, 1.0)
 	# Un peu d'avance dans le sens de la marche : on regarde où l'on va.

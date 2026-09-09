@@ -18,6 +18,37 @@ func _ready() -> void:
 
 	var appart := Interieurs.batir(id)
 	add_child(appart)
+
+	# `--pantin` pose le personnage du jeu à l'entrée, et le coffre reçoit une
+	# marque. C'est LA vérification d'échelle : un appartement se juge beau tout
+	# seul, mais rien ne dit qu'on y tient debout tant qu'on n'a pas mis
+	# quelqu'un dedans. Le premier essai avait des tuiles de deux mètres et un
+	# bonhomme dessiné pour des tuiles d'un mètre — sur une photo vide, personne
+	# ne l'aurait vu.
+	if "--pantin" in OS.get_cmdline_args():
+		var ou := Interieurs.degager(id, Interieurs.entree(id))
+		# Sans halo ni jauge : ici on mesure une TAILLE, et l'anneau du joueur
+		# recouvrait justement les pieds et la tête.
+		var pantin := FormesCarnage.pieton(Color("#ff2ea6"), false, "", false, "")
+		pantin.position = Vector3(ou.x, 0.0, ou.y) * Interieurs.ECHELLE
+		# La jauge de vie suit le joueur en jeu ; sur une photo d'intérieur
+		# c'est une barre verte en travers de la cuisine.
+		for e in pantin.get_children():
+			if String((e as Node).name) == "Vie":
+				(e as Node3D).visible = false
+		add_child(pantin)
+		var c: Dictionary = Interieurs.coffre(id)
+		if not c.is_empty():
+			var repere := MeshInstance3D.new()
+			var cyl := CylinderMesh.new()
+			cyl.top_radius = 0.45; cyl.bottom_radius = 0.45; cyl.height = 0.04
+			repere.mesh = cyl
+			var mm := StandardMaterial3D.new()
+			mm.albedo_color = Color("#22e3f2")
+			mm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			repere.material_override = mm
+			repere.position = Vector3(c["p"].x, 0.03, c["p"].y) * Interieurs.ECHELLE
+			add_child(repere)
 	var fiche := Interieurs.plan(id)
 	var lignes: Array = fiche["plan"]
 	var large := float((String(lignes[0]).length() - 1) / 2) * Interieurs.ECHELLE
