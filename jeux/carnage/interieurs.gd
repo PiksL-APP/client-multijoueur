@@ -673,7 +673,7 @@ static func _taudis() -> Dictionary:
 			# l'entrée, avec l'évier au nord et les cartons à l'est — on entrait
 			# dans un sas de deux pas. Aucune photo ne le montrait ;
 			# `outils/marche.gd` a déclaré 97 % du sol inatteignable.
-			pose("coatRackStanding", 0.28, 2.72, 3),
+			pose("coatRackStanding", 0.92, 2.35, 3),
 			pose("rugDoormat", 0.5, 2.86, 2),
 			pose("lampSquareCeiling", 1.2, 0.7, 2, 1.06),
 			pose("lampSquareCeiling", 2.4, 1.6, 2, 1.06),
@@ -751,7 +751,7 @@ static func _ouvrier() -> Dictionary:
 			# le meuble de télé contre le mur est, le salon n'avait plus aucune
 			# issue — 80 % de l'appartement coupé de l'entrée. Ramené du côté du
 			# canapé, face à la télé (r = 3 regarde l'est).
-			pose("loungeChair", 0.85, 3.30, 3),
+			pose("loungeChair", 0.85, 3.30, 2),
 			pose("lampRoundFloor", 0.35, 1.80, 2),
 			pose("lampSquareCeiling", 1.40, 2.60, 2, HAUT - 0.23),
 			pose("speakerSmall", 2.80, 3.05, 3),
@@ -1038,6 +1038,14 @@ static func _pavillon() -> Dictionary:
 			# LE COFFRE : un par repaire, un seul, et JAMAIS dans une file de
 			# meubles — adossé à côté d'un placard, il se lit comme un placard.
 			# `outils/verifier.py` lui impose soixante centimètres de vide.
+			# ⚠ À UN PAS DE LA PORTE (1,0 tuile) : on ouvre son coffre depuis le
+			# seuil, sans jamais entrer chez soi. `outils/marche.gd --coffre`
+			# ne trouve AUCUNE autre place adossée, dégagée de soixante
+			# centimètres et loin d'un passage : le pavillon est trop meublé.
+			# Essayé contre le mur est (3,7 tuiles) — juste devant la porte de
+			# la chambre — et au nord de la chambre — collé à la table à manger
+			# de l'autre côté de la cloison. Il faudra déplacer un meuble, pas
+			# le coffre.
 			pose("c:coffre", 3.45, 3.81, 2),
 		],
 	}
@@ -1118,7 +1126,10 @@ static func _poste() -> Dictionary:
 			# LE COFFRE : un par repaire, un seul, et JAMAIS dans une file de
 			# meubles — adossé à côté d'un placard, il se lit comme un placard.
 			# `outils/verifier.py` lui impose soixante centimètres de vide.
-			pose("c:coffre", 0.19, 2.75, 1),
+			# ⚠ Était à un pas de la porte d'entrée : on ouvrait son coffre depuis
+			# le seuil, sans jamais entrer chez soi, et l'appartement ne servait
+			# plus à rien. `outils/marche.gd` mesure maintenant cette distance.
+			contre("c:coffre", "N", 3.92, 0),
 		],
 	}
 

@@ -32,6 +32,118 @@ func _init() -> void:
 		print("%d défaut(s) de praticabilité." % fautes)
 	quit(0 if fautes == 0 else 1)
 
+## OÙ POSER UN COFFRE. Il doit être ADOSSÉ à un mur, LOIN de la porte, et
+## RESTER SEUL (le catalogue lui impose du vide autour, sans quoi il se lit
+## comme un placard de plus). Chercher la place à la main dans huit
+## appartements meublés, c'est trois allers-retours par coffre avec
+## `outils/verifier.py` — et on finit par le poser où il rentre, pas où il faut.
+## SOIXANTE CENTIMÈTRES de vide autour : la règle du catalogue, telle quelle.
+## Essayée à 90 cm puis 70 « pour prendre une marge », elle ne laissait plus
+## une seule place dans le Pavillon meublé — un outil qui ne répond jamais ne
+## sert à rien, et la marge inventée valait moins que la règle écrite.
+const VIDE_COFFRE := 0.30
+## Le demi-encombrement du coffre lui-même. Une place à huit centimètres d'un
+## angle est « dégagée » et pourtant impossible : le coffre passerait à travers
+## le mur d'à côté. C'est ce que la première version proposait, benoîtement.
+const DEMI_COFFRE := 0.30
+const CONTRE_LE_MUR := 0.34            ## à quelle distance du mur on est adossé
+const COTES := ["N", "S", "O", "E"]
+
+func _places_de_coffre(id: String) -> void:
+	var murs := Interieurs.murs(id)
+	var large := int(murs["large"])
+	var haut := int(murs["haut"])
+	var porte := Interieurs.entree(id)
+	# Le coffre actuel ne se bloque pas lui-même : sans ça, la meilleure place
+	# est toujours « ailleurs que là où il est ».
+	var c0: Dictionary = Interieurs.coffre(id)
+	var sauf: Vector2 = c0["p"] if not c0.is_empty() else Vector2(-99, -99)
+	var bonnes: Array = []
+	for j in haut * FIN:
+		for i in large * FIN:
+			var p := _point(i, j)
+			# ⚠ On teste le dégagement contre les MEUBLES seulement. Passer par
+			# `libre()` demandait aussi 45 cm de mur, ce qui est le contraire
+			# d'« adossé » : la recherche ne trouvait jamais rien.
+			if not Interieurs.libre(id, p, 0.02) or not _degage(id, p, sauf):
+				continue
+			var c := Vector2i(floori(p.x), floori(p.y))
+			if _pres_d_un_passage(murs, c, p) or not _rentre(murs, c, p):
+				continue
+			for k in 4:
+				if not Interieurs._ferme(murs, c, k):
+					continue
+				var loin: float = [p.y - float(c.y), float(c.y) + 1.0 - p.y,
+					p.x - float(c.x), float(c.x) + 1.0 - p.x][k]
+				if loin > CONTRE_LE_MUR:
+					continue
+				bonnes.append([porte.distance_to(p), p, COTES[k], c])
+	if bonnes.is_empty():
+		print("  ⚠ aucune place adossée et dégagée pour un coffre")
+		return
+	bonnes.sort_custom(func(a, b): return float(a[0]) > float(b[0]))
+	print("  places de coffre (les plus éloignées de la porte) :")
+	var dit := {}
+	var n := 0
+	for b in bonnes:
+		var cote := String(b[2])
+		var c: Vector2i = b[3]
+		# Une place par CÔTÉ de tuile : sinon les six premières lignes décrivent
+		# six fois le même mètre de mur.
+		var cle := "%s%d%d" % [cote, c.x, c.y]
+		if dit.has(cle):
+			continue
+		dit[cle] = true
+		var p: Vector2 = b[1]
+		var mur: int = [c.y, c.y + 1, c.x, c.x + 1][COTES.find(cote)]
+		var u: float = p.x if cote in ["N", "S"] else p.y
+		print('    contre("c:coffre", "%s", %.2f, %d)   à %.1f tuiles de la porte'
+			% [cote, u, mur, float(b[0])])
+		n += 1
+		if n >= 5:
+			return
+
+## Une place à côté d'une PORTE n'en est pas une : on entre chez soi dans son
+## coffre. Le contrôle (`outils/verifier.py`) le refuse, et la recherche
+## proposait justement ces coins-là — un passage est toujours dégagé, donc
+## toujours bien noté.
+const LOIN_DES_PORTES := 0.75
+
+func _pres_d_un_passage(murs: Dictionary, c: Vector2i, p: Vector2) -> bool:
+	for k in 4:
+		if Interieurs._ferme(murs, c, k):
+			continue
+		var voisine: Vector2i = c + [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)][k]
+		if not (murs["tuiles"] as Dictionary).has(voisine):
+			continue
+		# Le milieu du côté ouvert : c'est par là qu'on passe.
+		var milieu := Vector2(c) + Vector2(0.5, 0.5) + Vector2(voisine - c) * 0.5
+		if p.distance_to(milieu) < LOIN_DES_PORTES:
+			return true
+	return false
+
+## Le coffre tient-il là, sans entrer dans les murs perpendiculaires ?
+func _rentre(murs: Dictionary, c: Vector2i, p: Vector2) -> bool:
+	var marges := [p.y - float(c.y), float(c.y) + 1.0 - p.y,
+		p.x - float(c.x), float(c.x) + 1.0 - p.x]
+	var petit := 0
+	for k in 4:
+		if Interieurs._ferme(murs, c, k) and float(marges[k]) < DEMI_COFFRE:
+			petit += 1
+	# Un seul mur peut être à moins d'un demi-coffre : celui contre lequel on
+	# s'adosse. Deux, c'est un angle, et le coffre en dépasse.
+	return petit <= 1
+
+## Loin de tout meuble, sauf de celui qui est en `sauf` (le coffre en place).
+func _degage(id: String, p: Vector2, sauf: Vector2) -> bool:
+	for r in Interieurs.obstacles(id):
+		var rect: Rect2 = r
+		if rect.has_point(sauf):
+			continue
+		if rect.grow(VIDE_COFFRE).has_point(p):
+			return false
+	return true
+
 func _un(id: String, dessiner: bool) -> int:
 	var murs := Interieurs.murs(id)
 	var large := int(murs["large"])
@@ -97,6 +209,8 @@ func _un(id: String, dessiner: bool) -> int:
 	# une chambre condamnée, et c'est le contraire d'un banc utile.
 	var poches := _poches(libre, atteints)
 	_traverser(id, depart, libre, atteints)
+	if "--coffre" in OS.get_cmdline_args():
+		_places_de_coffre(id)
 
 	var perdues := libre.size() - atteints.size()
 	# UNE TUILE. En dessous, ce n'est pas un endroit : c'est le jour entre un

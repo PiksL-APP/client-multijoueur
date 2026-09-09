@@ -387,14 +387,49 @@ c'est la seconde qui casse — un pas trop long saute par-dessus une porte d'une
 tuile et le joueur rebondit contre le chambranle.
 
 Il signale au passage un **coffre trop près de la porte** (moins d'1,6 tuile) :
-on déposerait sans entrer, et l'appartement ne servirait plus à rien. Le
-Pavillon (1,0) et L'Ancien poste (0,8) sont dans ce cas — à replacer, c'est une
-décision de décoration, pas un défaut de praticabilité.
+on déposerait sans entrer, et l'appartement ne servirait plus à rien.
+
+## Où poser un coffre
+
+```
+godot --headless -s outils/marche.gd --coffre
+```
+
+Le banc propose les cinq meilleures places, écrites en `contre(...)`, prêtes à
+coller. Une place valable est **adossée** à un mur, **dégagée de soixante
+centimètres** (la règle du catalogue), **loin d'un passage**, et le coffre doit
+y **rentrer** — un point à huit centimètres d'un angle est dégagé et pourtant
+impossible, le coffre traverserait le mur d'à côté. Chacune de ces trois règles
+a été ajoutée après que l'outil eut proposé, avec aplomb, une place que
+`outils/verifier.py` refusait.
+
+Résultat : **L'Ancien poste** passe de 0,8 à 4,8 tuiles — le coffre est monté
+dans la cellule, à côté du placard, où il se lit comme un casier. Le
+**Pavillon** reste à 1,0 : l'outil n'y trouve aucune autre place. Essayé contre
+le mur est (3,7 tuiles, mais juste devant la porte de la chambre) et au nord de
+la chambre (collé à la table à manger de l'autre côté de la cloison). Il est
+trop meublé : c'est un meuble à déplacer, pas le coffre.
+
+## Le contrôle tourne enfin partout
+
+`outils/paquet.py` contenait **deux fois le même script**, collé bout à bout :
+tout le travail se faisait deux fois, et ça ne se voyait qu'au temps
+d'exécution. Ses chemins étaient en dur vers `~/mnt/client-multijoueur`, ce qui
+marchait sur une machine et faisait échouer le contrôle des intérieurs partout
+ailleurs — sans dire pourquoi. Les deux sont corrigés, et la chaîne complète
+tourne d'un bout à l'autre :
+
+```
+python3 outils/paquet.py && python3 outils/empreintes.py
+godot --headless --path . -s outils/vider.gd
+python3 outils/verifier.py        # -> TOTAL 0
+godot --headless -s outils/marche.gd
+```
 
 ## Ce qui reste à faire
 
-- Rapprocher le coffre du fond dans le Pavillon et L'Ancien poste (voir
-  ci-dessus), puis repasser `outils/verifier.py`.
+- Le Pavillon : dégager une place de coffre en déplaçant un meuble (voir
+  ci-dessus).
 - La boutique : aujourd'hui la planque s'achète au prix de `PlanVille`, et
   l'appartement suit le quartier. Une vraie boutique montrerait le catalogue,
   ses prix et ses résumés avant l'achat.
