@@ -51,10 +51,10 @@ func demarrer() -> void:
 	gauche.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	rangee.add_child(gauche)
 
-	gauche.add_child(UI.entete("Commencer", "Un nom, une tête, et on descend."))
+	gauche.add_child(Charte.entete("Commencer", "Un nom, une tête de carton, et on descend."))
 
-	gauche.add_child(UI.texte("Votre pseudo", 15, Palette.ENCRE_FAIBLE))
-	_champ = UI.champ("Votre pseudo", Session.pseudo)
+	gauche.add_child(Charte.capitales("Votre pseudo", 15, Color(1, 1, 1, 0.6)))
+	_champ = Charte.champ("Puxian", Session.pseudo)
 	_champ.text_submitted.connect(func(_x): _entrer())
 	# Chaque frappe s'entend, comme sur une borne : c'est ce qui fait qu'un
 	# champ de texte a du corps.
@@ -63,21 +63,21 @@ func demarrer() -> void:
 		_rafraichir())
 	gauche.add_child(_champ)
 
-	gauche.add_child(UI.texte("Votre personnage", 15, Palette.ENCRE_FAIBLE))
-	_nom_choisi = UI.titre("", 16)
+	gauche.add_child(Charte.capitales("Votre personnage", 15, Color(1, 1, 1, 0.6)))
+	_nom_choisi = Charte.titre("", 26, Charte.ORANGE)
 	gauche.add_child(_nom_choisi)
-	_lot = UI.texte("", 13, Palette.ENCRE_FAIBLE)
+	_lot = Charte.capitales("", 13, Color(1, 1, 1, 0.5))
 	gauche.add_child(_lot)
 	gauche.add_child(_bande())
 
-	_bouton = UI.bouton("Entrer à Pikstown", true)
+	_bouton = Charte.bouton("Entrer à Pikstown", true)
 	_bouton.pressed.connect(_entrer)
 	gauche.add_child(_bouton)
 
 	# Les deux autres jeux, le temps que les bâtiments de la ville en ouvrent
 	# les portes. Sans cette rangée, ils ne seraient plus joignables du tout
 	# depuis que le village n'est plus sur le chemin.
-	gauche.add_child(UI.texte("Ou une partie courte :", 13, Palette.ENCRE_FAIBLE))
+	gauche.add_child(Charte.capitales("Ou une partie courte :", 14, Color(1, 1, 1, 0.5)))
 	var courts := HBoxContainer.new()
 	courts.add_theme_constant_override("separation", 10)
 	gauche.add_child(courts)
@@ -85,27 +85,27 @@ func demarrer() -> void:
 	# ferme, qui est un écran et non une partie — elle ne se termine jamais et
 	# ne dépose aucun score. Les chambres, elles, se jouent.
 	for jeu in [["enigme-chambres", "Énigme"], ["bousculade", "Bousculade"]]:
-		var b := UI.bouton(String(jeu[1]))
+		var b := Charte.bouton(String(jeu[1]))
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(func(): _partir(String(jeu[0]), String(jeu[1])))
 		courts.add_child(b)
 		_courts.append(b)
 
-	var retour := UI.bouton("Retour au menu")
+	var retour := Charte.bouton("Retour au menu")
 	retour.pressed.connect(func() -> void:
 		Sons.interface("retour", -8.0)
 		demande_ecran.emit("menu", {}))
 	gauche.add_child(retour)
 
-	_avertissement = UI.texte("", 13, Palette.AVERTISSEMENT, true)
+	_avertissement = Charte.texte("", 15, Charte.ORANGE, true)
 	gauche.add_child(_avertissement)
 
 	var bas := HBoxContainer.new()
 	bas.add_theme_constant_override("separation", 12)
 	gauche.add_child(bas)
-	_etat = UI.etat_reseau()
+	_etat = Charte.etat_reseau()
 	bas.add_child(_etat)
-	bas.add_child(UI.texte("version " + Config.version, 13, Palette.ENCRE_FAIBLE))
+	bas.add_child(Charte.capitales("Version " + Config.version, 13, Color(1, 1, 1, 0.42)))
 
 	# ── Colonne de droite : le personnage en grand ──────────────────────
 	rangee.add_child(_vitrine())
@@ -254,15 +254,15 @@ func _choisir(cle: String) -> void:
 	_rafraichir()
 
 func _rafraichir() -> void:
-	UI.rafraichir_etat_reseau(_etat)
+	Charte.rafraichir_etat(_etat)
 	var fiche := Personnages.fiche(_cle)
 	_nom_choisi.text = String(fiche["nom"]).to_upper()
 	_lot.text = "lot " + String(fiche["lot"])
 	for b in _vignettes:
 		var elu: bool = String(b.get_meta("cle")) == _cle
 		var style := StyleBoxFlat.new()
-		style.bg_color = Palette.SURFACE.lightened(0.08) if elu else Palette.SURFACE
-		style.border_color = MenuPrincipal.ORANGE if elu else Palette.FILET
+		style.bg_color = Color(1, 1, 1, 0.10) if elu else Color(0, 0, 0, 0.45)
+		style.border_color = Charte.ORANGE if elu else Color(1, 1, 1, 0.14)
 		style.set_border_width_all(2 if elu else 1)
 		for etat in ["normal", "hover", "pressed"]:
 			b.add_theme_stylebox_override(etat, style)

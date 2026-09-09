@@ -1,259 +1,791 @@
 <!DOCTYPE html>
 <html lang="fr">
-	<head>
-		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
-		<title>Piks-l Multijoueur</title>
-		<style>
-html, body, #canvas {
-	margin: 0;
-	padding: 0;
-	border: 0;
-}
-
-body {
-	color: white;
-	background-color: black;
-	overflow: hidden;
-	touch-action: none;
-}
-
-#canvas {
-	display: block;
-}
-
-#canvas:focus {
-	outline: none;
-}
-
-#status, #status-splash, #status-progress {
-	position: absolute;
-	left: 0;
-	right: 0;
-}
-
-#status, #status-splash {
-	top: 0;
-	bottom: 0;
-}
-
-#status {
-	background-color: #0d0d0d;
-	display: flex;
-	flex-direction: column;
-	justify-content: center;
-	align-items: center;
-	visibility: hidden;
-}
-
-#status-splash {
-	max-height: 100%;
-	max-width: 100%;
-	margin: auto;
-}
-
-#status-splash.show-image--false {
-	display: none;
-}
-
-#status-splash.fullsize--true {
-	height: 100%;
-	width: 100%;
-	object-fit: contain;
-}
-
-#status-splash.use-filter--false {
-	image-rendering: pixelated;
-}
-
-#status-progress, #status-notice {
-	display: none;
-}
-
-#status-progress {
-	bottom: 10%;
-	width: 50%;
-	margin: 0 auto;
-}
-
-#status-notice {
-	background-color: #5b3943;
-	border-radius: 0.5rem;
-	border: 1px solid #9b3943;
-	color: #e0e0e0;
-	font-family: 'Noto Sans', 'Droid Sans', Arial, sans-serif;
-	line-height: 1.3;
-	margin: 0 2rem;
-	overflow: hidden;
-	padding: 1rem;
-	text-align: center;
-	z-index: 1;
-}
-
-#status {
-	background-color: #0d0d0d;
-	font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-}
-#chargement { text-align: center; color: #c3c2b7; }
-#chargement .marque {
-	font-size: clamp(22px, 4vw, 34px); letter-spacing: .18em;
-	color: #ffffff; margin-bottom: 10px;
-}
-#chargement .note { font-size: 14px; color: #898781; max-width: 34rem; line-height: 1.5; margin: 0 auto; }
-#chargement .anneau {
-	width: 62px; height: 62px; margin: 0 auto 26px; border-radius: 50%;
-	border: 2px solid rgba(255,255,255,.10); border-top-color: #3987e5;
-	animation: tourne 1s linear infinite;
-}
-@keyframes tourne { to { transform: rotate(360deg); } }
-#status-progress {
-	bottom: 14%; width: 34%; height: 4px; appearance: none; -webkit-appearance: none;
-	border: 0; background: rgba(255,255,255,.10); border-radius: 2px; overflow: hidden;
-}
-#status-progress::-webkit-progress-bar { background: rgba(255,255,255,.10); }
-#status-progress::-webkit-progress-value { background: #3987e5; }
-#status-progress::-moz-progress-bar { background: #3987e5; }
-#status-notice {
-	background-color: #1a1a19; border: 1px solid #d03b3b; color: #c3c2b7;
-	font-family: inherit; border-radius: 8px;
-}
-@media (prefers-reduced-motion: reduce) { #chargement .anneau { animation: none; } }
-		</style>
-		<link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+<title>Piks-l Multijoueur</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;700&display=swap" rel="stylesheet">
+<link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
 <link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
-
+<style>
+/* La page est le KIT. Le moteur vit sous elle, dans une toile qu'on ne
+   découvre qu'au moment d'entrer en ville : tant qu'on est dans les menus,
+   c'est le dessin qui commande, au pixel près, et rien n'est redessiné en
+   contrôles de moteur — c'était la seule façon d'être exact. */
+html, body { margin: 0; padding: 0; border: 0; background: #05040a; overflow: hidden; }
+#canvas { display: block; margin: 0; padding: 0; border: 0; width: 100vw; height: 100vh; }
+#canvas:focus { outline: none; }
+#pk-jeu { position: fixed; inset: 0; z-index: 1; visibility: hidden; }
+#pk-jeu.en-jeu { visibility: visible; }
+#pk-kit { position: fixed; inset: 0; z-index: 2; }
+#pk-kit.parti { opacity: 0; pointer-events: none; transition: opacity .5s ease; }
+#pk-panne {
+	position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 5;
+	display: none; max-width: 34rem; padding: 1.2rem 1.6rem; text-align: center;
+	background: rgba(10,6,18,.94); border: 1px solid #ff2ea6; color: #fff;
+	font-family: 'Barlow Condensed', Arial, sans-serif; font-size: 17px; line-height: 1.4;
+}
+</style>
 <link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
 <link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
 <meta name="description" content="Hub multijoueur Piks-l : des portails, des jeux de 2 à 4 joueurs, un classement.">
 <meta name="theme-color" content="#0d0d0d">
-	</head>
-	<body>
-		<canvas id="canvas">
-			Votre navigateur ne gère pas la balise canvas.
-		</canvas>
+</head>
+<body>
 
-		<noscript>
-			Ce jeu a besoin de JavaScript pour se lancer.
-		</noscript>
+<div id="pk-jeu">
+	<canvas id="canvas">Votre navigateur ne gère pas la balise canvas.</canvas>
+</div>
 
-		<div id="status">
-			<img id="status-splash" class="show-image--false fullsize--true use-filter--true" src="index.png" alt="">
-			<div id="chargement">
-				<div class="anneau"></div>
-				<div class="marque">PIKS-L MULTIJOUEUR</div>
-				<div class="note">Le moteur pèse une trentaine de mégaoctets : le premier chargement prend quelques secondes, les suivants sortent du cache.</div>
-			</div>
-			<progress id="status-progress"></progress>
-			<div id="status-notice"></div>
-		</div>
+<noscript>Ce jeu a besoin de JavaScript pour se lancer.</noscript>
 
-		<script src="index.js"></script>
-		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":18376368,"index.wasm":38057390},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+<div id="pk-kit">
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin:0; padding:0; background:#05040a; overflow:hidden; }
+  html, body, * { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34' viewBox='0 0 34 34'%3E%3Cg fill='none' stroke='%23ffffff' stroke-width='1.6'%3E%3Ccircle cx='17' cy='17' r='9.5' stroke='%23000000' stroke-width='3.2' opacity='.55'/%3E%3Ccircle cx='17' cy='17' r='9.5'/%3E%3Cpath d='M17 1.5v8M17 24.5v8M1.5 17h8M24.5 17h8' stroke='%23000000' stroke-width='3.2' opacity='.55'/%3E%3Cpath d='M17 1.5v8M17 24.5v8M1.5 17h8M24.5 17h8'/%3E%3C/g%3E%3Ccircle cx='17' cy='17' r='1.6' fill='%23ff2ea6'/%3E%3C/svg%3E") 17 17, crosshair; }
+  button, a, [role="button"], input[type="range"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='38' height='38' viewBox='0 0 38 38'%3E%3Cg fill='none' stroke='%23ff9d2e' stroke-width='2'%3E%3Ccircle cx='19' cy='19' r='11' stroke='%23000000' stroke-width='3.6' opacity='.55'/%3E%3Ccircle cx='19' cy='19' r='11'/%3E%3Cpath d='M19 2v9M19 27v9M2 19h9M27 19h9' stroke='%23000000' stroke-width='3.6' opacity='.55'/%3E%3Cpath d='M19 2v9M19 27v9M2 19h9M27 19h9'/%3E%3C/g%3E%3Ccircle cx='19' cy='19' r='2' fill='%23ff9d2e'/%3E%3C/svg%3E") 19 19, crosshair; }
+  a { color:#ff2ea6; } a:hover { color:#22e3f2; }
+  @keyframes pk-bgpan { 0% { transform:scale(1.06) translate3d(0,0,0); } 100% { transform:scale(1.14) translate3d(-2%,-1.5%,0); } }
+  @keyframes pk-flick { 0%,100% { opacity:1; } 47% { opacity:1; } 48% { opacity:.35; } 50% { opacity:1; } 72% { opacity:.6; } 74% { opacity:1; } }
+  @keyframes pk-spin { to { transform:rotate(360deg); } }
+  @keyframes pk-dots { 0% { opacity:.25; } 50% { opacity:1; } 100% { opacity:.25; } }
+  @keyframes pk-scan { 0% { transform:translateY(-10%); } 100% { transform:translateY(110%); } }
+  @keyframes pk-eq { from { height:3px; } to { height:14px; } }
+  @keyframes pk-fadein { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+</style>
+</helmet>
+<div style="position:relative; width:100%; height:100vh; min-height:420px; background:#05040a; overflow:hidden; font-family:Barlow, sans-serif; color:#fff; user-select:none">
+
+  <!-- Le fond est AUSSI posé en CSS : les deux `img` ne reçoivent leur
+       source qu'au premier rendu du kit, et sans cela la page s'ouvre sur
+       du noir le temps que React passe. -->
+  <div style="position:absolute; inset:0; overflow:hidden; background:url(kit/uploads/Loading1.jpg) center/cover no-repeat">
+    <img src="{{ srcA }}" alt="" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:{{ opacityA }}; transition:opacity 1.4s ease; animation:pk-bgpan 18s ease-in-out infinite alternate">
+    <img src="{{ srcB }}" alt="" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:{{ opacityB }}; transition:opacity 1.4s ease; animation:pk-bgpan 18s ease-in-out infinite alternate-reverse">
+  </div>
+
+  <div style="position:absolute; inset:0; background:linear-gradient(180deg, rgba(5,4,10,.72) 0%, rgba(5,4,10,.12) 32%, rgba(5,4,10,.45) 62%, rgba(5,4,10,.94) 100%)"></div>
+  <div style="position:absolute; inset:0; background:radial-gradient(120% 90% at 50% 45%, rgba(0,0,0,0) 38%, rgba(0,0,0,.72) 100%)"></div>
+  <div style="position:absolute; inset:0; opacity:.14; background:repeating-linear-gradient(180deg, rgba(255,255,255,.6) 0 1px, rgba(0,0,0,0) 1px 3px); mix-blend-mode:overlay"></div>
+  <div style="position:absolute; left:0; right:0; height:22%; background:linear-gradient(180deg, rgba(255,46,166,0) 0%, rgba(255,255,255,.055) 50%, rgba(34,227,242,0) 100%); animation:pk-scan 7s linear infinite; pointer-events:none"></div>
+
+  <div style="position:absolute; top:0; left:0; right:0; display:flex; align-items:flex-start; justify-content:space-between; gap:24px; padding:clamp(18px,2.6vw,42px)">
+    <img src="kit/uploads/Logo.png" alt="Piks Theft Auto" style="width:clamp(180px,26%,420px); filter:drop-shadow(0 0 26px rgba(255,46,166,.55)) drop-shadow(0 6px 18px rgba(0,0,0,.8)); animation:pk-fadein .9s ease both">
+    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:10px; animation:pk-fadein .9s .15s ease both">
+      <audio ref="{{ audioRef }}" src="kit/uploads/Vice City Drift.mp3" loop="{{ true }}"></audio>
+      <button onClick="{{ toggleSound }}" title="{{ soundTitle }}" style="display:flex; align-items:center; gap:10px; padding:8px 14px; background:rgba(5,4,10,.55); border:1px solid rgba(255,255,255,.22); backdrop-filter:blur(6px); cursor:pointer; color:#fff; font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:clamp(10px,.95vw,14px); letter-spacing:.24em; text-transform:uppercase; clip-path:polygon(0 0, calc(100% - 8px) 0, 100% 100%, 8px 100%)" style-hover="border-color:#ff2ea6; color:#ff2ea6">
+        <span style="display:flex; align-items:flex-end; gap:3px; height:14px">{{ eqBars }}</span>
+        <span>{{ soundLabel }}</span>
+      </button>
+      <div style="font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:clamp(13px,1.35vw,22px); letter-spacing:.34em; text-transform:uppercase; color:#22e3f2; text-shadow:0 0 14px rgba(34,227,242,.85)">Pikstown</div>
+      <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(10px,1vw,15px); letter-spacing:.28em; text-transform:uppercase; color:rgba(255,255,255,.6); margin-top:-4px">The Heart of Vice</div>
+    </div>
+  </div>
+
+  <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ true }}">
+  <div style="position:absolute; left:0; right:0; bottom:0; display:flex; flex-direction:column; gap:clamp(12px,1.5vw,22px); padding:clamp(18px,2.6vw,42px)">
+
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:clamp(20px,4vw,64px); flex-wrap:wrap">
+      <div style="flex:1 1 340px; min-width:0; max-width:640px">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
+          <div style="width:9px; height:9px; background:#ff2ea6; box-shadow:0 0 12px #ff2ea6; animation:pk-dots 1.1s ease-in-out infinite"></div>
+          <div style="font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:clamp(11px,1.05vw,16px); letter-spacing:.3em; text-transform:uppercase; color:#ff2ea6">{{ tipLabel }}</div>
+        </div>
+        <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(19px,2.2vw,38px); line-height:1.12; text-wrap:pretty; color:#fff; text-shadow:0 2px 18px rgba(0,0,0,.9); min-height:2.3em">{{ tip }}</div>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:clamp(12px,1.6vw,22px); animation:pk-flick 5s linear infinite">
+        <div style="position:relative; display:flex; align-items:center; justify-content:center; width:clamp(76px,7.4vw,124px); height:clamp(76px,7.4vw,124px)">
+          <div style="position:absolute; inset:0; border-radius:50%; border:4px solid rgba(255,255,255,.14)"></div>
+          <div style="position:absolute; inset:0; border-radius:50%; border:4px solid transparent; border-top-color:#22e3f2; border-right-color:#ff2ea6; animation:pk-spin 1s linear infinite; filter:drop-shadow(0 0 8px rgba(34,227,242,.7))"></div>
+          <div style="font-family:'Archivo Black',sans-serif; font-size:clamp(19px,1.95vw,32px); line-height:1; letter-spacing:-.03em; color:#fff; text-shadow:0 0 18px rgba(255,46,166,.7)">{{ pctLabel }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="position:relative; height:clamp(10px,1.1vw,16px); background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.18); overflow:hidden; clip-path:polygon(0 0, calc(100% - 10px) 0, 100% 100%, 10px 100%)">
+      <div style="position:absolute; inset:0 auto 0 0; width:{{ barWidth }}; background:linear-gradient(90deg,#7b2ff7 0%,#ff2ea6 55%,#22e3f2 100%); box-shadow:0 0 24px rgba(255,46,166,.8); transition:width .3s linear"></div>
+      <div style="position:absolute; inset:0; background:repeating-linear-gradient(90deg, rgba(0,0,0,.35) 0 2px, rgba(0,0,0,0) 2px 8px)"></div>
+    </div>
+
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(10px,.95vw,14px); letter-spacing:.24em; text-transform:uppercase; color:rgba(255,255,255,.42)">
+      <span>Piks Theft Auto &mdash; Online Session</span>
+      <span style="color:#22e3f2; text-shadow:0 0 14px rgba(34,227,242,.7)">{{ stage }}</span>
+      <span>Est. 1986 &middot; No Trust Just Greed</span>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isMenu }}">
+  <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:0 clamp(24px,6vw,110px); animation:pk-fadein .8s ease both">
+    <!-- La jaquette a été retirée du menu : elle n'y servait à rien et
+         passait sous le lettrage dès que la fenêtre s'élargissait. -->
+
+    <div style="flex:0 1 auto; min-width:0; max-width:660px; display:flex; flex-direction:column; align-items:center; text-align:center; gap:clamp(14px,1.6vw,26px)">
+
+      <div style="display:flex; flex-direction:column; align-items:center; gap:clamp(6px,.8vw,14px); margin-top:clamp(6px,1vw,18px)">
+        <sc-for list="{{ menuItems }}" as="item" hint-placeholder-count="3">
+          <button onClick="{{ item.onClick }}" onMouseEnter="{{ item.onHover }}" style="{{ item.style }}">
+            <span style="width:14px; height:14px; flex:0 0 auto; background:{{ item.dot }}; transform:rotate(45deg); box-shadow:{{ item.dotGlow }}"></span>
+            <span>{{ item.label }}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <div style="font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(13px,1.25vw,19px); letter-spacing:.12em; color:rgba(255,255,255,.62); min-height:1.5em; padding-left:26px">{{ menuHint }}</div>
+    </div>
+  </div>
+
+  <div style="position:absolute; left:0; right:0; bottom:0; display:flex; align-items:center; gap:clamp(16px,2.4vw,44px); flex-wrap:wrap; padding:clamp(18px,2.6vw,42px); font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(10px,.95vw,14px); letter-spacing:.22em; text-transform:uppercase; color:rgba(255,255,255,.42)">
+    <span style="display:flex; align-items:center; gap:8px; color:#39ff88"><span style="width:8px; height:8px; background:#39ff88; box-shadow:0 0 10px #39ff88; animation:pk-dots 1.6s ease-in-out infinite"></span>En ligne</span>
+    <span>Version 0.1.0</span>
+    <span>Haut / Bas pour choisir &middot; Entr&eacute;e pour valider</span>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isStart }}">
+  <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:clamp(16px,3vw,48px); background:rgba(4,3,9,.72); backdrop-filter:blur(10px); z-index:20; animation:pk-fadein .28s ease both">
+    <div style="width:min(880px,100%); max-height:100%; display:flex; flex-direction:column; gap:clamp(12px,1.4vw,20px); padding:clamp(20px,2.4vw,36px); background:linear-gradient(180deg, rgba(16,10,26,.94) 0%, rgba(8,6,14,.96) 100%); border:1px solid rgba(255,255,255,.14); box-shadow:0 40px 90px rgba(0,0,0,.7), 0 0 0 1px rgba(255,46,166,.12) inset">
+      <div>
+        <div style="font-family:'Archivo Black',sans-serif; font-size:clamp(24px,2.6vw,44px); line-height:1; text-transform:uppercase; color:#fff">Commencer</div>
+        <div style="margin-top:8px; font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(12px,1.15vw,17px); letter-spacing:.1em; color:rgba(255,255,255,.6)">Un nom, une t&ecirc;te de carton, et on descend.</div>
+        <div style="margin-top:14px; height:2px; background:linear-gradient(90deg,#7b2ff7,#ff2ea6 50%,#22e3f2)"></div>
+      </div>
+
+      <div style="flex:1 1 auto; min-height:0; overflow-y:auto; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:clamp(14px,1.8vw,28px); padding:clamp(14px,1.6vw,24px); background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08)">
+      <div style="display:flex; flex-direction:column; gap:clamp(12px,1.4vw,20px); min-width:0">
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(12px,1.15vw,17px); letter-spacing:.2em; text-transform:uppercase; color:rgba(255,255,255,.6); margin-bottom:8px">Votre pseudo</div>
+        <input type="text" value="{{ pseudo }}" onChange="{{ onPseudo }}" placeholder="Puxian" maxlength="16" style="width:100%; box-sizing:border-box; padding:14px 16px; background:rgba(0,0,0,.55); border:1px solid #ff2ea6; color:#fff; outline:none; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(15px,1.5vw,23px); letter-spacing:.08em; box-shadow:0 0 22px rgba(255,46,166,.25) inset">
+      </div>
+
+      <div>
+        <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(12px,1.15vw,17px); letter-spacing:.2em; text-transform:uppercase; color:rgba(255,255,255,.6)">Votre personnage</div>
+        <div style="margin-top:4px; font-family:'Archivo Black',sans-serif; font-size:clamp(17px,1.8vw,28px); text-transform:uppercase; color:#ff9d2e; text-shadow:0 0 20px rgba(255,157,46,.5)">{{ charName }}</div>
+        <div style="margin-top:4px; font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(11px,1.05vw,16px); letter-spacing:.1em; color:rgba(255,255,255,.5)">{{ charDesc }}</div>
+        <div style="margin-top:12px; display:grid; grid-template-columns:repeat(auto-fill, minmax(64px,1fr)); gap:10px">
+          <sc-for list="{{ chars }}" as="c" hint-placeholder-count="8">
+            <button onClick="{{ c.onClick }}" title="{{ c.name }}" style="{{ c.style }}">{{ c.glyph }}</button>
+          </sc-for>
+        </div>
+      </div>
+
+      <button onClick="{{ enterCity }}" style="margin-top:2px; padding:16px; background:#ff2ea6; border:none; color:#0a0410; cursor:pointer; font-family:'Archivo Black',sans-serif; font-size:clamp(14px,1.5vw,23px); letter-spacing:.1em; text-transform:uppercase; box-shadow:0 0 30px rgba(255,46,166,.55)" style-hover="background:#22e3f2">Entrer &agrave; Pikstown</button>
+
+      <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(11px,1.05vw,16px); letter-spacing:.2em; text-transform:uppercase; color:rgba(255,255,255,.5); margin-top:4px">Ou une partie courte :</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
+        <button onClick="{{ enterCity }}" style="padding:13px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.2); color:#fff; cursor:pointer; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(12px,1.15vw,17px); letter-spacing:.16em; text-transform:uppercase" style-hover="border-color:#22e3f2; color:#22e3f2">Braquage &eacute;clair</button>
+        <button onClick="{{ enterCity }}" style="padding:13px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.2); color:#fff; cursor:pointer; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(12px,1.15vw,17px); letter-spacing:.16em; text-transform:uppercase" style-hover="border-color:#22e3f2; color:#22e3f2">Course de rue</button>
+      </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:14px; min-width:0">
+        <div style="{{ bigHeadStyle }}">{{ charGlyph }}</div>
+        <div style="font-family:'Archivo Black',sans-serif; font-size:clamp(15px,1.5vw,24px); text-transform:uppercase; color:#fff; text-align:center; text-shadow:0 4px 18px rgba(0,0,0,.9)">{{ pseudoLabel }}</div>
+        <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(11px,1.05vw,15px); letter-spacing:.28em; text-transform:uppercase; color:#22e3f2; text-align:center">{{ charName }}</div>
+      </div>
+      </div>
+
+      <div style="display:flex; gap:12px; flex-wrap:wrap">
+      <button onClick="{{ closeStart }}" style="padding:14px 26px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.2); color:#fff; cursor:pointer; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(12px,1.15vw,17px); letter-spacing:.18em; text-transform:uppercase" style-hover="border-color:#ff2ea6; color:#ff2ea6">Retour au menu</button>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isSession }}">
+  <div style="position:absolute; inset:0; display:flex; z-index:25; padding:clamp(16px,3vw,48px); background:rgba(4,3,9,.9); backdrop-filter:blur(10px); animation:pk-fadein .3s ease both">
+    <div style="flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:clamp(12px,1.4vw,20px)">
+      <div>
+        <div style="display:flex; align-items:baseline; justify-content:space-between; gap:20px; flex-wrap:wrap">
+          <div style="font-family:'Archivo Black',sans-serif; font-size:clamp(22px,2.6vw,44px); line-height:1; letter-spacing:.04em; text-transform:uppercase; color:#fff">Salon Piks Theft Auto</div>
+          <span style="display:flex; align-items:center; gap:8px; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(10px,.95vw,14px); letter-spacing:.24em; text-transform:uppercase; color:#39ff88"><span style="width:8px; height:8px; background:#39ff88; box-shadow:0 0 10px #39ff88; animation:pk-dots 1.6s ease-in-out infinite"></span>En ligne</span>
+        </div>
+        <div style="margin-top:12px; height:2px; background:linear-gradient(90deg,#7b2ff7,#ff2ea6 50%,#22e3f2)"></div>
+        <div style="margin-top:10px; font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(12px,1.15vw,17px); letter-spacing:.08em; color:rgba(255,255,255,.6)">Vous &ecirc;tes h&ocirc;te de la table {{ table }}. &Agrave; plusieurs, la manche prend tout son sens : seul, elle sert d'entra&icirc;nement.</div>
+      </div>
+
+      <div style="flex:1 1 auto; min-height:0; overflow-y:auto; padding:clamp(14px,1.6vw,24px); background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.1); border-left:3px solid #ff2ea6">
+        <div style="display:flex; align-items:baseline; gap:16px">
+          <span style="font-family:'Archivo Black',sans-serif; font-size:clamp(15px,1.5vw,24px); letter-spacing:.06em; text-transform:uppercase; color:#fff">Table {{ table }}</span>
+          <span style="font-family:'Archivo Black',sans-serif; font-size:clamp(13px,1.3vw,20px); color:#ff9d2e">1/4</span>
+        </div>
+        <div style="margin-top:4px; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(11px,1.05vw,16px); letter-spacing:.24em; text-transform:uppercase; color:#22e3f2">Votre table</div>
+        <div style="margin-top:16px; display:flex; align-items:center; gap:12px">
+          <span style="width:12px; height:12px; background:#ff2ea6; box-shadow:0 0 12px #ff2ea6"></span>
+          <span style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(14px,1.4vw,22px); letter-spacing:.08em; color:#fff">{{ pseudoLabel }}</span>
+          <span style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(11px,1.05vw,15px); letter-spacing:.24em; text-transform:uppercase; color:#ff9d2e">H&ocirc;te &middot; {{ charName }}</span>
+        </div>
+        <div style="margin-top:22px; font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(11px,1.05vw,16px); letter-spacing:.14em; color:rgba(255,255,255,.35)">3 places libres &mdash; en attente de joueurs&hellip;</div>
+      </div>
+
+      <div style="display:flex; gap:12px; flex-wrap:wrap">
+        <button onClick="{{ closeStart }}" style="padding:14px 26px; background:#ff2ea6; border:none; color:#0a0410; cursor:pointer; font-family:'Archivo Black',sans-serif; font-size:clamp(13px,1.25vw,19px); letter-spacing:.06em; text-transform:uppercase; box-shadow:0 0 26px rgba(255,46,166,.5)" style-hover="background:#22e3f2">Lancer la manche (1 joueur)</button>
+        <button onClick="{{ nextTable }}" style="padding:14px 26px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.2); color:#fff; cursor:pointer; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(12px,1.15vw,17px); letter-spacing:.18em; text-transform:uppercase" style-hover="border-color:#22e3f2; color:#22e3f2">Changer de table</button>
+        <button onClick="{{ closeStart }}" style="padding:14px 26px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.2); color:#fff; cursor:pointer; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(12px,1.15vw,17px); letter-spacing:.18em; text-transform:uppercase" style-hover="border-color:#ff2ea6; color:#ff2ea6">Retour au hub</button>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isOptions }}">
+  <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:clamp(16px,3vw,48px); background:rgba(4,3,9,.72); backdrop-filter:blur(10px); z-index:20; animation:pk-fadein .28s ease both">
+    <div style="width:min(880px,100%); max-height:100%; display:flex; flex-direction:column; gap:clamp(12px,1.4vw,20px); padding:clamp(20px,2.4vw,36px); background:linear-gradient(180deg, rgba(16,10,26,.94) 0%, rgba(8,6,14,.96) 100%); border:1px solid rgba(255,255,255,.14); box-shadow:0 40px 90px rgba(0,0,0,.7), 0 0 0 1px rgba(255,46,166,.12) inset">
+      <div>
+        <div style="font-family:'Archivo Black',sans-serif; font-size:clamp(24px,2.6vw,44px); line-height:1; text-transform:uppercase; color:#fff">Options</div>
+        <div style="margin-top:8px; font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(12px,1.15vw,17px); letter-spacing:.1em; color:rgba(255,255,255,.6)">Le son, l'image, les touches. Tout est gard&eacute; sur cette machine.</div>
+        <div style="margin-top:14px; height:2px; background:linear-gradient(90deg,#7b2ff7,#ff2ea6 50%,#22e3f2)"></div>
+      </div>
+
+      <div style="display:flex; gap:6px">
+        <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+          <button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.label }}</button>
+        </sc-for>
+      </div>
+
+      <div style="flex:1 1 auto; min-height:0; overflow-y:auto; padding:clamp(14px,1.6vw,24px); background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08)">
+        <sc-if value="{{ isTabSon }}">
+          <div style="display:flex; flex-direction:column; gap:clamp(14px,1.6vw,24px)">
+            <sc-for list="{{ sliders }}" as="s" hint-placeholder-count="3">
+              <div style="display:flex; flex-direction:column; gap:8px">
+                <div style="display:flex; align-items:baseline; justify-content:space-between; gap:16px">
+                  <span style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(14px,1.35vw,21px); letter-spacing:.08em; color:#fff">{{ s.label }}</span>
+                  <span style="font-family:'Archivo Black',sans-serif; font-size:clamp(13px,1.2vw,18px); color:#ff9d2e">{{ s.valueLabel }}</span>
+                </div>
+                <input type="range" min="0" max="100" step="1" value="{{ s.value }}" onChange="{{ s.onChange }}" style="width:100%; accent-color:#ff2ea6; height:18px; cursor:pointer">
+              </div>
+            </sc-for>
+            <div style="font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(12px,1.15vw,17px); line-height:1.45; color:rgba(255,255,255,.5)">Le volume se r&egrave;gle en direct : la musique du menu suit le r&eacute;glage d&egrave;s qu'on l&acirc;che le curseur.</div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isTabGfx }}">
+          <div style="display:flex; flex-direction:column; gap:clamp(14px,1.6vw,22px)">
+            <sc-for list="{{ toggles }}" as="t" hint-placeholder-count="3">
+              <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:20px">
+                <div style="min-width:0">
+                  <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(14px,1.35vw,21px); letter-spacing:.08em; color:#fff">{{ t.label }}</div>
+                  <div style="margin-top:4px; font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(11px,1.05vw,16px); line-height:1.4; color:rgba(255,255,255,.5)">{{ t.desc }}</div>
+                </div>
+                <button onClick="{{ t.onClick }}" style="{{ t.trackStyle }}"><span style="{{ t.knobStyle }}"></span></button>
+              </div>
+            </sc-for>
+            <div style="display:flex; flex-direction:column; gap:8px">
+              <div style="display:flex; align-items:baseline; justify-content:space-between; gap:16px">
+                <span style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(14px,1.35vw,21px); letter-spacing:.08em; color:#fff">Finesse du rendu</span>
+                <span style="font-family:'Archivo Black',sans-serif; font-size:clamp(13px,1.2vw,18px); color:#ff9d2e">{{ resLabel }}</span>
+              </div>
+              <input type="range" min="50" max="100" step="5" value="{{ res }}" onChange="{{ onRes }}" style="width:100%; accent-color:#ff2ea6; height:18px; cursor:pointer">
+              <div style="font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(11px,1.05vw,16px); line-height:1.45; color:rgba(255,255,255,.5)">Baisser la finesse rend le jeu en plus petit puis agrandit l'image : moins de pixels &agrave; calculer, une nettet&eacute; &agrave; peine entam&eacute;e.</div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isTabKeys }}">
+          <div style="display:flex; flex-direction:column; gap:clamp(10px,1.2vw,16px)">
+            <div style="font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(12px,1.15vw,17px); line-height:1.45; color:rgba(255,255,255,.5)">Cliquez sur une touche puis appuyez sur la nouvelle. Les fl&egrave;ches du clavier restent toujours actives pour se d&eacute;placer.</div>
+            <sc-for list="{{ binds }}" as="b" hint-placeholder-count="6">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:20px">
+                <span style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(13px,1.25vw,19px); letter-spacing:.08em; color:rgba(255,255,255,.86)">{{ b.label }}</span>
+                <button onClick="{{ b.onClick }}" style="{{ b.style }}">{{ b.keyLabel }}</button>
+              </div>
+            </sc-for>
+            <button onClick="{{ resetKeys }}" style="margin-top:6px; padding:12px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.18); color:#fff; cursor:pointer; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(12px,1.15vw,17px); letter-spacing:.18em; text-transform:uppercase" style-hover="border-color:#ff2ea6; color:#ff2ea6">Touches par d&eacute;faut</button>
+          </div>
+        </sc-if>
+      </div>
+
+      <div style="display:flex; gap:12px; flex-wrap:wrap">
+        <button onClick="{{ closeOptions }}" style="padding:14px 26px; background:#ff2ea6; border:none; color:#0a0410; cursor:pointer; font-family:'Archivo Black',sans-serif; font-size:clamp(13px,1.25vw,19px); letter-spacing:.06em; text-transform:uppercase; box-shadow:0 0 26px rgba(255,46,166,.5)" style-hover="background:#22e3f2">Retour</button>
+        <button onClick="{{ resetAll }}" style="padding:14px 26px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.2); color:#fff; cursor:pointer; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(12px,1.15vw,17px); letter-spacing:.18em; text-transform:uppercase" style-hover="border-color:#ff2ea6; color:#ff2ea6">Tout remettre &agrave; z&eacute;ro</button>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+</div>
+</x-dc>
+</div>
+
+<div id="pk-panne"></div>
+
+<script>
+// Le pont entre la page et le moteur. Le kit ne connaît que ces trois
+// choses : où en est le chargement, s'il est fini, et comment passer la main.
+window.PK = {
+	pct: 0,
+	pret: false,
+	depart: null,          // {pseudo, personnage, jeu} — lu par le moteur
+	fonds: [
+		"kit/uploads/Loading1.jpg", "kit/uploads/Loading2.jpg", "kit/uploads/Loading3.jpg",
+		"kit/uploads/Loading4.jpg", "kit/uploads/Loading5.jpg", "kit/uploads/Loading6.jpg",
+		"kit/uploads/Loading7.jpg", "kit/uploads/Loading8.jpg", "kit/uploads/Loading9.jpg"
+	],
+	entrer: function (choix) {
+		if (window.PK.sonner) { window.PK.sonner("special"); }
+		window.PK.depart = choix;
+		// La page rend aussi la main sur le son : le thème est joué ici, et
+		// deux musiques qui se superposent s'entendent tout de suite.
+		var piste = document.querySelector('#pk-kit audio');
+		if (piste) { try { piste.pause(); } catch (e) {} }
+		var kit = document.getElementById("pk-kit");
+		kit.classList.add("parti");
+		document.getElementById("pk-jeu").classList.add("en-jeu");
+		// Et on le RETIRE une fois le fondu fini : laissé transparent, il
+		// resterait au-dessus de la toile et avalerait le clavier.
+		setTimeout(function () {
+			kit.style.display = "none";
+			document.getElementById("canvas").focus();
+		}, 520);
+	},
+	quitter: function () { window.location.href = "https://www.piks-l.com"; }
+};
+var PK_FONDS = window.PK.fonds;
+
+// ── LES SONS DE L'INTERFACE ────────────────────────────────────────────────
+//
+// Ils sont branchés DEPUIS L'EXTÉRIEUR du kit : on écoute les événements qui
+// remontent de son arbre plutôt que d'aller poser un appel dans chacun de ses
+// boutons. Le dessin reste ainsi intact, et un bouton ajouté demain sonnera
+// sans qu'on ait rien à rebrancher.
+(function () {
+	var VOLUME = 0.5;                 // la moitié du maximum, comme demandé
+	var NOMS = ["haut", "bas", "gauche", "droite", "valider", "retour",
+		"effacer", "frappe", "special"];
+	var banque = {};
+	NOMS.forEach(function (n) {
+		// Trois exemplaires par son : on peut survoler plus vite qu'un son ne
+		// dure, et un seul élément se couperait lui-même.
+		banque[n] = [0, 1, 2].map(function () {
+			var a = new Audio("kit/sons/" + n + ".ogg");
+			a.volume = VOLUME;
+			a.preload = "auto";
+			return a;
+		});
+		banque[n].tour = 0;
+	});
+	function sonner(nom) {
+		var v = banque[nom];
+		if (!v) { return; }
+		var a = v[v.tour];
+		v.tour = (v.tour + 1) % v.length;
+		try { a.currentTime = 0; a.play(); } catch (e) {}
+	}
+	window.PK.sonner = sonner;
+
+	var kit = document.getElementById("pk-kit");
+
+	// Ce qu'un bouton veut dire : revenir en arrière, ou valider. Le libellé
+	// le dit mieux qu'une classe — le kit n'en pose aucune.
+	function estUnRetour(el) {
+		var t = (el.textContent || "").toLowerCase();
+		return t.indexOf("retour") >= 0 || t.indexOf("quitter") >= 0
+			|| t.indexOf("fermer") >= 0 || t.indexOf("annuler") >= 0;
+	}
+
+	var survole = null;
+	kit.addEventListener("mouseover", function (e) {
+		var b = e.target.closest("button, [role=button], input[type=range]");
+		if (!b || b === survole) { return; }
+		survole = b;
+		sonner("droite");
+	}, true);
+	kit.addEventListener("mouseout", function (e) {
+		if (survole && !survole.contains(e.relatedTarget)) { survole = null; }
+	}, true);
+
+	kit.addEventListener("click", function (e) {
+		var b = e.target.closest("button, [role=button]");
+		if (!b) { return; }
+		sonner(estUnRetour(b) ? "retour" : "valider");
+	}, true);
+
+	kit.addEventListener("input", function (e) {
+		if (e.target.matches("input[type=range]")) { sonner("gauche"); }
+	}, true);
+
+	// Au clavier : les flèches montent et descendent, Entrée valide, Échap
+	// revient, la frappe crépite et l'effacement a son propre bruit.
+	kit.addEventListener("keydown", function (e) {
+		if (e.key === "Backspace" || e.key === "Delete") { sonner("effacer"); }
+		else if (e.key.length === 1) { sonner("frappe"); }
+	}, true);
+	window.addEventListener("keydown", function (e) {
+		if (kit.style.display === "none") { return; }
+		if (e.key === "ArrowUp") { sonner("haut"); }
+		else if (e.key === "ArrowDown") { sonner("bas"); }
+		else if (e.key === "ArrowLeft") { sonner("gauche"); }
+		else if (e.key === "ArrowRight") { sonner("droite"); }
+		else if (e.key === "Enter") { sonner("valider"); }
+		else if (e.key === "Escape") { sonner("retour"); }
+	});
+}());
+</script>
+
+<script src="kit/react.js"></script>
+<script src="kit/react-dom.js"></script>
+<script src="kit/support.js"></script>
+<script type="text/x-dc" data-dc-script data-props="{&quot;tipLabel&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Astuce Pikstown&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;volume&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:0.5,&quot;min&quot;:0,&quot;max&quot;:1,&quot;step&quot;:0.05,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Son&quot;},&quot;loop&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Comportement&quot;},&quot;tips&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;string[]&quot;}}">
+class Component extends DCLogic {
+  state = { pct: 0, slide: 0, tipIndex: 0, playing: false, view: "loading", sel: 0, flipped: false,
+    options: false, tab: "son", capturing: null,
+    start: false, session: false, pseudo: "", char: 0, table: 1,
+    master: 100, music: 100, sfx: 100, effects: true, shadows: true, fullscreen: false, res: 100,
+    keys: ["W", "S", "A", "D", "Espace", "Maj", "E", "M"] };
+  flipBox = () => this.setState(s => ({ flipped: !s.flipped }));
+
+  menu = [
+    { label: "Commencer", hint: "Choisir son pseudo et son personnage" },
+    { label: "Options", hint: "Affichage, son et commandes" },
+    { label: "Quitter", hint: "Retour au bureau" }
+  ];
+
+  defaultKeys = [
+    ["Avancer", "W"], ["Reculer", "S"], ["Aller à gauche", "A"], ["Aller à droite", "D"],
+    ["Sauter", "Espace"], ["Sprint", "Maj"], ["Interagir", "E"], ["Carte", "M"]
+  ];
+  defaults = { master: 100, music: 100, sfx: 100, effects: true, shadows: true, fullscreen: false, res: 100 };
+
+  characters = [
+    ["Le Roi", "♛", "Couronne au marqueur. Il dirige le crew."],
+    ["Le Coeur", "♥", "Charme d'abord, braquage ensuite."],
+    ["Le Fantôme", "✕", "Personne ne l'a jamais identifié."],
+    ["Le Comptable", "$", "Blanchit tout, ne salit rien."],
+    ["Le Souriant", "‿", "Toujours de bonne humeur, même armé."],
+    ["Le Vétéran", "≡", "Vice City, première génération."],
+    ["La Recrue", "?", "Vient d'arriver. Ça se voit."],
+    ["Le Boss", "▲", "On ne le voit jamais deux fois."]
+  ];
+
+  activate = (i) => {
+    if (i === 0) this.setState({ start: true });
+    if (i === 1) this.setState({ options: true, tab: "son" });
+    if (i === 2) window.PK.quitter();
+  };
+
+  onKey = (e) => {
+    if (this.state.start) {
+      if (e.key === "Escape") this.setState({ start: false, session: false });
+      return;
+    }
+    if (this.state.options) {
+      if (this.state.capturing !== null && this.state.capturing !== undefined) {
+        e.preventDefault();
+        const k = e.key === " " ? "Espace" : e.key === "Shift" ? "Maj" : e.key.length === 1 ? e.key.toUpperCase() : e.key;
+        this.setState(s => {
+          const keys = s.keys.slice();
+          keys[s.capturing] = k;
+          return { keys, capturing: null };
+        });
+        return;
+      }
+      if (e.key === "Escape") this.setState({ options: false });
+      return;
+    }
+    if (this.state.view !== "menu") return;
+    if (e.key === "ArrowDown") { e.preventDefault(); this.setState(s => ({ sel: (s.sel + 1) % this.menu.length })); }
+    if (e.key === "ArrowUp") { e.preventDefault(); this.setState(s => ({ sel: (s.sel - 1 + this.menu.length) % this.menu.length })); }
+    if (e.key === "Enter") { e.preventDefault(); this.activate(this.state.sel); }
+  };
+
+  setVol = (key) => (e) => {
+    const v = Number(e.target.value);
+    this.setState({ [key]: v }, () => {
+      const a = this.audioRef.current;
+      if (a) a.volume = Math.max(0, Math.min(1, (this.state.master / 100) * (this.state.music / 100)));
+    });
+  };
+  audioRef = React.createRef();
+
+  userMuted = false;
+
+  tryPlay = () => {
+    const a = this.audioRef.current;
+    if (!a || !a.paused) return;
+    a.muted = false;
+    a.volume = this.props.volume ?? 1;
+    a.play().then(() => {
+      this.setState({ playing: true });
+      window.removeEventListener("pointerdown", this.unlock);
+      window.removeEventListener("keydown", this.unlock);
+    }).catch(() => this.setState({ playing: false }));
+  };
+
+  toggleSound = (e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const a = this.audioRef.current;
+    if (!a) return;
+    if (a.paused) { this.userMuted = false; this.tryPlay(); }
+    else { this.userMuted = true; a.pause(); this.setState({ playing: false }); }
+  };
+
+  componentDidMount() {
+    this.tryPlay();
+    this.unlock = () => { if (!this.userMuted) this.tryPlay(); };
+    window.addEventListener("pointerdown", this.unlock);
+    window.addEventListener("keydown", this.unlock);
+    window.addEventListener("keydown", this.onKey);
+    this.tips = this.props.tips ?? [
+      "Ne laisse jamais ta caisse ouverte dans le quartier des docks. Pikstown n'oublie pas.",
+      "Les feux rouges sont une suggestion. Les hélicos, beaucoup moins.",
+      "Appuie sur le klaxon pour saluer. Ou pour prévenir.",
+      "La couronne se porte sur la tête. Le carton aussi.",
+      "Un braquage propre commence par un plein d'essence.",
+      "No trust, just greed. C'est écrit sur les murs."
+    ];
+    // L'avancement est celui du MOTEUR : `window.PK.pct` est nourri par le
+    // chargeur de Godot, et `PK.pret` passe à vrai quand le jeu est prêt à
+    // tourner. Un faux minuteur mentirait — et il mentirait toujours dans le
+    // mauvais sens, en annonçant cent pour cent avant que le jeu ne soit là.
+    this.loop = setInterval(() => {
+      const p = Math.min(100, Math.round(window.PK.pct * 100));
+      this.setState(s => (p === s.pct ? null : { pct: p }));
+      if (window.PK.pret && this.state.view === "loading") {
+        setTimeout(() => this.setState({ view: "menu" }), 600);
+      }
+    }, 90);
+    this.slides = setInterval(() => this.setState(s => ({ slide: (s.slide + 1) % (PK_FONDS.length * 2) })), 7000);
+    this.tipTimer = setInterval(() => this.setState(s => ({ tipIndex: (s.tipIndex + 1) % this.tips.length })), 6000);
+  }
+  componentWillUnmount() {
+    clearInterval(this.loop); clearInterval(this.slides); clearInterval(this.tipTimer);
+    window.removeEventListener("pointerdown", this.unlock);
+    window.removeEventListener("keydown", this.unlock);
+    window.removeEventListener("keydown", this.onKey);
+  }
+
+  renderVals() {
+    const p = Math.min(100, this.state.pct);
+    const stages = [[0,"Connexion"],[18,"Chargement du monde"],[42,"Synchronisation"],[68,"Chargement des joueurs"],[88,"Presque prêt"]];
+    let stage = "Connexion";
+    for (const [t, label] of stages) if (p >= t) stage = label;
+    return {
+      pctLabel: Math.floor(p) + "%",
+      barWidth: p.toFixed(1) + "%",
+      stage,
+      opacityA: this.state.slide % 2 === 0 ? 1 : 0,
+      opacityB: this.state.slide % 2 === 1 ? 1 : 0,
+      // Neuf affiches sur deux calques : celui qui vient de s'effacer va
+      // chercher la suivante pendant qu'on regarde l'autre.
+      srcA: PK_FONDS[(this.state.slide % 2 === 0 ? this.state.slide : this.state.slide + 1) % PK_FONDS.length],
+      srcB: PK_FONDS[(this.state.slide % 2 === 1 ? this.state.slide : this.state.slide + 1) % PK_FONDS.length],
+      tipLabel: this.props.tipLabel ?? "Astuce Pikstown",
+      tip: (this.tips || [""])[this.state.tipIndex],
+      isStart: this.state.start && !this.state.session,
+      isSession: this.state.session,
+      pseudo: this.state.pseudo,
+      pseudoLabel: this.state.pseudo.trim() || "Anonyme",
+      onPseudo: (e) => this.setState({ pseudo: e.target.value }),
+      charName: this.characters[this.state.char][0],
+      charGlyph: this.characters[this.state.char][1],
+      charDesc: this.characters[this.state.char][2],
+      bigHeadStyle: {
+        display: "flex", alignItems: "center", justifyContent: "center",
+        width: "clamp(150px,17vw,260px)", aspectRatio: "1", borderRadius: 6,
+        background: "linear-gradient(150deg,#d9b184 0%,#c39a69 40%,#a97f56 100%)",
+        border: "2px solid rgba(0,0,0,.45)",
+        boxShadow: "0 30px 60px rgba(0,0,0,.7), 0 0 40px rgba(255,46,166,.25)",
+        fontFamily: "'Archivo Black', sans-serif", fontSize: "clamp(56px,7vw,120px)",
+        color: "#2b1c10", transform: "rotate(-2deg)"
+      },
+      enterCity: () => {
+        // On passe la main au moteur : la page s'efface, la toile paraît.
+        window.PK.entrer({
+          pseudo: this.state.pseudo,
+          personnage: this.state.char,
+          jeu: "carnage",
+          general: this.state.master, musique: this.state.music, effets_son: this.state.sfx,
+          effets: this.state.effects, ombres: this.state.shadows,
+          finesse: this.state.res, plein_ecran: this.state.fullscreen,
+          touches: this.state.keys
+        });
+      },
+      table: this.state.table,
+      nextTable: () => this.setState(s => ({ table: (s.table % 4) + 1 })),
+      closeStart: () => this.setState({ start: false, session: false }),
+      chars: this.characters.map(([name, glyph], i) => {
+        const on = i === this.state.char;
+        return {
+          name, glyph,
+          onClick: () => this.setState({ char: i }),
+          style: {
+            aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", borderRadius: 4,
+            background: "linear-gradient(150deg,#d9b184,#a97f56)",
+            border: on ? "3px solid #ff9d2e" : "2px solid rgba(0,0,0,.5)",
+            boxShadow: on ? "0 0 22px rgba(255,157,46,.7)" : "0 4px 10px rgba(0,0,0,.6)",
+            opacity: on ? 1 : 0.72,
+            fontFamily: "'Archivo Black', sans-serif", fontSize: "clamp(18px,2vw,30px)",
+            color: "#2b1c10", transition: "all .15s ease"
+          }
+        };
+      }),
+      isOptions: this.state.options,
+      isTabSon: this.state.tab === "son",
+      isTabGfx: this.state.tab === "gfx",
+      isTabKeys: this.state.tab === "keys",
+      closeOptions: () => this.setState({ options: false, capturing: null }),
+      resetAll: () => this.setState(Object.assign({}, this.defaults, { keys: this.defaultKeys.map(k => k[1]), capturing: null }), () => {
+        const a = this.audioRef.current; if (a) a.volume = 1;
+      }),
+      resetKeys: () => this.setState({ keys: this.defaultKeys.map(k => k[1]), capturing: null }),
+      tabs: [["son", "Son"], ["gfx", "Graphisme"], ["keys", "Touches"]].map(([id, label]) => {
+        const on = this.state.tab === id;
+        return {
+          label,
+          onClick: () => this.setState({ tab: id, capturing: null }),
+          style: {
+            padding: "10px 20px", cursor: "pointer",
+            background: on ? "rgba(255,46,166,.16)" : "rgba(255,255,255,.04)",
+            border: on ? "1px solid #ff2ea6" : "1px solid rgba(255,255,255,.12)",
+            color: on ? "#fff" : "rgba(255,255,255,.6)",
+            fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700,
+            fontSize: "clamp(12px,1.15vw,17px)", letterSpacing: ".18em", textTransform: "uppercase",
+            transition: "all .15s ease"
+          }
+        };
+      }),
+      sliders: [["master", "Volume général"], ["music", "Musique et ambiance"], ["sfx", "Bruitages"]].map(([k, label]) => ({
+        label, value: this.state[k], valueLabel: this.state[k] + " %", onChange: this.setVol(k)
+      })),
+      toggles: [
+        ["effects", "Effets d'image", "Le flou de bascule du menu et le halo des néons de Pikstown."],
+        ["shadows", "Ombres portées", "Dans le menu comme en ville. Le premier réglage à couper si ça saccade."],
+        ["fullscreen", "Plein écran", "Lance Piks Theft Auto sur tout l'écran."]
+      ].map(([k, label, desc]) => {
+        const on = !!this.state[k];
+        return {
+          label, desc,
+          onClick: () => this.setState({ [k]: !on }),
+          trackStyle: {
+            flex: "0 0 auto", width: 54, height: 28, padding: 3, borderRadius: 999, cursor: "pointer",
+            border: "1px solid " + (on ? "#ff2ea6" : "rgba(255,255,255,.2)"),
+            background: on ? "rgba(255,46,166,.3)" : "rgba(255,255,255,.06)",
+            display: "flex", justifyContent: on ? "flex-end" : "flex-start", alignItems: "center",
+            transition: "all .18s ease"
+          },
+          knobStyle: {
+            display: "block", width: 20, height: 20, borderRadius: "50%",
+            background: on ? "#fff" : "rgba(255,255,255,.5)",
+            boxShadow: on ? "0 0 12px rgba(255,46,166,.9)" : "none",
+            transition: "all .18s ease"
+          }
+        };
+      }),
+      res: this.state.res,
+      resLabel: this.state.res + " %",
+      onRes: (e) => this.setState({ res: Number(e.target.value) }),
+      binds: this.defaultKeys.map(([label], i) => {
+        const cap = this.state.capturing === i;
+        return {
+          label,
+          keyLabel: cap ? "Appuyez…" : this.state.keys[i],
+          onClick: () => this.setState({ capturing: cap ? null : i }),
+          style: {
+            minWidth: 150, padding: "10px 18px", cursor: "pointer",
+            background: cap ? "rgba(255,46,166,.2)" : "rgba(0,0,0,.45)",
+            border: "1px solid " + (cap ? "#ff2ea6" : "rgba(255,255,255,.28)"),
+            color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700,
+            fontSize: "clamp(12px,1.15vw,17px)", letterSpacing: ".14em", textTransform: "uppercase",
+            transition: "all .15s ease"
+          }
+        };
+      }),
+      flipBox: this.flipBox,
+      boxStyle: {
+        position: "relative", width: "100%", aspectRatio: "0.7 / 1",
+        transformStyle: "preserve-3d",
+        transform: `rotateY(${this.state.flipped ? 199 : 19}deg) rotateZ(-1.2deg)`,
+        transition: "transform .9s cubic-bezier(.22,.68,.28,1)"
+      },
+      isLoading: this.state.view === "loading",
+      isMenu: this.state.view === "menu",
+      menuHint: this.menu[this.state.sel].hint,
+      menuItems: this.menu.map((m, i) => {
+        const on = i === this.state.sel;
+        return {
+          label: m.label,
+          dot: on ? "#ff9d2e" : "rgba(255,255,255,0)",
+          dotGlow: on ? "0 0 16px rgba(255,157,46,.9)" : "none",
+          onHover: () => this.setState({ sel: i }),
+          onClick: () => { this.setState({ sel: i }); this.activate(i); },
+          style: {
+            display: "flex", alignItems: "center", gap: "12px",
+            background: "none", border: "none", padding: "2px 0", cursor: "pointer",
+            fontFamily: "'Archivo Black', sans-serif",
+            fontSize: "clamp(26px,3vw,52px)", lineHeight: 1.1, letterSpacing: "0.01em",
+            textTransform: "uppercase",
+            color: on ? "#ff9d2e" : "rgba(255,255,255,.62)",
+            textShadow: on ? "0 0 26px rgba(255,157,46,.6), 0 3px 10px rgba(0,0,0,.9)" : "0 3px 10px rgba(0,0,0,.9)",
+            transform: on ? "translateX(2px)" : "none",
+            transition: "color .18s ease, transform .18s ease"
+          }
+        };
+      }),
+      audioRef: this.audioRef,
+      toggleSound: this.toggleSound,
+      soundLabel: this.state.playing ? "Son" : "Son coupé",
+      soundTitle: this.state.playing ? "Couper le son" : "Activer le son",
+      eqBars: [4, 11, 7, 14].map((h, i) => React.createElement("span", {
+        key: i,
+        style: {
+          display: "block", width: 3, background: this.state.playing ? "#22e3f2" : "rgba(255,255,255,.35)",
+          height: this.state.playing ? h : 3,
+          transition: "height .2s ease, background .2s ease",
+          animation: this.state.playing ? `pk-eq ${0.5 + i * 0.13}s ease-in-out ${i * 0.07}s infinite alternate` : "none"
+        }
+      }))
+    };
+  }
+}
+</script>
+
+<script src="index.js"></script>
+<script>
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":31961412,"index.wasm":38057390},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 
 (function () {
-	const statusOverlay = document.getElementById('status');
-	const statusProgress = document.getElementById('status-progress');
-	const statusNotice = document.getElementById('status-notice');
+	const panne = document.getElementById('pk-panne');
 
-	let initializing = true;
-	let statusMode = '';
-
-	function setStatusMode(mode) {
-		if (statusMode === mode || !initializing) {
-			return;
-		}
-		if (mode === 'hidden') {
-			statusOverlay.remove();
-			initializing = false;
-			return;
-		}
-		statusOverlay.style.visibility = 'visible';
-		statusProgress.style.display = mode === 'progress' ? 'block' : 'none';
-		statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
-		statusMode = mode;
-	}
-
-	function setStatusNotice(text) {
-		while (statusNotice.lastChild) {
-			statusNotice.removeChild(statusNotice.lastChild);
-		}
-		const lines = text.split('\n');
-		lines.forEach((line) => {
-			statusNotice.appendChild(document.createTextNode(line));
-			statusNotice.appendChild(document.createElement('br'));
-		});
-	}
-
-	function displayFailureNotice(err) {
+	function direLaPanne(err) {
 		console.error(err);
-		if (err instanceof Error) {
-			setStatusNotice(err.message);
-		} else if (typeof err === 'string') {
-			setStatusNotice(err);
-		} else {
-			setStatusNotice('Une erreur inattendue est survenue.');
-		}
-		setStatusMode('notice');
-		initializing = false;
+		panne.textContent = (err instanceof Error) ? err.message
+			: (typeof err === 'string' ? err : 'Une erreur inattendue est survenue.');
+		panne.style.display = 'block';
 	}
 
-	const missing = Engine.getMissingFeatures({
-		threads: GODOT_THREADS_ENABLED,
-	});
-
-	if (missing.length !== 0) {
+	const manque = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
+	if (manque.length !== 0) {
 		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
-			let serviceWorkerRegistrationPromise;
-			try {
-				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
-			} catch (err) {
-				serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
-			}
-			// There's a chance that installing the service worker would fix the issue
+			let inscription;
+			try { inscription = navigator.serviceWorker.getRegistration(); }
+			catch (err) { inscription = Promise.reject(new Error('Service worker registration failed.')); }
 			Promise.race([
-				serviceWorkerRegistrationPromise.then((registration) => {
-					if (registration != null) {
-						return Promise.reject(new Error('Service worker already exists.'));
-					}
-					return registration;
-				}).then(() => engine.installServiceWorker()),
-				// For some reason, `getRegistration()` can stall
-				new Promise((resolve) => {
-					setTimeout(() => resolve(), 2000);
-				}),
-			]).then(() => {
-				// Reload if there was no error.
-				window.location.reload();
-			}).catch((err) => {
-				console.error('Error while registering service worker:', err);
-			});
+				inscription.then((r) => (r != null) ? Promise.reject(new Error('Service worker already exists.')) : r)
+					.then(() => engine.installServiceWorker()),
+				new Promise((resolve) => { setTimeout(() => resolve(), 2000); }),
+			]).then(() => { window.location.reload(); })
+				.catch((err) => { console.error('Error while registering service worker:', err); });
 		} else {
-			// Display the message as usual
-			const missingMsg = 'Ce navigateur ne réunit pas ce qu\'il faut pour lancer le jeu :\n';
-			displayFailureNotice(missingMsg + missing.join('\n'));
+			direLaPanne('Ce navigateur ne réunit pas ce qu\'il faut pour lancer le jeu :\n' + manque.join('\n'));
 		}
 	} else {
-		setStatusMode('progress');
 		engine.startGame({
 			'onProgress': function (current, total) {
-				if (current > 0 && total > 0) {
-					statusProgress.value = current;
-					statusProgress.max = total;
-				} else {
-					statusProgress.removeAttribute('value');
-					statusProgress.removeAttribute('max');
-				}
+				if (current > 0 && total > 0) { window.PK.pct = current / total; }
 			},
-		}).then(() => {
-			setStatusMode('hidden');
-		}, displayFailureNotice);
+		}).then(() => { window.PK.pct = 1; window.PK.pret = true; }, direLaPanne);
 	}
 }());
-		</script>
-	</body>
+</script>
+</body>
 </html>
-
 

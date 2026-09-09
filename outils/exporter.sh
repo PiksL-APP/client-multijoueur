@@ -15,4 +15,13 @@ fi
 
 godot --headless --path . --import
 godot --headless --path . --export-release "Web" sortie/index.html
-echo "Export dans $racine/sortie"
+
+# LE KIT VA À CÔTÉ DE L'EXPORT, PAS DEDANS. C'est lui qui tient les menus dans
+# le navigateur (`web/coque.html` le charge), mais il est exclu du paquet du
+# moteur (`exclude_filter` du préréglage) : embarqué deux fois, il pèserait
+# onze mégaoctets pour rien. Oublier cette copie, c'est une page qui charge
+# sur du vide — d'où sa place ici, dans le script, et non dans une consigne.
+rm -rf sortie/kit
+cp -r web/kit sortie/kit
+touch sortie/.gdignore
+echo "Export dans $racine/sortie (kit compris)"
