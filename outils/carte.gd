@@ -45,7 +45,7 @@ func _ready() -> void:
 		sujet = Node3D.new()
 		var mer := MeshInstance3D.new()
 		var plan := PlaneMesh.new()
-		plan.size = Vector2(600.0 * Quartiers.CASE, 600.0 * Quartiers.CASE)
+		plan.size = Vector2(3000.0 * Quartiers.CASE, 3000.0 * Quartiers.CASE)
 		mer.mesh = plan
 		var eau := StandardMaterial3D.new()
 		eau.albedo_color = Color("#2b5f7a")
