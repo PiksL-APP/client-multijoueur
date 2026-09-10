@@ -49,6 +49,9 @@ var _prete: Dictionary = {}
 var _chantier := Vector2i(999999, 999999)   ## le morceau en cours de montage
 var _chantier_noeud: Node3D = null
 var _chantier_passe := 0
+## Vrai quand le dessin a changé depuis la dernière carte complète : le prochain
+## morceau à découvrir la fera refaire.
+var _prete_perime := false
 var _morceaux: Dictionary = {}         ## Vector2i -> Node3D
 var _file: Array[Vector2i] = []
 var _centre := Vector2i(999999, 999999)
@@ -123,6 +126,11 @@ func _process(_delta: float) -> void:
 	while faits < par_image:
 		if _chantier_noeud == null:
 			if _file.is_empty(): return
+			if _prete_perime:
+				# Une seule fois, et seulement parce qu'on découvre du terrain
+				# neuf : tant qu'on peint sur place, elle ne se refait jamais.
+				_prete = Quartiers.preparer(fiche)
+				_prete_perime = false
 			var c: Vector2i = _file.pop_front()
 			if _morceaux.has(c): continue
 			_chantier = c
@@ -159,17 +167,52 @@ func _batir(c: Vector2i) -> void:
 ## relâchement du pinceau, une avenue de trente cases ne rebâtit que deux
 ## morceaux, pas la ville.
 func refaire(cases: Array) -> void:
-	_prete = Quartiers.preparer(fiche)
+	# ⚠ LE VOISIN N'EST REFAIT QUE S'IL EST CONCERNÉ. Première version : les huit
+	# morceaux voisins de CHAQUE case touchée. Une avenue de vingt cases peinte
+	# au milieu d'un morceau en rebâtissait neuf — 2 304 cases pour vingt
+	# modifiées, et 424 ms de gel par coup de pinceau.
+	#
+	# Ce qui déborde vraiment d'un morceau tient en deux choses : un bâtiment,
+	# large de quatre cases au plus (emprise du hangar), et le raccord d'une rue,
+	# qui lit sa voisine immédiate. Au-delà de DÉBORD cases du bord, une case
+	# n'a aucun effet chez le voisin.
+	const DEBORD := 4
 	var a_refaire: Dictionary = {}
 	for v in cases:
 		var c: Vector2i = v
-		# Les huit voisins aussi : un bâtiment ou un raccord de rue déborde sur
-		# le morceau d'à côté, et le bord serait resté sur l'ancienne version.
-		for dy in [-1, 0, 1]:
-			for dx in [-1, 0, 1]:
-				var m := Vector2i(floori(float(c.x + dx) / float(COTE)),
-					floori(float(c.y + dy) / float(COTE)))
-				a_refaire[m] = true
+		var m := Vector2i(floori(float(c.x) / float(COTE)), floori(float(c.y) / float(COTE)))
+		a_refaire[m] = true
+		var dans_x := c.x - m.x * COTE       # position dans le morceau
+		var dans_y := c.y - m.y * COTE
+		if dans_x < DEBORD: a_refaire[m + Vector2i(-1, 0)] = true
+		if dans_x >= COTE - DEBORD: a_refaire[m + Vector2i(1, 0)] = true
+		if dans_y < DEBORD: a_refaire[m + Vector2i(0, -1)] = true
+		if dans_y >= COTE - DEBORD: a_refaire[m + Vector2i(0, 1)] = true
+		# Les diagonales seulement si l'on est dans un COIN.
+		if dans_x < DEBORD and dans_y < DEBORD: a_refaire[m + Vector2i(-1, -1)] = true
+		if dans_x >= COTE - DEBORD and dans_y < DEBORD: a_refaire[m + Vector2i(1, -1)] = true
+		if dans_x < DEBORD and dans_y >= COTE - DEBORD: a_refaire[m + Vector2i(-1, 1)] = true
+		if dans_x >= COTE - DEBORD and dans_y >= COTE - DEBORD: a_refaire[m + Vector2i(1, 1)] = true
+	# ⚠ UNE CARTE DE FENÊTRE, PAS LA VILLE ENTIÈRE. `preparer()` complet coûte
+	# 250 ms : c'était le prix de CHAQUE coup de pinceau, geste après geste.
+	# On ne prépare que le rectangle des morceaux à refaire, plus trois cases
+	# de marge pour que les rues s'y raccordent — quelques millisecondes.
+	var mini_x := 999999
+	var mini_y := 999999
+	var maxi_x := -999999
+	var maxi_y := -999999
+	for cle in a_refaire.keys():
+		var m: Vector2i = cle
+		mini_x = mini(mini_x, m.x * COTE)
+		mini_y = mini(mini_y, m.y * COTE)
+		maxi_x = maxi(maxi_x, m.x * COTE + COTE - 1)
+		maxi_y = maxi(maxi_y, m.y * COTE + COTE - 1)
+	if maxi_x < mini_x: return
+	var marge := 3
+	var fenetre := Rect2i(mini_x - marge, mini_y - marge,
+		maxi_x - mini_x + 1 + marge * 2, maxi_y - mini_y + 1 + marge * 2)
+	var avant := _prete
+	_prete = Quartiers.preparer(fiche, fenetre)
 	for cle in a_refaire.keys():
 		if not _morceaux.has(cle): continue
 		if _chantier_noeud != null and cle == _chantier:
@@ -177,6 +220,12 @@ func refaire(cases: Array) -> void:
 		(_morceaux[cle] as Node3D).queue_free()
 		_morceaux.erase(cle)
 		_batir(cle)
+	# ⚠ LA CARTE DE FENÊTRE NE VAUT QUE POUR CES MORCEAUX-LÀ. Gardée pour la
+	# suite, elle ferait bâtir les morceaux suivants — ceux qu'on découvre en se
+	# déplaçant — sur une carte vide : une ville de trous. On la jette, et on ne
+	# refait la carte complète qu'au moment où un NOUVEAU morceau la réclame.
+	_prete = avant
+	_prete_perime = true
 
 ## Tout bâtir, pour le banc photo et pour l'export d'une image d'ensemble. À ne
 ## jamais appeler dans le jeu : c'est la minute qu'on cherche à éviter.

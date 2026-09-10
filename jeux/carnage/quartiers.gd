@@ -129,27 +129,65 @@ static func _niveau(relief: Array, i: int, j: int) -> int:
 
 ## Le dessin devient une carte : terre, paliers, chaussée. Le pavage des rues
 ## et les rampes se déduisent ensuite tout seuls (`CarteVille.tuile`).
-static func carte_de(fiche: Dictionary) -> CarteVille:
+## ⚠ UN SEUL BALAYAGE, ET LES LIGNES LUES DIRECTEMENT. Cette fonction est
+## appelée à CHAQUE relâchement de pinceau dans l'éditeur — deux fois, même,
+## puisque `fautes` la rappelait pour son compte. Mesurée sur Pikstown
+## (96 000 cases) : 463 ms. Sur les quartiers de 32 × 20 pour lesquels elle a
+## été écrite, personne ne pouvait le voir.
+##
+## Trois choses la ralentissaient, aucune n'était nécessaire :
+##  - DEUX balayages complets, le second uniquement pour retrouver les `O` :
+##    on note leur position au passage du premier ;
+##  - `_car()` par case, qui refait deux bornes et un accès tableau : la ligne
+##    est lue une fois par rangée et indexée directement ;
+##  - la conversion `String(l)` dans la boucle des largeurs.
+## ⚠ `fenetre` : LA CARTE D'UN MORCEAU DE VILLE. Le contenu d'une case ne dépend
+## que d'elle-même — son caractère et son chiffre de relief —, jamais de ses
+## voisines. On peut donc n'en calculer qu'un rectangle, et c'est ce qui rend
+## l'éditeur utilisable : rebâtir quatre morceaux après un coup de pinceau
+## n'exige pas de reconstruire les 63 536 cases de Pikstown.
+##
+## Les seules choses qui débordent d'une case sont les ronds-points (3 × 3) et
+## le pavage des rues, qui lit les quatre voisines. La fenêtre doit donc être
+## prise avec une MARGE de trois cases autour de ce qu'on rebâtit, sinon les
+## rues se raccorderaient en impasse au bord de la fenêtre.
+static func carte_de(fiche: Dictionary, fenetre: Rect2i = Rect2i()) -> CarteVille:
 	var dessin: Array = fiche["plan"]
 	var relief: Array = fiche.get("relief", [])
 	var carte := CarteVille.new()
-	var large := 0
-	for l in dessin:
-		large = maxi(large, String(l).length())
-	for j in dessin.size():
-		for i in large:
-			var c := _car(dessin, i, j)
+	var ronds: Array = []
+	var j0 := 0
+	var j1 := dessin.size() - 1
+	if fenetre.size != Vector2i.ZERO:
+		j0 = maxi(0, fenetre.position.y)
+		j1 = mini(dessin.size() - 1, fenetre.position.y + fenetre.size.y - 1)
+	for j in range(j0, j1 + 1):
+		var ligne: String = dessin[j]
+		var haut: String = relief[j] if j < relief.size() else ""
+		var i0 := 0
+		var i1 := ligne.length() - 1
+		if fenetre.size != Vector2i.ZERO:
+			i0 = maxi(0, fenetre.position.x)
+			i1 = mini(ligne.length() - 1, fenetre.position.x + fenetre.size.x - 1)
+		for i in range(i0, i1 + 1):
+			var c := ligne[i]
 			if c == "." or c == "~":
 				continue
-			carte.poser_sol(Vector2i(i, j), _niveau(relief, i, j))
-			if c in CHAUSSEE:
+			var niveau := 0
+			if i < haut.length():
+				var d := haut[i]
+				if d >= "0" and d <= "9":
+					niveau = int(d)
+			carte.poser_sol(Vector2i(i, j), niveau)
+			if c == "#" or c == "=" or c == "O":
 				carte.poser_route(Vector2i(i, j), true)
+				if c == "O":
+					ronds.append(Vector2i(i, j))
 	# Les ronds-points APRÈS : ils ont besoin que leurs neuf cases existent.
-	for j in dessin.size():
-		for i in large:
-			if _car(dessin, i, j) == "O":
-				if not carte.poser_piece("road-roundabout", Vector2i(i - 1, j - 1), 3, 0):
-					push_warning("rond-point refusé en (%d,%d) : il lui faut 3x3 cases de terre au même palier" % [i, j])
+	for r in ronds:
+		var c2: Vector2i = r
+		if not carte.poser_piece("road-roundabout", Vector2i(c2.x - 1, c2.y - 1), 3, 0):
+			push_warning("rond-point refusé en (%d,%d) : il lui faut 3x3 cases de terre au même palier" % [c2.x, c2.y])
 	return carte
 
 # ------------------------------------------------------------ les bâtiments
@@ -158,34 +196,63 @@ static func carte_de(fiche: Dictionary) -> CarteVille:
 ## vers l'est tant que c'est la même lettre, puis vers le sud tant que la
 ## rangée entière l'est aussi. Le dessinateur trace des rectangles : inutile
 ## d'aller chercher des formes en L qu'il ne dessinera jamais.
+## ⚠ UN TABLEAU DE BOOLÉENS, PAS UN DICTIONNAIRE DE `Vector2i`. Le marquage des
+## cases déjà prises passait par `vus.has(Vector2i(i, j))` : sur Pikstown, ça
+## fait plus de deux cent mille hachages de vecteur pour un balayage — 258 ms.
+## Une ligne de booléens par rangée coûte un accès tableau. La sortie est
+## identique, rectangle pour rectangle et dans le même ordre : c'est vérifié au
+## banc, pas supposé.
 static func batiments(dessin: Array) -> Array:
-	var vus: Dictionary = {}
 	var sortie: Array = []
+	var hauteur := dessin.size()
+	if hauteur == 0: return sortie
+	var lignes: Array = []
 	var large := 0
 	for l in dessin:
-		large = maxi(large, String(l).length())
-	for j in dessin.size():
-		for i in large:
-			var cle := Vector2i(i, j)
-			if vus.has(cle): continue
-			var c := _car(dessin, i, j)
-			if _lettre(c) == "": continue
+		var t := String(l)
+		lignes.append(t)
+		large = maxi(large, t.length())
+	var vus: Array = []
+	for j in hauteur:
+		var rangee: PackedByteArray = PackedByteArray()
+		rangee.resize(large)
+		vus.append(rangee)
+
+	# Le caractère en (i, j), ou "." hors du dessin — la même convention que
+	# `_car`, écrite ici pour éviter l'appel.
+	var lire := func(i: int, j: int) -> String:
+		if j < 0 or j >= hauteur: return "."
+		var t: String = lignes[j]
+		if i < 0 or i >= t.length(): return "."
+		return t[i]
+
+	for j in hauteur:
+		var pris: PackedByteArray = vus[j]
+		var ligne: String = lignes[j]
+		for i in ligne.length():
+			if pris[i] != 0: continue
+			var c := ligne[i]
+			var lettre := _lettre(c)
+			if lettre == "": continue
 			var w := 1
-			while _car(dessin, i + w, j) == c and not vus.has(Vector2i(i + w, j)):
+			while i + w < large and lire.call(i + w, j) == c \
+					and (vus[j] as PackedByteArray)[i + w] == 0:
 				w += 1
 			var h := 1
-			while true:
+			while j + h < hauteur:
 				var entier := true
 				for k in w:
-					if _car(dessin, i + k, j + h) != c or vus.has(Vector2i(i + k, j + h)):
+					if lire.call(i + k, j + h) != c \
+							or (vus[j + h] as PackedByteArray)[i + k] != 0:
 						entier = false
 						break
 				if not entier: break
 				h += 1
-			for a in w:
-				for b in h:
-					vus[Vector2i(i + a, j + b)] = true
-			sortie.append({"lettre": _lettre(c), "i": i, "j": j, "w": w, "h": h})
+			for b in h:
+				var r: PackedByteArray = vus[j + b]
+				for a in w:
+					r[i + a] = 1
+			sortie.append({"lettre": lettre, "i": i, "j": j, "w": w, "h": h})
 	return sortie
 
 # ------------------------------------------------------------ vérification
@@ -203,9 +270,14 @@ static func batiments(dessin: Array) -> Array:
 ##     flotte au-dessus du plus bas.
 ## Plus un compte : un rond-point qui n'a pas trouvé ses 3 x 3 cases disparaît
 ## sans bruit.
-static func fautes(fiche: Dictionary) -> Array:
+## ⚠ `prete` : NE PAS REFAIRE CE QUI VIENT D'ÊTRE FAIT. L'éditeur appelle
+## `preparer()` pour rebâtir les morceaux touchés, puis `fautes()` pour
+## rafraîchir la vérification — et les deux reconstruisaient chacun leur carte
+## et leur liste de bâtiments. Un coup de pinceau coûtait 1 093 ms, dont 720 en
+## double. Le banc, lui, appelle sans `prete` et ne change pas.
+static func fautes(fiche: Dictionary, prete: Dictionary = {}) -> Array:
 	var dessin: Array = fiche["plan"]
-	var carte := carte_de(fiche)
+	var carte: CarteVille = prete["carte"] if prete.has("carte") else carte_de(fiche)
 	var liste: Array = []
 	for c in carte.cases.keys():
 		if not carte.route(c) or carte.case_prise(c): continue
@@ -223,7 +295,7 @@ static func fautes(fiche: Dictionary) -> Array:
 			elif ecart > 2:
 				liste.append({"i": c.x, "j": c.y,
 					"texte": "marche de %d : le kit monte de deux paliers au plus" % ecart})
-	for b in batiments(dessin):
+	for b in (prete["batiments"] if prete.has("batiments") else batiments(dessin)):
 		var niv := -99
 		var faute := false
 		for a in int(b["w"]):
@@ -280,10 +352,28 @@ static func batir(id: String) -> Node3D:
 ## morceau ne lit plus que les seaux qui le recouvrent.
 const SEAU := 16
 
-static func preparer(fiche: Dictionary) -> Dictionary:
-	var carte := carte_de(fiche)
+## `fenetre` vide = toute la ville. ⚠ LES BÂTIMENTS SE CALCULENT TOUJOURS EN
+## ENTIER, eux : un bâtiment est un RECTANGLE de lettres identiques, et le
+## découper à la fenêtre en ferait deux là où il n'y en a qu'un — une façade
+## coupée en deux au bord d'un morceau. Ils ne coûtent que 68 ms.
+static func preparer(fiche: Dictionary, fenetre: Rect2i = Rect2i()) -> Dictionary:
+	var carte := carte_de(fiche, fenetre)
 	_depots_caches[carte] = _compter_depots(carte, fiche["plan"])
-	var liste: Array = batiments(fiche["plan"])
+	var tous: Array = batiments(fiche["plan"])
+	# ⚠ HORS FENÊTRE, ON N'INDEXE PAS. Les rectangles se calculent en entier —
+	# c'est la seule façon d'avoir les bons —, mais ranger les 16 784 en seaux
+	# alors qu'on en pose une centaine, c'est le reste du coût d'un geste.
+	var liste: Array = tous
+	if fenetre.size != Vector2i.ZERO:
+		liste = []
+		for b in tous:
+			var bi := int(b["i"])
+			var bj := int(b["j"])
+			if bi + int(b["w"]) - 1 < fenetre.position.x: continue
+			if bi > fenetre.position.x + fenetre.size.x - 1: continue
+			if bj + int(b["h"]) - 1 < fenetre.position.y: continue
+			if bj > fenetre.position.y + fenetre.size.y - 1: continue
+			liste.append(b)
 	var seaux: Dictionary = {}
 	for k in liste.size():
 		var b: Dictionary = liste[k]

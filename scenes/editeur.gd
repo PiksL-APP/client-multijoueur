@@ -206,6 +206,18 @@ func demarrer() -> void:
 		_depart = Vector2i(4, 4)
 		_case = Vector2i(mini(11, _large() - 1), mini(9, _haut() - 1))
 		_apercu_forme()
+		# ⚠ ON FABRIQUE DES FAUTES EXPRÈS. Le panneau plein de fautes, avec ses
+		# lignes cliquables, est l'état de l'éditeur qu'on ne sait pas atteindre
+		# à la main : il faut trouver un carrefour, y monter une marche, et
+		# c'est justement ce qu'on passe son temps à éviter. Une marche de trois
+		# paliers posée en travers d'une rue en donne à coup sûr.
+		_empiler()
+		_forme = FORME_LIBRE
+		for k in 8:
+			_poser(_large() / 2 - 4 + k, _haut() / 2, true)
+		_touchees.clear()
+		_montrer_fautes()
+		_forme = FORME_PLEIN
 		_rafraichir_boutons()
 		_vue_dessus()
 	# ⚠ L'ALLER-RETOUR. `--essai-export=<fichier>` ressort le dessin SANS y avoir
@@ -222,6 +234,12 @@ func demarrer() -> void:
 				print("export écrit : ", chemin)
 			get_tree().quit()
 			return
+	# ⚠ LE BANC DU GESTE. Ce que coûte un coup de pinceau, du clic au
+	# relâchement, est le seul chiffre qui dit si l'éditeur est utilisable — et
+	# c'est celui qu'aucune capture d'écran ne montre. Il valait 1 093 ms sur
+	# Pikstown sans que rien ne le signale.
+	if "--essai-geste" in OS.get_cmdline_args():
+		_essai_geste()
 	if "--essai-editeur" in OS.get_cmdline_args():
 		_essai()
 	for a in OS.get_cmdline_args():
@@ -231,6 +249,27 @@ func demarrer() -> void:
 
 ## LE BANC. Il peint par le code exactement ce que la souris peindrait — et il
 ## se sert des FORMES, sinon elles ne seraient vérifiées nulle part.
+func _essai_geste() -> void:
+	var ou := Vector2i(_large() / 2, _haut() / 2)
+	# Les morceaux autour du geste doivent exister : on ne rebâtit que ce qui
+	# est déjà bâti, et un banc qui ne rebâtit rien mesure zéro.
+	var m := Vector2i(ou.x / VilleMorcelee.COTE, ou.y / VilleMorcelee.COTE)
+	for dy in [-1, 0, 1]:
+		for dx in [-1, 0, 1]:
+			_ville._batir(m + Vector2i(dx, dy))
+	print("--- banc du geste : %d morceaux bâtis autour de %s" % [_ville.morceaux_batis(), ou])
+	_empiler()
+	_choisir("#")
+	for k in 20:
+		_poser(ou.x - 10 + k, ou.y, true)
+	var t0 := Time.get_ticks_msec()
+	_finir_geste()
+	print("--- UN GESTE (avenue de 20 cases) : %d ms" % [Time.get_ticks_msec() - t0])
+	var t1 := Time.get_ticks_msec()
+	_montrer_fautes()
+	print("--- LA VÉRIFICATION, différée : %d ms" % [Time.get_ticks_msec() - t1])
+	get_tree().quit()
+
 func _essai() -> void:
 	_empiler()
 	_depart = Vector2i(2, 16)                    # une avenue en travers, à la ligne
@@ -436,8 +475,13 @@ func _large() -> int:
 func _haut() -> int:
 	return _haut_cache
 
-## À rappeler après TOUT changement de taille de grille ou de relief : agrandir
-## un bord, charger, annuler, reprendre un brouillon.
+## À rappeler quand la GRILLE change de forme : charger, agrandir un bord,
+## annuler, reprendre un brouillon.
+##
+## ⚠ PAS APRÈS UN COUP DE PINCEAU. Elle relit les 96 000 chiffres du relief pour
+## retrouver le palier le plus haut : un tiers du coût d'un geste, pour une
+## valeur qui ne peut que MONTER quand on peint. `_poser` la tient donc à jour
+## case par case, et cette fonction-ci ne sert plus qu'aux changements de forme.
 func _remesurer() -> void:
 	_large_cache = 0
 	for ligne in _lignes("plan"):
@@ -647,6 +691,7 @@ func _poser(i: int, j: int, gauche: bool) -> void:
 			n = _palier if gauche else maxi(0, _palier_de(i, j) - 1)
 		if _palier_de(i, j) == n: return
 		_ecrire("relief", i, j, str(n))
+		_plus_haut = maxi(_plus_haut, n)
 	else:
 		var c := _caractere() if gauche else "."
 		if _lire("plan", i, j) == c: return
@@ -655,6 +700,7 @@ func _poser(i: int, j: int, gauche: bool) -> void:
 		# elle arrive à zéro au milieu d'une terrasse.
 		if gauche and not EAUX.contains(c):
 			_ecrire("relief", i, j, str(_palier))
+			_plus_haut = maxi(_plus_haut, _palier)
 	_touchees[Vector2i(i, j)] = true
 	_dalle(Vector2i(i, j), _teinte_pose(gauche))
 
@@ -695,16 +741,33 @@ func _finir_geste() -> void:
 	if _touchees.is_empty(): return
 	var cases: Array = _touchees.keys()
 	_touchees.clear()
-	_remesurer()
 	if _ville != null:
 		_ville.refaire(cases)
 	for e in _apercu.get_children():
 		_apercu.remove_child(e)
 		e.queue_free()
-	_montrer_fautes()
-	_redessiner_carte()
+	_verifier_plus_tard()
+	_toucher_carte(cases)
 	_etat()
-	_sauver_brouillon()
+
+## ⚠ LA VÉRIFICATION NE SUIT PAS LE PINCEAU. `Quartiers.fautes` relit les 63 536
+## cases et les 16 784 bâtiments : 370 ms. Lancée au relâchement de chaque coup,
+## elle collait ce prix à tous les gestes — pour une réponse dont on n'a besoin
+## que quand on s'arrête. On la repousse donc à huit dixièmes de seconde après
+## le DERNIER geste : en peignant d'affilée, elle ne tourne pas une seule fois.
+##
+## Et on le DIT pendant ce temps. Une liste de fautes qui date du geste
+## précédent, sans rien qui l'indique, c'est pire que pas de liste : on corrige
+## une faute déjà corrigée.
+func _verifier_plus_tard() -> void:
+	if _minuteur == null: return
+	if _fautes_texte != null:
+		_fautes_texte.text = "vérification…"
+		_fautes_texte.add_theme_color_override("font_color", Palette.ENCRE_FAIBLE)
+	for b in _boutons_faute:
+		b.queue_free()
+	_boutons_faute.clear()
+	_minuteur.start(0.8)
 
 func _montrer_curseur() -> void:
 	if _curseur == null: return
@@ -925,23 +988,29 @@ func _basculer_grille() -> void:
 
 ## Les fautes du banc, posées SUR la case coupable. Un message dans un panneau
 ## se lit ; un bloc rouge sur le carrefour fautif se comprend.
+## Les fautes du banc, posées SUR la case coupable — et CLIQUABLES. Sur une
+## ville de 320 cases de large, « (218, 143) marche de 3 » est une adresse qu'on
+## ne rejoint pas à la main : on clique la ligne, la caméra y va.
+## Ce qu'on fait quand la main s'arrête : vérifier, et garder le brouillon.
+##
+## ⚠ LE BROUILLON AUSSI EST DIFFÉRÉ. Il fait 192 Ko de JSON — les 600 lignes du
+## plan et du relief — et il était réécrit à chaque relâchement de pinceau. Le
+## garder huit dixièmes de seconde après le dernier geste ne coûte rien : au
+## pire on perd le dernier coup si l'onglet meurt dans cet intervalle, et c'est
+## un filet de sécurité, pas une transaction.
+func _au_repos() -> void:
+	_montrer_fautes()
+	_sauver_brouillon()
+
 func _montrer_fautes() -> void:
+	if _marques == null: return
 	for e in _marques.get_children(): e.queue_free()
+	for b in _boutons_faute:
+		b.queue_free()
+	_boutons_faute.clear()
 	var liste: Array = Quartiers.fautes(_fiche)
 	_fautives.clear()
-	var texte := ""
-	var dites := 0
 	for f in liste:
-		# QUATRE fautes affichées, pas quinze : une colonne pleine de rouge
-		# repousse le pinceau hors de l'écran, et on les corrige de toute
-		# façon une par une. Le compte, lui, est toujours dit.
-		if dites < 4:
-			texte += "• %s\n" % f["texte"] if int(f["i"]) < 0 \
-				else "• (%d,%d) %s\n" % [f["i"], f["j"], f["texte"]]
-			dites += 1
-		elif dites == 4:
-			texte += "• … et %d autre(s).\n" % (liste.size() - 4)
-			dites += 1
 		if int(f["i"]) < 0: continue
 		_fautives[Vector2i(int(f["i"]), int(f["j"]))] = true
 		var n := MeshInstance3D.new()
@@ -958,9 +1027,30 @@ func _montrer_fautes() -> void:
 			(float(f["j"]) + 0.5) * CASE)
 		_marques.add_child(n)
 	if _fautes_texte != null:
-		_fautes_texte.text = "PLAN PROPRE." if liste.is_empty() else texte
+		_fautes_texte.text = "PLAN PROPRE." if liste.is_empty() \
+			else "%d faute%s :" % [liste.size(), "s" if liste.size() > 1 else ""]
 		_fautes_texte.add_theme_color_override("font_color",
 			Palette.BON if liste.is_empty() else Palette.CRITIQUE)
+	if _fautes_boite == null: return
+	# QUATRE au plus : une colonne pleine de rouge repousse le pinceau hors de
+	# l'écran, et on les corrige de toute façon une par une.
+	for k in mini(liste.size(), 4):
+		var f: Dictionary = liste[k]
+		var ou := Vector2i(int(f["i"]), int(f["j"]))
+		var b := UI.bouton("(%d,%d) %s" % [ou.x, ou.y, f["texte"]] if ou.x >= 0
+			else String(f["texte"]))
+		_petit(b)
+		b.tooltip_text = String(f["texte"]) + "\n(cliquer pour s'y rendre)"
+		b.add_theme_color_override("font_color", Palette.CRITIQUE)
+		b.add_theme_color_override("font_hover_color", Palette.ENCRE)
+		if ou.x >= 0:
+			b.pressed.connect(_aller_a.bind(ou))
+		_fautes_boite.add_child(b)
+		_boutons_faute.append(b)
+	if liste.size() > 4:
+		var reste := UI.texte("… et %d autre(s)." % (liste.size() - 4), 12, Palette.CRITIQUE)
+		_fautes_boite.add_child(reste)
+		_boutons_faute.append(reste)
 
 # ---------------------------------------------------------------- agrandir
 
@@ -1180,6 +1270,9 @@ var _etiquette: Label
 var _aide: Label
 var _message: Label
 var _fautes_texte: Label
+var _fautes_boite: VBoxContainer
+var _boutons_faute: Array[Control] = []
+var _minuteur: Timer
 var _boutons: Array[Button] = []
 var _boutons_forme: Array[Button] = []
 var _choix_quartier: OptionButton
@@ -1193,6 +1286,11 @@ var _carte2d: Control
 var _carte_pas := 1.0
 var _carte_org := Vector2.ZERO
 var _carte_image: ImageTexture
+var _carte_img: Image
+## La couleur d'un caractère, cherchée UNE fois. `_couleur()` parcourt les
+## dix-neuf pinceaux à chaque appel : sur une carte de 96 000 cases repeinte en
+## entier, ça fait presque deux millions de comparaisons de chaînes.
+var _teintes: Dictionary = {}
 
 ## Un bouton de la colonne. Deux choses à savoir : il ne doit JAMAIS réclamer
 ## plus de largeur que la colonne — sinon c'est lui qui décide de la taille du
@@ -1317,6 +1415,14 @@ func _interface() -> void:
 	boite.add_child(UI.texte("VÉRIFICATION", 12, Palette.ENCRE_FAIBLE))
 	_fautes_texte = UI.texte("", 12, Palette.ENCRE_DOUCE, true)
 	boite.add_child(_fautes_texte)
+	_fautes_boite = VBoxContainer.new()
+	_fautes_boite.add_theme_constant_override("separation", 3)
+	_fautes_boite.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	boite.add_child(_fautes_boite)
+	_minuteur = Timer.new()
+	_minuteur.one_shot = true
+	_minuteur.timeout.connect(_au_repos)
+	add_child(_minuteur)
 
 	# LA MINI-CARTE. C'est le plan tel qu'il est ÉCRIT, pas tel qu'il est bâti :
 	# vingt cases d'un pâté se lisent d'un coup, là où la vue 3D demande de
@@ -1573,6 +1679,44 @@ func _etat() -> void:
 ## mouvement de souris figeaient l'éditeur. On peint donc une IMAGE d'un pixel
 ## par case, une seule fois par modification du plan, et le `draw` ne fait plus
 ## que l'étirer et poser le curseur et les fautes par-dessus.
+## La teinte d'une case, prête à poser dans l'image.
+func _teinte_case(c: String, i: int, j: int) -> Color:
+	if _carte_relief:
+		# LA CARTE DU RELIEF : la chaussée reste plus sombre, pour garder le
+		# plan de rues comme repère par-dessus les paliers.
+		var t: Color = RAMPE[clampi(_palier_de(i, j), 0, RAMPE.size() - 1)]
+		return t.darkened(0.42) if CHAUSSEE.contains(c) else t
+	if _teintes.is_empty():
+		for p in PINCEAUX:
+			_teintes[String(p[0])] = p[2]
+			_teintes[String(p[0]).to_lower()] = p[2]
+		for k in CHAUSSEE.length():
+			_teintes[CHAUSSEE[k]] = TEINTE_VOIE
+	var teinte: Color = _teintes.get(c, Color("#ff00ff"))
+	teinte = teinte.lightened(float(_palier_de(i, j)) * 0.07)
+	# La minuscule d'une famille est un AUTRE bâtiment : sans ça, `TTtt` et
+	# `TTTT` se ressemblent sur la carte.
+	if FAMILLES.contains(c.to_upper()) and c == c.to_lower():
+		teinte = teinte.darkened(0.22)
+	return teinte
+
+## ⚠ SEULEMENT LES CASES TOUCHÉES. Repeindre les 96 000 pixels au relâchement de
+## chaque coup de pinceau coûtait plus cher que de rebâtir les morceaux — pour
+## vingt cases changées. L'image est gardée, on y pose les cases modifiées et on
+## dit à la texture de se rafraîchir.
+func _toucher_carte(cases: Array) -> void:
+	if _carte_img == null or _carte_image == null:
+		_redessiner_carte()
+		return
+	for v in cases:
+		var c: Vector2i = v
+		if not _dans_grille(c.x, c.y): continue
+		var car := _lire("plan", c.x, c.y)
+		_carte_img.set_pixel(c.x, c.y,
+			Color("#16323f") if car == "." else _teinte_case(car, c.x, c.y))
+	_carte_image.update(_carte_img)
+	if _carte2d != null: _carte2d.queue_redraw()
+
 func _redessiner_carte() -> void:
 	var l := _large()
 	var h := _haut()
@@ -1587,22 +1731,9 @@ func _redessiner_carte() -> void:
 			# La chaussée est peinte plus sombre que son pinceau : au gris du
 			# pinceau, les rues et les bureaux se confondaient et la carte
 			# devenait un aplat laiteux où le plan de rues ne se voyait plus.
-			var teinte := Color.BLACK
-			if _carte_relief:
-				# LA CARTE DU RELIEF. Sur une ville plate elle n'aurait rien
-				# dit ; avec cinq paliers, c'est la seule vue où l'on voit d'un
-				# coup où sont les hauteurs — et la chaussée reste plus sombre,
-				# pour garder le plan de rues comme repère.
-				teinte = RAMPE[clampi(_palier_de(i, j), 0, RAMPE.size() - 1)]
-				if CHAUSSEE.contains(c): teinte = teinte.darkened(0.42)
-			else:
-				teinte = (TEINTE_VOIE if CHAUSSEE.contains(c) else _couleur(c)) \
-					.lightened(float(_palier_de(i, j)) * 0.07)
-				# La minuscule d'une famille est un AUTRE bâtiment : sans ça,
-				# `TTtt` et `TTTT` se ressemblent sur la carte.
-				if FAMILLES.contains(c.to_upper()) and c == c.to_lower():
-					teinte = teinte.darkened(0.22)
+			var teinte := _teinte_case(c, i, j)
 			img.set_pixel(i, j, teinte)
+	_carte_img = img
 	_carte_image = ImageTexture.create_from_image(img)
 	if _carte2d != null: _carte2d.queue_redraw()
 
