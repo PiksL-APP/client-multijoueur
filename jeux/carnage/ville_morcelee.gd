@@ -35,7 +35,20 @@ var identifiant := "pikstown"
 var rayon := 3                         ## morceaux bâtis autour du regard
 var par_image := 1
 
+## L'ORDRE DES PASSES est celui dans lequel on veut voir un morceau paraître :
+## le sol d'abord (sinon on voit à travers), la chaussée, les façades, puis ce
+## qui décore. Chaque passe tient dans une image.
+const PASSES := [
+	Quartiers.P_SOLS,
+	Quartiers.P_CHAUSSEES | Quartiers.P_BATEAUX,
+	Quartiers.P_BATIMENTS,
+	Quartiers.P_VERDURE | Quartiers.P_MOBILIER,
+]
+
 var _prete: Dictionary = {}
+var _chantier := Vector2i(999999, 999999)   ## le morceau en cours de montage
+var _chantier_noeud: Node3D = null
+var _chantier_passe := 0
 var _morceaux: Dictionary = {}         ## Vector2i -> Node3D
 var _file: Array[Vector2i] = []
 var _centre := Vector2i(999999, 999999)
@@ -55,6 +68,8 @@ func regler(f: Dictionary, id: String = "pikstown", r: int = 3) -> void:
 		n.queue_free()
 	_morceaux.clear()
 	_file.clear()
+	_chantier_noeud = null
+	_chantier_passe = 0
 	_centre = Vector2i(999999, 999999)
 	var org: Vector2 = fiche.get("origine", Vector2.ZERO)
 	transform = Transform3D(Basis(Vector3.UP, deg_to_rad(float(fiche.get("angle", 0.0)))),
@@ -79,6 +94,11 @@ func _revoir() -> void:
 	for cle in _morceaux.keys():
 		var d: Vector2i = cle
 		if maxi(absi(d.x - _centre.x), absi(d.y - _centre.y)) > derniers:
+			# ⚠ Ne pas jeter le morceau qu'on est en train de monter : le
+			# chantier garderait un nœud libéré et les passes suivantes
+			# tomberaient dans le vide.
+			if _chantier_noeud != null and cle == _chantier:
+				_chantier_noeud = null
 			(_morceaux[cle] as Node3D).queue_free()
 			_morceaux.erase(cle)
 	_file.clear()
@@ -96,12 +116,34 @@ func _revoir() -> void:
 	_file.sort_custom(func(a: Vector2i, b: Vector2i):
 		return (a - ici).length_squared() < (b - ici).length_squared())
 
+## Une PASSE par image, pas un morceau. `par_image` compte maintenant des
+## passes : à 1, un morceau paraît en quatre images sans jamais en figer une.
 func _process(_delta: float) -> void:
 	var faits := 0
-	while faits < par_image and not _file.is_empty():
-		_batir(_file.pop_front())
+	while faits < par_image:
+		if _chantier_noeud == null:
+			if _file.is_empty(): return
+			var c: Vector2i = _file.pop_front()
+			if _morceaux.has(c): continue
+			_chantier = c
+			_chantier_passe = 0
+			_chantier_noeud = Node3D.new()
+			_chantier_noeud.name = "%s_%d_%d" % [identifiant, c.x, c.y]
+			add_child(_chantier_noeud)
+			# ⚠ Inscrit TOUT DE SUITE dans la table, même à peine commencé :
+			# sinon `_revoir` le remet dans la file à chaque pas du joueur et
+			# le morceau recommence sans jamais finir.
+			_morceaux[c] = _chantier_noeud
+		var zone := Rect2i(_chantier.x * COTE, _chantier.y * COTE, COTE, COTE)
+		Quartiers.batir_fiche(fiche, identifiant, zone, _prete,
+			PASSES[_chantier_passe], _chantier_noeud)
+		_chantier_passe += 1
 		faits += 1
+		if _chantier_passe >= PASSES.size():
+			_chantier_noeud = null
 
+## Le montage EN UNE FOIS, pour l'éditeur et le banc : au relâchement d'un coup
+## de pinceau, on veut le morceau rebâti tout de suite, pas dans quatre images.
 func _batir(c: Vector2i) -> void:
 	if _morceaux.has(c): return
 	var zone := Rect2i(c.x * COTE, c.y * COTE, COTE, COTE)
@@ -130,6 +172,8 @@ func refaire(cases: Array) -> void:
 				a_refaire[m] = true
 	for cle in a_refaire.keys():
 		if not _morceaux.has(cle): continue
+		if _chantier_noeud != null and cle == _chantier:
+			_chantier_noeud = null
 		(_morceaux[cle] as Node3D).queue_free()
 		_morceaux.erase(cle)
 		_batir(cle)

@@ -1297,6 +1297,11 @@ func _interface() -> void:
 	defilement.add_child(boite)
 
 	boite.add_child(UI.titre("EDITEUR", 16))
+	# ⚠ QUELLE VERSION REGARDE-T-ON ? `sortie/` est un artefact versionné servi
+	# tel quel : on peut très bien avoir poussé une journée de travail et voir
+	# encore la page de la veille. Sans cette ligne, rien dans le jeu ne le
+	# disait — on comparait des captures d'écran.
+	boite.add_child(UI.texte(Version.etiquette(), 12, Palette.ENCRE_FAIBLE))
 	_choix_quartier = OptionButton.new()
 	_choix_quartier.clip_text = true
 	for id in Quartiers.CATALOGUE.keys():

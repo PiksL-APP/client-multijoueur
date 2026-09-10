@@ -332,13 +332,31 @@ static func _compter_depots(carte: CarteVille, dessin: Array) -> int:
 		if _car(dessin, c.x, c.y) == "X": n += 1
 	return n
 
+## LES PASSES. Un morceau se bâtit en quatre fois plutôt qu'en une : le coût est
+## le même, mais il se répartit sur quatre images au lieu d'en figer une seule.
+## Soixante-quatre millisecondes d'un coup, c'est quatre images sautées au
+## franchissement de chaque bord de morceau — et on en franchit un toutes les
+## trois secondes en voiture. Étalé, ça ne se voit plus : le sol paraît, puis la
+## chaussée, puis les façades, puis les arbres. C'est aussi l'ordre dans lequel
+## on veut qu'ils paraissent si on regarde.
+enum {
+	P_SOLS = 1, P_CHAUSSEES = 2, P_BATIMENTS = 4, P_VERDURE = 8,
+	P_MOBILIER = 16, P_BATEAUX = 32,
+}
+const P_TOUT := 63
+
 static func batir_fiche(fiche: Dictionary, id: String = "atelier",
-		zone: Rect2i = Rect2i(), prete: Dictionary = {}) -> Node3D:
-	var racine := Node3D.new()
-	racine.name = "Quartier_" + id
-	var org: Vector2 = fiche.get("origine", Vector2.ZERO)
-	racine.transform = Transform3D(Basis(Vector3.UP, deg_to_rad(float(fiche.get("angle", 0.0)))),
-		Vector3(org.x * CASE, 0, org.y * CASE))
+		zone: Rect2i = Rect2i(), prete: Dictionary = {}, passes: int = P_TOUT,
+		racine: Node3D = null) -> Node3D:
+	# ⚠ `racine` non nulle = on CONTINUE un morceau commencé. Sans ce paramètre,
+	# chaque passe fabriquerait son propre nœud et le morceau sortirait en
+	# quatre exemplaires superposés.
+	if racine == null:
+		racine = Node3D.new()
+		racine.name = "Quartier_" + id
+		var org: Vector2 = fiche.get("origine", Vector2.ZERO)
+		racine.transform = Transform3D(Basis(Vector3.UP, deg_to_rad(float(fiche.get("angle", 0.0)))),
+			Vector3(org.x * CASE, 0, org.y * CASE))
 	var carte: CarteVille = prete.get("carte", null) if prete.has("carte") else carte_de(fiche)
 	var listes: Array = prete.get("batiments", [])
 	var seaux: Dictionary = prete.get("seaux", {})
@@ -346,12 +364,12 @@ static func batir_fiche(fiche: Dictionary, id: String = "atelier",
 	var alea := RandomNumberGenerator.new()
 	alea.seed = int(fiche.get("graine", 1))
 
-	_poser_sols(racine, carte, dessin, fiche, zone)
-	_poser_chaussees(racine, carte, zone)
-	_poser_batiments(racine, carte, dessin, fiche, alea, zone, listes, seaux)
-	_poser_verdure(racine, carte, dessin, alea, zone)
-	_poser_mobilier(racine, carte, dessin, alea, zone)
-	_poser_bateaux(racine, dessin, alea, zone)
+	if passes & P_SOLS: _poser_sols(racine, carte, dessin, fiche, zone)
+	if passes & P_CHAUSSEES: _poser_chaussees(racine, carte, zone)
+	if passes & P_BATIMENTS: _poser_batiments(racine, carte, dessin, fiche, alea, zone, listes, seaux)
+	if passes & P_VERDURE: _poser_verdure(racine, carte, dessin, alea, zone)
+	if passes & P_MOBILIER: _poser_mobilier(racine, carte, dessin, alea, zone)
+	if passes & P_BATEAUX: _poser_bateaux(racine, dessin, alea, zone)
 	return racine
 
 ## Une zone de taille nulle vaut « toute la grille ».
