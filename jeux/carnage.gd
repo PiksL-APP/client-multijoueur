@@ -209,12 +209,9 @@ var _planque_en_cours := -1        ## la planque dans laquelle on se tient
 ## montrait. Les huit appartements de `Interieurs` existaient depuis longtemps
 ## et ne se voyaient qu'au banc photo — c'est là qu'ils entrent dans le jeu.
 ##
-## ⚠ L'INTÉRIEUR EST BÂTI LOIN SOUS LA VILLE, pas à sa place. Cacher la ville
-## demanderait de la ranger sous un nœud à elle, c'est-à-dire de reprendre trois
-## cents `monde().add_child` dans le fichier le plus chargé du jeu, pour un gain
-## nul : la caméra regarde vers le BAS, donc ce qui est au-dessus d'elle n'est
-## jamais dans le cadre. Six cents unités suffisent, la brume fait le reste.
-const SOUS_SOL := Vector3(0.0, -600.0, 0.0)
+## ⚠ L'INTÉRIEUR EST BÂTI LOIN SOUS LA VILLE (`Interieurs.SOUS_SOL`), pas à sa
+## place — et la constante vit là-bas pour que le banc de photo cadre au même
+## endroit que le jeu.
 ## En tuiles. Une tuile fait deux mètres : on ouvre son coffre à un mètre
 ## quatre-vingts, et la porte à un mètre quatre-vingts aussi.
 const PORTEE_COFFRE := 0.9
@@ -1278,7 +1275,7 @@ func _entrer_chez_soi(planque: int) -> void:
 	# appui sur F, et la porte devient une porte à tambour.
 	_dedans_p = Interieurs.degager(_dedans, _dedans_p)
 	_dedans_noeud = Interieurs.batir(_dedans)
-	_dedans_noeud.position = SOUS_SOL
+	_dedans_noeud.position = Interieurs.SOUS_SOL
 	# ⚠ SANS CECI ON ENTRE CHEZ SOI ET ON REGARDE UN MUR. Un appartement bâti
 	# tel quel est une boîte fermée ; la caméra du jeu est fixe et regarde
 	# depuis le sud, donc les façades sud et est sont entre l'œil et la pièce.
@@ -2481,7 +2478,7 @@ func _placer_le_joueur(delta: float) -> void:
 			# ⚠ Le pantin est taillé pour la VILLE ; un intérieur est à
 			# l'échelle du mètre. Posé tel quel, il dépassait le plafond — la
 			# première photo montrait un géant dans sa cuisine.
-			Interieurs.poser_pantin(_corps_pied, _dedans_p, "joueur", SOUS_SOL)
+			Interieurs.poser_pantin(_corps_pied, _dedans_p, "joueur", Interieurs.SOUS_SOL)
 		else:
 			_corps_pied.scale = Vector3.ONE
 			_corps_pied.position = Decor.vers3d(_position, 0.0)
@@ -2693,19 +2690,19 @@ func _regler_jauge(porteur: Node3D, part: float) -> void:
 ## mélanger tuiles et pixels de jeu — elle ne se voit pas, elle donne juste un
 ## personnage dix fois trop loin.
 func _dedans3d(p: Vector2, hauteur: float = 0.0) -> Vector3:
-	return SOUS_SOL + Vector3(p.x * Interieurs.ECHELLE, hauteur, p.y * Interieurs.ECHELLE)
+	return Interieurs.SOUS_SOL + Vector3(p.x * Interieurs.ECHELLE, hauteur, p.y * Interieurs.ECHELLE)
 
 func _placer_camera(delta: float) -> void:
 	if _camera == null:
 		return
 	if _dedans != "":
-		# Chez soi, la caméra ne suit pas : elle cadre l'appartement entier,
-		# comme la vitrine. Un six-mètres-sur-huit ne demande pas de suivi, et
-		# un plan qui bouge dans une pièce donne le mal de mer.
-		var m: Dictionary = Interieurs.murs(_dedans)
-		var centre := Vector2(float(m["large"]), float(m["haut"])) * 0.5
-		var recul: float = maxf(float(m["large"]), float(m["haut"])) * Interieurs.ECHELLE * 1.25
-		var vu := _dedans3d(centre) + Vector3(0.0,
+		# Chez soi, la caméra ne suit pas : elle cadre l'appartement entier
+		# (`Interieurs.cadre`, la MÊME que le banc de photo).
+		var ecran := Vector2(get_viewport().get_visible_rect().size)
+		var c: Dictionary = Interieurs.cadre(_dedans, ecran.x / maxf(ecran.y, 1.0),
+			_camera.fov, INCLINAISON)
+		var recul: float = c["recul"]
+		var vu: Vector3 = (c["centre"] as Vector3) + Vector3(0.0,
 			sin(deg_to_rad(INCLINAISON)) * recul, cos(deg_to_rad(INCLINAISON)) * recul)
 		_camera.position = _camera.position.lerp(vu, clamp(delta * 7.0, 0, 1))
 		return

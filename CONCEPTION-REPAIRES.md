@@ -409,7 +409,48 @@ que les vitrines étaient lisibles et que personne n'avait vu le problème.
 `Interieurs.degager_la_vue()` est maintenant la SEULE implémentation, appelée
 par le jeu et par le banc : la photo montre ce qu'on verra.
 
-La caméra ne suit pas : elle cadre l'appartement entier, comme la vitrine. Un
+## Le banc du repaire EN JEU
+
+```
+./outils/chez_soi.sh penthouse
+```
+
+`vitrine.sh` photographie un intérieur sous des lumières de studio, posé à
+l'origine, cadré sur son contenu : c'est ce qu'il faut pour juger une
+décoration, et ça ne dit **rien** de ce que le joueur verra. Dans le jeu, le
+même appartement est bâti six cents unités sous la ville, éclairé par l'heure
+bleue de Carnage, et cadré par une caméra fixe à septante-deux degrés — trois
+choses qui peuvent chacune le rendre illisible.
+
+`outils/chez_soi.sh` reprend **les mêmes fonctions que le jeu** — `SOUS_SOL`,
+`cadre()`, `degager_la_vue()`, `poser_pantin()`, `MatieresCarnage.ambiance()` —
+pour que l'image ne puisse pas mentir par construction. C'est exactement le
+piège de la vitrine : elle escamotait les deux façades de devant dans son coin,
+donc le défaut « on entre chez soi et on regarde un mur » ne pouvait pas s'y
+voir.
+
+### Le cadrage se calcule, il ne se devine pas
+
+La caméra ne suit pas le joueur chez lui : elle cadre l'appartement entier. Le
+recul, lui, a demandé trois essais :
+
+1. « le plus grand côté fois 1,25 » — le studio flottait au milieu d'un grand
+   cadre noir, et un appartement large aurait débordé sur un écran étroit ;
+2. la taille projetée à plat — l'appartement se retrouvait rogné de tous les
+   côtés, parce que le bord du plan le plus **proche** de la caméra n'est pas à
+   la distance du centre : il est trois mètres plus près, donc il grossit
+   d'autant ;
+3. la borne sur les **huit coins** de la boîte, en perspective, comme le banc de
+   vitrine le fait depuis toujours. C'est le seul calcul qui ne se trompe
+   jamais, et il ne coûte que huit tours de boucle.
+
+Deux détails qui comptent : `Camera3D.fov` est le champ **vertical** (Godot
+garde la hauteur), donc l'axe horizontal s'en déduit par la proportion RÉELLE de
+la fenêtre — un joueur en fenêtre haute ne doit pas voir moins ; et le plan n'est
+pas centré sur son sol, puisque les murs ne montent que du côté opposé à la
+caméra. On relève donc le point visé d'une demi-hauteur de mur projetée.
+
+ Un
 six-mètres-sur-huit ne demande pas de suivi, et un plan qui bouge dans une pièce
 donne le mal de mer.
 

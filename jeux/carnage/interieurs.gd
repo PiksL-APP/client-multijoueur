@@ -100,6 +100,71 @@ static func _cumuler(noeud: Node, t: Transform3D, boite: Array) -> void:
 	for enfant in noeud.get_children():
 		_cumuler(enfant, t2, boite)
 
+# ------------------------------------------------------------ où et comment on le regarde
+
+## OÙ L'ON BÂTIT UN INTÉRIEUR DANS LE MONDE DU JEU : loin SOUS la ville.
+## Cacher la ville demanderait de la ranger sous un nœud à elle — trois cents
+## `monde().add_child` à reprendre dans le fichier le plus chargé du jeu —
+## pour un gain nul : la caméra regarde vers le BAS, donc ce qui est au-dessus
+## d'elle n'est jamais dans le cadre.
+## ⚠ La constante vit ICI et pas dans `carnage.gd` : le banc de photo doit
+## cadrer au même endroit que le jeu, sinon il ne prouve rien.
+const SOUS_SOL := Vector3(0.0, -600.0, 0.0)
+
+## COMMENT ON LE REGARDE : le centre du plan et le recul qu'il faut. La caméra
+## ne SUIT PAS le joueur chez lui — elle cadre l'appartement entier, comme la
+## vitrine. Un six-mètres-sur-huit ne demande pas de suivi, et un plan qui bouge
+## dans une pièce donne le mal de mer.
+##
+## ⚠ LE RECUL SE CALCULE, il ne se devine pas. La première version prenait
+## « le plus grand côté fois 1,25 » : le studio flottait au milieu d'un grand
+## cadre noir, et un appartement large aurait débordé sur un écran étroit. Ici
+## on projette vraiment — la profondeur du plan est écrasée par l'inclinaison
+## de la caméra (`sin`), la hauteur des murs, elle, remonte à l'écran (`cos`) —
+## et on prend le recul le plus contraignant des deux axes, avec la PROPORTION
+## RÉELLE de la fenêtre. Un joueur en fenêtre haute ne doit pas voir moins.
+const MARGE_CADRE := 1.10
+
+static func cadre(id: String, proportion: float = 16.0 / 9.0,
+		champ: float = 54.0, inclinaison: float = 72.0) -> Dictionary:
+	var m := murs(id)
+	var large := float(m["large"]) * ECHELLE
+	var profond := float(m["haut"]) * ECHELLE
+	var haut := HAUT * ECHELLE
+	var a := deg_to_rad(inclinaison)
+	# Ce que l'appartement occupe à l'écran, en unités, une fois incliné.
+	var demi_h := large * 0.5
+	# `Camera3D.fov` est le champ VERTICAL (Godot garde la hauteur) : l'axe
+	# horizontal s'en déduit par la proportion, jamais l'inverse.
+	var tv := tan(deg_to_rad(champ) * 0.5)
+	var th: float = tv * maxf(proportion, 0.2)
+	# ⚠ ET LA PERSPECTIVE. Calculer le recul sur la taille projetée « à plat »
+	# rognait l'appartement de tous les côtés : le bord du plan le plus PROCHE
+	# de la caméra n'est pas à la distance du centre, il est trois mètres plus
+	# près, donc il grossit d'autant. On borne donc sur les HUIT COINS de la
+	# boîte, comme le banc de vitrine le fait depuis toujours — c'est le seul
+	# calcul qui ne se trompe jamais, et il ne coûte que huit tours de boucle.
+	var vers_cam := Vector3(0.0, sin(a), cos(a))       ## l'axe caméra->arrière
+	var droite := Vector3(1.0, 0.0, 0.0)
+	var vertical := Vector3(0.0, cos(a), -sin(a))
+	var recul := 0.0
+	for cx in [-demi_h, demi_h]:
+		for cy in [-haut * cos(a) * 0.5, haut - haut * cos(a) * 0.5]:
+			for cz in [-profond * 0.5, profond * 0.5]:
+				var q := Vector3(cx, cy, cz)
+				recul = maxf(recul, vers_cam.dot(q) + absf(droite.dot(q)) / th)
+				recul = maxf(recul, vers_cam.dot(q) + absf(vertical.dot(q)) / tv)
+	recul *= MARGE_CADRE
+	# ⚠ LE PLAN N'EST PAS CENTRÉ SUR SON SOL. Les murs ne montent que du côté
+	# OPPOSÉ à la caméra (ceux de devant sont escamotés) : à l'écran, la pièce
+	# déborde vers le haut et pas vers le bas. Viser le milieu du sol coupait
+	# donc la cloison du fond et laissait une bande noire en bas. On relève le
+	# point visé d'une demi-hauteur de mur, projetée sur l'axe vertical de
+	# l'écran — c'est exactement de combien elle dépasse.
+	var vers_le_haut := Vector3(0.0, cos(a), -sin(a)) * (haut * cos(a) * 0.5)
+	return {"centre": SOUS_SOL + Vector3(large * 0.5, 0.0, profond * 0.5) + vers_le_haut,
+		"recul": recul}
+
 # ------------------------------------------------------------ voir dedans
 
 ## ESCAMOTER LES FAÇADES QUI SONT ENTRE LA CAMÉRA ET LA PIÈCE.
