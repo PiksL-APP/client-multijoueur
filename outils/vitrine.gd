@@ -31,11 +31,6 @@ func _ready() -> void:
 		# recouvrait justement les pieds et la tête.
 		var pantin := FormesCarnage.pieton(Color("#ff2ea6"), false, "", false, "")
 		Interieurs.poser_pantin(pantin, ou, "essai")
-		# La jauge de vie suit le joueur en jeu ; sur une photo d'intérieur
-		# c'est une barre verte en travers de la cuisine.
-		for e in pantin.get_children():
-			if String((e as Node).name) == "Vie":
-				(e as Node3D).visible = false
 		add_child(pantin)
 		var c: Dictionary = Interieurs.coffre(id)
 		if not c.is_empty():

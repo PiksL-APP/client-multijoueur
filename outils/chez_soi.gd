@@ -39,7 +39,10 @@ func _ready() -> void:
 	add_child(appart)
 
 	var ou := Interieurs.degager(id, Interieurs.entree(id))
-	var pantin := FormesCarnage.pieton(Color("#ff2ea6"), false, "", false, "")
+	# ⚠ LE MÊME pantin que le jeu, halo et pseudo compris. Le banc en posait un
+	# nu : il ne montrait donc pas l'anneau de couleur ni l'étiquette, c'est-à-
+	# dire précisément ce qui occupe de la place à l'écran chez soi.
+	var pantin := FormesCarnage.pieton(Palette.couleur_joueur(0), false, "Piks-L", true, "")
 	Interieurs.poser_pantin(pantin, ou, "banc", Interieurs.SOUS_SOL)
 	add_child(pantin)
 

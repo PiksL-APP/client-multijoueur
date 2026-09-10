@@ -268,6 +268,14 @@ static func poser_pantin(pantin: Node3D, p: Vector2, cle: String = "",
 		origine: Vector3 = Vector3.ZERO) -> void:
 	pantin.scale = Vector3.ONE * echelle_du_pantin(pantin, cle)
 	pantin.position = origine + Vector3(p.x * ECHELLE, 0.0, p.y * ECHELLE)
+	# ⚠ ET ON ÉTEINT LA JAUGE DE VIE. Dehors, elle fait un mètre soixante
+	# au-dessus d'un personnage, sur une rue de vingt mètres : on la remarque à
+	# peine. Chez soi, la caméra cadre huit mètres de large — la même barre
+	# verte prend le sixième de l'écran, en travers de la cuisine. Et elle n'a
+	# rien à dire : chez soi on ne se fait pas tirer dessus.
+	var jauge := pantin.get_node_or_null("Vie") as Node3D
+	if jauge != null:
+		jauge.visible = false
 
 # ------------------------------------------------------------ les collisions
 

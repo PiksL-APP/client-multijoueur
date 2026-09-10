@@ -429,6 +429,14 @@ piège de la vitrine : elle escamotait les deux façades de devant dans son coin
 donc le défaut « on entre chez soi et on regarde un mur » ne pouvait pas s'y
 voir.
 
+Premier défaut trouvé par lui : **la jauge de vie**. Dehors, elle fait un mètre
+soixante au-dessus d'un personnage, sur une rue de vingt mètres — on la remarque
+à peine. Chez soi, la caméra cadre huit mètres de large : la même barre verte
+prend le sixième de l'écran, en travers de la cuisine. Et elle n'a rien à dire,
+puisque chez soi on ne se fait pas tirer dessus. `poser_pantin()` l'éteint, donc
+le jeu et les deux bancs l'éteignent ensemble. Restent l'anneau de couleur et le
+pseudo, qui suffisent à se repérer.
+
 ### Le cadrage se calcule, il ne se devine pas
 
 La caméra ne suit pas le joueur chez lui : elle cadre l'appartement entier. Le
