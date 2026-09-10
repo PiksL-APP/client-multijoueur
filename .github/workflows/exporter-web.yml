@@ -1,0 +1,145 @@
+name: Export web
+
+# L'EXPORT SE FAIT ICI, PLUS SUR UN POSTE.
+#
+# ⚠ POURQUOI CE FICHIER EXISTE. `sortie/` est l'export web, il est VERSIONNÉ, et
+# c'est lui que Vercel sert tel quel. Pousser les sources ne met donc rien à
+# jour en ligne : il faut avoir relancé `outils/exporter.sh` avant de committer.
+# Ça a raté une fois pour de bon — une journée entière de travail poussée, la
+# page en ligne toujours à la veille, et rien qui le disait. Et ça ne pouvait
+# rater que comme ça : l'export dépend d'un Godot installé sur UNE machine, avec
+# les bons modèles d'export, et de la mémoire de celui qui pousse.
+#
+# Ici, la machine est jetable et la mémoire est écrite. À chaque push, le runner
+# installe Godot 4.5, grave la version, exporte, recopie le kit et recommite
+# `sortie/`. Il n'y a plus de « poussé mais pas exporté » possible.
+#
+# CE QU'IL FAUT UNE FOIS, dans Settings → Secrets and variables → Actions :
+#   CONFIG_CFG   le contenu de config.cfg (les clés Supabase). Il est hors dépôt
+#                — c'est la règle Piks-l — donc le runner ne l'a pas autrement,
+#                et sans lui le jeu part en ligne sans réseau.
+
+on:
+  push:
+    branches: [main, master]
+    # ⚠ NE PAS SE DÉCLENCHER SUR SON PROPRE COMMIT. Le job recommite `sortie/` ;
+    # sans cette exclusion, chaque export en déclencherait un autre, sans fin.
+    # Le `[skip ci]` du message de commit est la deuxième ceinture.
+    paths-ignore:
+      - 'sortie/**'
+      - 'claude/**'
+      - '**.md'
+  workflow_dispatch:
+
+concurrency:
+  group: export-web
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  GODOT: "4.5"
+
+jobs:
+  exporter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Les modèles d'export pèsent 800 Mo : sans le cache, on les retélécharge
+      # à chaque push et le job passe de trois minutes à dix.
+      - name: Cache Godot
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT }}-stable
+
+      - name: Installer Godot ${{ env.GODOT }}
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT}-stable"
+          mkdir -p ~/godot
+          curl -fsSL -o /tmp/godot.zip "$base/Godot_v${GODOT}-stable_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d ~/godot
+          mv ~/godot/Godot_v${GODOT}-stable_linux.x86_64 ~/godot/godot
+          chmod +x ~/godot/godot
+          # ⚠ Les modèles doivent être ceux de la MÊME version, et à l'endroit
+          # exact où le moteur les cherche : `<version>.stable/`, pas ailleurs.
+          curl -fsSL -o /tmp/tpl.tpz "$base/Godot_v${GODOT}-stable_export_templates.tpz"
+          mkdir -p ~/.local/share/godot/export_templates
+          unzip -q /tmp/tpl.tpz -d /tmp/tpl
+          mv /tmp/tpl/templates ~/.local/share/godot/export_templates/${GODOT}.stable
+
+      - name: Les clés d'exécution
+        env:
+          CONFIG_CFG: ${{ secrets.CONFIG_CFG }}
+        run: |
+          if [ -z "${CONFIG_CFG:-}" ]; then
+            echo "::error::secret CONFIG_CFG absent — le jeu partirait en ligne sans réseau." >&2
+            exit 1
+          fi
+          printf '%s\n' "$CONFIG_CFG" > config.cfg
+
+      # ⚠ LA VERSION SE GRAVE AVANT L'EXPORT : elle doit entrer dans le paquet.
+      # C'est elle que l'éditeur affiche sous son titre, et c'est ce qui permet
+      # de savoir, en regardant la page en ligne, quel commit on regarde.
+      - name: Graver la version
+        run: |
+          {
+            echo "class_name Version"
+            echo "extends RefCounted"
+            echo "## ÉCRIT PAR le workflow d'export — ne pas modifier à la main."
+            echo ""
+            echo "const COMMIT := \"$(git rev-parse --short HEAD)\""
+            echo "const DATE := \"$(date '+%d/%m/%Y %H:%M') UTC\""
+            echo ""
+            echo "static func etiquette() -> String:"
+            echo "	if COMMIT == \"sources\":"
+            echo "		return \"sources (non exporté)\""
+            echo "	return \"%s · %s\" % [COMMIT, DATE]"
+          } > commun/version.gd
+          cat commun/version.gd
+
+      - name: Vérifier le plan de la ville
+        run: |
+          export PATH="$HOME/godot:$PATH"
+          godot --headless --path . --import 2>&1 | tail -3
+          # `outils/verifier.gd` passe le dessin aux règles de `Quartiers.fautes`.
+          # Un plan fautif ne doit pas partir en ligne.
+          sortie="$(godot --headless --path . --script res://outils/verifier.gd 2>&1)"
+          echo "$sortie"
+          echo "$sortie" | grep -q "PLAN PROPRE" \
+            || { echo "::error::le plan a des fautes — export annulé." >&2; exit 1; }
+
+      - name: Exporter
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/godot:$PATH"
+          mkdir -p sortie
+          godot --headless --path . --export-release "Web" sortie/index.html
+          # LE KIT VA À CÔTÉ DE L'EXPORT, PAS DEDANS : il tient les menus dans
+          # le navigateur, mais il est exclu du paquet du moteur. Oublier cette
+          # copie, c'est une page qui charge sur du vide.
+          rm -rf sortie/kit
+          cp -r web/kit sortie/kit
+          touch sortie/.gdignore
+          rm -f sortie/*.import
+          ls -la sortie/
+
+      - name: Recommitter sortie/
+        run: |
+          set -euo pipefail
+          git config user.name "export-web"
+          git config user.email "export@piks-l.com"
+          git add -f sortie commun/version.gd
+          if git diff --cached --quiet; then
+            echo "rien à committer — l'export est identique au précédent."
+            exit 0
+          fi
+          git commit -m "Export web de $(git rev-parse --short HEAD) [skip ci]"
+          git push
