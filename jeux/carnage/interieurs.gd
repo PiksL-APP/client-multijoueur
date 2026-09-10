@@ -100,6 +100,36 @@ static func _cumuler(noeud: Node, t: Transform3D, boite: Array) -> void:
 	for enfant in noeud.get_children():
 		_cumuler(enfant, t2, boite)
 
+# ------------------------------------------------------------ voir dedans
+
+## ESCAMOTER LES FAÇADES QUI SONT ENTRE LA CAMÉRA ET LA PIÈCE.
+##
+## Un appartement bâti tel quel est une BOÎTE FERMÉE : vu de trois quarts, les
+## deux murs les plus proches de l'œil cachent tout le reste. Le banc de photo
+## le faisait depuis toujours dans son coin ; le jeu, lui, entrait chez soi et
+## regardait un mur. Une seule fonction, partagée, sinon l'un des deux le
+## refera un jour à sa façon.
+##
+## `vers` est la direction qui va de la pièce VERS la caméra, dans le plan.
+## Un mur porte un méta `dehors` qui dit vers où il donne sur le vide ; celui
+## qui donne du côté de l'œil est celui qu'on retire.
+static func degager_la_vue(racine: Node3D, vers: Vector2) -> void:
+	var plan := vers.normalized()
+	for n in racine.get_children():
+		if not (n is Node3D) or not (n as Node3D).has_meta("dehors"):
+			continue
+		var d: Vector2 = (n as Node3D).get_meta("dehors")
+		(n as Node3D).visible = d == Vector2.ZERO or d.dot(plan) <= 0.3
+	# Un poteau ne tient que par ses murs : les deux qu'il joint escamotés, il
+	# reste planté seul au milieu du vide.
+	for n in racine.get_children():
+		if not (n is Node3D) or not (n as Node3D).has_meta("aretes"):
+			continue
+		var reste := false
+		for mur in (n as Node3D).get_meta("aretes"):
+			reste = reste or (mur as Node3D).visible
+		(n as Node3D).visible = reste
+
 # ------------------------------------------------------------ les postes
 
 ## LES MEUBLES QUI SE MANIPULENT. On les retrouve dans la liste des meubles par

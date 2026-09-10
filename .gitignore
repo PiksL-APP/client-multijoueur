@@ -20,6 +20,19 @@ sortie/*.import
 # Ce que `device_bash` ne peut pas effacer : le pont du poste n'a pas le droit
 # de supprimer, on déplace ici et on vide à la main.
 _to_delete/
+_a_supprimer/
+
+# LE DOSSIER DE TRANSFERT. Il ne contient que du DÉRIVÉ : le paquet de
+# géométrie de l'Établi (`outils/paquet.py`), les empreintes, le catalogue
+# vidé. Tout se régénère en trois commandes, et rien ne doit voyager — c'est
+# par là qu'une archive de 226 Mo s'est retrouvée un jour dans l'historique.
+_transfert/
+
+# Ce que les sessions Claude déposent à côté du projet : captures, sauvegardes
+# `.avant`, scripts d'appoint. Utile sur le poste, sans intérêt dans le dépôt —
+# et c'est ce qui partait en push sans qu'on l'ait demandé.
+Claude outputs/
+*.avant
 
 # ⚠ AUCUNE ARCHIVE dans le dépôt. Un `_transfert_tree.zip` de 226 Mo, laissé
 # par un transfert de fichiers, s'est fait avaler par un `git add -A` : GitHub

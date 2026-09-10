@@ -111,21 +111,9 @@ func _ready() -> void:
 	cam.position = centre + dir * (recul * 1.03 + 0.4)
 	cam.look_at(centre)
 	# On escamote les façades qui nous tournent le dos : elles sont entre la
-	# caméra et la pièce, et une boîte fermée ne se valide pas.
-	var vers_cam := Vector2(dir.x, dir.z)
-	for n in appart.get_children():
-		if not n.has_meta("dehors"):
-			continue
-		var d: Vector2 = n.get_meta("dehors")
-		if d != Vector2.ZERO and d.dot(vers_cam) > 0.3:
-			(n as Node3D).visible = false
-	for n in appart.get_children():
-		if not n.has_meta("aretes"):
-			continue
-		var reste := false
-		for mur in n.get_meta("aretes"):
-			reste = reste or (mur as Node3D).visible
-		(n as Node3D).visible = reste
+	# caméra et la pièce, et une boîte fermée ne se valide pas. LA MÊME
+	# fonction que le jeu, pour que la photo montre ce qu'on verra.
+	Interieurs.degager_la_vue(appart, Vector2(dir.x, dir.z))
 	await get_tree().create_timer(1.2).timeout
 	await RenderingServer.frame_post_draw
 	var img := get_viewport().get_texture().get_image()

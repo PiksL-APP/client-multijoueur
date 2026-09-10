@@ -358,7 +358,7 @@ changer.
 |---|---|---|
 | le coffre | déposer, puis payer les travaux | **retirer** |
 | la garde-robe | changer de tenue | — |
-| la porte | ressortir | — |
+| la porte | ressortir (**au volant** si on a le garage) | — |
 
 **Retirer** manquait : le coffre était un puits, l'argent y entrait et n'en
 sortait plus, et on ne pouvait pas ressortir avec de quoi payer un hôpital. Il
@@ -378,6 +378,36 @@ posé (`Personnages.habiller`) : le rebâtir couperait sa démarche.
 quarante centimètres du paillasson : dans l'autre ordre on se changeait au lieu
 de sortir, et on ne pouvait plus quitter le studio. Le banc de marche signale
 maintenant tout poste à portée de la porte.
+
+### Le garage, et le catalogue qu'on lit enfin
+
+`_ranger_le_vehicule` gardait déjà la voiture qu'on ramène chez soi. Il manquait
+de la **ressortir** : se relever après une mort annonçait « votre véhicule vous
+attend » et il n'y avait rien devant la porte. Un message qui ment est pire
+qu'un garage qui n'existe pas. Maintenant, quand on possède le garage et qu'une
+voiture y dort, on ressort **au volant** — de chez soi comme après une mort — et
+la ligne du HUD le dit avant qu'on appuie : une voiture qui apparaît sous le
+joueur sans prévenir se lit comme un défaut. Elle porte son propre identifiant
+(`ID_VOITURE_GARAGE`) : deux voitures du même numéro, et l'une efface l'autre de
+la nappe chez les autres joueurs.
+
+Les huit appartements ont un **nom** et un **résumé** depuis le premier jour, et
+personne ne les avait jamais lus : on achetait « une planque » à un prix, sans
+savoir qu'on achetait Le Penthouse ou Le Taudis. En arrivant sur une planque
+libre, le résumé s'affiche deux secondes ; la ligne d'action porte le nom.
+
+⚠ Le prix reste celui de `PlanVille`, pas celui du catalogue : c'est lui qui est
+équilibré avec l'argent qu'on ramasse en ville, et afficher deux prix pour la
+même porte ne se comprendrait pas. Le prix du catalogue continue de servir à la
+vitrine et à l'éditeur web, qui ne connaissent pas `PlanVille`.
+
+⚠ **Sans escamoter deux murs, on entre chez soi et on regarde un mur.** Un
+appartement bâti tel quel est une boîte fermée, et la caméra du jeu regarde
+depuis le sud : les façades qui donnent de ce côté sont entre l'œil et la pièce.
+Le banc de photo les retirait depuis toujours — dans son coin, ce qui explique
+que les vitrines étaient lisibles et que personne n'avait vu le problème.
+`Interieurs.degager_la_vue()` est maintenant la SEULE implémentation, appelée
+par le jeu et par le banc : la photo montre ce qu'on verra.
 
 La caméra ne suit pas : elle cadre l'appartement entier, comme la vitrine. Un
 six-mètres-sur-huit ne demande pas de suivi, et un plan qui bouge dans une pièce
@@ -470,8 +500,8 @@ godot --headless -s outils/marche.gd
 - La boutique : aujourd'hui la planque s'achète au prix de `PlanVille`, et
   l'appartement suit le quartier. Une vraie boutique montrerait le catalogue,
   ses prix et ses résumés avant l'achat.
-- Le garage : `_ranger_le_vehicule` garde déjà la voiture qu'on ramène chez soi.
-  Il reste à ressortir AU VOLANT quand on possède le garage — aujourd'hui on
-  ressort toujours à pied.
+- Une vraie boutique : aujourd'hui on lit le nom et le résumé de l'appartement
+  sur place, mais on ne les compare pas. Un écran de catalogue (les huit, leurs
+  prix, leurs quartiers) rendrait le choix d'une planque intéressant.
 - Vérifier le tout en partie réelle : le branchement compile et les intérieurs
   sont photographiés à l'angle du jeu, mais aucune manche ne l'a encore joué.

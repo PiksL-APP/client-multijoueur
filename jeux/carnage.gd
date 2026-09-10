@@ -171,6 +171,10 @@ const MOTEURS_VEHICULE := {
 ## fait découvrir. Le nombre est haut pour ne jamais croiser un identifiant
 ## engendré pendant la manche.
 const ID_VOITURE_DEPART := 10000
+## Le véhicule qu'on ressort du garage. Un identifiant à lui, jamais celui du
+## véhicule de départ ni d'une dormante : deux voitures qui portent le même
+## numéro, et l'une efface l'autre de la nappe chez les autres joueurs.
+const ID_VOITURE_GARAGE := 11000
 
 var carte: PlanVille
 var ville: VilleVivante
@@ -1213,7 +1217,14 @@ func _surveiller_les_affaires(_delta: float) -> void:
 		var fiche := carte.planque_par_id(_position, planque)
 		var prix := int(fiche.get("prix", 0))
 		if _planque < 0:
-			_affaire = "F : acheter cette planque — $%d" % prix
+			# LE CATALOGUE ARRIVE ENFIN AU JOUEUR. Les huit appartements ont un
+			# nom et un résumé depuis le premier jour, et personne ne les avait
+			# jamais lus : on achetait « une planque » à un prix, sans savoir
+			# qu'on achetait Le Penthouse ou Le Taudis.
+			# ⚠ Le prix reste celui de `PlanVille`, pas celui du catalogue :
+			# c'est lui qui est équilibré avec l'argent qu'on ramasse en ville.
+			# Afficher deux prix pour la même porte ne se comprendrait pas.
+			_affaire = "F : acheter %s — $%d" % [_nom_du_logement(), prix]
 			if Commandes.affaire_declenchee():
 				_acheter_la_planque(planque, prix)
 		elif planque == _planque:
@@ -1242,6 +1253,10 @@ func _surveiller_les_affaires(_delta: float) -> void:
 			_planque_en_cours = planque
 			if planque == _planque:
 				_ranger_le_vehicule()
+			elif _planque < 0:
+				# Le résumé à l'arrivée, deux secondes : c'est la vitrine de
+				# l'agence. La ligne d'action, elle, n'a la place que du nom.
+				_dire_affaire(_resume_du_logement())
 	elif hopital >= 0:
 		if _vie < VIE_MAX:
 			_affaire = "F : se faire recoudre — $%d" % SOIN
@@ -1257,14 +1272,20 @@ func _surveiller_les_affaires(_delta: float) -> void:
 ## (`Interieurs.pour_quartier`) : même planque, même appartement chez tout le
 ## monde, sans qu'un octet passe par le réseau.
 func _entrer_chez_soi(planque: int) -> void:
-	var pate := PlanVille.pate_de(int(_position.x / PlanVille.PAS), int(_position.y / PlanVille.PAS))
-	_dedans = Interieurs.pour_quartier(carte.quartier_du_pate(pate))
+	_dedans = _logement_ici()
 	_dedans_p = Interieurs.entree(_dedans)
 	# Un pas vers l'intérieur : posé pile sur le seuil, on ressort au premier
 	# appui sur F, et la porte devient une porte à tambour.
 	_dedans_p = Interieurs.degager(_dedans, _dedans_p)
 	_dedans_noeud = Interieurs.batir(_dedans)
 	_dedans_noeud.position = SOUS_SOL
+	# ⚠ SANS CECI ON ENTRE CHEZ SOI ET ON REGARDE UN MUR. Un appartement bâti
+	# tel quel est une boîte fermée ; la caméra du jeu est fixe et regarde
+	# depuis le sud, donc les façades sud et est sont entre l'œil et la pièce.
+	# Le banc de photo escamotait ces deux murs depuis toujours, dans son coin —
+	# c'est pour ça que les vitrines étaient lisibles et que personne n'avait vu
+	# le problème.
+	Interieurs.degager_la_vue(_dedans_noeud, Vector2(0.0, 1.0))
 	monde().add_child(_dedans_noeud)
 	_pied = true
 	_vitesse = 0.0
@@ -1281,6 +1302,23 @@ func _sortir_de_chez_soi() -> void:
 	# le séjour, et c'est voulu — les autres joueurs voient quelqu'un d'immobile
 	# sur sa planque, ce qui est exactement ce qui se passe.
 	Sons.jouer("portail", 0.85, -8.0)
+	_sortir_du_garage(_position, _angle)
+
+## LE GARAGE. `_ranger_le_vehicule` gardait déjà ce qu'on ramène chez soi ; il
+## manquait de le RESSORTIR. Se relever après une mort annonçait « votre
+## véhicule vous attend » et il n'y avait rien devant la porte : un message qui
+## ment est pire qu'un garage qui n'existe pas.
+##
+## On ne pose pas une voiture dans le décor pour aller l'ouvrir ensuite : on met
+## le joueur AU VOLANT directement. Le garage est une amélioration payée, pas
+## une chasse au trésor devant sa porte.
+func _sortir_du_garage(ou: Vector2, angle: float) -> bool:
+	if not bool(_ameliorations["garage"]) or _garage_perso < 0 or _dedans != "":
+		return false
+	_prendre_le_volant(ID_VOITURE_GARAGE + _place, VilleVivante.CIVILE,
+		carte.degager(ou, RAYON_VOITURE)[0], angle, PV_VOITURE, _garage_perso)
+	_dire_affaire("sorti du garage")
+	return true
 
 ## La marche à l'intérieur. Les murs et les meubles viennent de
 ## `Interieurs.degager` — donc du DESSIN, le même que celui qu'on regarde.
@@ -1336,7 +1374,11 @@ func _affaires_dedans() -> void:
 		# à quarante centimètres du paillasson : dans l'autre ordre, on se
 		# changeait au lieu de sortir et on ne pouvait plus quitter le studio.
 		# On se change d'un pas en arrière.
-		_affaire = "F : ressortir"
+		# Le HUD dit ce qui va se passer : sortir au volant quand on a payé le
+		# garage n'a rien d'évident, et une voiture qui apparaît sous soi sans
+		# prévenir se lit comme un défaut.
+		var au_volant: bool = bool(_ameliorations["garage"]) and _garage_perso >= 0
+		_affaire = "F : ressortir au volant" if au_volant else "F : ressortir"
 		if Commandes.affaire_declenchee():
 			_sortir_de_chez_soi()
 	elif pres_de_la_penderie:
@@ -1388,6 +1430,19 @@ func _habiller(porteur: Node3D, cle: String) -> void:
 	var silhouette := porteur.get_node_or_null("Silhouette") as Node3D
 	if silhouette != null:
 		Personnages.habiller(silhouette, cle)
+
+## L'appartement qu'on trouve ICI : c'est le QUARTIER qui décide
+## (`Interieurs.pour_quartier`), donc la réponse est la même chez tout le monde
+## et rien ne circule sur le réseau.
+func _logement_ici() -> String:
+	var pate := PlanVille.pate_de(int(_position.x / PlanVille.PAS), int(_position.y / PlanVille.PAS))
+	return Interieurs.pour_quartier(carte.quartier_du_pate(pate))
+
+func _nom_du_logement() -> String:
+	return String(Interieurs.CATALOGUE[_logement_ici()]["nom"])
+
+func _resume_du_logement() -> String:
+	return String(Interieurs.CATALOGUE[_logement_ici()]["resume"])
 
 func _acheter_la_planque(id: int, prix: int) -> void:
 	if _argent < prix:
@@ -2053,9 +2108,10 @@ func _relever() -> void:
 		_position = carte.degager(Vector2(reveil["p"]) + Vector2(0.0, PlanVille.PAS * 0.9), RAYON_A_PIED)[0]
 	else:
 		_position = carte.point_de_rue(_rng, _position, 300.0, 700.0)
-	# Le véhicule rangé au garage nous attend devant la porte.
-	if _garage_perso >= 0 and _planque >= 0 and not reveil.is_empty():
-		_dire_affaire("votre véhicule vous attend")
+	# Le véhicule rangé au garage nous attend devant la porte — et cette fois
+	# on y monte vraiment.
+	if _planque >= 0 and not reveil.is_empty():
+		_sortir_du_garage(_position, _angle)
 	Sons.jouer("depart", 0.8, -8.0)
 
 # ------------------------------------------------------- effets
