@@ -29,13 +29,27 @@ func _ready() -> void:
 		if a.begins_with("--interieur="): id = a.trim_prefix("--interieur=")
 		if a.begins_with("--sortie="): _sortie = a.trim_prefix("--sortie=")
 
+	# ⚠ L'HEURE SE FORCE, sinon le banc n'est pas reproductible. Le jour tombe
+	# tout seul par cycles de quinze minutes (`MatieresCarnage.nuit()`) : deux
+	# photos prises à trois heures d'intervalle sortaient l'une de nuit, l'autre
+	# en plein jour, et on croyait à une régression du rendu. `--nuit=0` donne
+	# le plein jour, 1 la pleine nuit ; 0,85 est l'heure bleue de Carnage.
+	var nuit := 0.85
+	for a in OS.get_cmdline_args():
+		if a.begins_with("--nuit="): nuit = clampf(float(a.trim_prefix("--nuit=")), 0.0, 1.0)
+	MatieresCarnage.nuit_forcee = nuit
+
 	# L'ambiance DU JEU, pas des lumières de studio : c'est elle qu'on éprouve.
-	for n in MatieresCarnage.ambiance():
+	var amb := MatieresCarnage.ambiance()
+	for n in amb:
 		add_child(n)
+	MatieresCarnage.regler_heure(amb[0], amb[1], amb[2], nuit)
+	MatieresCarnage.regler_nuit(nuit)
 
 	var appart := Interieurs.batir(id)
 	appart.position = Interieurs.SOUS_SOL
 	Interieurs.degager_la_vue(appart, Vector2(0.0, 1.0))
+	Interieurs.poser_marques(appart, id)
 	add_child(appart)
 
 	var ou := Interieurs.degager(id, Interieurs.entree(id))
@@ -55,7 +69,7 @@ func _ready() -> void:
 	cam.position = (c["centre"] as Vector3) + Vector3(0.0,
 		sin(deg_to_rad(INCLINAISON)) * recul, cos(deg_to_rad(INCLINAISON)) * recul)
 
-	print("[chez soi] %s — recul %.1f, caméra en %s" % [id, recul, cam.position])
+	print("[chez soi] %s — nuit %.2f, recul %.1f" % [id, nuit, recul])
 	get_tree().process_frame.connect(_photographier)
 
 func _photographier() -> void:

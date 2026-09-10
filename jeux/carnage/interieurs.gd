@@ -165,6 +165,84 @@ static func cadre(id: String, proportion: float = 16.0 / 9.0,
 	return {"centre": SOUS_SOL + Vector3(large * 0.5, 0.0, profond * 0.5) + vers_le_haut,
 		"recul": recul}
 
+# ------------------------------------------------------------ les marques au sol
+
+## LES MARQUES AU SOL. C'est le geste de GTA 2 : un disque de couleur par
+## chose à faire, et on sait où aller sans lire une ligne de texte. Sans elles,
+## un joueur qui entre chez lui pour la première fois voit un appartement meublé
+## et rien qui dise que le coffre est un coffre — le portemanteau, le placard et
+## le coffre ont exactement la même silhouette vus de dessus.
+##
+## ⚠ Elles ne sont PAS posées par `batir()`. Le banc de vitrine juge la
+## décoration : y ajouter trois disques fluo empêcherait de voir si un canapé
+## traverse un mur. Le jeu et `outils/chez_soi.gd` les posent, la vitrine non —
+## et c'est la seule différence assumée entre les deux bancs.
+const MARQUES := {
+	"coffre": Color("#fab219"),          ## l'argent — Palette.AVERTISSEMENT
+	"garde-robe": Color("#3987e5"),      ## la tenue — Palette.SERIE
+	"porte": Color("#0ca30c"),           ## la sortie — Palette.BON
+}
+## En tuiles : 44 cm. Essayé à 68 — trois flaques de couleur au milieu du
+## salon, on ne voyait plus les meubles qu'elles désignent.
+const RAYON_MARQUE := 0.22
+## ⚠ LA DALLE DE SOL FAIT CINQ CENTIMÈTRES D'ÉPAISSEUR (mesuré : `floorFull`
+## va de 0 à 0,05). Une marque posée à un centimètre était donc DANS le sol, et
+## invisible — on l'a cherchée un moment en accusant la transparence, l'ombre,
+## puis le tampon de profondeur. Elle se pose au-dessus de la dalle, point.
+const DESSUS_DU_SOL := 0.054
+
+static func poser_marques(racine: Node3D, id: String) -> void:
+	for genre in MARQUES:
+		var g := String(genre)
+		var ou := point_de_poste(id, g)
+		if ou == Vector2.ZERO:
+			continue
+		racine.add_child(_marque(ou, MARQUES[g]))
+
+## OÙ L'ON SE MET pour se servir d'un poste : DEVANT le meuble, pas dessus.
+##
+## Un coffre, un lit, un portemanteau occupent leur case ; le joueur se tient à
+## côté. Deux raisons, découvertes dans cet ordre : une marque posée sur le
+## meuble passe SOUS lui et devient invisible — le lit du Penthouse a avalé la
+## sienne — et un rayon mesuré depuis le centre du meuble se déclenche à
+## travers le meuble, donc depuis l'autre côté du lit.
+##
+## ⚠ Le jeu ET la marque appellent cette fonction : la marque montre exactement
+## l'endroit où `F` répond. Deux calculs pour un même point, c'est un bouton qui
+## ment tôt ou tard.
+static func point_de_poste(id: String, genre: String) -> Vector2:
+	if genre == "porte":
+		return entree(id)
+	var p: Dictionary = poste(id, genre)
+	if p.is_empty():
+		return Vector2.ZERO
+	# Un cheveu de dégagement suffit : on veut le bord du meuble, pas le milieu
+	# de la pièce — au-delà, on sortirait de la portée d'interaction.
+	return degager(id, p["p"], 0.05)
+
+## Un disque plat, posé À RAS DU SOL et non éclairé : une marque qui prend
+## l'ombre d'un meuble ne se voit plus, et c'est justement contre les meubles
+## qu'on les pose.
+static func _marque(p: Vector2, teinte: Color) -> Node3D:
+	var n := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = RAYON_MARQUE
+	cyl.bottom_radius = RAYON_MARQUE
+	cyl.height = 0.004
+	cyl.radial_segments = 24
+	n.mesh = cyl
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(teinte, 0.45)
+	m.emission_enabled = true
+	m.emission = teinte
+	m.emission_energy_multiplier = 0.9
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	n.material_override = m
+	n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	n.position = Vector3(p.x, DESSUS_DU_SOL, p.y)
+	return n
+
 # ------------------------------------------------------------ voir dedans
 
 ## ESCAMOTER LES FAÇADES QUI SONT ENTRE LA CAMÉRA ET LA PIÈCE.

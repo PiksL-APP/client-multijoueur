@@ -437,6 +437,40 @@ puisque chez soi on ne se fait pas tirer dessus. `poser_pantin()` l'éteint, don
 le jeu et les deux bancs l'éteignent ensemble. Restent l'anneau de couleur et le
 pseudo, qui suffisent à se repérer.
 
+### Des marques au sol, comme dans GTA 2
+
+Un disque de couleur par chose à faire — **jaune** le coffre, **bleu** la
+garde-robe, **vert** la porte — et on sait où aller sans lire une ligne de
+texte. Sans elles, un joueur qui entre chez lui pour la première fois voit un
+appartement meublé et rien qui dise que le coffre est un coffre : vus de dessus,
+le portemanteau, le placard et le coffre ont exactement la même silhouette.
+
+Elles ne sont **pas** posées par `batir()`. La vitrine juge la décoration : y
+ajouter trois disques fluo empêcherait de voir si un canapé traverse un mur. Le
+jeu et `chez_soi.sh` les posent, la vitrine non — seule différence assumée entre
+les deux bancs.
+
+Deux choses apprises en les posant :
+
+- ⚠ **la dalle de sol fait cinq centimètres d'épaisseur** (mesuré : `floorFull`
+  va de 0 à 0,05). Une marque posée à un centimètre était donc DANS le sol, et
+  invisible. On l'a cherchée un moment en accusant la transparence, puis
+  l'ombre, puis le tampon de profondeur ;
+- **on se met DEVANT un meuble, pas dessus.** Une marque au centre du lit passe
+  sous le matelas (le Penthouse a avalé la sienne), et un rayon mesuré depuis le
+  centre du meuble se déclenche à travers lui — le coffre répondait de l'autre
+  côté du lit. `point_de_poste()` donne le point où l'on se tient, et le jeu
+  comme la marque l'appellent : deux calculs pour un même point, c'est un bouton
+  qui ment tôt ou tard.
+
+### L'heure se force, sinon le banc ment aussi
+
+Le jour tombe tout seul, par cycles de quinze minutes (`MatieresCarnage.nuit()`).
+Deux photos prises à trois heures d'intervalle sortaient donc l'une de nuit,
+l'autre en plein jour — et on a cru une seconde à une régression du rendu.
+`chez_soi.sh <id> <sortie> <nuit>` fixe l'heure : `0` plein jour, `1` pleine
+nuit, **0,85 par défaut**, l'heure bleue de Carnage.
+
 ### Le cadrage se calcule, il ne se devine pas
 
 La caméra ne suit pas le joueur chez lui : elle cadre l'appartement entier. Le

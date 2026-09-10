@@ -1283,6 +1283,9 @@ func _entrer_chez_soi(planque: int) -> void:
 	# c'est pour ça que les vitrines étaient lisibles et que personne n'avait vu
 	# le problème.
 	Interieurs.degager_la_vue(_dedans_noeud, Vector2(0.0, 1.0))
+	# Un disque de couleur par chose à faire : c'est le geste de GTA 2, et sans
+	# lui le coffre a la même silhouette qu'un placard vu de dessus.
+	Interieurs.poser_marques(_dedans_noeud, _dedans)
 	monde().add_child(_dedans_noeud)
 	_pied = true
 	_vitesse = 0.0
@@ -1346,11 +1349,14 @@ func _marcher_dedans(delta: float) -> void:
 ## arsenal. E ne fait rien d'autre à l'intérieur (pas de portière chez soi).
 func _affaires_dedans() -> void:
 	_affaire = ""
-	var c: Dictionary = Interieurs.coffre(_dedans)
-	var penderie: Dictionary = Interieurs.poste(_dedans, "garde-robe")
-	var pres_du_coffre: bool = not c.is_empty() and _dedans_p.distance_to(c["p"]) < PORTEE_COFFRE
-	var pres_de_la_penderie: bool = not penderie.is_empty() \
-		and _dedans_p.distance_to(penderie["p"]) < PORTEE_COFFRE
+	# ⚠ On mesure la distance au POINT DE POSTE, pas au meuble : c'est le point
+	# que la marque au sol montre. Mesuré depuis le centre du meuble, le coffre
+	# répondait à travers le lit, et la marque était ailleurs que le bouton.
+	var au_coffre := Interieurs.point_de_poste(_dedans, "coffre")
+	var a_la_penderie := Interieurs.point_de_poste(_dedans, "garde-robe")
+	var pres_du_coffre: bool = au_coffre != Vector2.ZERO and _dedans_p.distance_to(au_coffre) < PORTEE_COFFRE
+	var pres_de_la_penderie: bool = a_la_penderie != Vector2.ZERO \
+		and _dedans_p.distance_to(a_la_penderie) < PORTEE_COFFRE
 	var pres_de_la_porte := _dedans_p.distance_to(Interieurs.entree(_dedans)) < PORTEE_PORTE
 	if pres_du_coffre:
 		var suivante := _amelioration_suivante()
