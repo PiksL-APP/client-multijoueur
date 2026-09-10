@@ -12,10 +12,14 @@ func _ready() -> void:
 			ecart = float(a.trim_prefix("--ecart="))
 		if a.begins_with("--sortie="):
 			sortie = a.trim_prefix("--sortie=")
+	# La pelouse est posée APRÈS, une fois qu'on sait ce que la rangée mesure :
+	# à deux cents unités de côté elle s'arrêtait au milieu du parc automobile,
+	# et la moitié des véhicules flottaient dans le ciel.
 	var sol := MeshInstance3D.new()
 	var pm := PlaneMesh.new(); pm.size = Vector2(200, 200); sol.mesh = pm
 	var ms := StandardMaterial3D.new(); ms.albedo_color = Color(0.38, 0.66, 0.29); sol.material_override = ms
 	add_child(sol)
+	var _sol_pm := pm
 	# `etalon` : un mât de deux unités, gradué chaque demi-unité — c'est lui
 	# qui donne l'échelle d'un modèle qu'on découvre. `k:<peau>` sort un
 	# personnage du casting Kenney plutôt qu'un voxel.
@@ -31,6 +35,32 @@ func _ready() -> void:
 				barre.position = Vector3(x, 0.25 + k * 0.5, 0)
 				add_child(barre)
 			x += ecart
+			continue
+		# `v:<indice>` sort un VÉHICULE du parc de Carnage, bâti comme le jeu le
+		# bâtit (`FormesCarnage.voiture_kit`). Le parc n'avait aucun banc : c'est
+		# exactement pour ça que quatre carrosseries du Car Kit sont restées dans
+		# le dossier sans jamais rouler. `v:*` les sort toutes.
+		if String(nom).begins_with("v:"):
+			var quoi := String(nom).substr(2)
+			var indices: Array = []
+			if quoi == "*":
+				for k2 in FormesCarnage.MODELES_VOITURES.size():
+					indices.append(k2)
+			else:
+				indices.append(int(quoi))
+			for indice in indices:
+				var auto := FormesCarnage.voiture_kit(int(indice))
+				auto.position = Vector3(x, 0, 0)
+				add_child(auto)
+				var etiquette := Label3D.new()
+				etiquette.text = "%d %s" % [int(indice),
+					String(FormesCarnage.MODELES_VOITURES[int(indice)])]
+				etiquette.font_size = 96
+				etiquette.pixel_size = 0.006
+				etiquette.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+				etiquette.position = Vector3(x, 3.2, 0)
+				add_child(etiquette)
+				x += ecart
 			continue
 		if String(nom).begins_with("k:"):
 			var perso := Personnages.creer(String(nom).substr(2))
@@ -49,6 +79,8 @@ func _ready() -> void:
 	var l := DirectionalLight3D.new(); l.rotation_degrees = Vector3(-55, -35, 0); l.shadow_enabled = true; l.light_energy = 1.1; add_child(l)
 	var cam := Camera3D.new(); add_child(cam)
 	var centre := Vector3((x - ecart) * 0.5, 1.1, 0)
+	_sol_pm.size = Vector2(maxf(200.0, x * 1.3), maxf(200.0, x * 1.3))
+	sol.position = Vector3(centre.x, 0, 0)
 	var dist := maxf(4.0, x * 0.5)
 	cam.position = centre + Vector3(0, dist * 0.34, dist * 0.94)
 	cam.look_at(centre)

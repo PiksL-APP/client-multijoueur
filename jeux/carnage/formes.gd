@@ -15,7 +15,15 @@ extends RefCounted
 const MODELES_VOITURES := ["berline", "berline sport", "compacte", "4x4", "4x4 de luxe",
 	"taxi", "fourgon", "camion de livraison", "camion", "police",
 	"coupé", "break", "pick-up", "bus", "limousine", "ambulance",
-	"moto", "moto de course", "camion de pompiers"]
+	"moto", "moto de course", "camion de pompiers",
+	# Le reste du Car Kit, longtemps resté dans le dossier faute d'indice : la
+	# voiture de course, le tracteur, la benne à ordures et le plateau. Quatre
+	# carrosseries dessinées qui ne roulaient nulle part.
+	"voiture de course", "tracteur", "benne à ordures", "plateau de livraison",
+	# LA FLOTTE. Un bateau est un véhicule comme un autre — même indice sur le
+	# réseau, même `E` pour monter, même identifiant de dormante — mais il ne
+	# roule que sur l'eau, et la ville ne l'amarre qu'au bord d'un quai.
+	"chaloupe", "vedette", "vedette rapide", "barque de pêche", "remorqueur"]
 ## Les deux-roues : ils accélèrent et tournent mieux, mais on n'a pas de tôle
 ## autour de soi — un choc, et on est à terre.
 const MODELES_MOTOS := [16, 17]
@@ -27,15 +35,17 @@ const MODELE_POLICE := 9
 ## industrielle en fourgon, la banlieue en break : c'est ce qui fait qu'on sait
 ## où l'on est en regardant ce qui passe.
 const VOITURES_PAR_QUARTIER := {
-	PlanVille.CENTRE: [0, 1, 4, 5, 5, 5, 1, 14, 13, 10, 16, 17],
-	PlanVille.AFFAIRES: [0, 1, 4, 4, 5, 1, 0, 14, 13, 10, 16],
-	PlanVille.COMMERCE: [0, 0, 1, 4, 5, 6, 2, 11, 13, 15, 16, 16],
-	PlanVille.VIEUX: [0, 2, 2, 0, 5, 3, 6, 10, 11, 16],
-	PlanVille.RESIDENCES: [0, 0, 2, 3, 6, 0, 2, 11, 12, 13, 16],
-	PlanVille.INDUSTRIE: [6, 6, 7, 7, 8, 8, 3, 12, 12, 16],
-	PlanVille.PORT: [7, 8, 8, 6, 3, 7, 6, 12, 17],
-	PlanVille.BANLIEUE: [0, 0, 3, 3, 2, 6, 4, 11, 11, 12, 10, 17],
-	PlanVille.PARC: [0, 2, 3, 13, 17],
+	PlanVille.CENTRE: [0, 1, 4, 5, 5, 5, 1, 14, 13, 10, 16, 17, 19],
+	PlanVille.AFFAIRES: [0, 1, 4, 4, 5, 1, 0, 14, 13, 10, 16, 19],
+	PlanVille.COMMERCE: [0, 0, 1, 4, 5, 6, 2, 11, 13, 15, 16, 16, 21],
+	PlanVille.VIEUX: [0, 2, 2, 0, 5, 3, 6, 10, 11, 16, 21],
+	PlanVille.RESIDENCES: [0, 0, 2, 3, 6, 0, 2, 11, 12, 13, 16, 21],
+	PlanVille.INDUSTRIE: [6, 6, 7, 7, 8, 8, 3, 12, 12, 16, 21, 22, 22],
+	PlanVille.PORT: [7, 8, 8, 6, 3, 7, 6, 12, 17, 22, 22],
+	PlanVille.BANLIEUE: [0, 0, 3, 3, 2, 6, 4, 11, 11, 12, 10, 17, 20, 21],
+	# Le tracteur ne se gare pas au centre-ville : il vit au parc et au bout de
+	# la banlieue, et c'est ce qui le rend drôle à trouver.
+	PlanVille.PARC: [0, 2, 3, 13, 17, 20, 20],
 	PlanVille.EAU: [0],
 }
 
@@ -47,10 +57,29 @@ const KENNEY_VOITURES := {
 	0: "sedan", 1: "sedan-sports", 2: "hatchback-sports", 3: "suv", 4: "suv-luxury",
 	5: "taxi", 6: "van", 7: "delivery", 8: "truck", 9: "police",
 	10: "sedan-sports", 11: "suv", 12: "truck-flat", 15: "ambulance", 18: "firetruck",
+	19: "race", 20: "tractor", 21: "garbage-truck", 22: "delivery-flat",
 }
 const CHEMIN_VOITURES := "res://modeles/kenney/voitures/"
 
+## Les coques du Watercraft Pack, dans le même espace d'indices que les
+## carrosseries : c'est ce qui fait qu'un bateau traverse le réseau, la nappe
+## du morceau et le vol de véhicule SANS UNE LIGNE de code en plus.
+const KENNEY_BATEAUX := {
+	23: "boat-row-large", 24: "boat-speed-a", 25: "boat-speed-c",
+	26: "boat-fishing-small", 27: "boat-tug-a",
+}
+const CHEMIN_BATEAUX := "res://modeles/kenney/bateaux/"
+## Ce qui s'amarre au bord d'un quai. La chaloupe et les vedettes partout, le
+## remorqueur et la barque plus rarement : un port où chaque anneau porte un
+## remorqueur ne ressemble pas à un port.
+const FLOTTE_AMARREE := [23, 24, 24, 25, 25, 26, 23, 27]
+
+static func est_bateau(indice: int) -> bool:
+	return KENNEY_BATEAUX.has(indice)
+
 static func modele_kenney_de(indice: int) -> String:
+	if KENNEY_BATEAUX.has(indice):
+		return CHEMIN_BATEAUX + String(KENNEY_BATEAUX[indice]) + ".glb"
 	if not KENNEY_VOITURES.has(indice):
 		return ""
 	return CHEMIN_VOITURES + String(KENNEY_VOITURES[indice]) + ".glb"
@@ -80,7 +109,8 @@ static func maillage_voiture(indice: int) -> Mesh:
 ## Vrai si ce gabarit est dessiné par un modèle Kenney (matière texturée) et
 ## non par nos voxels (matière à couleurs de sommet).
 static func est_kenney(indice: int) -> bool:
-	return KENNEY_VOITURES.has(clampi(indice, 0, MODELES_VOITURES.size() - 1))
+	var i := clampi(indice, 0, MODELES_VOITURES.size() - 1)
+	return KENNEY_VOITURES.has(i) or KENNEY_BATEAUX.has(i)
 
 ## Les phares d'une voiture conduite : deux flaques chaudes devant, une lueur
 ## rouge derrière. Au crépuscule, c'est ce qui dit dans quel sens on roule et

@@ -1133,7 +1133,36 @@ func _mer(colonne: int, ligne: int) -> Dictionary:
 	var fiche := _vierge(colonne, ligne, S_EAU)
 	fiche["bloc"] = true
 	fiche["rect"] = Rect2(Vector2(colonne, ligne) * PAS, Vector2(PAS, PAS))
+	_amarrer(fiche, colonne, ligne)
 	return fiche
+
+## UN MOUILLAGE : une case d'eau qui touche le quai reçoit une PLACE, exactement
+## comme une case de pâté en reçoit une le long du trottoir. Tout le reste suit
+## sans une ligne de plus — l'identifiant, `E` pour monter, le réveil par
+## l'hôte, la nappe du morceau : un bateau amarré EST une voiture dormante
+## posée sur l'eau. Lui donner sa propre mécanique aurait voulu dire réécrire
+## les quatre.
+##
+## Un anneau sur huit environ : un port où chaque mètre de quai porte un bateau
+## ne ressemble pas à un port, il ressemble à un parking.
+const CHANCE_MOUILLAGE := 0.13
+
+func _amarrer(fiche: Dictionary, colonne: int, ligne: int) -> void:
+	if colonne < 0 or ligne < 0 or colonne >= COLONNES or ligne >= LIGNES:
+		return
+	for k in 4:
+		var d: Vector2i = [Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, -1), Vector2i(0, 1)][k]
+		# Le quai est du côté OPPOSÉ à l'eau : on ne s'amarre qu'à de la terre.
+		if eau(colonne + d.x, ligne + d.y) or _dans_la_riviere(colonne + d.x, ligne + d.y):
+			continue
+		if _bruit(colonne, ligne, 280 + k) > CHANCE_MOUILLAGE:
+			continue
+		# La coque LONGE le quai, elle ne le regarde pas : mêmes angles que le
+		# stationnement, où le côté du bord donne l'orientation.
+		var angles := [-PI * 0.5, PI * 0.5, 0.0, PI]
+		fiche["places"].append({"p": centre_tuile(colonne, ligne) + Vector2(d) * (PAS * 0.20),
+			"a": angles[k], "cote": k, "flotte": true})
+		return
 
 func _teinte_territoire(gang: int, force: float) -> Color:
 	if gang < 0:
@@ -2000,8 +2029,10 @@ func decrire(fiche: Dictionary, place: Dictionary) -> Dictionary:
 	var quartier := quartier_du_pate(_pate_proche_de(colonne, ligne))
 	var gang := int(place.get("gang", -1))
 	var liste: Array = FormesCarnage.VOITURES_PAR_QUARTIER.get(quartier, [0])
+	if bool(place.get("flotte", false)):
+		liste = FormesCarnage.FLOTTE_AMARREE
 	var modele := int(liste[_entier(colonne, ligne, 260 + int(place["cote"]), liste.size())])
-	if gang >= 0:
+	if gang >= 0 and not bool(place.get("flotte", false)):
 		modele = 1 if _bruit(colonne, ligne, 270) < 0.5 else 4
 	return {"id": id_dormante(colonne, ligne, int(place["cote"])), "p": place["p"], "a": float(place["a"]),
 		"modele": modele, "gang": gang, "quartier": quartier}
@@ -2016,7 +2047,14 @@ func dormantes_autour(point: Vector2, rayon: float) -> Array:
 	var l1 := int(floor((point.y + rayon) / PAS))
 	for l in range(l0, l1 + 1):
 		for c in range(c0, c1 + 1):
-			if c < 0 or l < 0 or c >= COLONNES or l >= LIGNES or est_voie(c) or est_voie(l):
+			# ⚠ Le filtre `est_voie` évite d'interroger les tuiles de rue, qui
+			# n'ont jamais de place. L'EAU, elle, en a depuis les mouillages :
+			# sans cette exception, un anneau sur cinq tombait sur un indice de
+			# voie et son bateau devenait impossible à monter — sans que rien
+			# ne le distingue des autres à l'écran.
+			if c < 0 or l < 0 or c >= COLONNES or l >= LIGNES:
+				continue
+			if (est_voie(c) or est_voie(l)) and not eau(c, l):
 				continue
 			var fiche := tuile(c, l)
 			for place in fiche["places"]:
@@ -2062,6 +2100,53 @@ func dans_un_batiment(point: Vector2, marge: float = 0.0) -> bool:
 	for t: Vector2i in _tuiles_autour(point, marge):
 		for r in rectangles_tuile(t.x, t.y):
 			if (r as Rect2).grow(marge).has_point(point):
+				return true
+	return false
+
+## LE CONTRAIRE DE `degager`, pour un bateau : c'est la TERRE qui arrête, et
+## l'eau qui laisse passer. Une coque et une carrosserie ne peuvent pas partager
+## la même fonction — l'une est bloquée par exactement ce qui porte l'autre.
+##
+## On teste les quatre cases qui touchent le cercle, comme pour les voitures :
+## la ville fait trois cent cinquante mille tuiles, et balayer une côte entière
+## coûterait plus cher que tout le reste de la simulation.
+func degager_bateau(point: Vector2, rayon: float) -> Array:
+	var corrige := point
+	var touche := false
+	var c0 := int(floor((point.x - rayon) / PAS))
+	var c1 := int(floor((point.x + rayon) / PAS))
+	var l0 := int(floor((point.y - rayon) / PAS))
+	var l1 := int(floor((point.y + rayon) / PAS))
+	for l in range(l0, l1 + 1):
+		for c in range(c0, c1 + 1):
+			if eau(c, l):
+				continue
+			var etendu := Rect2(Vector2(c, l) * PAS, Vector2(PAS, PAS)).grow(rayon)
+			if not etendu.has_point(corrige):
+				continue
+			var gauche := corrige.x - etendu.position.x
+			var droite := etendu.end.x - corrige.x
+			var haut := corrige.y - etendu.position.y
+			var bas := etendu.end.y - corrige.y
+			var minimum: float = min(min(gauche, droite), min(haut, bas))
+			if minimum == gauche: corrige.x = etendu.position.x
+			elif minimum == droite: corrige.x = etendu.end.x
+			elif minimum == haut: corrige.y = etendu.position.y
+			else: corrige.y = etendu.end.y
+			touche = true
+	return [corrige, touche]
+
+## Y a-t-il de la TERRE à portée ? C'est ce qui décide si l'on peut débarquer :
+## sauter d'un bateau au milieu du bassin serait une noyade, et le jeu n'a pas
+## de noyade.
+func terre_proche(point: Vector2, rayon: float) -> bool:
+	var c0 := int(floor((point.x - rayon) / PAS))
+	var c1 := int(floor((point.x + rayon) / PAS))
+	var l0 := int(floor((point.y - rayon) / PAS))
+	var l1 := int(floor((point.y + rayon) / PAS))
+	for l in range(l0, l1 + 1):
+		for c in range(c0, c1 + 1):
+			if c >= 0 and l >= 0 and c < COLONNES and l < LIGNES and not eau(c, l):
 				return true
 	return false
 

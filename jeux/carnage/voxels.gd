@@ -976,6 +976,22 @@ const GABARITS := {
 	16: {"l": 13, "w": 3, "hc": 3, "cab": [4, 9], "ch": 2, "forme": "moto"},        # moto de rue
 	17: {"l": 14, "w": 3, "hc": 3, "cab": [3, 10], "ch": 2, "forme": "moto"},       # moto de course
 	18: {"l": 27, "w": 9, "hc": 4, "cab": [19, 25], "ch": 3, "forme": "camion"},    # camion de pompiers
+	# ⚠ La LONGUEUR de ces gabarits n'est pas décorative : c'est elle qui met
+	# le modèle Kenney à l'échelle (`FormesCarnage.maillage_voiture`), et c'est
+	# à elle que se réfèrent les places de stationnement et le pare-buffle.
+	19: {"l": 18, "w": 8, "hc": 2, "cab": [7, 13], "ch": 2, "forme": "sport"},      # voiture de course
+	20: {"l": 16, "w": 9, "hc": 5, "cab": [4, 11], "ch": 4, "forme": "haut"},       # tracteur
+	21: {"l": 28, "w": 9, "hc": 4, "cab": [20, 26], "ch": 3, "forme": "benne"},     # benne à ordures
+	22: {"l": 23, "w": 8, "hc": 4, "cab": [16, 21], "ch": 3, "forme": "camion"},    # plateau
+	# LA FLOTTE. Les longueurs sont celles qu'on VEUT dans le jeu, pas celles
+	# du kit : le Watercraft Pack n'est pas à l'échelle entre ses classes (un
+	# remorqueur y fait la taille d'une vedette). À une unité par mètre, une
+	# chaloupe fait cinq mètres et un remorqueur dix-huit.
+	23: {"l": 20, "w": 8, "hc": 2, "cab": [6, 14], "ch": 2, "forme": "berline"},    # chaloupe
+	24: {"l": 28, "w": 8, "hc": 2, "cab": [8, 18], "ch": 2, "forme": "berline"},    # vedette
+	25: {"l": 26, "w": 8, "hc": 2, "cab": [8, 17], "ch": 2, "forme": "berline"},    # vedette rapide
+	26: {"l": 36, "w": 9, "hc": 3, "cab": [10, 24], "ch": 3, "forme": "berline"},   # barque de pêche
+	27: {"l": 72, "w": 12, "hc": 5, "cab": [40, 60], "ch": 4, "forme": "camion"},   # remorqueur
 }
 
 ## Le maillage d'une voiture, en couleurs de sommet. La caisse est BLANCHE :

@@ -49,6 +49,9 @@ const PV_VOITURE := 100.0
 const VITESSE_A_PIED := 215.0
 const RAYON_A_PIED := 16.0
 const PORTEE_ENTREE := 110.0       ## distance à laquelle on peut ouvrir une portière
+## À quelle distance d'une berge on peut débarquer d'un bateau. Une tuile et
+## demie : de quoi accoster sans avoir à coller la coque au quai au centimètre.
+const PORTEE_QUAI := 150.0
 const DELAI_PORTIERE := 0.45       ## on ne ressort pas dans la même seconde
 
 const VIE_MAX := 100.0
@@ -141,6 +144,20 @@ const CARACTERES := {
 	16: {"v": 1.24, "a": 1.45, "t": 0.35},  # moto : file et tourne, mais rien autour de soi
 	17: {"v": 1.34, "a": 1.55, "t": 0.3},   # moto de course
 	18: {"v": 0.86, "a": 0.74, "t": 2.0},   # camion de pompiers
+	# La course et le tracteur sont les deux BOUTS de l'échelle, et c'est fait
+	# exprès : trouver l'une ou l'autre doit changer la minute qui suit.
+	19: {"v": 1.45, "a": 1.55, "t": 0.4},   # voiture de course : la plus rapide, en papier
+	20: {"v": 0.52, "a": 0.5, "t": 2.6},    # tracteur : increvable, et on le voit venir
+	21: {"v": 0.7, "a": 0.6, "t": 2.1},     # benne à ordures
+	22: {"v": 0.86, "a": 0.76, "t": 1.5},   # plateau de livraison
+	# LA FLOTTE. Un bateau n'a pas de freins : sa décélération vient du
+	# frottement de l'eau, réglé plus bas (`FROTTEMENT_EAU`). Ce qu'on met ici,
+	# c'est ce qu'il file et ce qu'il encaisse.
+	23: {"v": 0.55, "a": 0.5, "t": 0.9},    # chaloupe
+	24: {"v": 1.05, "a": 0.9, "t": 0.8},    # vedette
+	25: {"v": 1.18, "a": 1.0, "t": 0.7},    # vedette rapide
+	26: {"v": 0.7, "a": 0.6, "t": 1.2},     # barque de pêche
+	27: {"v": 0.62, "a": 0.45, "t": 2.4},   # remorqueur
 }
 
 ## Le butin qui n'est pas une arme : une trousse rend cinquante points de vie,
@@ -164,6 +181,11 @@ const MOTEURS_VEHICULE := {
 	16: "compact", 17: "sport",
 	3: "van", 4: "van", 6: "van", 12: "van", 15: "van",
 	7: "camion", 8: "camion", 13: "camion", 18: "camion",
+	19: "super", 20: "camion", 21: "camion", 22: "camion",
+	# ⚠ Pas de moteur de bateau dans la banque de sons : le hors-bord prend le
+	# grain « compact » et le remorqueur celui du camion. Inventer un son de
+	# diesel marin demanderait une prise, pas une ligne de table.
+	23: "compact", 24: "compact", 25: "sport", 26: "compact", 27: "camion",
 }
 
 ## Identifiant de la voiture de départ. Elle n'appartient à personne dans la
@@ -870,6 +892,15 @@ func _basculer_portiere() -> void:
 			canal.envoyer("monte", {"id": id, "x": int(_position.x), "y": int(_position.y)})
 		return
 
+	# ⚠ ON NE DÉBARQUE PAS AU MILIEU DU BASSIN. Sauter d'un bateau à cent
+	# mètres du quai serait une noyade, et le jeu n'a pas de noyade : on
+	# resterait à marcher sur l'eau. Tant qu'il n'y a pas de terre à portée,
+	# la portière ne s'ouvre pas — et la ligne du HUD le dit.
+	if FormesCarnage.est_bateau(_modele_vehicule) \
+			and not carte.terre_proche(_position, PORTEE_QUAI):
+		_dire_affaire("accostez d'abord")
+		return
+
 	# On descend : la voiture retourne au monde, là où on l'a laissée.
 	if Commandes.pilote_automatique:
 		print("[banc] descend du véhicule %d" % _vehicule)
@@ -1078,6 +1109,14 @@ func _klaxonner(delta: float) -> void:
 ## frôle. Avant, le moindre angle de trottoir coupait les deux tiers de la
 ## vitesse et clouait la voiture — dans une ville, c'est toutes les trois
 ## secondes.
+## ⚠ POUR UN BATEAU, C'EST LA TERRE QUI ARRÊTE. La même fonction ne peut pas
+## servir aux deux : une coque est bloquée par exactement ce qui porte une
+## carrosserie. `PlanVille.degager_bateau` est le miroir de `degager`.
+func _degager_vehicule(point: Vector2, rayon: float) -> Array:
+	if FormesCarnage.est_bateau(_modele_vehicule):
+		return carte.degager_bateau(point, rayon)
+	return carte.degager(point, rayon)
+
 func _heurter_les_murs() -> void:
 	var direction0 := Vector2.RIGHT.rotated(_angle)
 	var correction := Vector2.ZERO
@@ -1087,7 +1126,7 @@ func _heurter_les_murs() -> void:
 	var empattement := DEMI_EMPATTEMENT * (0.7 if moto else 1.0)
 	for signe in [1.0, -1.0]:
 		var bout: Vector2 = _position + direction0 * empattement * signe
-		var resultat := carte.degager(bout, rayon_c)
+		var resultat := _degager_vehicule(bout, rayon_c)
 		if bool(resultat[1]):
 			var c: Vector2 = (resultat[0] as Vector2) - bout
 			_position += c

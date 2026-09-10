@@ -83,7 +83,8 @@ const RAMPE := [
 const EAUX := ".~"
 
 enum { OUTIL_DESSIN, OUTIL_RELIEF }
-enum { FORME_LIBRE, FORME_LIGNE, FORME_CADRE, FORME_PLEIN, FORME_GODET, FORME_PIPETTE }
+enum { FORME_LIBRE, FORME_LIGNE, FORME_CADRE, FORME_PLEIN, FORME_GODET, FORME_PIPETTE,
+	FORME_SELECTION }
 
 ## La forme du geste, son libellé et sa touche. L'ordre est celui des boutons.
 const FORMES := [
@@ -93,6 +94,7 @@ const FORMES := [
 	[FORME_PLEIN, "Plein", "J"],
 	[FORME_GODET, "Godet", "G"],
 	[FORME_PIPETTE, "Pipette", "I"],
+	[FORME_SELECTION, "Sélection", "C"],
 ]
 
 var _id := "pikstown"
@@ -103,6 +105,7 @@ var _apercu: Node3D                     ## les dalles du geste en cours
 var _marques: Node3D                    ## les blocs rouges des fautes
 var _ville: VilleMorcelee               ## le décor, bâti par morceaux
 var _maillage: MeshInstance3D           ## le quadrillage posé au sol
+var _cadre_selection: MeshInstance3D    ## le rectangle jaune de la sélection
 var _nappe: MeshInstance3D              ## le plan du palier courant, en relief
 var _curseur: MeshInstance3D
 var _camera: Camera3D
@@ -114,6 +117,13 @@ var _minuscule := false
 var _palier := 0
 var _voir_grille := true
 var _relief_relatif := false
+## LA SÉLECTION ET LE PRESSE-PAPIER. Une ville de 96 000 cases ne se dessine pas
+## deux fois : un pâté réussi, un quai, une place, on veut les reposer ailleurs.
+## Le presse-papier garde le PLAN ET LE RELIEF ensemble — copier un quartier
+## perché et le recoller à plat en ferait un autre quartier.
+var _selection := Rect2i()
+var _presse: Dictionary = {}
+var _collage := false
 var _carte_relief := false
 var _dessus := false
 
@@ -238,6 +248,8 @@ func demarrer() -> void:
 	# relâchement, est le seul chiffre qui dit si l'éditeur est utilisable — et
 	# c'est celui qu'aucune capture d'écran ne montre. Il valait 1 093 ms sur
 	# Pikstown sans que rien ne le signale.
+	if "--essai-copie" in OS.get_cmdline_args():
+		_essai_copie()
 	if "--essai-geste" in OS.get_cmdline_args():
 		_essai_geste()
 	if "--essai-editeur" in OS.get_cmdline_args():
@@ -249,6 +261,43 @@ func demarrer() -> void:
 
 ## LE BANC. Il peint par le code exactement ce que la souris peindrait — et il
 ## se sert des FORMES, sinon elles ne seraient vérifiées nulle part.
+## ⚠ CE QUI EST COLLÉ DOIT ÊTRE EXACTEMENT CE QUI A ÉTÉ COPIÉ, RELIEF COMPRIS.
+## Un collage qui perd le relief ne se voit pas tout de suite : le pâté a l'air
+## juste, et c'est trois gestes plus tard que le banc annonce quatre bâtiments à
+## cheval sur deux paliers. On compare donc case par case, ici, tout de suite.
+func _essai_copie() -> void:
+	var src := Rect2i(40, 40, 9, 6)
+	var dst := Vector2i(120, 200)
+	_selection = src
+	_copier()
+	# On note ce qu'on croit avoir copié, LU DEPUIS LA GRILLE, pas depuis le
+	# presse-papier : sinon on comparerait le presse-papier à lui-même.
+	var attendu: Array = []
+	for j in src.size.y:
+		var l := ""
+		for i in src.size.x:
+			l += _lire("plan", src.position.x + i, src.position.y + j) \
+				+ _lire("relief", src.position.x + i, src.position.y + j)
+		attendu.append(l)
+	_case = dst
+	_collage = true
+	_poser_collage()
+	var faux := 0
+	for j in src.size.y:
+		var l := ""
+		for i in src.size.x:
+			l += _lire("plan", dst.x + i, dst.y + j) + _lire("relief", dst.x + i, dst.y + j)
+		if l != attendu[j]: faux += 1
+	print("--- COPIE/COLLAGE %d x %d : %s" % [src.size.x, src.size.y,
+		"IDENTIQUE (plan et relief)" if faux == 0 else "*** %d rangées DIFFÉRENTES ***" % faux])
+	print("    source  : ", attendu[0])
+	var rendu := ""
+	for i in src.size.x:
+		rendu += _lire("plan", dst.x + i, dst.y) + _lire("relief", dst.x + i, dst.y)
+	print("    collage : ", rendu)
+	print("--- fautes après collage : ", Quartiers.fautes(_fiche).size())
+	get_tree().quit()
+
 func _essai_geste() -> void:
 	var ou := Vector2i(_large() / 2, _haut() / 2)
 	# Les morceaux autour du geste doivent exister : on ne rebâtit que ce qui
@@ -566,6 +615,9 @@ func _input(evenement: InputEvent) -> void:
 			return
 		_viser()
 		_montrer_curseur()
+		if _collage:
+			_apercu_collage()
+			return
 		if _peint:
 			if _forme == FORME_LIBRE:
 				_appliquer(_gauche)
@@ -599,6 +651,16 @@ func _commencer(gauche: bool, alt: bool) -> void:
 	if not _vise: return
 	_gauche = gauche
 	_depart = _case
+	# ⚠ LE COLLAGE PASSE AVANT TOUT. Sinon le clic qui doit poser le presse-
+	# papier peint aussi une case avec le pinceau courant, sous le collage.
+	if _collage:
+		if gauche:
+			_poser_collage()
+		else:
+			_collage = false
+			_vider_apercu()
+			_dire("Collage annulé.")
+		return
 	if alt or _forme == FORME_PIPETTE:
 		_prelever()
 		return
@@ -606,6 +668,12 @@ func _commencer(gauche: bool, alt: bool) -> void:
 		_empiler()
 		_remplir(_case, gauche)
 		_finir_geste()
+		return
+	if _forme == FORME_SELECTION:
+		# Elle ne peint pas : elle délimite. Rien à empiler, rien à annuler.
+		_peint = true
+		_selection = Rect2i(_case, Vector2i.ONE)
+		_apercu_forme()
 		return
 	_empiler()
 	_peint = true
@@ -618,13 +686,32 @@ func _relacher() -> void:
 	if not _peint:
 		return
 	_peint = false
+	if _forme == FORME_SELECTION:
+		_selection = _rectangle(_depart, _case)
+		_dire("Sélection %d × %d — Ctrl+C pour copier." % [_selection.size.x, _selection.size.y])
+		_montrer_selection()
+		_etat()
+		return
 	if _forme != FORME_LIBRE:
 		_appliquer_forme(_gauche)
 	_finir_geste()
 
+static func _rectangle(a: Vector2i, b: Vector2i) -> Rect2i:
+	return Rect2i(mini(a.x, b.x), mini(a.y, b.y), absi(b.x - a.x) + 1, absi(b.y - a.y) + 1)
+
 func _touche(k: InputEventKey) -> void:
 	if k.ctrl_pressed and k.keycode == KEY_Z: _annuler(); return
 	if k.ctrl_pressed and k.keycode == KEY_Y: _refaire_geste(); return
+	if k.ctrl_pressed and k.keycode == KEY_C: _copier(); return
+	if k.ctrl_pressed and k.keycode == KEY_V: _coller(); return
+	if k.keycode == KEY_ESCAPE:
+		_collage = false
+		_selection = Rect2i()
+		_montrer_selection()
+		_vider_apercu()
+		_dire("")
+		return
+	if k.keycode == KEY_C: _choisir_forme(FORME_SELECTION); return
 	# Les chiffres choisissent le pinceau : les neuf premiers, puis les neuf
 	# suivants avec Maj. Dix-neuf pinceaux ne tiennent pas sur dix touches, et
 	# lâcher la souris pour aller cliquer dans la colonne casse le geste.
@@ -791,6 +878,15 @@ func _cases_forme() -> Array:
 	var b := _case
 	if _forme == FORME_LIGNE:
 		return _tracer_ligne(a, b)
+	if _forme == FORME_SELECTION:
+		var r := _rectangle(a, b)
+		var bord: Array = []
+		for j in range(r.position.y, r.position.y + r.size.y):
+			for i in range(r.position.x, r.position.x + r.size.x):
+				if i == r.position.x or i == r.position.x + r.size.x - 1 \
+						or j == r.position.y or j == r.position.y + r.size.y - 1:
+					bord.append(Vector2i(i, j))
+		return bord
 	if _forme == FORME_CADRE or _forme == FORME_PLEIN:
 		var x0 := mini(a.x, b.x)
 		var x1 := maxi(a.x, b.x)
@@ -893,6 +989,116 @@ func _prelever() -> void:
 			_choisir(String(p[0]))
 			_dire("Pinceau « %s » prélevé." % _caractere())
 			return
+
+# ------------------------------------------------------- copier et coller
+
+## ⚠ LE PLAN ET LE RELIEF PARTENT ENSEMBLE. Un pâté copié depuis la vieille
+## ville — perchée au palier 5 — et recollé sans son relief se retrouve à plat
+## au bord de l'eau : ce n'est plus le même quartier, et les bâtiments qu'on
+## croyait dupliquer sortent à cheval sur deux paliers.
+func _copier() -> void:
+	if _selection.size == Vector2i.ZERO:
+		_dire("Rien de sélectionné — forme « Sélection » (C), puis un rectangle.")
+		return
+	var plan: Array = []
+	var relief: Array = []
+	for j in range(_selection.position.y, _selection.position.y + _selection.size.y):
+		var lp := ""
+		var lr := ""
+		for i in range(_selection.position.x, _selection.position.x + _selection.size.x):
+			lp += _lire("plan", i, j)
+			lr += _lire("relief", i, j)
+		plan.append(lp)
+		relief.append(lr)
+	_presse = {"plan": plan, "relief": relief,
+		"w": _selection.size.x, "h": _selection.size.y}
+	_dire("Copié %d × %d — Ctrl+V, puis clic gauche pour poser." % [_selection.size.x, _selection.size.y])
+	_etat()
+
+func _coller() -> void:
+	if _presse.is_empty():
+		_dire("Presse-papier vide — sélectionnez (C) puis Ctrl+C.")
+		return
+	_collage = true
+	_forme = FORME_LIBRE
+	_rafraichir_boutons()
+	_dire("Collage %d × %d : clic gauche pour poser, Échap pour annuler."
+		% [int(_presse["w"]), int(_presse["h"])])
+	_apercu_collage()
+
+## L'aperçu du collage suit le curseur. Le coin visé est le coin HAUT-GAUCHE :
+## viser le centre obligerait à calculer de tête où tombe un rectangle pair.
+func _apercu_collage() -> void:
+	_vider_apercu()
+	if not _collage or _presse.is_empty() or not _vise: return
+	var plan: Array = _presse["plan"]
+	for j in plan.size():
+		var ligne: String = plan[j]
+		for i in ligne.length():
+			var c := Vector2i(_case.x + i, _case.y + j)
+			if not _dans_grille(c.x, c.y): continue
+			_dalle(c, _couleur(ligne[i]))
+
+func _poser_collage() -> void:
+	if _presse.is_empty(): return
+	_empiler()
+	var plan: Array = _presse["plan"]
+	var relief: Array = _presse["relief"]
+	var n := 0
+	for j in plan.size():
+		var lp: String = plan[j]
+		var lr: String = relief[j]
+		for i in lp.length():
+			var x := _case.x + i
+			var y := _case.y + j
+			if not _dans_grille(x, y): continue
+			_ecrire("plan", x, y, lp[i])
+			if i < lr.length():
+				_ecrire("relief", x, y, lr[i])
+				var d := lr[i]
+				if d >= "0" and d <= "9": _plus_haut = maxi(_plus_haut, int(d))
+			_touchees[Vector2i(x, y)] = true
+			n += 1
+	_collage = false
+	_dire("%d cases collées." % n)
+	_finir_geste()
+
+func _vider_apercu() -> void:
+	if _apercu == null: return
+	for e in _apercu.get_children():
+		_apercu.remove_child(e)
+		e.queue_free()
+
+## Le rectangle de sélection, tracé au sol comme le quadrillage : un aperçu en
+## dalles disparaîtrait au premier geste, or une sélection doit rester visible
+## pendant qu'on va chercher où la coller.
+func _montrer_selection() -> void:
+	if _cadre_selection != null:
+		_cadre_selection.queue_free()
+		_cadre_selection = null
+	if _selection.size == Vector2i.ZERO or _quartier == null: return
+	var im := ImmediateMesh.new()
+	im.surface_begin(Mesh.PRIMITIVE_LINES)
+	var y := float(_plus_haut) * PALIER + 2.0
+	var x0 := float(_selection.position.x) * CASE
+	var z0 := float(_selection.position.y) * CASE
+	var x1 := float(_selection.position.x + _selection.size.x) * CASE
+	var z1 := float(_selection.position.y + _selection.size.y) * CASE
+	var coins := [Vector3(x0, y, z0), Vector3(x1, y, z0), Vector3(x1, y, z1), Vector3(x0, y, z1)]
+	for k in 4:
+		im.surface_add_vertex(coins[k])
+		im.surface_add_vertex(coins[(k + 1) % 4])
+		im.surface_add_vertex(coins[k])
+		im.surface_add_vertex(coins[k] - Vector3(0, y + 4.0, 0))
+	im.surface_end()
+	_cadre_selection = MeshInstance3D.new()
+	_cadre_selection.mesh = im
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color("#ffd23f")
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_cadre_selection.material_override = m
+	_quartier.add_child(_cadre_selection)
+	if _carte2d != null: _carte2d.queue_redraw()
 
 # ---------------------------------------------------------------- annuler
 
@@ -1549,10 +1755,14 @@ func _interface() -> void:
 		_petit(b)
 		b.pressed.connect(f[1])
 		barre.add_child(b)
-	var barre2 := HBoxContainer.new()
-	barre2.add_theme_constant_override("separation", 4)
+	var barre2 := GridContainer.new()
+	barre2.columns = 3
+	barre2.add_theme_constant_override("h_separation", 4)
+	barre2.add_theme_constant_override("v_separation", 4)
+	barre2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	boite.add_child(barre2)
-	for f5 in [["Annuler", _annuler], ["Refaire", _refaire_geste], ["Recadrer", _recadrer]]:
+	for f5 in [["Annuler", _annuler], ["Refaire", _refaire_geste], ["Recadrer", _recadrer],
+			["Copier", _copier], ["Coller", _coller]]:
 		var b7 := UI.bouton(String(f5[0]))
 		_petit(b7)
 		b7.pressed.connect(f5[1])
@@ -1645,7 +1855,7 @@ func _rafraichir_boutons() -> void:
 	if _bouton_relatif != null: _teinter(_bouton_relatif, _relief_relatif)
 	if _bouton_carte_relief != null: _teinter(_bouton_carte_relief, _carte_relief)
 
-const AIDE := "clic milieu sur le plan : s'y rendre · ZQSD déplacer · molette zoom · clic milieu tourner · clic gauche peindre · clic droit effacer · Alt+clic pipette · Tab dessin/relief · Pg↑ Pg↓ palier · Ctrl+Z / Ctrl+Y annuler · F recadrer · E exporter"
+const AIDE := "C sélection · Ctrl+C copier · Ctrl+V coller · clic milieu sur le plan : s'y rendre · ZQSD déplacer · molette zoom · clic milieu tourner · clic gauche peindre · clic droit effacer · Alt+clic pipette · Tab dessin/relief · Pg↑ Pg↓ palier · Ctrl+Z / Ctrl+Y annuler · F recadrer · E exporter"
 
 func _etat() -> void:
 	if _etiquette == null: return
@@ -1663,6 +1873,9 @@ func _etat() -> void:
 		_nombre((_fiche.get("origine", Vector2.ZERO) as Vector2).x),
 		_nombre((_fiche.get("origine", Vector2.ZERO) as Vector2).y)]
 	if _aide != null: _aide.text = AIDE
+	if _collage and not _presse.is_empty():
+		_etiquette.text = "COLLAGE %d × %d en (%d, %d) — clic gauche pose, clic droit ou Échap annule" % [
+			int(_presse["w"]), int(_presse["h"]), _case.x, _case.y]
 	_regler_nappe()
 	if _carte2d != null: _carte2d.queue_redraw()
 
@@ -1759,6 +1972,9 @@ func _dessiner_carte() -> void:
 		var c2: Vector2i = f
 		_carte2d.draw_rect(Rect2(org + Vector2(float(c2.x), float(c2.y)) * pas,
 			Vector2(maxf(pas, 2.0), maxf(pas, 2.0))), Palette.CRITIQUE, false, maxf(1.0, pas * 0.3))
+	if _selection.size != Vector2i.ZERO:
+		_carte2d.draw_rect(Rect2(org + Vector2(_selection.position) * pas,
+			Vector2(_selection.size) * pas), Color("#ffd23f"), false, maxf(1.0, pas * 0.4))
 	_carte2d.draw_rect(emprise, Color(1, 1, 1, 0.25), false, 1.0)
 	if _dans_grille(_case.x, _case.y):
 		_carte2d.draw_rect(Rect2(org + Vector2(float(_case.x), float(_case.y)) * pas,
