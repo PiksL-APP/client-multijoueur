@@ -1,8 +1,8 @@
 class_name VilleVivante
 extends RefCounted
-## Tout ce qui vit dans CARNAGE et que l'HÔTE simule : les passants, les trois
-## gangs, la circulation, la police, les caisses d'armes, la jauge de recherche
-## et le respect.
+## Tout ce qui vit dans CARNAGE et que l'HÔTE simule : les passants, les sept
+## gangs (trois par district), la circulation, la police, les caisses d'armes,
+## la jauge de recherche et le respect.
 ##
 ## Pourquoi un seul module pour tout ça : ces populations se regardent en
 ## permanence. Un flic poursuit un joueur MAIS s'arrête devant une voiture ;
@@ -54,6 +54,48 @@ const VITESSE_FLIC := 108.0
 const PV_PIETON := 1
 const PV_GANG := 3
 const PV_FLIC := 4
+
+## LES CORPS QUI VOUS CHERCHENT, du plus banal au plus lourd (guide §5). Ce
+## n'est pas la même chose d'avoir la police au train ou l'armée : sans ces
+## quatre lignes, monter d'une étoile ne changeait que le NOMBRE de voitures,
+## et cinq étoiles ressemblaient à trois avec plus de bruit.
+##
+## ⚠ Ce sont des PATROUILLES, toutes : le corps ne change ni le genre du
+## véhicule, ni la conduite, ni le radar. Un fourgon du SWAT poursuit comme
+## une voiture de police parce que c'est la même fonction qui le conduit —
+## et c'est la seule raison pour laquelle cette phase tient en un fichier.
+enum { CORPS_POLICE, CORPS_SWAT, CORPS_AGENT, CORPS_ARMEE }
+const CORPS := [
+	{"nom": "police", "pv": PV_FLIC, "cadence": 1.15, "degat": 9.0, "portee": 640.0,
+		"vitesse": 108.0, "modele": FormesCarnage.MODELE_POLICE, "discret": false},
+	{"nom": "SWAT", "pv": 7, "cadence": 0.78, "degat": 13.0, "portee": 700.0,
+		"vitesse": 118.0, "modele": 6, "discret": false},
+	{"nom": "agent spécial", "pv": 9, "cadence": 0.58, "degat": 16.0, "portee": 780.0,
+		"vitesse": 128.0, "modele": 1, "discret": true},
+	{"nom": "armée", "pv": 12, "cadence": 0.64, "degat": 20.0, "portee": 860.0,
+		"vitesse": 112.0, "modele": 8, "discret": false},
+]
+## À quelle étoile chaque corps entre en scène.
+const NIVEAU_SWAT := 3
+const NIVEAU_AGENTS := 5
+const NIVEAU_ARMEE := 6
+## Ce qu'un fourgon du SWAT débarque en arrivant, et à quelle distance.
+const DEBARQUEMENT := 4
+const PORTEE_DEBARQUEMENT := 300.0
+## LE CHAR. Il ne tire pas des balles : un obus toutes les deux secondes et
+## demie, qui souffle tout dans un rayon. C'est la seule chose du jeu contre
+## laquelle la tôle ne protège pas.
+const PV_CHAR := 320.0
+const CADENCE_OBUS := 2.5
+const PORTEE_OBUS := 700.0
+const DEGAT_OBUS := 46.0
+const SOUFFLE_OBUS := 120.0
+## ⚠ LA DISPERSION DOIT DÉPASSER LE SOUFFLE. À 110 px de dispersion pour 120
+## de souffle, l'obus touchait DEUX CENTS FOIS SUR DEUX CENTS au banc : le
+## char ne ratait jamais, quarante-six points toutes les deux secondes et
+## demie, et la seule réponse était de quitter l'écran. À 240, un tir sur deux
+## porte — on peut tenir la rue si on bouge.
+const DISPERSION_OBUS := 240.0
 const PV_AUTO := 100.0
 
 ## En dessous, on pousse le passant sans l'écraser : c'est le piéton qui gagne
@@ -84,18 +126,53 @@ const CHALEUR := {
 	"pieton": 12.0, "gang": 6.0, "flic": 52.0, "auto": 15.0,
 	"coup_de_feu": 2.5, "joueur": 0.0,
 }
-const PALIERS := [40.0, 115.0, 230.0, 400.0, 620.0]   ## une étoile par palier franchi
+## SIX PALIERS, SIX RÉPONSES (guide §5). Le sixième a été ajouté avec la
+## phase 8 : à cinq, l'hélicoptère était le dernier mot, et une jauge dont le
+## dernier cran arrive à la moitié de ce qu'on peut faire en une manche cesse
+## de menacer. Le sixième est LOIN — neuf cents points, soit une manche à
+## saccager sans jamais passer au garage.
+const PALIERS := [40.0, 115.0, 230.0, 400.0, 620.0, 900.0]
 const REFROIDISSEMENT := 9.0      ## points par seconde, après une accalmie
 const ACCALMIE := 4.5             ## secondes sans crime avant que ça redescende
 
-## Le respect. Nettoyer un gang fâche ce gang et arrange les deux autres.
-const RESPECT_PERDU := 22.0
-const RESPECT_GAGNE := 12.0
-## ⚠ Le seuil vaut TROIS morts, pas un. À -30 pour 34 points perdus, abattre
-## un seul passant en couleurs retournait le quartier entier contre le joueur,
-## et la jauge de respect ne servait plus qu'à annoncer une catastrophe.
-const RESPECT_HOSTILE := -60.0    ## en dessous, le gang tire à vue
-const RESPECT_AMI := 50.0         ## au-dessus, il laisse passer
+## LE RESPECT, DE ZÉRO À CENT, EN CINQ PALIERS.
+##
+## On commence à CINQUANTE avec les sept gangs : le joueur n'est ni attendu ni
+## chassé, il est INCONNU. C'est ce qui donne deux directions à la jauge —
+## avant, elle partait de zéro et ne pouvait que descendre en pratique, faute
+## d'une raison de monter avant le premier contrat.
+##
+## Les cinq paliers viennent du guide (§3.3) et chacun a une CONSÉQUENCE
+## visible, sinon ce serait un chiffre de plus dans un coin de l'écran :
+##   moins de 20 : on lui tire dessus à vue
+##   20 à 40     : mauvaise tête, aucun contrat proposé
+##   40 à 60     : on l'ignore, contrats de base
+##   60 à 80     : on le laisse passer, contrats moyens
+##   plus de 80  : on se bat À CÔTÉ de lui, contrats difficiles
+const RESPECT_DEPART := 50.0
+const SEUIL_VUE := 20.0
+const SEUIL_HOSTILE := 40.0
+const SEUIL_AMICAL := 60.0
+const SEUIL_ALLIE := 80.0
+
+## ⚠ ON NE TIRE À VUE QU'AU TROISIÈME MORT. Le chiffre a déjà été remonté une
+## fois : abattre un seul passant en couleurs retournait le quartier entier
+## contre le joueur, et la jauge ne servait plus qu'à annoncer une
+## catastrophe. Depuis 50, onze points par mort, cela donne 39 (mauvaise tête :
+## le gang ne confie plus rien), 28, puis 17 — et là seulement on vous tire
+## dessus. La sanction s'annonce donc DEUX FOIS avant de tomber.
+##
+## Un mort coûte les contrats du gang immédiatement, et c'est voulu : à moins
+## de dix points la mort, il fallait quatre cadavres pour se faire chasser, et
+## descendre un gars en couleurs ne se payait plus du tout.
+const RESPECT_PERDU := 11.0
+const RESPECT_GAGNE := 5.0
+
+## Les cinq humeurs, et ce que le tableau de bord en dit. Un gang « vous
+## couvre » : c'est la seule ligne qui promet de l'aide, elle doit se
+## distinguer d'un « vous salue » qui ne promet rien.
+enum { H_VUE, H_HOSTILE, H_NEUTRE, H_AMICAL, H_ALLIE }
+const NOMS_HUMEUR := ["vous chasse", "vous cherche", "vous ignore", "vous salue", "vous couvre"]
 
 ## Ce que rapporte chaque chose, en DOLLARS : c'est de l'argent qu'on ramasse,
 ## pas des points — il s'achète une planque, un coffre, un garage.
@@ -107,7 +184,18 @@ const POINTS := {
 ## ville est un bac à sable où l'on tourne en rond jusqu'au chrono.
 const DUREE_CONTRAT := {"nettoyage": 55.0, "livraison": 45.0, "chasse": 32.0}
 const PRIME_CONTRAT := {"nettoyage": 620, "livraison": 700, "chasse": 800}
-const RESPECT_CONTRAT := 26.0
+const RESPECT_CONTRAT := 13.0
+
+## Les trois téléphones du guide (§4.1) : un gang ne confie pas le même
+## travail à un inconnu et à quelqu'un qui s'est battu pour lui. La difficulté
+## n'est donc PAS tirée au sort, elle se mérite — c'est ce qui fait du respect
+## une progression et pas un thermomètre.
+##   nom, multiplicateur de prime, travail en plus, respect gagné
+const PALIERS_CONTRAT := {
+	H_NEUTRE: {"nom": "facile", "prime": 1.0, "plus": 0, "respect": RESPECT_CONTRAT * 0.8},
+	H_AMICAL: {"nom": "moyenne", "prime": 1.6, "plus": 1, "respect": RESPECT_CONTRAT},
+	H_ALLIE: {"nom": "difficile", "prime": 2.4, "plus": 2, "respect": RESPECT_CONTRAT * 1.3},
+}
 
 const COMBO_FENETRE := 3.0
 const COMBO_MAX := 4              ## facteur maximum = COMBO_MAX + 1
@@ -119,7 +207,8 @@ var caisses: Array = []           ## {id,p,arme}
 var barrages: Array = []          ## {id,p}
 var helicos: Array = []           ## {id,p,cible,recharge} — un par joueur à cinq étoiles
 var chaleur: Dictionary = {}      ## cle -> points de recherche
-var respect: Dictionary = {}      ## cle -> [respect gang 0, 1, 2]
+var plaques: Dictionary = {}      ## cle -> secondes de plaques maquillées
+var respect: Dictionary = {}      ## cle -> une jauge 0..100 par gang (7)
 
 # ------------------------------------------------------------ le feu
 #
@@ -172,6 +261,13 @@ func etoiles(cle: String) -> int:
 func crime(cle: String, genre_de_crime: String) -> void:
 	if cle == "":
 		return
+	# LES PLAQUES MAQUILLÉES (atelier) : la police n'a plus la bonne
+	# description. Ce n'est PAS le garage de peinture — la jauge ne redescend
+	# pas, elle CESSE DE MONTER. C'est ce qui en fait un achat de poursuite :
+	# on ne va pas au garage quand on a trois voitures aux fesses, on essaie
+	# de tenir quarante-cinq secondes.
+	if float(plaques.get(cle, 0.0)) > 0.0:
+		return
 	var avant := etoiles(cle)
 	chaleur[cle] = float(chaleur.get(cle, 0.0)) + float(CHALEUR.get(genre_de_crime, 0.0))
 	_depuis_crime[cle] = 0.0
@@ -194,24 +290,104 @@ func repeindre(cle: String) -> void:
 
 func respect_de(cle: String) -> Array:
 	if not respect.has(cle):
-		respect[cle] = [0.0, 0.0, 0.0]
+		var neuve: Array = []
+		for _i in PlanVille.GANGS.size():
+			neuve.append(RESPECT_DEPART)
+		respect[cle] = neuve
 	return respect[cle]
 
+func respect_pour(cle: String, gang: int) -> float:
+	return float(respect_de(cle)[posmod(gang, PlanVille.GANGS.size())])
+
+## L'humeur d'un gang envers un joueur : le seul endroit du jeu où l'on
+## traduit un nombre en intention. Tout le reste (l'IA, les cabines, le
+## tableau de bord, les alliés) passe par ici — deux tables de seuils
+## divergentes, c'est un gang qui tire à vue sur un joueur que l'écran
+## annonce comme ami.
+func humeur(cle: String, gang: int) -> int:
+	var valeur := respect_pour(cle, gang)
+	if valeur < SEUIL_VUE:
+		return H_VUE
+	if valeur < SEUIL_HOSTILE:
+		return H_HOSTILE
+	if valeur < SEUIL_AMICAL:
+		return H_NEUTRE
+	if valeur < SEUIL_ALLIE:
+		return H_AMICAL
+	return H_ALLIE
+
 func gang_hostile(cle: String, gang: int) -> bool:
-	return float(respect_de(cle)[posmod(gang, 3)]) <= RESPECT_HOSTILE
+	return humeur(cle, gang) == H_VUE
 
 func gang_ami(cle: String, gang: int) -> bool:
-	return float(respect_de(cle)[posmod(gang, 3)]) >= RESPECT_AMI
+	return humeur(cle, gang) >= H_AMICAL
 
-func _ajuster_respect(cle: String, gang: int, perte: float, gain: float) -> void:
+func gang_allie(cle: String, gang: int) -> bool:
+	return humeur(cle, gang) == H_ALLIE
+
+## Bouger UNE jauge. `delta` positif fait monter le respect.
+func _ajuster_respect(cle: String, gang: int, delta: float) -> void:
 	var jauge := respect_de(cle)
-	for i in 3:
-		if i == posmod(gang, 3):
-			jauge[i] = clamp(float(jauge[i]) - perte, -100.0, 100.0)
-		else:
-			jauge[i] = clamp(float(jauge[i]) + gain, -100.0, 100.0)
+	var i := posmod(gang, jauge.size())
+	jauge[i] = clamp(float(jauge[i]) + delta, 0.0, 100.0)
 	respect[cle] = jauge
-	emettre("resp", {"j": cle, "v": [int(jauge[0]), int(jauge[1]), int(jauge[2])]})
+	_diffuser_respect(cle)
+
+## Un coup porté à un gang RETOMBE sur ses rivaux : c'est le triangle du
+## guide (§3.2). Le point compte — voir `PlanVille.rivaux` : le Consortium
+## n'a pas de secteur à lui, ce sont les deux locaux DE L'ENDROIT qui se
+## réjouissent.
+func _repercuter(cle: String, gang: int, ou: Vector2, perte: float, gain: float) -> void:
+	var jauge := respect_de(cle)
+	var vise := posmod(gang, jauge.size())
+	jauge[vise] = clamp(float(jauge[vise]) - perte, 0.0, 100.0)
+	if gain != 0.0:
+		for autre in plan.rivaux(vise, ou):
+			jauge[int(autre)] = clamp(float(jauge[int(autre)]) + gain, 0.0, 100.0)
+	respect[cle] = jauge
+	_diffuser_respect(cle)
+
+## LES TROIS BARRES DU DISTRICT, prêtes à peindre : les deux gangs locaux puis
+## le commun, avec ce qu'ils pensent du joueur. C'est ici et nulle part
+## ailleurs — le tableau de bord et le banc d'image appellent la même
+## fonction, sans quoi le banc photographierait des barres que le jeu ne
+## montre pas.
+func barres_de_respect(cle: String, ou: Vector2) -> Array:
+	var barres: Array = []
+	for g in plan.trio(ou):
+		var indice := int(g)
+		var etat := humeur(cle, indice)
+		# DEUX couleurs par barre, et c'est voulu : le nom porte la couleur du
+		# GANG (elle dit qui l'on regarde, elle est la même sur la carte, sur
+		# les casquettes et sur les voitures), la barre et le mot portent celle
+		# de l'HUMEUR. Une barre verte annonçant « vous chasse » parce que le
+		# gang a le vert pour bannière, c'est un contresens qu'on lit avant de
+		# lire le mot.
+		barres.append({
+			"nom": plan.nom_du_gang(indice),
+			"part": respect_pour(cle, indice) / 100.0,
+			"couleur": plan.couleur_du_gang(indice),
+			"teinte": FormesCarnage.COULEURS_HUMEUR[etat],
+			"humeur": String(NOMS_HUMEUR[etat]),
+		})
+	return barres
+
+## La puce « qui tient la rue, et ce qu'il pense de vous ». Le rouge de
+## l'alerte l'emporte sur la couleur du gang quand on tire à vue : la couleur
+## d'un gang dit QUI, elle ne doit pas dire à sa place que tout va bien.
+func puce_de_gang(cle: String, gang: int) -> Dictionary:
+	var etat := humeur(cle, gang)
+	var couleur: Color = plan.couleur_du_gang(gang)
+	if etat == H_VUE:
+		couleur = Palette.CRITIQUE
+	return {"texte": "%s : %s" % [plan.nom_du_gang(gang), String(NOMS_HUMEUR[etat])],
+		"couleur": couleur}
+
+func _diffuser_respect(cle: String) -> void:
+	var valeurs: Array = []
+	for v in respect_de(cle):
+		valeurs.append(int(v))
+	emettre("resp", {"j": cle, "v": valeurs})
 
 ## Un coup de feu, un klaxon : les passants à portée décampent. C'est la moitié
 ## de ce qui rend une rue vivante — l'autre moitié, c'est qu'ils y reviennent.
@@ -241,6 +417,15 @@ func simuler(delta: float, temps: float, joueurs: Dictionary) -> void:
 	_depecher_la_police(delta, joueurs)
 	_animer_les_helicos(delta, joueurs)
 	_avancer_contrats(delta, joueurs)
+	_animer_les_pieges(delta, joueurs)
+	_animer_les_bombes(delta)
+	_semer_les_a_cotes(delta, joueurs)
+	_avancer_les_frenzies(delta)
+	for cle_p in plaques.keys():
+		var reste := float(plaques[cle_p]) - delta
+		plaques[cle_p] = max(0.0, reste)
+		if reste <= 0.0 and reste > -delta:
+			emettre("mod", {"j": String(cle_p), "m": "plaques", "e": "fini"})
 
 ## Au-delà de cette distance de TOUS les joueurs, un passant ou une voiture
 ## civile disparaît : le plafond se libère et la ville se repeuple devant soi.
@@ -456,7 +641,8 @@ func _naitre_passant(joueurs: Dictionary, large: bool) -> void:
 		"etat": 0, "minuterie": _rng.randf_range(1.0, 3.5), "recharge": 0.0, "a": 0.0,
 	})
 
-func _naitre_auto(joueurs: Dictionary, genre: int, cible: String) -> void:
+func _naitre_auto(joueurs: Dictionary, genre: int, cible: String, corps: int = CORPS_POLICE,
+		canon: bool = false) -> void:
 	# Le plafond porte sur ce qui ROULE : les garées sont trois cents et ne
 	# comptent pas, sinon plus rien ne circulerait jamais.
 	if _mobiles() >= plafond_autos() and genre != PATROUILLE:
@@ -484,12 +670,15 @@ func _naitre_auto(joueurs: Dictionary, genre: int, cible: String) -> void:
 		genre = VOITURE_GANG
 		modele = 1 if _rng.randf() < 0.5 else 4
 	if genre == PATROUILLE:
-		modele = FormesCarnage.MODELE_POLICE
+		modele = int(CORPS[posmod(corps, CORPS.size())]["modele"])
 	autos.append({
 		"id": _id(), "p": pose["p"], "a": direction.angle(), "d": direction,
 		"vitesse": 0.0, "genre": genre, "gang": gang,
-		"pv": PV_AUTO, "pilote": "", "cible": cible, "minuterie": 0.0, "recharge": 0.0,
+		"pv": PV_CHAR if canon else PV_AUTO, "pilote": "", "cible": cible,
+		"minuterie": 0.0, "recharge": 0.0,
 		"modele": modele, "garee": false,
+		"corps": posmod(corps, CORPS.size()) if genre == PATROUILLE else CORPS_POLICE,
+		"canon": canon, "vide": false,
 	})
 
 ## Vrai si aucune voiture (ni aucun joueur) ne se trouve à moins de deux
@@ -539,7 +728,24 @@ func _menace_la_plus_proche(depuis: Vector2, joueurs: Dictionary, rayon: float) 
 			meilleure = {"cle": String(cle), "p": j["p"], "pied": bool(j.get("pied", true))}
 	return meilleure
 
+## LES ALLIÉS QUI PRÊTENT MAIN-FORTE (guide §3.3, palier « très élevé »).
+##
+## Au-dessus de quatre-vingts, un homme de gang ne se contente plus de laisser
+## passer : il tire sur ce qui vous tire dessus. C'est la seule récompense du
+## respect qui se voie SANS regarder l'écran — un flic qui tombe sans qu'on ait
+## appuyé sur rien.
+##
+## ⚠ Il vise des PNJ, pas des joueurs. Un allié qui canarde un autre joueur
+## ferait du respect une arme à distance : on monterait sa jauge chez un gang
+## et on lâcherait le quartier sur un adversaire qui n'a rien demandé, sans
+## risque et sans y être. Les joueurs ne se blessent qu'en arène.
+const PORTEE_MAIN_FORTE := 520.0    ## distance à laquelle un allié prend un ennemi en charge
+const DELAI_MAIN_FORTE := 9.0       ## secondes entre deux annonces, par joueur
+var _depuis_main_forte: Dictionary = {}   ## cle -> secondes avant de pouvoir réannoncer
+
 func _animer_les_gens(delta: float, joueurs: Dictionary) -> void:
+	for cle_j in _depuis_main_forte:
+		_depuis_main_forte[cle_j] = max(0.0, float(_depuis_main_forte[cle_j]) - delta)
 	for personne in gens:
 		personne["recharge"] = max(0.0, float(personne["recharge"]) - delta)
 		personne["minuterie"] = float(personne["minuterie"]) - delta
@@ -548,9 +754,15 @@ func _animer_les_gens(delta: float, joueurs: Dictionary) -> void:
 		var vitesse := VITESSE_MARCHE
 		var direction: Vector2 = personne["d"]
 		var proche := _menace_la_plus_proche(personne["p"], joueurs, 520.0)
+		# Cherché UNE fois : `_a_epauler` parcourt toute la foule, et l'appeler
+		# dans la condition PUIS dans le corps doublait la facture à chaque
+		# image pour chaque homme de gang allié.
+		var epaule := {}
+		if genre == GANG and not proche.is_empty() and gang_allie(String(proche["cle"]), int(personne["gang"])):
+			epaule = _a_epauler(personne, proche)
 
 		if genre == FLIC:
-			vitesse = VITESSE_FLIC
+			vitesse = float(CORPS[posmod(int(personne.get("corps", CORPS_POLICE)), CORPS.size())]["vitesse"])
 			var proie := _proie_de_la_police(personne["p"], joueurs)
 			if not proie.is_empty():
 				direction = (Vector2(proie["p"]) - personne["p"]).normalized()
@@ -558,6 +770,11 @@ func _animer_les_gens(delta: float, joueurs: Dictionary) -> void:
 			elif float(personne["minuterie"]) <= 0.0:
 				personne["minuterie"] = _rng.randf_range(1.4, 3.0)
 				direction = Vector2.RIGHT.rotated(_rng.randf() * TAU)
+		elif genre == GANG and not epaule.is_empty():
+			# Allié : il court vers CE QUI VOUS ATTAQUE et lui tire dessus.
+			vitesse = VITESSE_GANG
+			direction = (Vector2(epaule["p"]) - personne["p"]).normalized()
+			_tirer_sur_pnj(personne, epaule, String(proche["cle"]), int(personne["gang"]))
 		elif genre == GANG and not proche.is_empty() and gang_hostile(String(proche["cle"]), int(personne["gang"])):
 			# Fâché : il charge et il tire. Un gang qu'on a saigné ne se
 			# contente pas de bouder — sinon la jauge de respect ne se sent
@@ -624,10 +841,17 @@ func _proie_de_la_police(depuis: Vector2, joueurs: Dictionary) -> Dictionary:
 func _tirer_sur(tireur: Dictionary, proie: Dictionary, _delta: float) -> void:
 	if float(tireur["recharge"]) > 0.0:
 		return
+	# Un homme du SWAT n'a pas la même arme qu'un îlotier, et un agent spécial
+	# encore moins. Cadence, portée et dégâts viennent de son CORPS ; hors
+	# police (les gangs), on retombe sur les valeurs d'origine.
+	var corps: Dictionary = {}
+	if int(tireur.get("genre", PIETON)) == FLIC:
+		corps = CORPS[posmod(int(tireur.get("corps", CORPS_POLICE)), CORPS.size())]
+	var portee := float(corps.get("portee", PORTEE_TIR_PNJ))
 	var vers: Vector2 = Vector2(proie["p"]) - Vector2(tireur["p"])
-	if vers.length() > PORTEE_TIR_PNJ:
+	if vers.length() > portee:
 		return
-	tireur["recharge"] = CADENCE_TIR_PNJ * _rng.randf_range(0.8, 1.4)
+	tireur["recharge"] = float(corps.get("cadence", CADENCE_TIR_PNJ)) * _rng.randf_range(0.8, 1.4)
 	var angle := vers.angle()
 	emettre("tn", {"x": int(tireur["p"].x), "y": int(tireur["p"].y), "a": snapped(angle, 0.01)})
 	# La balle d'un PNJ ne vole pas : elle touche ou elle rate, tiré au sort
@@ -636,9 +860,65 @@ func _tirer_sur(tireur: Dictionary, proie: Dictionary, _delta: float) -> void:
 	# à l'œil dans une rue de nuit.
 	# Sept balles sur dix qui portent, avec quatre tireurs, c'est une mort
 	# toutes les trois secondes à pied : on ne sortait plus de voiture.
-	var chance: float = clamp(1.0 - vers.length() / PORTEE_TIR_PNJ, 0.10, 0.46)
+	var chance: float = clamp(1.0 - vers.length() / portee, 0.10, 0.46)
 	if _rng.randf() < chance:
-		emettre("deg", {"j": proie["cle"], "d": int(DEGAT_BALLE_PNJ), "k": "balle"})
+		emettre("deg", {"j": proie["cle"], "d": int(corps.get("degat", DEGAT_BALLE_PNJ)), "k": "balle"})
+
+## Qui un allié prend en charge : le flic qui vous poursuit, ou l'homme d'un
+## gang qui vous tire dessus. Rien d'autre — un allié qui abattrait les
+## passants pour vous faire plaisir viderait la rue en dix secondes et vous
+## collerait la police sur le dos sans que vous ayez rien fait.
+##
+## ⚠ On cherche autour de L'ALLIÉ, pas autour du joueur : c'est lui qui doit
+## avoir l'ennemi à portée de tir, sinon il part en courant traverser deux
+## avenues pour un flic qu'il ne rejoindra jamais.
+func _a_epauler(garde: Dictionary, joueur: Dictionary) -> Dictionary:
+	var cle := String(joueur["cle"])
+	var traque := etoiles(cle) > 0
+	var meilleure := {}
+	var distance := PORTEE_MAIN_FORTE * PORTEE_MAIN_FORTE
+	for autre in gens:
+		if int(autre["id"]) == int(garde["id"]):
+			continue
+		var genre_autre := int(autre["genre"])
+		var vise := false
+		if genre_autre == FLIC:
+			vise = traque
+		elif genre_autre == GANG:
+			vise = int(autre["gang"]) != int(garde["gang"]) and gang_hostile(cle, int(autre["gang"]))
+		if not vise:
+			continue
+		var d: float = Vector2(garde["p"]).distance_squared_to(autre["p"])
+		if d < distance:
+			distance = d
+			meilleure = autre
+	return meilleure
+
+## Le tir d'un PNJ sur un PNJ. Il emprunte la même balle qui ne vole pas que
+## `_tirer_sur` : elle touche ou elle rate, tirée au sort selon la distance.
+## Le joueur épaulé ne marque RIEN — il n'a pas tiré. Ce qu'il gagne, c'est un
+## ennemi de moins, et c'est déjà beaucoup.
+func _tirer_sur_pnj(tireur: Dictionary, cible: Dictionary, pour: String, gang: int) -> void:
+	if float(tireur["recharge"]) > 0.0:
+		return
+	var vers: Vector2 = Vector2(cible["p"]) - Vector2(tireur["p"])
+	if vers.length() > PORTEE_TIR_PNJ:
+		return
+	tireur["recharge"] = CADENCE_TIR_PNJ * _rng.randf_range(0.8, 1.4)
+	emettre("tn", {"x": int(tireur["p"].x), "y": int(tireur["p"].y), "a": snapped(vers.angle(), 0.01)})
+	if float(_depuis_main_forte.get(pour, 0.0)) <= 0.0:
+		_depuis_main_forte[pour] = DELAI_MAIN_FORTE
+		emettre("aide", {"j": pour, "g": gang})
+	var chance: float = clamp(1.0 - vers.length() / PORTEE_TIR_PNJ, 0.10, 0.46)
+	if _rng.randf() >= chance:
+		return
+	cible["pv"] = int(cible["pv"]) - 1
+	if int(cible["pv"]) > 0:
+		return
+	# Mort sans propriétaire : personne ne l'inscrit à son tableau, personne
+	# n'écope de l'étoile. `_abattre` ferait les deux au nom du joueur épaulé.
+	if retirer(gens, int(cible["id"])):
+		paniquer(Vector2(cible["p"]), 260.0, 2.4)
 
 # ------------------------------------------------------------ la circulation
 
@@ -843,7 +1123,33 @@ func _conduire_patrouille(auto: Dictionary, delta: float, joueurs: Dictionary) -
 		return
 	var vers: Vector2 = Vector2(joueurs[cible]["p"]) - Vector2(auto["p"])
 	var direction := vers.normalized()
+
+	# LE FOURGON DU SWAT (guide §5) : arrivé à portée, il s'arrête et VIDE
+	# quatre hommes sur le trottoir. C'est ce qui rend trois étoiles autre
+	# chose que « deux étoiles avec une voiture de plus » — on ne sème pas
+	# quatre types à pied en tournant à droite.
+	if int(auto.get("corps", CORPS_POLICE)) == CORPS_SWAT and not bool(auto.get("vide", false)) \
+			and vers.length() < PORTEE_DEBARQUEMENT:
+		auto["vide"] = true
+		auto["vitesse"] = 0.0
+		for i in DEBARQUEMENT:
+			var autour: Vector2 = Vector2(auto["p"]) + Vector2.RIGHT.rotated(TAU * float(i) / float(DEBARQUEMENT)) * 40.0
+			_poser_uniforme(plan.degager(autour, RAYON_PIETON)[0], CORPS_SWAT)
+		emettre("swat", {"x": int(auto["p"].x), "y": int(auto["p"].y), "j": cible})
+		return
+
+	# LE CHAR ne poursuit pas, il CANONNE. Il roule moins vite que tout le
+	# monde et tire un obus dès qu'il vous tient dans sa portée : le fuir est
+	# facile, rester dans la rue ne l'est pas.
+	if bool(auto.get("canon", false)):
+		auto["recharge"] = max(0.0, float(auto.get("recharge", 0.0)) - delta)
+		if vers.length() < PORTEE_OBUS and float(auto["recharge"]) <= 0.0:
+			auto["recharge"] = CADENCE_OBUS
+			_tirer_un_obus(auto, joueurs, cible)
+
 	var allure: float = 300.0 + 42.0 * float(etoiles(cible))
+	if bool(auto.get("canon", false)):
+		allure = 190.0
 	auto["vitesse"] = move_toward(float(auto["vitesse"]), allure, 420.0 * delta)
 	var suivant: Vector2 = auto["p"] + direction * float(auto["vitesse"]) * delta
 	var degage := plan.degager(suivant, RAYON_AUTO)
@@ -860,7 +1166,60 @@ func _conduire_patrouille(auto: Dictionary, delta: float, joueurs: Dictionary) -
 	auto["d"] = direction
 	auto["a"] = direction.angle()
 
+## L'obus. Il ne vole pas non plus (comme les balles des PNJ) : il tombe où le
+## char visait, et souffle tout ce qui est autour — voitures comprises. C'est
+## la seule attaque du jeu qui ne fait aucune différence entre celui qui est à
+## pied et celui qui est en tôle.
+func _tirer_un_obus(auto: Dictionary, joueurs: Dictionary, cible: String) -> void:
+	var ou: Vector2 = Vector2(joueurs[cible]["p"])
+	# ⚠ On vise LÀ OÙ IL ÉTAIT, avec de la dispersion : un obus qui tombe pile
+	# sur le joueur à chaque coup, c'est une mort par seconde et demie et plus
+	# aucune raison de conduire.
+	ou += Vector2.RIGHT.rotated(_rng.randf() * TAU) * _rng.randf_range(0.0, DISPERSION_OBUS)
+	emettre("obus", {"x": int(ou.x), "y": int(ou.y),
+		"dx": int(auto["p"].x), "dy": int(auto["p"].y)})
+	for autre in joueurs:
+		var j: Dictionary = joueurs[autre]
+		if float(j.get("vie", 100.0)) <= 0.0:
+			continue
+		var loin: float = Vector2(j["p"]).distance_to(ou)
+		if loin > SOUFFLE_OBUS:
+			continue
+		emettre("deg", {"j": String(autre), "d": int(DEGAT_OBUS * (1.0 - loin / SOUFFLE_OBUS * 0.5)),
+			"k": "obus", "par": ""})
+	for victime in autos:
+		if int(victime["id"]) == int(auto["id"]) or int(victime["genre"]) == EPAVE:
+			continue
+		if String(victime["pilote"]) != "" or Vector2(victime["p"]).distance_to(ou) > SOUFFLE_OBUS:
+			continue
+		victime["pv"] = float(victime["pv"]) - DEGAT_OBUS * 1.6
+		if float(victime["pv"]) <= 0.0:
+			detruire_auto(victime, "")
+	allumer(ou, 0.7)
+
 # ------------------------------------------------------------ la police
+
+## Qui répond, à ce niveau-là. Le tirage garde une part de police ordinaire
+## même à six étoiles : une rue où il n'y a QUE des chars n'a plus l'air d'une
+## ville en panique, elle a l'air d'un niveau de jeu.
+func corps_pour(niveau: int) -> int:
+	if niveau >= NIVEAU_ARMEE and _rng.randf() < 0.55:
+		return CORPS_ARMEE
+	if niveau >= NIVEAU_AGENTS and _rng.randf() < 0.55:
+		return CORPS_AGENT
+	if niveau >= NIVEAU_SWAT and _rng.randf() < 0.6:
+		return CORPS_SWAT
+	return CORPS_POLICE
+
+func _poser_uniforme(ou: Vector2, corps: int) -> Dictionary:
+	var fiche: Dictionary = CORPS[posmod(corps, CORPS.size())]
+	var homme := {
+		"id": _id(), "p": ou, "d": Vector2.RIGHT, "genre": FLIC, "gang": -1,
+		"pv": int(fiche["pv"]), "etat": 0, "minuterie": 0.0, "recharge": 0.0, "a": 0.0,
+		"corps": posmod(corps, CORPS.size()),
+	}
+	gens.append(homme)
+	return homme
 
 func _depecher_la_police(delta: float, joueurs: Dictionary) -> void:
 	for cle in joueurs:
@@ -876,17 +1235,23 @@ func _depecher_la_police(delta: float, joueurs: Dictionary) -> void:
 			if int(auto["genre"]) == PATROUILLE and typeof(auto["cible"]) == TYPE_STRING and String(auto["cible"]) == cle:
 				patrouilles += 1
 		if patrouilles < niveau and _rng.randf() < delta * 1.2:
-			_naitre_auto(joueurs, PATROUILLE, String(cle))
+			_naitre_auto(joueurs, PATROUILLE, String(cle), corps_pour(niveau))
 
 		# À deux étoiles, la police descend de voiture.
 		if niveau >= 2 and gens.size() < plafond_gens() and _rng.randf() < delta * 0.6 * float(niveau - 1):
-			var p := plan.point_de_rue(_rng, j["p"], 420.0, 760.0)
-			gens.append({
-				"id": _id(), "p": p, "d": Vector2.RIGHT, "genre": FLIC, "gang": -1,
-				"pv": PV_FLIC, "etat": 0, "minuterie": 0.0, "recharge": 0.0, "a": 0.0,
-			})
+			_poser_uniforme(plan.point_de_rue(_rng, j["p"], 420.0, 760.0), corps_pour(niveau))
 
 		# À quatre étoiles, on ferme les rues.
+		# LE CHAR, au dernier cran. Un seul par joueur : deux, et la rue est un
+		# champ de tir où l'on ne fait plus trois mètres.
+		if niveau >= NIVEAU_ARMEE:
+			var chars := 0
+			for auto in autos:
+				if bool(auto.get("canon", false)) and String(auto.get("cible", "")) == cle:
+					chars += 1
+			if chars == 0 and _rng.randf() < delta * 0.7:
+				_naitre_auto(joueurs, PATROUILLE, String(cle), CORPS_ARMEE, true)
+
 		if niveau >= 4 and barrages.size() < 5 and _rng.randf() < delta * 0.5:
 			var carrefour := plan.carrefour_proche(Vector2(j["p"]) + Vector2(j.get("d", Vector2.RIGHT)) * 700.0)
 			var libre := true
@@ -1084,9 +1449,10 @@ func _abattre(personne: Dictionary, cle: String, ecrase: bool) -> void:
 		quoi = "flic"
 	crime(cle, quoi)
 	if genre == GANG:
-		_ajuster_respect(cle, int(personne["gang"]), RESPECT_PERDU, RESPECT_GAGNE)
+		_repercuter(cle, int(personne["gang"]), Vector2(personne["p"]), RESPECT_PERDU, RESPECT_GAGNE)
 		_avancer_nettoyage(cle, int(personne["gang"]))
 	_compter(cle, Vector2(personne["p"]), int(POINTS[quoi]), quoi, ecrase)
+	_avancer_frenzy(cle, Vector2(personne["p"]))
 	# Ce qu'il laisse par terre. Un gang armé lâche son arme une fois sur
 	# trois ; un passant, un billet une fois sur six, une trousse une fois sur
 	# quinze. C'est ce qui donne une raison de descendre de voiture.
@@ -1112,7 +1478,7 @@ func detruire_auto(auto: Dictionary, cle: String) -> void:
 		# Brûler la voiture d'un gang, ça se retient aussi longtemps qu'un
 		# mort : sans ça, on ferait le vide dans un quartier au lance-roquettes
 		# sans jamais fâcher personne.
-		_ajuster_respect(cle, int(auto.get("gang", 0)), RESPECT_PERDU * 0.6, RESPECT_GAGNE * 0.5)
+		_repercuter(cle, int(auto.get("gang", 0)), Vector2(auto["p"]), RESPECT_PERDU * 0.6, RESPECT_GAGNE * 0.5)
 	auto["genre"] = EPAVE
 	auto["minuterie"] = 7.0
 	auto["vitesse"] = 0.0
@@ -1340,6 +1706,254 @@ func _conduire_service(auto: Dictionary, delta: float, joueurs: Dictionary) -> v
 		auto["d"] = direction
 		auto["a"] = direction.angle()
 
+# ------------------------------------------------------------ les à-côtés
+#
+## LES À-CÔTÉS (guide §4.3) : ce qu'on trouve dans la rue sans que personne
+## l'ait demandé. Ils vivent chez l'HÔTE, comme les caisses — un ramassage est
+## un objet du monde, pas une décision de client.
+##
+## ⚠ Pourquoi ils comptent : sans eux, une manche de Carnage est un bac à
+## sable où l'on tourne en rond entre deux contrats. Un colis qui brille à
+## trois rues donne une RAISON de tourner à droite.
+enum { R_COLIS, R_FRENZY }
+const COLIS_EN_VILLE := 8         ## ce que la ville garde de colis posés
+const COLIS_OBJECTIF := 10        ## la collection complète, et sa prime
+const PRIME_COLIS := 220
+const PRIME_COLLECTION := 3000
+const FRENZY_EN_VILLE := 2
+const DUREE_FRENZY := 30.0
+const OBJECTIF_FRENZY := 8
+const PRIME_FRENZY := 1800
+## L'arme imposée fait le défi : à la roquette on cherche la foule, à la
+## mitraillette on cherche le trottoir. C'est ce qui distingue deux Frenzy.
+const ARMES_FRENZY := ["mitraillette", "roquette", "mitraillette"]
+var ramassages: Array = []        ## {id, p, genre, arme}
+var colis: Dictionary = {}        ## cle -> colis trouvés
+var frenzies: Dictionary = {}     ## cle -> {reste, fait, objectif, arme}
+var _depuis_ramassage := 0.0
+
+func _semer_les_a_cotes(delta: float, joueurs: Dictionary) -> void:
+	if joueurs.is_empty():
+		return
+	_depuis_ramassage += delta
+	if _depuis_ramassage < 1.5:
+		return
+	_depuis_ramassage = 0.0
+	var colis_poses := 0
+	var frenzy_poses := 0
+	for r in ramassages:
+		if int(r["genre"]) == R_COLIS:
+			colis_poses += 1
+		else:
+			frenzy_poses += 1
+	# ⚠ Loin, mais pas trop : posé à cent pixels, le colis se ramasse sans
+	# avoir été cherché ; posé à deux mille, on ne le voit jamais.
+	if colis_poses < COLIS_EN_VILLE:
+		ramassages.append({"id": _id(), "genre": R_COLIS, "arme": "",
+			"p": plan.point_de_rue(_rng, _autour_d_un_joueur(joueurs), 420.0, 1500.0)})
+	if frenzy_poses < FRENZY_EN_VILLE:
+		ramassages.append({"id": _id(), "genre": R_FRENZY,
+			"arme": String(ARMES_FRENZY[_rng.randi_range(0, ARMES_FRENZY.size() - 1)]),
+			"p": plan.point_de_rue(_rng, _autour_d_un_joueur(joueurs), 600.0, 1700.0)})
+
+## Ramasser. C'est l'hôte qui tranche — deux joueurs sur le même colis à cent
+## millisecondes près, et le premier arrivé est celui que l'hôte a vu.
+func ramasser_a_cote(id: int, cle: String, ou: Vector2) -> void:
+	for r in ramassages:
+		if int(r["id"]) != id:
+			continue
+		var genre := int(r["genre"])
+		retirer(ramassages, id)
+		if genre == R_COLIS:
+			colis[cle] = int(colis.get(cle, 0)) + 1
+			var combien := int(colis[cle])
+			_compter(cle, ou, PRIME_COLIS, "colis", false)
+			emettre("colis", {"j": cle, "n": combien, "sur": COLIS_OBJECTIF})
+			if combien == COLIS_OBJECTIF:
+				_compter(cle, ou, PRIME_COLLECTION, "collection", false)
+				emettre("colis", {"j": cle, "n": combien, "sur": COLIS_OBJECTIF, "fini": true})
+		else:
+			lancer_frenzy(cle, String(r["arme"]))
+		return
+
+## KILL FRENZY. Une arme, un compte, un chrono. Le joueur reçoit l'arme :
+## sans elle, le défi consiste à courir chercher une caisse, et le chrono est
+## déjà fini quand il commence.
+func lancer_frenzy(cle: String, arme: String) -> void:
+	frenzies[cle] = {"reste": DUREE_FRENZY, "fait": 0, "objectif": OBJECTIF_FRENZY, "arme": arme}
+	emettre("frenzy", {"j": cle, "e": "debut", "a": arme, "n": OBJECTIF_FRENZY,
+		"f": 0, "r": int(DUREE_FRENZY)})
+
+func _avancer_les_frenzies(delta: float) -> void:
+	for cle in frenzies.keys():
+		var f: Dictionary = frenzies[cle]
+		f["reste"] = float(f["reste"]) - delta
+		if float(f["reste"]) > 0.0:
+			continue
+		frenzies.erase(cle)
+		emettre("frenzy", {"j": String(cle), "e": "perdu", "a": String(f["arme"]),
+			"n": int(f["objectif"]), "f": int(f["fait"]), "r": 0})
+
+## Une victime de plus pendant un Frenzy. Appelé depuis `_abattre` : c'est le
+## même compte que le score, on ne recompte rien à côté.
+func _avancer_frenzy(cle: String, ou: Vector2) -> void:
+	if not frenzies.has(cle):
+		return
+	var f: Dictionary = frenzies[cle]
+	f["fait"] = int(f["fait"]) + 1
+	if int(f["fait"]) < int(f["objectif"]):
+		emettre("frenzy", {"j": cle, "e": "avance", "a": String(f["arme"]),
+			"n": int(f["objectif"]), "f": int(f["fait"]), "r": int(ceil(float(f["reste"])))})
+		return
+	frenzies.erase(cle)
+	_compter(cle, ou, PRIME_FRENZY, "frenzy", false)
+	emettre("frenzy", {"j": cle, "e": "gagne", "a": String(f["arme"]),
+		"n": int(f["objectif"]), "f": int(f["fait"]), "r": 0})
+
+## Le client monte dans le taxi : il quitte le trottoir. C'est l'hôte qui le
+## retire — un client effacé par le seul chauffeur resterait là pour les trois
+## autres joueurs, qui le verraient marcher pendant toute la course.
+func embarquer_client(id: int) -> bool:
+	for personne in gens:
+		if int(personne["id"]) == id and int(personne["genre"]) == PIETON:
+			return retirer(gens, id)
+	return false
+
+## Payer un service rendu qui n'est pas une victime : une course de taxi, une
+## cascade. Passe par le même chemin que tout le reste — le tableau, l'effet
+## de gain et l'argent sur soi sont ceux du jeu, pas des copies.
+func payer(cle: String, ou: Vector2, montant: int, quoi: String) -> void:
+	_compter(cle, ou, max(0, montant), quoi, false)
+
+# ------------------------------------------------------------ les pièges
+#
+## MINES ET TACHES D'HUILE — ce que l'atelier vend et qu'on sème derrière soi.
+##
+## Ils vivent chez l'HÔTE, comme les caisses et les barrages : c'est lui qui
+## décide qu'une voiture a roulé dessus. Un client qui annoncerait ses propres
+## victimes ferait sauter la ville entière depuis son navigateur.
+##
+## ⚠ Une mine s'AMORCE. Sans le délai, elle explosait sous la voiture qui
+## venait de la lâcher — on payait sept cents dollars pour se tuer soi-même,
+## une fois, et on n'en rachetait plus jamais.
+enum { MINE, HUILE }
+const PIEGES_MAX := 18            ## au-delà, la ville est un champ de mines
+const AMORCE_MINE := 1.4          ## secondes avant qu'elle morde
+const DUREE_MINE := 45.0
+const DUREE_HUILE := 26.0
+const DEGAT_MINE := 70.0          ## une voiture n'y survit pas deux fois
+var pieges: Array = []            ## {id, p, genre, par, reste, amorce}
+
+## LA BOMBE (guide §7.2) : elle ne se déclenche pas à distance, elle attend
+## qu'on soit SORTI. C'est le piège à voleur de GTA 2 — on laisse sa voiture
+## ouverte au milieu de la rue, quelqu'un monte, et la rue change de forme.
+##
+## ⚠ Elle est armée par l'HÔTE et attachée à l'identifiant du VÉHICULE, pas au
+## joueur : sinon un joueur qui se déconnecte emporterait la bombe avec lui et
+## la voiture piégée resterait piégée pour l'éternité.
+var bombes: Dictionary = {}       ## id de véhicule -> {reste, par}
+const BOMBE_DELAI := 6.0
+
+func armer_bombe(cle: String, id: int) -> void:
+	bombes[id] = {"reste": BOMBE_DELAI, "par": cle}
+
+func _animer_les_bombes(delta: float) -> void:
+	for id in bombes.keys():
+		var fiche: Dictionary = bombes[id]
+		fiche["reste"] = float(fiche["reste"]) - delta
+		if float(fiche["reste"]) > 0.0:
+			continue
+		bombes.erase(id)
+		for auto in autos:
+			if int(auto["id"]) != int(id) or int(auto["genre"]) == EPAVE:
+				continue
+			# Celui qui a posé la bombe marque la voiture : c'est son piège,
+			# même s'il est à trois rues de là quand elle saute.
+			detruire_auto(auto, String(fiche["par"]))
+			break
+
+func poser_piege(cle: String, ou: Vector2, genre: int) -> int:
+	if pieges.size() >= PIEGES_MAX:
+		# Le plus vieux s'efface : refuser la pose punirait celui qui a payé,
+		# et il ne verrait même pas pourquoi.
+		retirer(pieges, int(pieges[0]["id"]))
+	var id := _id()
+	pieges.append({"id": id, "p": ou, "genre": genre, "par": cle,
+		"reste": DUREE_MINE if genre == MINE else DUREE_HUILE,
+		"amorce": AMORCE_MINE if genre == MINE else 0.0})
+	return id
+
+func _animer_les_pieges(delta: float, joueurs: Dictionary) -> void:
+	var restants: Array = []
+	for piege in pieges:
+		piege["reste"] = float(piege["reste"]) - delta
+		piege["amorce"] = max(0.0, float(piege["amorce"]) - delta)
+		if float(piege["reste"]) <= 0.0:
+			retirer(pieges, int(piege["id"]))
+			continue
+		if float(piege["amorce"]) > 0.0:
+			restants.append(piege)
+			continue
+		if int(piege["genre"]) == MINE:
+			if _mordre(piege, joueurs):
+				retirer(pieges, int(piege["id"]))
+				continue
+		else:
+			_faire_glisser(piege, joueurs)
+		restants.append(piege)
+	pieges = restants
+
+## Une mine ne saute qu'UNE fois : elle rend vrai, et l'appelant la retire.
+func _mordre(piege: Dictionary, joueurs: Dictionary) -> bool:
+	var ou: Vector2 = piege["p"]
+	var par := String(piege["par"])
+	for auto in autos:
+		if String(auto["pilote"]) != "" or bool(auto.get("garee", false)) or int(auto["genre"]) == EPAVE:
+			continue
+		if Vector2(auto["p"]).distance_to(ou) > PlanVille.RAYON_MINE:
+			continue
+		# La mine porte le nom de celui qui l'a posée : c'est SA victime, il
+		# la marque, et le gang de la voiture le lui reproche.
+		detruire_auto(auto, par)
+		emettre("boum", {"x": int(ou.x), "y": int(ou.y)})
+		return true
+	for cle in joueurs:
+		var j: Dictionary = joueurs[cle]
+		if bool(j.get("pied", true)) or float(j.get("vie", 100.0)) <= 0.0:
+			continue
+		if Vector2(j["p"]).distance_to(ou) > PlanVille.RAYON_MINE:
+			continue
+		emettre("deg", {"j": String(cle), "d": int(DEGAT_MINE), "k": "mine", "par": par})
+		emettre("boum", {"x": int(ou.x), "y": int(ou.y)})
+		return true
+	return false
+
+## L'huile ne fait pas de dégâts : elle fait PERDRE LE CAP. C'est ce qui la
+## rend intéressante en poursuite — le poursuivant ne meurt pas, il part dans
+## le décor et se retrouve trois rues en arrière.
+##
+## ⚠ Elle glisse aussi sous celui qui l'a posée. Une flaque inoffensive pour
+## son propriétaire, c'est une arme sans risque : on en sème une devant chaque
+## carrefour et on ne se retourne jamais.
+func _faire_glisser(piege: Dictionary, joueurs: Dictionary) -> void:
+	var ou: Vector2 = piege["p"]
+	for auto in autos:
+		if String(auto["pilote"]) != "" or bool(auto.get("garee", false)):
+			continue
+		if Vector2(auto["p"]).distance_to(ou) > PlanVille.RAYON_HUILE:
+			continue
+		var d: Vector2 = Vector2(auto["d"]).rotated(_rng.randf_range(-1.5, 1.5))
+		auto["d"] = d
+		auto["a"] = d.angle()
+		auto["vitesse"] = float(auto["vitesse"]) * 0.45
+	for cle in joueurs:
+		var j: Dictionary = joueurs[cle]
+		if bool(j.get("pied", true)) or float(j.get("vie", 100.0)) <= 0.0:
+			continue
+		if Vector2(j["p"]).distance_to(ou) > PlanVille.RAYON_HUILE:
+			continue
+		emettre("glisse", {"j": String(cle)})
+
 # ------------------------------------------------------------ les contrats
 
 ## Décrocher à une cabine. Le gang qui appelle est celui dont c'est le
@@ -1348,11 +1962,35 @@ func _conduire_service(auto: Dictionary, delta: float, joueurs: Dictionary) -> v
 func proposer_contrat(cle: String, cabine: int, position: Vector2) -> void:
 	if cle == "" or contrats.has(cle):
 		return
-	var employeur := posmod(cabine, 3)
-	var rival := posmod(employeur + 1 + _rng.randi_range(0, 1), 3)
+	# ⚠ L'employeur est le gang DU TERRITOIRE, pas le numéro de la cabine.
+	# C'était `posmod(cabine, 3)` — l'indice d'un pâté modulo trois : une
+	# cabine plantée chez Le Lierre faisait travailler pour Les Braises deux
+	# fois sur trois, et son enseigne annonçait un employeur qui n'était pas
+	# celui qui décrochait.
+	var employeur := plan.territoire(position)
+	if employeur < 0:
+		# Terrain neutre — le centre d'affaires n'appartient à personne. C'est
+		# le trio du secteur qui s'y partage les téléphones, sinon les cabines
+		# du centre ne sonneraient jamais.
+		var trio: Array = plan.trio(position)
+		employeur = int(trio[posmod(cabine, trio.size())])
+	var etat := humeur(cle, employeur)
+	if etat <= H_HOSTILE:
+		# Sous quarante, personne ne vous confie rien : c'est la conséquence
+		# du palier « bas » du guide, et la seule qui se ressente AVANT d'être
+		# pris pour cible. Le joueur apprend là qu'il a une jauge à remonter.
+		emettre("ctr", {"j": cle, "e": "refuse", "n": 0, "a": 0, "r": 0, "g": employeur,
+			"t": "%s n'a rien pour vous" % plan.nom_du_gang(employeur)})
+		return
+	var niveau: Dictionary = PALIERS_CONTRAT[etat]
+	# Le rival est tiré parmi les rivaux DE CE GANG ICI : envoyer nettoyer
+	# chez un gang de l'autre bout de la ville, c'est un contrat qu'on ne peut
+	# pas tenir dans le temps imparti.
+	var candidats: Array = plan.rivaux(employeur, position)
+	var rival := int(candidats[_rng.randi_range(0, candidats.size() - 1)])
 	var tirage := _rng.randf()
 	var genre := "nettoyage"
-	var objectif := 3 + _rng.randi_range(0, 2)
+	var objectif := 3 + _rng.randi_range(0, 2) + int(niveau["plus"])
 	var texte := ""
 	if tirage < 0.36:
 		texte = "%s veut la peau de %d gars %s" % [
@@ -1363,14 +2001,17 @@ func proposer_contrat(cle: String, cabine: int, position: Vector2) -> void:
 		texte = "%s veut cette voiture repeinte, et vite" % plan.nom_du_gang(employeur)
 	else:
 		genre = "chasse"
-		objectif = 2
+		objectif = 2 + int(niveau["plus"])
 		texte = "%s paie si vous tenez %d étoiles jusqu'au bout" % [
 			plan.nom_du_gang(employeur), objectif]
+	texte += " (%s)" % String(niveau["nom"])
 
 	contrats[cle] = {
 		"genre": genre, "employeur": employeur, "rival": rival,
 		"objectif": objectif, "fait": 0.0, "reste": float(DUREE_CONTRAT[genre]),
 		"texte": texte, "p": position,
+		"prime": int(round(float(PRIME_CONTRAT[genre]) * float(niveau["prime"]))),
+		"respect": float(niveau["respect"]),
 	}
 	_diffuser_contrat(cle, "pris")
 
@@ -1412,10 +2053,15 @@ func _solder_contrat(cle: String, gagne: bool) -> void:
 	var position: Vector2 = c.get("p", plan.centre())
 	contrats.erase(cle)
 	if gagne:
-		_compter(cle, position, int(PRIME_CONTRAT[String(c["genre"])]), "contrat", false)
-		# Une perte NÉGATIVE remonte la jauge de l'employeur sans toucher aux
-		# deux autres : rendre service à un gang ne fâche pas ses voisins.
-		_ajuster_respect(cle, int(c["employeur"]), -RESPECT_CONTRAT, 0.0)
+		_compter(cle, position, int(c.get("prime", PRIME_CONTRAT[String(c["genre"])])), "contrat", false)
+		# Servir un gang le rapproche ET fâche celui qu'on a servi contre lui,
+		# moitié moins fort (guide §3.2). Sans ce second mouvement, on pouvait
+		# enchaîner les contrats des deux camps et finir ami avec tout le
+		# monde — le triangle de rivalité ne tenait plus.
+		var gagne_respect := float(c.get("respect", RESPECT_CONTRAT))
+		_ajuster_respect(cle, int(c["employeur"]), gagne_respect)
+		if int(c.get("rival", -1)) >= 0:
+			_ajuster_respect(cle, int(c["rival"]), -gagne_respect * 0.5)
 	emettre("ctr", {"j": cle, "e": "gagne" if gagne else "perdu",
 		"t": String(c.get("texte", "")), "n": 0, "a": 0, "r": 0})
 
@@ -1539,7 +2185,7 @@ func accorder_vehicule(cle: String, id: int, position: Vector2) -> void:
 		crime(cle, "pieton")
 	elif int(auto["genre"]) == VOITURE_GANG:
 		# Voler la voiture d'un gang aussi — moins qu'un mort, plus qu'un rien.
-		_ajuster_respect(cle, int(auto.get("gang", 0)), RESPECT_PERDU * 0.4, 0.0)
+		_repercuter(cle, int(auto.get("gang", 0)), Vector2(auto["p"]), RESPECT_PERDU * 0.4, 0.0)
 	emettre("pris", {"j": cle, "id": id, "g": int(auto["genre"]), "m": int(auto.get("modele", 0)),
 		"x": int(auto["p"].x), "y": int(auto["p"].y), "a": snapped(float(auto["a"]), 0.01),
 		"pv": int(auto["pv"])})
@@ -1614,9 +2260,12 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 	for personne in gens:
 		if not _regarde(personne["p"], joueurs):
 			continue
+		# Le CORPS voyage : c'est lui qui donne sa tenue à l'uniforme et la
+		# hauteur de sa jauge de vie. Sans lui, les quatre hommes d'un fourgon
+		# apparaissaient chez les autres joueurs en simples îlotiers.
 		vus_gens.append([int(personne["id"]), int(personne["p"].x), int(personne["p"].y),
 			int(personne["genre"]), int(personne["gang"]), int(personne["pv"]),
-			int(float(personne["a"]) * 100.0)])
+			int(float(personne["a"]) * 100.0), int(personne.get("corps", CORPS_POLICE))])
 
 	var vus_autos: Array = []
 	for auto in autos:
@@ -1624,7 +2273,8 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 			continue
 		vus_autos.append([int(auto["id"]), int(auto["p"].x), int(auto["p"].y),
 			int(float(auto["a"]) * 100.0), int(auto["genre"]), int(auto["pv"]),
-			int(auto.get("modele", 0)), 1 if bool(auto.get("garee", false)) else 0])
+			int(auto.get("modele", 0)), 1 if bool(auto.get("garee", false)) else 0,
+			int(auto.get("corps", CORPS_POLICE)), 1 if bool(auto.get("canon", false)) else 0])
 
 	var vues_caisses: Array = []
 	for c in caisses:
@@ -1640,16 +2290,25 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 
 	var etats: Dictionary = {}
 	for cle in joueurs:
-		etats[cle] = [etoiles(String(cle)),
-			int(respect_de(String(cle))[0]), int(respect_de(String(cle))[1]),
-			int(respect_de(String(cle))[2])]
+		var ligne: Array = [etoiles(String(cle))]
+		for v in respect_de(String(cle)):
+			ligne.append(int(v))
+		etats[cle] = ligne
 
 	var vus_feux: Array = []
 	for f in feux:
 		vus_feux.append([int(f["id"]), int(f["p"].x), int(f["p"].y), int(float(f["force"]) * 100.0)])
 
+	var vus_a_cotes: Array = []
+	for r in ramassages:
+		vus_a_cotes.append([int(r["id"]), int(r["p"].x), int(r["p"].y), int(r["genre"])])
+
+	var vus_pieges: Array = []
+	for piege in pieges:
+		vus_pieges.append([int(piege["id"]), int(piege["p"].x), int(piege["p"].y), int(piege["genre"])])
+
 	return {"g": vus_gens, "a": vus_autos, "c": vues_caisses, "b": vus_barrages, "h": vus_helicos,
-		"f": vus_feux, "e": etats}
+		"f": vus_feux, "e": etats, "pg": vus_pieges, "ac": vus_a_cotes}
 
 func _regarde(point: Vector2, joueurs: Dictionary) -> bool:
 	for cle in joueurs:
@@ -1704,6 +2363,7 @@ func appliquer_instantane(charge: Dictionary) -> void:
 			"cible": Vector2(float(entree[1]), float(entree[2])),
 			"genre": int(entree[3]), "gang": int(entree[4]), "pv": int(entree[5]),
 			"a": float(entree[6]) / 100.0, "d": Vector2.RIGHT, "etat": 0,
+			"corps": int(entree[7]) if entree.size() > 7 else CORPS_POLICE,
 			"minuterie": 0.0, "recharge": 0.0})
 	for entree in charge.get("a", []):
 		if typeof(entree) == TYPE_ARRAY and (entree as Array).size() > 0 and PlanVille.est_dormante(int(entree[0])):
@@ -1714,6 +2374,8 @@ func appliquer_instantane(charge: Dictionary) -> void:
 			"a": float(entree[3]) / 100.0, "genre": int(entree[4]), "pv": float(entree[5]),
 			"modele": int(entree[6]) if entree.size() > 6 else 0,
 			"garee": (int(entree[7]) == 1) if entree.size() > 7 else false,
+			"corps": int(entree[8]) if entree.size() > 8 else CORPS_POLICE,
+			"canon": (int(entree[9]) == 1) if entree.size() > 9 else false,
 			"gang": plan.territoire(Vector2(float(entree[1]), float(entree[2]))),
 			"d": Vector2.RIGHT, "vitesse": 0.0, "pilote": "", "cible": "", "minuterie": 0.0})
 	caisses = _fusionner(caisses, charge.get("c", []), func(entree: Array) -> Dictionary:
@@ -1721,6 +2383,12 @@ func appliquer_instantane(charge: Dictionary) -> void:
 			"arme": String(entree[3])})
 	barrages = _fusionner(barrages, charge.get("b", []), func(entree: Array) -> Dictionary:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2]))})
+	ramassages = _fusionner(ramassages, charge.get("ac", []), func(entree: Array) -> Dictionary:
+		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
+			"genre": int(entree[3]), "arme": ""})
+	pieges = _fusionner(pieges, charge.get("pg", []), func(entree: Array) -> Dictionary:
+		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
+			"genre": int(entree[3]), "par": "", "reste": 9.0, "amorce": 0.0})
 	helicos = _fusionner(helicos, charge.get("h", []), func(entree: Array) -> Dictionary:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
 			"cible": "", "recharge": 0.0, "cap": float(entree[3]) / 100.0 if entree.size() > 3 else 0.0})
@@ -1733,9 +2401,12 @@ func appliquer_instantane(charge: Dictionary) -> void:
 	if typeof(etats) == TYPE_DICTIONARY:
 		for cle in etats:
 			var valeurs = etats[cle]
-			if typeof(valeurs) == TYPE_ARRAY and (valeurs as Array).size() >= 4:
+			if typeof(valeurs) == TYPE_ARRAY and (valeurs as Array).size() >= 1 + PlanVille.GANGS.size():
 				chaleur[cle] = chaleur_pour(int(valeurs[0]))
-				respect[cle] = [float(valeurs[1]), float(valeurs[2]), float(valeurs[3])]
+				var jauge: Array = []
+				for i in PlanVille.GANGS.size():
+					jauge.append(float(valeurs[1 + i]))
+				respect[cle] = jauge
 
 ## Le client ne reçoit que le NOMBRE d'étoiles, pas la chaleur : il lui suffit
 ## d'en avoir une valeur qui affiche le bon compte.
@@ -1763,7 +2434,7 @@ func _fusionner(existants: Array, recus, fabrique: Callable) -> Array:
 			# On garde le nœud 3D et on ne déplace que la CIBLE : la position
 			# affichée glisse vers elle image par image, sinon un instantané
 			# à huit par seconde donne une ville qui saute.
-			for champ in ["genre", "gang", "pv", "a", "arme", "garee", "cap"]:
+			for champ in ["genre", "gang", "pv", "a", "arme", "garee", "cap", "corps", "canon"]:
 				if neuf.has(champ):
 					objet[champ] = neuf[champ]
 			objet["cible"] = neuf["p"]

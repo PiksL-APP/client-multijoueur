@@ -39,6 +39,8 @@ func _draw() -> void:
 	var bas := taille.y - MARGE - 24.0     # au-dessus de la ligne d'aide
 	if not fiche.is_empty():
 		bas = _peindre_la_fiche(bas)
+		if fiche.has("respect"):
+			bas = _peindre_le_respect(bas)
 	elif etat_texte != "":
 		bas = _peindre_l_etat(bas)
 	if fiche.has("alerte"):
@@ -111,9 +113,13 @@ func _peindre_le_reseau(taille: Vector2) -> void:
 func _peindre_les_etoiles(taille: Vector2) -> void:
 	var niveau := int(fiche.get("etoiles", 0))
 	var centre_x := taille.x * 0.5
-	var pas := 30.0
-	for i in 5:
-		var centre := Vector2(centre_x + (i - 2) * pas, MARGE + 18.0)
+	# SIX crans depuis la phase 8 : le sixième, c'est l'armée. Les étoiles se
+	# resserrent (26 au lieu de 30) pour que la rangée garde la même largeur
+	# qu'avant — elle est centrée sur le haut de l'écran, et une rangée qui
+	# s'élargit d'un cran décale tout le reste.
+	var pas := 26.0
+	for i in 6:
+		var centre := Vector2(centre_x + (float(i) - 2.5) * pas, MARGE + 18.0)
 		var allumee := i < niveau
 		var couleur := Color(1, 1, 1, 0.14)
 		if allumee:
@@ -187,6 +193,43 @@ func _peindre_la_fiche(bas: float) -> float:
 			draw_string(UI.TEXTE_POLICE, Vector2(px + 6.0, y + 15.0), texte_puce, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, couleur)
 			px += l + 16.0
 		y += 22.0
+	return rect.position.y
+
+## LES TROIS BARRES DE RESPECT du district où l'on se trouve — pas les sept de
+## la ville. Sept barres, c'est un tableau de bord de simulateur : on ne les
+## lit plus, et cinq d'entre elles parlent de quartiers qu'on ne voit pas.
+## Trois, c'est la question du moment : qui, ICI, vous laisse passer.
+##
+## Elles se peignent AU-DESSUS de la fiche : posées dedans, elles doublaient la
+## hauteur du cartouche et mangeaient le bas de l'écran en voiture.
+func _peindre_le_respect(bas: float) -> float:
+	var barres: Array = fiche.get("respect", [])
+	if barres.is_empty():
+		return bas
+	var hauteur := 16.0 + barres.size() * 17.0
+	var rect := Rect2(Vector2(MARGE, bas - hauteur - 6.0), Vector2(LARGEUR_FICHE, hauteur))
+	UI.cartouche(self, rect, Palette.ENCRE_FAIBLE)
+	var x := rect.position.x + UI.ACCENT + 12.0
+	var largeur := rect.size.x - UI.ACCENT - 24.0
+	var y := rect.position.y + 8.0
+	for b in barres:
+		var couleur: Color = b.get("couleur", Palette.ENCRE_DOUCE)
+		var teinte: Color = b.get("teinte", couleur)
+		var part: float = clamp(float(b.get("part", 0.0)), 0.0, 1.0)
+		# Le nom à gauche, l'humeur à droite, la barre par-dessous : le nom
+		# seul ne dit pas ce qu'il faut en penser, et l'humeur seule ne dit pas
+		# de qui l'on parle.
+		draw_string(UI.TEXTE_POLICE, Vector2(x, y + 8.0), String(b.get("nom", "")),
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, couleur)
+		var mot := String(b.get("humeur", ""))
+		var lm := UI.TEXTE_POLICE.get_string_size(mot, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+		draw_string(UI.TEXTE_POLICE, Vector2(rect.end.x - 12.0 - lm, y + 8.0), mot,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, teinte)
+		# ⚠ La barre DEUX pixels plus bas qu'il n'y paraît : à dix, la jambe du
+		# « p » de « vous chasse » tombait dedans et les deux se brouillaient.
+		draw_rect(Rect2(Vector2(x, y + 12.0), Vector2(largeur, 3.0)), Color(couleur, 0.20), true)
+		draw_rect(Rect2(Vector2(x, y + 12.0), Vector2(largeur * part, 3.0)), teinte, true)
+		y += 17.0
 	return rect.position.y
 
 ## La ligne d'état libre des jeux qui n'ont pas de fiche : un cartouche, une

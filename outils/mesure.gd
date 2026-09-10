@@ -59,7 +59,7 @@ static func carte_lente(fiche: Dictionary) -> CarteVille:
 	for j in dessin.size():
 		for i in large:
 			if _car(dessin, i, j) == "O":
-				carte.poser_piece("road-roundabout", Vector2i(i - 1, j - 1), 3, 0)
+				carte.poser_piece("road-roundabout", Vector2i(i - 1, j - 1), Vector2i(3, 3), 0)
 	return carte
 
 func _ready() -> void:

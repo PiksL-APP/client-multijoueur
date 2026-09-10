@@ -147,7 +147,6 @@ static func nappe(chemin: String, transformations: Array, ombre: bool = true,
 	return noeud
 
 const PERSONNAGE := "res://modeles/personnages/character.glb"
-const CREATURE := "res://modeles/creatures/enemy-flying.glb"
 const PIECE := "res://modeles/personnages/coin.glb"
 
 ## Un modèle du kit, teinté sans perdre sa peinture.

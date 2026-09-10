@@ -116,6 +116,14 @@ const ARMES := {
 		"nom": "Éperon", "munitions": 0, "cadence": 0.0, "portee": 0.0,
 		"vitesse": 0.0, "souffle": 0.0, "degat": 0.0, "couleur": Palette.SERIE,
 	},
+	# LA MITRAILLEUSE DE BORD (atelier). Elle n'entre jamais dans `_arme` : on
+	# la prend à la place de son arme TANT QU'ON EST AU VOLANT, et on retrouve
+	# la sienne en descendant. Sinon l'achat coûtait au joueur le fusil qu'il
+	# venait de ramasser.
+	"canon": {
+		"nom": "Mitrailleuse de bord", "munitions": -1, "cadence": 0.13, "portee": 880.0,
+		"vitesse": 1450.0, "souffle": 0.0, "degat": 12.0, "couleur": Color("#f2c53d"),
+	},
 }
 const DUREE_EPERON := 16.0
 
@@ -171,7 +179,7 @@ const KLAXON_DELAI := 0.9
 ## va plus vite que l'œil quand on est trois à tirer dans la même rue.
 const SONS_ARMES := {
 	"pistolet": "tir_pistolet", "mitraillette": "tir_mitraillette",
-	"roquette": "tir_roquette", "eperon": "choc_metal",
+	"roquette": "tir_roquette", "eperon": "choc_metal", "canon": "tir_mitraillette",
 }
 
 ## Le grain du moteur suit le châssis : la sportive siffle, le camion gronde.
@@ -278,6 +286,66 @@ var _recharge := 0.0
 var _dernier_agresseur := ""
 var _hors_ville := 0.0
 var _garage_en_cours := -1
+var _etoiles_vues := 0             ## pour n'annoncer une escalade qu'en MONTANT
+## L'AUTORADIO (guide, phase 10). Six stations, et CHAQUE CARROSSERIE a la
+## sienne par défaut : on monte dans un taxi, on tombe sur les infos ; dans une
+## sportive, sur la synthé. C'est le détail de GTA 2 qui donne une personnalité
+## à une voiture volée — sans lui, changer de véhicule ne change que la tôle.
+##
+## ⚠ Les morceaux sont ceux du dépôt (CC0, `sons/*.ogg`) : le jeu ne fabrique
+## pas de musique, et personne ici n'a de licence à distribuer. « Police » n'a
+## pas de morceau — c'est la fréquence de la police, qui ne joue que des voix.
+const RADIO_DB := -11.0            ## plus bas que le thème : les sirènes passent devant
+var _station := Sons.STATION_SILENCE
+var _station_dite := 0.0           ## secondes pendant lesquelles on affiche le nom
+var _roue_vue: Control             ## la roue des stations (ui/roue.gd)
+var _roue := false                 ## tenue ouverte tant que R est enfoncée
+var _roue_choix := 0
+
+## LA TRICHE (code Konami). Voir `ui/triche.gd` : elle coûte le classement.
+var _triche_vue: Control
+var _triche_ouverte := false
+var _invincible := false
+var _triche_avant := {}            ## fronts des touches du menu
+var _colis := 0                    ## colis trouvés, et sur combien
+var _colis_sur := 0
+var _frenzy: Dictionary = {}       ## le défi en cours : {a, n, f, r}
+
+## LE TAXI (guide §4.3). Un métier attaché à une CARROSSERIE : on devient
+## chauffeur en volant un taxi, on cesse de l'être en le laissant. Pas de
+## menu, pas de bouton « prendre le service » — la voiture est le contrat.
+const PRIX_COURSE := 32            ## dollars par pâté (100 px) à vol d'oiseau
+const PRIME_COURSE_MIN := 140
+const PORTEE_CLIENT := 110.0       ## à quelle distance un piéton hèle
+const PORTEE_DEPOT := 110.0
+var _course: Dictionary = {}       ## {} ou {"p": destination, "depart": Vector2}
+
+## LES CASCADES, version sans axe vertical.
+##
+## ⚠ Le guide (§4.3) parle de SAUTS — « Insane Stunt ». Notre ville est plate
+## et la voiture n'a pas d'altitude : un tremplin ne peut rien décoller. La
+## cascade est donc le FRÔLEMENT : passer à pleine vitesse au ras d'une
+## voiture qui roule, sans la toucher. Même geste, même risque, même récompense
+## — et c'est vérifiable, ce qu'un saut simulé ne serait pas.
+const VITESSE_FROLEMENT := 240.0
+const RAYON_FROLEMENT := 54.0      ## au-delà, ce n'est plus un frôlement
+const FENETRE_CASCADE := 3.0       ## secondes pour enchaîner
+const PRIME_FROLEMENT := 90
+const CASCADE_MAX := 5
+var _froles: Dictionary = {}       ## id d'auto -> temps du dernier frôlement
+var _cascade := 0
+var _cascade_reste := 0.0
+## L'ATELIER. Les modifications tiennent au VÉHICULE qu'on conduit, pas au
+## joueur : on descend, on les laisse avec la voiture. Sauf les plaques, qui
+## sont une affaire de police et suivent le joueur, et la bombe, qui reste sur
+## la carrosserie — c'est tout son intérêt.
+var _mods: Dictionary = {}         ## "mitrailleuse" -> true, "mines"/"huile" -> stock
+var _plaques := 0.0                ## secondes de plaques maquillées restantes
+var _largage := 0.0                ## délai entre deux pièges
+var _atelier_en_cours := -1
+const MUNITIONS_PIEGE := 4         ## ce qu'un achat met dans le coffre
+const DELAI_LARGAGE := 0.9
+const DUREE_PLAQUES := 45.0
 var _cabine_en_cours := -1
 var _contrat: Dictionary = {}
 var _depuis_sirene := 0.0
@@ -324,7 +392,7 @@ func duree_manche() -> float:
 	return DUREE
 
 func aide() -> String:
-	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · F : affaires (planque, hôpital) · H : klaxon · TAB : carte · caisse = arme, trousse ou billet · garage bleu = étoiles effacées · cabine jaune = contrat · maison violette = planque à acheter · croix blanche = hôpital"
+	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · F : affaires (planque, hôpital) · H : klaxon · TAB : carte · caisse = arme, trousse ou billet · colis doré = à ramasser · crâne rouge = Kill Frenzy · au volant d'un taxi, F prend et dépose un client · garage bleu = étoiles effacées, et un sur deux est un ATELIER (F sur une pastille) · cabine jaune = contrat · maison violette = planque à acheter · croix blanche = hôpital"
 
 # ------------------------------------------------------- mise en place
 
@@ -373,6 +441,10 @@ func preparer() -> void:
 					_position = carte.un_pont()
 	_vehicule = ID_VOITURE_DEPART + place
 	_pied = false
+	# La manche commence AU VOLANT : la radio s'allume avec elle, sur la
+	# station de la Volvo de départ. C'est aussi ce qui remet le thème du hub
+	# en marche — `Partie.demarrer` vient de le couper.
+	_allumer_la_radio(_modele_vehicule)
 
 	_corps_auto = FormesCarnage.voiture(_ma_couleur(), Session.pseudo)
 	_corps_auto.add_child(FormesCarnage.echappement(-2.4))
@@ -460,6 +532,24 @@ func preparer() -> void:
 	_plan_vue.draw.connect(_dessiner_le_plan)
 	interface().add_child(_plan_vue)
 
+	# LA ROUE DES STATIONS, repliée. Elle ne s'ouvre que `R` tenue, au volant.
+	_roue_vue = Control.new()
+	_roue_vue.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_roue_vue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_roue_vue.set_script(load("res://ui/roue.gd"))
+	_roue_vue.visible = false
+	_roue_vue.stations = Sons.STATIONS
+	interface().add_child(_roue_vue)
+
+	# LE MENU DE TRICHE, replié. Il ne se montre qu'au code Konami.
+	_triche_vue = Control.new()
+	_triche_vue.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_triche_vue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_triche_vue.set_script(load("res://ui/triche.gd"))
+	_triche_vue.visible = false
+	_triche_vue.codes = _codes_de_triche()
+	interface().add_child(_triche_vue)
+
 	# Les quatre morceaux les plus proches du départ, tout de suite ; les autres
 	# suivent à un par image pendant le décompte. Bâtir les neuf d'un coup
 	# bloquait le fil principal une seconde et demie dans le navigateur.
@@ -494,7 +584,8 @@ func preparer() -> void:
 			if String(argument).begins_with("--banc-etoiles="):
 				var niveau := int(String(argument).substr(15))
 				if niveau > 0:
-					ville.chaleur[Session.cle] = float(VilleVivante.PALIERS[min(niveau, 5) - 1]) + 40.0
+					ville.chaleur[Session.cle] = float(VilleVivante.PALIERS[
+						min(niveau, VilleVivante.PALIERS.size()) - 1]) + 40.0
 					ville._depuis_crime[Session.cle] = 0.0
 
 ## La carrosserie qu'on conduit : la Volvo au départ, puis ce qu'on a volé. On
@@ -730,6 +821,19 @@ func simuler_local(delta: float) -> void:
 	if Commandes.pilote_automatique:
 		_piloter_pour_le_banc()
 
+	# ⚠ LE CODE KONAMI SE LIT EN PREMIER, et le menu attrape les touches avant
+	# tout le reste : ouvert, il rend la main tout de suite. La manche, elle,
+	# continue de tourner derrière — c'est du multijoueur, on ne met pas trois
+	# autres joueurs en pause pour lire un menu.
+	if Commandes.konami(delta):
+		_basculer_la_triche()
+	# ⚠ On NE SORT PAS de la boucle : la ville continue de vivre derrière le
+	# menu (c'est du multijoueur, et un monde figé qui reprend d'un coup à la
+	# fermeture saute de trois rues). Le joueur, lui, ne bouge plus : c'est
+	# `Commandes.saisie` qui ferme ses touches, comme pour le tchat du village.
+	if _triche_ouverte:
+		_naviguer_dans_la_triche()
+
 	_depuis_portiere = max(0.0, _depuis_portiere - delta)
 	# ⚠ Le délai se teste AVANT de lire la touche : `action_declenchee` consomme
 	# le front. Interrogée pendant le délai, elle avalait l'appui de celui qui
@@ -783,6 +887,8 @@ func simuler_local(delta: float) -> void:
 
 	_avancer_projectiles(delta)
 	_ramasser_caisses()
+	_ramasser_les_a_cotes()
+	_compter_les_frolements()
 
 ## Pilote automatique du banc d'essai. Il ne joue pas bien, il joue TOUT :
 ## sans une sortie de véhicule programmée, la moitié du jeu — la marche, le
@@ -922,6 +1028,23 @@ func _basculer_portiere() -> void:
 	if est_hote():
 		ville.rendre_vehicule(Session.cle, id_rendu, _position, angle_rendu, pv, modele_rendu, genre_rendu)
 		_vider_les_evenements()
+	# LA BOMBE part avec la voiture qu'on laisse : c'est le seul moment où elle
+	# s'arme, et c'est ce qui en fait un piège et pas une arme.
+	if bool(_mods.get("bombe", false)):
+		canal.envoyer("bombe", {"id": id_rendu})
+		if est_hote():
+			ville.armer_bombe(Session.cle, id_rendu)
+			_vider_les_evenements()
+		_dire_affaire("bombe amorcée — éloignez-vous")
+	# Le reste du matériel reste avec la carrosserie : on descend les mains
+	# vides, comme on est monté.
+	_mods = {}
+	_eteindre_la_radio()
+	# Et la course s'arrête avec le taxi : le client ne suit pas à pied.
+	if not _course.is_empty():
+		_course = {}
+		_cible_contrat = {}
+		_dire_affaire("course abandonnée")
 	_position = descente
 	_modele_vehicule = -1
 
@@ -938,6 +1061,7 @@ func _prendre_le_volant(id: int, genre: int, position: Vector2, angle: float, pv
 	if Commandes.pilote_automatique:
 		print("[banc] prend le volant du véhicule %d" % id)
 	_pied = false
+	_allumer_la_radio(modele)
 	_vehicule = id
 	_genre_vehicule = genre
 	_pv_vehicule = pv
@@ -1237,6 +1361,22 @@ func _surveiller_la_friche(delta: float) -> void:
 ## jamais effacé un casier.
 func _surveiller_les_lieux(delta: float) -> void:
 	_mot_affaire_reste = max(0.0, _mot_affaire_reste - delta)
+	_largage = max(0.0, _largage - delta)
+	_cascade_reste = max(0.0, _cascade_reste - delta)
+	_station_dite = max(0.0, _station_dite - delta)
+	_tenir_la_roue()
+	# LA FRÉQUENCE DE LA POLICE n'a pas de morceau : elle DIT des choses. On
+	# emprunte les voix de la radio de bord (celles qui parlent déjà quand on
+	# est recherché), avec un niveau minimum pour qu'elle grésille même quand
+	# on n'a rien fait — c'est une radio qu'on écoute, pas une alarme.
+	if not _pied and _station == Sons.STATION_POLICE:
+		Sons.radio_police(max(1, ville.etoiles(Session.cle)))
+	if _cascade_reste == 0.0:
+		_cascade = 0
+	if _plaques > 0.0:
+		_plaques = max(0.0, _plaques - delta)
+		if _plaques == 0.0:
+			_dire_affaire("plaques repérées")
 	_surveiller_les_affaires(delta)
 	# Une cabine se décroche à pied comme au volant : obliger à descendre au
 	# milieu d'une avenue pour prendre un contrat, c'est se faire faucher.
@@ -1319,6 +1459,17 @@ func _surveiller_les_affaires(_delta: float) -> void:
 				# Le résumé à l'arrivée, deux secondes : c'est la vitrine de
 				# l'agence. La ligne d'action, elle, n'a la place que du nom.
 				_dire_affaire(_resume_du_logement())
+	elif not _pied and _modele_vehicule == FormesCarnage.MODELE_TAXI and _taxi_en_service():
+		pass
+	elif not _pied and _atelier_ici() >= 0:
+		# L'ATELIER. On est au volant, sur un garage qui vend : la baie sous les
+		# roues décide de la marchandise, `F` l'achète.
+		var baie := _baie_sous_les_roues()
+		var article: Dictionary = FormesCarnage.ATELIER[baie]
+		var prix := int(article["prix"])
+		_affaire = "F : %s — $%d" % [String(article["nom"]).to_lower(), prix]
+		if Commandes.affaire_declenchee():
+			_acheter_a_l_atelier(baie, prix)
 	elif hopital >= 0:
 		if _vie < VIE_MAX:
 			_affaire = "F : se faire recoudre — $%d" % SOIN
@@ -1328,7 +1479,150 @@ func _surveiller_les_affaires(_delta: float) -> void:
 			_affaire = "hôpital"
 	else:
 		_planque_en_cours = -1
+		# Loin de tout lieu, au volant, `F` LARGUE. La même touche qu'ailleurs :
+		# elle fait toujours « l'affaire de l'endroit où l'on est », et en pleine
+		# rue l'affaire c'est ce qu'on traîne dans le coffre.
+		if not _pied and _stock_de_piege() != "":
+			var quoi := _stock_de_piege()
+			_affaire = "F : %s (%d)" % ["mine" if quoi == "mines" else "huile", int(_mods[quoi])]
+			if Commandes.affaire_declenchee():
+				_larguer(quoi)
 	_hopital_en_cours = hopital
+
+## Le garage sous les roues, s'il vend des modifications. On redemande la
+## FICHE et pas seulement l'identifiant : il faut son centre pour savoir sur
+## quelle baie on s'est garé.
+## LE SERVICE DE TAXI. Renvoie vrai s'il a rempli `_affaire` — la chaîne des
+## affaires enchaîne alors sans regarder les autres lieux.
+##
+## Deux moments, une seule touche : prendre le client qui hèle, puis le
+## déposer. Entre les deux, le radar pointe la destination — sans elle, une
+## course est une adresse qu'on cherche à l'aveugle pendant que le compteur
+## tourne.
+func _taxi_en_service() -> bool:
+	if _course.is_empty():
+		var client := _client_qui_hele()
+		if client.is_empty():
+			return false
+		_affaire = "F : prendre le client"
+		if Commandes.affaire_declenchee():
+			_prendre_le_client(client)
+		return true
+	var reste: float = (_course["p"] as Vector2).distance_to(_position)
+	if reste > PORTEE_DEPOT:
+		_affaire = "course : %d pâtés" % int(reste / PlanVille.PAS)
+		return true
+	_affaire = "F : déposer — $%d" % _prix_de_la_course()
+	if Commandes.affaire_declenchee():
+		_deposer_le_client()
+	return true
+
+## Qui hèle : un PIÉTON, à portée, et seulement si l'on roule au pas. Un client
+## cueilli à trois cents à l'heure serait un piéton écrasé.
+func _client_qui_hele() -> Dictionary:
+	if abs(_vitesse) > 90.0:
+		return {}
+	for personne in ville.gens:
+		if int(personne["genre"]) != VilleVivante.PIETON:
+			continue
+		if (personne["p"] as Vector2).distance_to(_position) <= PORTEE_CLIENT:
+			return personne
+	return {}
+
+func _prendre_le_client(client: Dictionary) -> void:
+	# La destination est TIRÉE DANS LA RUE, loin mais pas à l'autre bout de la
+	# ville : à quatre mille pixels, la course dure plus longtemps que la
+	# manche.
+	var ou := carte.point_de_rue(_rng, _position, 900.0, 2600.0)
+	_course = {"p": ou, "depart": _position}
+	_cible_contrat = {"k": "course", "p": ou}
+	canal.envoyer("client", {"id": int(client["id"])})
+	if est_hote():
+		ville.embarquer_client(int(client["id"]))
+		_vider_les_evenements()
+	_dire_affaire("en course — %d pâtés" % int(_position.distance_to(ou) / PlanVille.PAS))
+	Sons.jouer("portiere_ferme", 1.0, -10.0)
+
+func _prix_de_la_course() -> int:
+	if _course.is_empty():
+		return 0
+	var trajet: float = (_course["depart"] as Vector2).distance_to(_course["p"])
+	return max(PRIME_COURSE_MIN, int(trajet / PlanVille.PAS * float(PRIX_COURSE)))
+
+func _deposer_le_client() -> void:
+	var prime := _prix_de_la_course()
+	canal.envoyer("payer", {"m": prime, "q": "course",
+		"x": int(_position.x), "y": int(_position.y)})
+	if est_hote():
+		ville.payer(Session.cle, _position, prime, "course")
+		_vider_les_evenements()
+	_course = {}
+	_cible_contrat = {}
+	_annoncer("COURSE PAYÉE — $%d" % prime, Color("#f2c53d"), 2.6)
+	Sons.jouer("fin", 1.2, -8.0)
+
+func _fiche_garage_ici() -> Dictionary:
+	for g in carte.lieux_autour(_position, PlanVille.RAYON_GARAGE)["garages"]:
+		return g
+	return {}
+
+func _atelier_ici() -> int:
+	var g := _fiche_garage_ici()
+	if g.is_empty() or not FormesCarnage.est_atelier(int(g["id"])):
+		return -1
+	return int(g["id"])
+
+func _baie_sous_les_roues() -> int:
+	var g := _fiche_garage_ici()
+	if g.is_empty():
+		return 0
+	return FormesCarnage.baie_sous(_position, Vector2(g["p"]))
+
+## Ce qu'on peut larguer : les mines d'abord, l'huile ensuite. L'ordre est
+## celui du danger — quand on sème quelque chose derrière soi en fuyant, on
+## veut la mine tant qu'il en reste.
+func _stock_de_piege() -> String:
+	for quoi in ["mines", "huile"]:
+		if int(_mods.get(quoi, 0)) > 0:
+			return quoi
+	return ""
+
+func _acheter_a_l_atelier(baie: int, prix: int) -> void:
+	var article: Dictionary = FormesCarnage.ATELIER[baie]
+	var quoi := String(article["cle"])
+	if _argent < prix:
+		_dire_affaire("il manque $%d" % (prix - _argent))
+		Sons.jouer("choc", 0.6, -14.0)
+		return
+	_encaisser_argent(-prix)
+	match quoi:
+		"plaques":
+			_plaques = DUREE_PLAQUES
+			canal.envoyer("mod", {"m": "plaques", "d": DUREE_PLAQUES})
+			if est_hote():
+				ville.plaques[Session.cle] = DUREE_PLAQUES
+				_vider_les_evenements()
+		"mines", "huile":
+			_mods[quoi] = int(_mods.get(quoi, 0)) + MUNITIONS_PIEGE
+		_:
+			_mods[quoi] = true
+	_dire_affaire("%s — %s" % [String(article["nom"]).to_lower(), String(article["mot"])])
+	Sons.jouer("portail", 1.2, -7.0)
+
+## Larguer un piège DERRIÈRE soi, pas dessous : posé sous la voiture, on
+## roulait dessus à l'arrêt et on s'asseyait sur sa propre mine.
+func _larguer(quoi: String) -> void:
+	if _largage > 0.0:
+		return
+	_largage = DELAI_LARGAGE
+	_mods[quoi] = int(_mods[quoi]) - 1
+	var ou := _position - Vector2.RIGHT.rotated(_angle) * 56.0
+	var genre := VilleVivante.MINE if quoi == "mines" else VilleVivante.HUILE
+	canal.envoyer("piege", {"x": int(ou.x), "y": int(ou.y), "g": genre})
+	if est_hote():
+		ville.poser_piege(Session.cle, ou, genre)
+		_vider_les_evenements()
+	Sons.jouer("portiere_ferme", 0.7, -12.0)
 
 ## Ouvrir sa porte. L'appartement se déduit du QUARTIER de la planque
 ## (`Interieurs.pour_quartier`) : même planque, même appartement chez tout le
@@ -1588,26 +1882,30 @@ func _encaisser_argent(montant: int) -> void:
 
 func _tirer(delta: float) -> void:
 	_recharge = max(0.0, _recharge - delta)
-	if _hors_service > 0.0 or _arme == "" or _arme == "eperon" or _munitions == 0 or _recharge > 0.0:
+	# Au volant, la mitrailleuse de bord passe DEVANT l'arme de poing : elle a
+	# ses propres munitions (infinies) et sa propre cadence.
+	var montee := not _pied and bool(_mods.get("mitrailleuse", false))
+	var arme := "canon" if montee else _arme
+	if _hors_service > 0.0 or arme == "" or arme == "eperon" or (not montee and _munitions == 0) or _recharge > 0.0:
 		return
 	if not Commandes.tir():
 		return
-	var fiche: Dictionary = ARMES[_arme]
+	var fiche: Dictionary = ARMES[arme]
 	_recharge = float(fiche["cadence"])
-	if _munitions > 0:
+	if _munitions > 0 and not montee:
 		_munitions -= 1
 	var depart := _position + Vector2.RIGHT.rotated(_angle) * (40.0 if not _pied else 24.0)
 	canal.envoyer("tir", {"x": int(depart.x), "y": int(depart.y),
-		"a": snapped(_angle, 0.01), "arme": _arme})
-	_creer_projectile(depart, _angle, _arme, Session.cle)
-	Sons.jouer(String(SONS_ARMES.get(_arme, "tir_pistolet")),
+		"a": snapped(_angle, 0.01), "arme": arme})
+	_creer_projectile(depart, _angle, arme, Session.cle)
+	Sons.jouer(String(SONS_ARMES.get(arme, "tir_pistolet")),
 		_rng.randf_range(0.97, 1.05), -10.0)
 	# Tirer en ville, ça s'entend. La police n'a pas besoin de voir le corps.
 	if est_hote():
 		ville.crime(Session.cle, "coup_de_feu")
 		ville.paniquer(_position, 320.0, 2.2)
 		_vider_les_evenements()
-	if _munitions == 0:
+	if _munitions == 0 and not montee:
 		_reprendre_le_pistolet()
 
 func _reprendre_le_pistolet() -> void:
@@ -1722,6 +2020,235 @@ func _ramasser_caisses() -> void:
 				_accorder(Session.cle, arme)
 			_vider_les_evenements()
 		return
+
+## LES À-CÔTÉS se ramassent PLUS LARGE qu'une caisse (52 px) : on les prend en
+## voiture, souvent à pleine vitesse, et un rayon de cinquante pixels se
+## traverse entre deux images à trois cents pixels par seconde.
+const PORTEE_A_COTE := 78.0
+
+func _ramasser_les_a_cotes() -> void:
+	for r in ville.ramassages:
+		if (r["p"] as Vector2).distance_to(_position) > PORTEE_A_COTE:
+			continue
+		canal.envoyer("acote", {"id": int(r["id"]), "x": int(_position.x), "y": int(_position.y)})
+		if est_hote():
+			ville.ramasser_a_cote(int(r["id"]), Session.cle, _position)
+			_vider_les_evenements()
+		return
+
+## UN FRÔLEMENT : à pleine vitesse, au ras d'une voiture QUI ROULE, sans la
+## toucher. La fenêtre est étroite par construction — entre le rayon de choc
+## (38 px, au-delà on s'est percutés) et 54.
+##
+## ⚠ Chaque voiture ne compte qu'UNE FOIS par passage : sans la mémoire des
+## identifiants, longer une file de voitures à l'arrêt rapportait quinze
+## primes par seconde.
+func _compter_les_frolements() -> void:
+	if _pied or _hors_service > 0.0 or abs(_vitesse) < VITESSE_FROLEMENT:
+		return
+	for auto in ville.autos:
+		if String(auto.get("pilote", "")) != "" or int(auto["genre"]) == VilleVivante.EPAVE:
+			continue
+		if bool(auto.get("garee", false)) or abs(float(auto.get("vitesse", 0.0))) < 60.0:
+			continue
+		var id := int(auto["id"])
+		if temps - float(_froles.get(id, -99.0)) < 2.5:
+			continue
+		var loin: float = (auto["p"] as Vector2).distance_to(_position)
+		if loin > RAYON_FROLEMENT or loin <= VilleVivante.CHOC_AUTO:
+			continue
+		_froles[id] = temps
+		_cascade = min(_cascade + 1, CASCADE_MAX) if _cascade_reste > 0.0 else 1
+		_cascade_reste = FENETRE_CASCADE
+		var prime := PRIME_FROLEMENT * _cascade
+		canal.envoyer("payer", {"m": prime, "q": "cascade",
+			"x": int(_position.x), "y": int(_position.y)})
+		if est_hote():
+			ville.payer(Session.cle, _position, prime, "cascade")
+			_vider_les_evenements()
+		_dire_affaire("frôlement ×%d" % _cascade if _cascade > 1 else "frôlement")
+		Sons.jouer("derapage", 1.2, -13.0)
+		return
+
+# ------------------------------------------------------- la triche
+#
+## LES CODES. Chacun est une ligne du menu : un nom, ce qu'il fait, et s'il
+## s'agit d'un interrupteur (blindage, nuit) ou d'un coup unique (le magot).
+##
+## ⚠ Ils passent par les MÊMES fonctions que le jeu : le magot appelle
+## `_encaisser_argent`, l'arsenal appelle `_equiper`, le char appelle
+## `_naitre_auto`. Un code qui écrirait directement dans les variables
+## finirait par mentir — c'est ainsi qu'on se retrouve avec de l'argent que la
+## planque ne peut pas ranger.
+func _codes_de_triche() -> Array:
+	return load("res://ui/triche.gd").codes_neufs()
+
+func _basculer_la_triche() -> void:
+	_triche_ouverte = not _triche_ouverte
+	if _triche_vue:
+		_triche_vue.visible = _triche_ouverte
+		_triche_vue.queue_redraw()
+	# `saisie` est le drapeau du tchat du village : il coupe les commandes de
+	# jeu sans toucher au reste. Un menu ouvert ne doit pas conduire.
+	Commandes.saisie = _triche_ouverte
+	if _triche_ouverte:
+		Sons.jouer("portail", 0.6, -6.0)
+	else:
+		_triche_avant = {}
+
+## Les touches du menu, lues au FRONT — une flèche tenue ne doit pas défiler
+## dix lignes par seconde.
+func _naviguer_dans_la_triche() -> void:
+	if _triche_vue == null:
+		return
+	var codes: Array = _triche_vue.codes
+	if _front_de_triche(KEY_UP):
+		_triche_vue.choix = posmod(int(_triche_vue.choix) - 1, codes.size())
+	if _front_de_triche(KEY_DOWN):
+		_triche_vue.choix = posmod(int(_triche_vue.choix) + 1, codes.size())
+	if _front_de_triche(KEY_ENTER) or _front_de_triche(KEY_KP_ENTER) or _front_de_triche(KEY_SPACE):
+		_activer_le_code(int(_triche_vue.choix))
+	if _front_de_triche(KEY_ESCAPE):
+		_basculer_la_triche()
+	_triche_vue.queue_redraw()
+
+func _front_de_triche(code: int) -> bool:
+	var maintenant := Input.is_key_pressed(code)
+	var front: bool = maintenant and not bool(_triche_avant.get(code, false))
+	_triche_avant[code] = maintenant
+	return front
+
+func _activer_le_code(indice: int) -> void:
+	var codes: Array = _triche_vue.codes
+	var code: Dictionary = codes[indice]
+	var quoi := String(code["cle"])
+	if bool(code["unique"]) and bool(code["actif"]) and quoi in ["char"]:
+		pass    # le char se rappelle autant de fois qu'on veut
+	code["actif"] = true if bool(code["unique"]) else not bool(code["actif"])
+	_signaler_la_triche()
+	match quoi:
+		"blindage":
+			_invincible = bool(code["actif"])
+		"arsenal":
+			_equiper("roquette")
+		"magot":
+			_encaisser_argent(50000)
+		"casier":
+			canal.envoyer("garage", {"i": -1})
+			if est_hote():
+				ville.repeindre(Session.cle)
+				_vider_les_evenements()
+		"traque":
+			if est_hote():
+				ville.chaleur[Session.cle] = ville.chaleur_pour(VilleVivante.PALIERS.size())
+				ville.crime(Session.cle, "coup_de_feu")
+				_vider_les_evenements()
+			else:
+				_dire_affaire("il faut être l'hôte pour ça")
+		"atelier":
+			_mods = {"mitrailleuse": true, "mines": 9, "huile": 9, "bombe": true}
+			_plaques = DUREE_PLAQUES
+			canal.envoyer("mod", {"m": "plaques", "d": DUREE_PLAQUES})
+			if est_hote():
+				ville.plaques[Session.cle] = DUREE_PLAQUES
+				_vider_les_evenements()
+		"ami", "ennemi":
+			if est_hote():
+				var valeur := 100.0 if quoi == "ami" else 0.0
+				var jauge: Array = []
+				for _g in PlanVille.GANGS.size():
+					jauge.append(valeur)
+				ville.respect[Session.cle] = jauge
+				ville._diffuser_respect(Session.cle)
+				_vider_les_evenements()
+			else:
+				_dire_affaire("il faut être l'hôte pour ça")
+		"char":
+			if est_hote():
+				ville._naitre_auto(_etats_des_joueurs(), VilleVivante.PATROUILLE,
+					Session.cle, VilleVivante.CORPS_ARMEE, true)
+				_vider_les_evenements()
+			else:
+				_dire_affaire("il faut être l'hôte pour ça")
+		"nuit":
+			# `nuit_forcee` est le réglage du banc de photo : on s'en sert ici
+			# pour arrêter l'horloge, et `-1` la rend au cycle.
+			MatieresCarnage.nuit_forcee = 0.9 if bool(code["actif"]) else -1.0
+	_annoncer(String(code["nom"]).split(" — ")[0], Palette.CRITIQUE, 2.0)
+	Sons.jouer("bonus", 0.8, -8.0)
+
+## Le prix de la triche : la manche ne compte plus POUR SOI. On le dit une
+## fois, à l'écran, et on l'envoie à l'hôte — c'est lui qui dépose les scores.
+func _signaler_la_triche() -> void:
+	if tricheurs.has(Session.cle):
+		return
+	tricheurs[Session.cle] = true
+	canal.envoyer("triche", {"j": Session.cle})
+	_dire_affaire("triche activée — la manche ne comptera pas")
+
+# ------------------------------------------------------- l'autoradio
+
+## LA ROUE. Tenue, elle vise ; relâchée, elle change de station. Elle ne
+## s'ouvre qu'au volant : à pied, l'autoradio est éteint et il n'y a rien à
+## choisir.
+func _tenir_la_roue() -> void:
+	var voulue := not _pied and _hors_service <= 0.0 and not _triche_ouverte \
+		and Commandes.radio_tenue()
+	if voulue and not _roue:
+		_roue = true
+		_roue_choix = _station
+		Commandes.saisie = true      # la voiture roule, mais ne braque plus
+		Sons.jouer("bonus", 1.9, -20.0)
+	elif not voulue and _roue:
+		_roue = false
+		Commandes.saisie = false
+		_changer_de_station(_roue_choix)
+	if _roue:
+		_viser_dans_la_roue()
+	if _roue_vue:
+		_roue_vue.visible = _roue
+		if _roue:
+			_roue_vue.choix = _roue_choix
+			_roue_vue.actuelle = _station
+			_roue_vue.queue_redraw()
+
+## Le secteur visé, tiré de la direction poussée. ⚠ On lit les touches
+## DIRECTEMENT : `Commandes.direction` est coupée par `saisie`, que la roue
+## vient justement de lever pour empêcher la voiture de braquer.
+func _viser_dans_la_roue() -> void:
+	var d := Vector2.ZERO
+	if Input.is_key_pressed(KEY_UP) or Reglages.enfoncee("avancer"): d.y -= 1.0
+	if Input.is_key_pressed(KEY_DOWN) or Reglages.enfoncee("reculer"): d.y += 1.0
+	if Input.is_key_pressed(KEY_LEFT) or Reglages.enfoncee("gauche"): d.x -= 1.0
+	if Input.is_key_pressed(KEY_RIGHT) or Reglages.enfoncee("droite"): d.x += 1.0
+	if d.length() < 0.4:
+		return                        # rien de poussé : on garde ce qu'on vise
+	# Zéro EN HAUT, puis dans le sens des aiguilles : c'est l'ordre de la table
+	# des stations, donc celui que le joueur finit par connaître par cœur.
+	var angle := atan2(d.x, -d.y)
+	var pas := TAU / float(Sons.STATIONS.size())
+	_roue_choix = posmod(int(round(angle / pas)), Sons.STATIONS.size())
+
+## On monte : la radio s'allume sur la station de la carrosserie. On descend :
+## elle s'éteint — un autoradio qui continue de jouer pendant qu'on court dans
+## la rue, c'est une bande-son, pas une radio.
+func _allumer_la_radio(modele: int) -> void:
+	_changer_de_station(Sons.station_du_modele(modele), true)
+
+func _eteindre_la_radio() -> void:
+	_station = Sons.STATION_SILENCE
+	_station_dite = 0.0
+	Sons.musique("")
+
+func _changer_de_station(indice: int, discret: bool = false) -> void:
+	_station = posmod(indice, Sons.STATIONS.size())
+	var station: Dictionary = Sons.STATIONS[_station]
+	Sons.musique(String(station["piste"]), RADIO_DB)
+	# Trois secondes de nom à l'écran : c'est une radio, on veut savoir sur
+	# quoi on est tombé, et ensuite on l'oublie.
+	_station_dite = 3.0
+	if not discret:
+		Sons.jouer("bonus", 1.6, -18.0)
 
 func _accorder(cle: String, arme: String) -> void:
 	canal.envoyer("arme", {"j": cle, "arme": arme})
@@ -1861,6 +2388,37 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 			if est_hote():
 				ville.repeindre(String(charge.get("cle", "")))
 				_vider_les_evenements()
+		"piege":
+			if est_hote():
+				ville.poser_piege(String(charge.get("cle", "")),
+					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
+					int(charge.get("g", 0)))
+				_vider_les_evenements()
+		"bombe":
+			if est_hote():
+				ville.armer_bombe(String(charge.get("cle", "")), int(charge.get("id", 0)))
+				_vider_les_evenements()
+		"mod":
+			if est_hote() and String(charge.get("m", "")) == "plaques":
+				ville.plaques[String(charge.get("cle", ""))] = float(charge.get("d", 0.0))
+				_vider_les_evenements()
+		"triche":
+			tricheurs[String(charge.get("j", ""))] = true
+		"payer":
+			if est_hote():
+				ville.payer(String(charge.get("cle", "")),
+					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
+					int(charge.get("m", 0)), String(charge.get("q", "prime")))
+				_vider_les_evenements()
+		"client":
+			if est_hote():
+				ville.embarquer_client(int(charge.get("id", -1)))
+				_vider_les_evenements()
+		"acote":
+			if est_hote():
+				ville.ramasser_a_cote(int(charge.get("id", -1)), String(charge.get("cle", "")),
+					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))))
+				_vider_les_evenements()
 		"ramasse":
 			if est_hote():
 				var arme := ville.retirer_caisse(int(charge.get("id", -1)), String(charge.get("cle", "")))
@@ -1943,6 +2501,21 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 				_hors_service = min(_hors_service, 0.6)
 				_vie = max(_vie, VIE_MAX * 0.5)
 				_dire_affaire("le Medicar vous relève")
+		"obus":
+			# L'OBUS DU CHAR. Il n'a pas volé : l'hôte a déjà décidé où il
+			# tombe et qui il abîme. Ici on ne fait que le montrer — et on le
+			# montre GROS, parce qu'un souffle de cent vingt pixels qu'on ne
+			# voit pas passe pour un bogue.
+			var ou_obus := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
+			_effet_explosion(ou_obus)
+			_effet_depart_de_coup(Vector2(float(charge.get("dx", 0)), float(charge.get("dy", 0))),
+				(ou_obus - Vector2(float(charge.get("dx", 0)), float(charge.get("dy", 0)))).angle())
+			var loin_obus: float = ou_obus.distance_to(_position)
+			Sons.jouer("explosion_grande", 0.82, -4.0 - loin_obus * 0.006)
+		"swat":
+			if String(charge.get("j", "")) == Session.cle:
+				_annoncer("ILS DESCENDENT DU FOURGON", Palette.CRITIQUE, 2.6)
+				Sons.jouer("portiere_ferme", 0.8, -8.0)
 		"boum":
 			var ou_boum := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
 			_effet_explosion(ou_boum)
@@ -1967,11 +2540,27 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 			ville.chaleur[String(charge.get("j", ""))] = ville.chaleur_pour(int(charge.get("r", 0)))
 			if Commandes.pilote_automatique and String(charge.get("j", "")) == Session.cle:
 				print("[banc] recherche : %d étoile(s)" % int(charge.get("r", 0)))
+			# L'ESCALADE S'ANNONCE. Trois crans du guide changent la nature de
+			# ce qui arrive, pas seulement le nombre : il faut le dire, sinon
+			# le joueur découvre le char en le percutant.
+			if String(charge.get("j", "")) == Session.cle:
+				var cran := int(charge.get("r", 0))
+				if cran > _etoiles_vues:
+					match cran:
+						VilleVivante.NIVEAU_SWAT:
+							_annoncer("LE SWAT ARRIVE", Palette.CRITIQUE, 3.2)
+						VilleVivante.NIVEAU_AGENTS:
+							_annoncer("AGENTS SPÉCIAUX", Palette.CRITIQUE, 3.4)
+						VilleVivante.NIVEAU_ARMEE:
+							_annoncer("L'ARMÉE — UN CHAR VOUS CHERCHE", Palette.CRITIQUE, 4.5)
+				_etoiles_vues = cran
 		"resp":
 			var valeurs = charge.get("v", [])
-			if typeof(valeurs) == TYPE_ARRAY and (valeurs as Array).size() >= 3:
-				ville.respect[String(charge.get("j", ""))] = [
-					float(valeurs[0]), float(valeurs[1]), float(valeurs[2])]
+			if typeof(valeurs) == TYPE_ARRAY and (valeurs as Array).size() >= PlanVille.GANGS.size():
+				var jauge: Array = []
+				for v in valeurs:
+					jauge.append(float(v))
+				ville.respect[String(charge.get("j", ""))] = jauge
 		"ctr":
 			if String(charge.get("j", "")) != Session.cle:
 				return
@@ -1986,6 +2575,13 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 				_contrat = {}
 				_cible_contrat = {}
 				Sons.jouer("choc", 0.55, -12.0)
+			elif etat == "refuse":
+				# Le gang décroche et raccroche : sous quarante de respect, il
+				# n'a rien à confier. Ce n'est pas une erreur, c'est la
+				# réponse — et elle doit s'entendre, sinon on croit la cabine
+				# cassée et on la rappelle dix fois.
+				_annoncer(String(charge.get("t", "")), Palette.CRITIQUE, 2.6)
+				Sons.jouer("choc", 0.75, -14.0)
 			else:
 				_contrat = {"t": String(charge.get("t", "")), "n": int(charge.get("n", 0)),
 					"a": int(charge.get("a", 0)), "r": float(charge.get("r", 0))}
@@ -2006,6 +2602,55 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 			if String(charge.get("j", "")) == Session.cle:
 				_annoncer("HÉLICOPTÈRE — filez au garage", Palette.CRITIQUE, 4.0)
 				Sons.jouer("sirene", 0.7, -6.0)
+		"aide":
+			# Un allié vient d'ouvrir le feu POUR vous. On l'annonce une fois
+			# par salve (l'hôte espace les annonces) : sans le mot, on croit
+			# à une fusillade entre PNJ et le respect ne se voit toujours pas.
+			if String(charge.get("j", "")) == Session.cle:
+				var gang_aide := int(charge.get("g", 0))
+				_annoncer("%s vous prête main-forte" % carte.nom_du_gang(gang_aide),
+					carte.couleur_du_gang(gang_aide), 2.4)
+				Sons.jouer("portail", 1.5, -12.0)
+		"glisse":
+			# L'HUILE. On réutilise l'état « sonné » du choc : la voiture part
+			# en toupie et ne répond plus une seconde. C'est exactement ce que
+			# fait une flaque d'huile, et le joueur connaît déjà la sensation.
+			if String(charge.get("j", "")) == Session.cle and not _pied and _sonne <= 0.0:
+				_sonne = 1.0
+				_dire_affaire("ça glisse !")
+				Sons.jouer("choc", 0.5, -13.0)
+		"colis":
+			if String(charge.get("j", "")) == Session.cle:
+				_colis = int(charge.get("n", 0))
+				_colis_sur = int(charge.get("sur", 0))
+				if bool(charge.get("fini", false)):
+					_annoncer("LES %d COLIS — PRIME" % _colis_sur, Color("#f0c04a"), 4.0)
+					Sons.jouer("fin", 1.3, -4.0)
+				else:
+					_dire_affaire("colis %d/%d" % [_colis, _colis_sur])
+					Sons.jouer("ramasse", 1.25, -8.0)
+		"frenzy":
+			if String(charge.get("j", "")) != Session.cle:
+				return
+			var etat_f := String(charge.get("e", ""))
+			_frenzy = {} if etat_f in ["gagne", "perdu"] else {
+				"a": String(charge.get("a", "")), "n": int(charge.get("n", 0)),
+				"f": int(charge.get("f", 0)), "r": float(charge.get("r", 0))}
+			match etat_f:
+				"debut":
+					# L'ARME VIENT AVEC LE DÉFI. Sans elle, le Frenzy consiste à
+					# courir chercher une caisse et le chrono est fini avant de
+					# commencer.
+					_equiper(String(charge.get("a", "")))
+					_annoncer("KILL FRENZY — %d en %d s" % [int(charge.get("n", 0)),
+						int(charge.get("r", 0))], Palette.CRITIQUE, 3.0)
+					Sons.jouer("portail", 0.7, -4.0)
+				"gagne":
+					_annoncer("FRENZY RÉUSSI", Palette.BON, 3.4)
+					Sons.jouer("fin", 1.35, -4.0)
+				"perdu":
+					_annoncer("frenzy manqué — %d sur %d" % [int(charge.get("f", 0)),
+						int(charge.get("n", 0))], Palette.ENCRE_FAIBLE, 2.6)
 		"peint":
 			if String(charge.get("j", "")) == Session.cle:
 				Sons.jouer("fin", 1.2, -10.0)
@@ -2084,6 +2729,11 @@ func _recevoir_joueur(charge: Dictionary) -> void:
 
 func _encaisser(degats: float, cause: String, par: String) -> void:
 	if _hors_service > 0.0:
+		return
+	# BLINDAGE (triche). On sort ici et pas plus bas : la secousse, le bruit
+	# et le ralentissement partent aussi. Un invincible qui se fait quand même
+	# secouer l'écran à chaque balle ne se croit pas invincible.
+	if _invincible:
 		return
 	_depuis_coup = 0.0
 	if par != "":
@@ -2186,7 +2836,10 @@ func _relever() -> void:
 
 func _effet_gain(position: Vector2, points: int, facteur: int, cle: String, quoi: String) -> void:
 	var couleur := Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 0)))
-	if quoi == "argent" or quoi == "contrat":
+	# Ce qui se GAGNE sonne comme une prime, pas comme un choc : les à-côtés
+	# de la phase 9 (colis, collection, frenzy, course, cascade) rejoignent la
+	# liste — sans ça, ramasser un colis faisait le bruit d'une tôle froissée.
+	if quoi in ["argent", "contrat", "colis", "collection", "frenzy", "course", "cascade"]:
 		Sons.jouer("bonus", 1.0, -10.0)
 	elif quoi == "pieton" and not _pied:
 		Sons.jouer("ecrase_pieton", _rng.randf_range(0.9, 1.1), -6.0)
@@ -2437,9 +3090,10 @@ func _animer_les_feux(delta: float) -> void:
 			break
 
 ## La cabine annonce sa couleur : ce que le gang du quartier pense de vous.
-const CABINE_HOSTILE := Color("#d0402c")
-const CABINE_NEUTRE := Color("#e0b23a")
-const CABINE_AMIE := Color("#4cc25a")
+## L'enseigne d'une cabine dit, de loin, ce que le gang du quartier pense de
+## vous. Les couleurs sont celles de `FormesCarnage.COULEURS_HUMEUR` — les
+## mêmes que l'anneau sous ses hommes, sinon la rue et le téléphone
+## raconteraient deux histoires différentes.
 
 func _animer_les_cabines() -> void:
 	var libre := _contrat.is_empty()
@@ -2456,12 +3110,10 @@ func _animer_les_cabines() -> void:
 			if enseigne == null:
 				continue
 			var gang := int(entree.get("gang", -1))
-			var couleur := CABINE_NEUTRE
+			var couleur: Color = FormesCarnage.COULEURS_HUMEUR[VilleVivante.H_NEUTRE]
 			if gang >= 0:
-				if ville.gang_hostile(Session.cle, gang):
-					couleur = CABINE_HOSTILE
-				elif ville.gang_ami(Session.cle, gang):
-					couleur = CABINE_AMIE
+				couleur = FormesCarnage.COULEURS_HUMEUR[clamp(ville.humeur(Session.cle, gang),
+					0, FormesCarnage.COULEURS_HUMEUR.size() - 1)]
 			if entree.get("teinte") != couleur:
 				entree["teinte"] = couleur
 				enseigne.material_override = Decor.matiere_lumineuse(couleur, 1.4)
@@ -2589,8 +3241,15 @@ func _placer_la_foule() -> void:
 			if (personne["p"] as Vector2).distance_to(_position) > PORTEE_RENDU or _batisses >= BATISSES_PAR_IMAGE:
 				continue
 			_batisses += 1
-			noeud = FormesCarnage.pieton(_couleur_de(personne),
-				int(personne["genre"]) == VilleVivante.GANG, "", false, _peau_de(personne))
+			# Un uniforme se bâtit par `FormesCarnage.uniforme` — le gilet de
+			# son corps compris. Le banc d'image appelle la même fonction ;
+			# c'est la seule façon d'être sûr que ce qu'on photographie est ce
+			# que la rue montre.
+			if int(personne["genre"]) == VilleVivante.FLIC:
+				noeud = FormesCarnage.uniforme(int(personne.get("corps", 0)))
+			else:
+				noeud = FormesCarnage.pieton(_couleur_de(personne),
+					int(personne["genre"]) == VilleVivante.GANG, "", false, _peau_de(personne))
 			monde().add_child(noeud)
 			personne["noeud"] = noeud
 		var corps: Node3D = noeud
@@ -2602,6 +3261,7 @@ func _placer_la_foule() -> void:
 		corps.rotation.y = -float(personne.get("a", 0.0))
 		_demarche(corps, "walk")
 		_regler_jauge(corps, float(int(personne["pv"])) / float(_pv_max_de(personne)))
+		_regler_humeur(personne, corps)
 
 ## La tête d'un habitant : les hommes de main ont les leurs, les flics la
 ## leur, les passants huit visages tirés de leur identifiant. Tirer sur
@@ -2621,10 +3281,14 @@ func _couleur_de(personne: Dictionary) -> Color:
 		VilleVivante.GANG:
 			return carte.couleur_du_gang(int(personne["gang"]))
 		VilleVivante.FLIC:
-			return Palette.SERIE
+			return FormesCarnage.TENUES_CORPS[clamp(int(personne.get("corps", 0)), 0,
+				FormesCarnage.TENUES_CORPS.size() - 1)]
 	return Palette.ENCRE_DOUCE
 
 func _pv_max_de(personne: Dictionary) -> int:
+	if int(personne["genre"]) == VilleVivante.FLIC:
+		return int(VilleVivante.CORPS[clamp(int(personne.get("corps", 0)), 0,
+			VilleVivante.CORPS.size() - 1)]["pv"])
 	match int(personne["genre"]):
 		VilleVivante.GANG:
 			return VilleVivante.PV_GANG
@@ -2653,6 +3317,8 @@ func _placer_les_autos() -> void:
 			_batisses += 1
 			if genre == VilleVivante.EPAVE:
 				noeud = FormesCarnage.epave()
+			elif bool(auto.get("canon", false)):
+				noeud = FormesCarnage.char_arme()
 			else:
 				var couleur := Color.WHITE
 				if genre == VilleVivante.VOITURE_GANG:
@@ -2692,6 +3358,39 @@ func _placer_les_objets() -> void:
 		if objet:
 			objet.rotation.y = temps * 1.3
 			objet.position.y = 1.6 + sin(temps * 2.2 + float(int(caisse["id"]))) * 0.28
+
+	# LES À-CÔTÉS : le colis tourne comme une caisse (c'est le vocabulaire de
+	# « ramasse-moi »), le crâne du Frenzy aussi mais plus vite — il n'attend
+	# pas, il défie.
+	for r in ville.ramassages:
+		var noeud_r = r.get("noeud")
+		if noeud_r == null:
+			noeud_r = FormesCarnage.colis() if int(r["genre"]) == VilleVivante.R_COLIS \
+				else FormesCarnage.icone_frenzy()
+			monde().add_child(noeud_r)
+			r["noeud"] = noeud_r
+		(noeud_r as Node3D).position = Decor.vers3d(r["p"])
+		var tourne := (noeud_r as Node3D).get_node_or_null("Objet") as Node3D
+		if tourne:
+			var vite := 1.2 if int(r["genre"]) == VilleVivante.R_COLIS else 2.6
+			tourne.rotation.y = temps * vite
+			tourne.position.y = (1.5 if int(r["genre"]) == VilleVivante.R_COLIS else 1.8) \
+				+ sin(temps * 2.0 + float(int(r["id"]))) * 0.24
+
+	# LES PIÈGES. La mine clignote — un objet qui blesse doit se signaler, même
+	# à celui qui l'a posée ; la flaque, elle, reste sourde : elle ne fait
+	# perdre que le cap.
+	for piege in ville.pieges:
+		var noeud_p = piege.get("noeud")
+		if noeud_p == null:
+			noeud_p = FormesCarnage.mine() if int(piege["genre"]) == VilleVivante.MINE \
+				else FormesCarnage.flaque_huile()
+			monde().add_child(noeud_p)
+			piege["noeud"] = noeud_p
+		(noeud_p as Node3D).position = Decor.vers3d(piege["p"])
+		var oeil := (noeud_p as Node3D).get_node_or_null("Oeil") as Node3D
+		if oeil:
+			oeil.visible = fmod(temps, 0.6) > 0.3
 
 	for b in ville.barrages:
 		var noeud = b.get("noeud")
@@ -2747,6 +3446,35 @@ func _placer_les_helicos(delta: float) -> void:
 
 ## La jauge est fille de son porteur : sans compenser la rotation, elle
 ## tournerait avec lui et deviendrait illisible dès le premier virage.
+## L'ANNEAU D'HUMEUR sous un homme de gang : rouge il vous tire dessus, vert
+## il se battra à côté de vous. C'est l'idée du guide (§3.4) — « changer la
+## couleur des piétons selon le respect » — mais l'anneau plutôt que le
+## personnage : sa couleur À LUI dit de quel gang il est, et sept gangs qui
+## changeraient tous de teinte selon l'humeur, on ne saurait plus qui l'on
+## abat. Rien sous les pieds d'un neutre : un anneau permanent sous chaque
+## passant en couleurs, c'est une guirlande, plus une information.
+##
+## La teinte n'est refaite que lorsque l'humeur CHANGE : une matière neuve par
+## image et par passant, c'est quatre-vingts matières par image à la poubelle.
+func _regler_humeur(personne: Dictionary, corps: Node3D) -> void:
+	if int(personne["genre"]) != VilleVivante.GANG:
+		return
+	var etat := ville.humeur(Session.cle, int(personne["gang"]))
+	var anneau := corps.get_node_or_null("Humeur") as MeshInstance3D
+	if etat == VilleVivante.H_NEUTRE:
+		if anneau != null:
+			anneau.visible = false
+		return
+	if anneau == null:
+		anneau = FormesCarnage.anneau_humeur(Palette.ENCRE_DOUCE)
+		corps.add_child(anneau)
+		personne["humeur_vue"] = -1
+	anneau.visible = true
+	if int(personne.get("humeur_vue", -1)) == etat:
+		return
+	personne["humeur_vue"] = etat
+	anneau.material_override = Decor.matiere_lumineuse(FormesCarnage.COULEURS_HUMEUR[etat], 1.5)
+
 func _regler_jauge(porteur: Node3D, part: float) -> void:
 	var jauge := porteur.get_node_or_null("Vie") as Node3D
 	if jauge == null:
@@ -2826,20 +3554,39 @@ func fiche_joueur() -> Dictionary:
 		puces.append({"texte": "éperon %ds" % int(ceil(_eperon)), "couleur": Palette.SERIEUX})
 	var territoire := carte.territoire(_position)
 	if territoire >= 0:
-		var humeur := "neutre"
-		var couleur := carte.couleur_du_gang(territoire)
-		if ville.gang_hostile(Session.cle, territoire):
-			humeur = "vous chasse"
-			couleur = Palette.CRITIQUE
-		elif ville.gang_ami(Session.cle, territoire):
-			humeur = "vous laisse"
-		puces.append({"texte": "%s : %s" % [carte.nom_du_gang(territoire), humeur], "couleur": couleur})
+		puces.append(ville.puce_de_gang(Session.cle, territoire))
 	else:
 		puces.append({"texte": "terrain neutre", "couleur": Palette.ENCRE_FAIBLE})
+	# Les trois gangs DU DISTRICT, dans l'ordre du trio : deux locaux, puis le
+	# Consortium qui est partout. C'est la lecture qui manquait pour choisir
+	# son camp — on voyait ce qu'un gang pensait de soi, jamais ce qu'on avait
+	# à y gagner ailleurs.
+	fiche["respect"] = ville.barres_de_respect(Session.cle, _position)
 	if carte.arene_de(_position) >= 0:
 		puces.append({"texte": "ARÈNE — tir ami", "couleur": Palette.CRITIQUE})
 	if carte.garage_de(_position) >= 0:
-		puces.append({"texte": "garage", "couleur": Palette.SERIE})
+		puces.append({"texte": "atelier" if _atelier_ici() >= 0 else "garage",
+			"couleur": Palette.SERIE})
+	if _plaques > 0.0:
+		puces.append({"texte": "plaques %ds" % int(ceil(_plaques)), "couleur": Color("#5aa0e0")})
+	if not _frenzy.is_empty():
+		puces.append({"texte": "FRENZY %d/%d" % [int(_frenzy["f"]), int(_frenzy["n"])],
+			"couleur": Palette.CRITIQUE})
+	if _colis_sur > 0:
+		puces.append({"texte": "colis %d/%d" % [_colis, _colis_sur], "couleur": Color("#f0c04a")})
+	if _cascade > 1:
+		puces.append({"texte": "cascade ×%d" % _cascade, "couleur": Palette.SERIE})
+	if not _pied and _station != Sons.STATION_SILENCE and _station_dite > 0.0:
+		var station: Dictionary = Sons.STATIONS[_station]
+		puces.append({"texte": "♪ %s" % String(station["nom"]), "couleur": station["couleur"]})
+	if bool(_mods.get("mitrailleuse", false)):
+		puces.append({"texte": "mitrailleuse", "couleur": Color("#f2c53d")})
+	for quoi in ["mines", "huile"]:
+		if int(_mods.get(quoi, 0)) > 0:
+			puces.append({"texte": "%s ×%d" % [quoi, int(_mods[quoi])],
+				"couleur": Color("#d0402c") if quoi == "mines" else Color("#6a5a7a")})
+	if bool(_mods.get("bombe", false)):
+		puces.append({"texte": "bombe armée", "couleur": Color("#e07a3c")})
 	if _pied:
 		var auto := ville.vehicule_proche(_position, PORTEE_ENTREE)
 		puces.append({"texte": "E : monter" if not auto.is_empty() else "à pied", "couleur": Palette.AVERTISSEMENT if not auto.is_empty() else Palette.ENCRE_DOUCE})

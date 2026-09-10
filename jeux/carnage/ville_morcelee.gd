@@ -42,7 +42,9 @@ const PASSES := [
 	Quartiers.P_SOLS,
 	Quartiers.P_CHAUSSEES | Quartiers.P_BATEAUX,
 	Quartiers.P_BATIMENTS,
-	Quartiers.P_VERDURE | Quartiers.P_MOBILIER,
+	# Le mobilier libre arrive avec la verdure : c'est de la décoration, elle
+	# n'a aucune raison de paraître avant les façades.
+	Quartiers.P_VERDURE | Quartiers.P_MOBILIER | Quartiers.P_OBJETS,
 ]
 
 var _prete: Dictionary = {}

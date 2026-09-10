@@ -11,10 +11,13 @@ const PSEUDO_MAX := 16
 var id: String = ""      ## stable, gardé d'une visite à l'autre : sert aux scores
 var cle: String = ""     ## propre à cet onglet : sert au réseau
 var pseudo: String = ""
-var heros: String = ""   ## knight, rogue ou wizzard ; vide = tiré de l'identifiant
-## Le personnage du casting Kenney, celui qu'on incarne en ville. `heros` est
-## l'ancien trio de pantins voxel du village : les deux cohabitent le temps que
-## le village s'efface, et rien ne se perd pour un joueur déjà installé.
+## Le personnage du casting Kenney, celui qu'on incarne en ville.
+##
+## ⚠ Il y avait ici un second champ, `heros` : le trio de pantins EN PIXELS du
+## village (knight, rogue, wizzard). Il est parti avec les jeux 2D. Un fichier
+## de réglages écrit par une version précédente en porte encore la clé — elle
+## est simplement ignorée, ce qui est le comportement voulu : un joueur déjà
+## installé ne doit rien perdre parce qu'on a retiré un jeu.
 var personnage: String = ""
 
 func _ready() -> void:
@@ -22,7 +25,6 @@ func _ready() -> void:
 	if fichier.load(FICHIER) == OK:
 		id = String(fichier.get_value("joueur", "id", ""))
 		pseudo = String(fichier.get_value("joueur", "pseudo", ""))
-		heros = String(fichier.get_value("joueur", "heros", ""))
 		personnage = String(fichier.get_value("joueur", "personnage", ""))
 	if id.length() < 8:
 		id = _tirer_identifiant()
@@ -37,10 +39,6 @@ func definir_pseudo(nouveau: String) -> void:
 	pseudo = nettoyer_pseudo(nouveau)
 	_ecrire()
 
-func definir_heros(nom: String) -> void:
-	heros = nom
-	_ecrire()
-
 func definir_personnage(cle: String) -> void:
 	personnage = cle
 	_ecrire()
@@ -50,11 +48,6 @@ func definir_personnage(cle: String) -> void:
 ## sous le même trait sans qu'on ait rien à diffuser.
 func personnage_affiche() -> String:
 	return personnage if Personnages.existe(personnage) else Personnages.par_defaut(id)
-
-## Le héros affiché : celui qu'on a choisi, sinon celui que l'identifiant
-## désigne — le même calcul chez tous les clients.
-func heros_affiche() -> String:
-	return heros if heros in Pixels.HEROS else Pixels.heros_de(id)
 
 static func nettoyer_pseudo(brut: String) -> String:
 	var propre := ""
@@ -83,6 +76,5 @@ func _ecrire() -> void:
 	var fichier := ConfigFile.new()
 	fichier.set_value("joueur", "id", id)
 	fichier.set_value("joueur", "pseudo", pseudo)
-	fichier.set_value("joueur", "heros", heros)
 	fichier.set_value("joueur", "personnage", personnage)
 	fichier.save(FICHIER)

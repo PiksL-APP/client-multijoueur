@@ -115,11 +115,52 @@ func _ready() -> void:
 
 ## Lance la musique d'un lieu (`res://sons/<nom>.ogg`, en boucle), en fondu
 ## depuis la précédente. `""` arrête. Rejouer le même nom ne redémarre rien.
-func musique(nom: String) -> void:
+# ------------------------------------------------------- l'autoradio
+
+## LES STATIONS (phase 10). Elles vivent ici et pas dans Carnage : c'est ce
+## module qui possède les morceaux, et c'est lui qui sait ce qui existe dans
+## `sons/`. Le banc `outils/radio.tscn` vérifie que chaque piste citée est un
+## fichier réel — une station dont le nom de piste a une faute ne fait aucun
+## bruit et ne lève aucune erreur.
+##
+## « Fréquence police » n'a PAS de piste : elle ne joue que des voix
+## (`radio_police`). C'est une station à part entière, pas un trou.
+const STATIONS := [
+	{"nom": "PIKS FM", "piste": "vice-city-drift", "couleur": Color("#e0559b")},
+	{"nom": "RADIO TAVERNE", "piste": "taverne", "couleur": Color("#f2c53d")},
+	{"nom": "CANAL FORÊT", "piste": "foret", "couleur": Color("#4cc25a")},
+	{"nom": "ONDES DU VILLAGE", "piste": "village", "couleur": Color("#8fa3b5")},
+	{"nom": "FRÉQUENCE POLICE", "piste": "", "couleur": Color("#3987e5")},
+	{"nom": "SILENCE", "piste": "", "couleur": Color("#898781")},
+]
+const STATION_POLICE := 4
+const STATION_SILENCE := 5
+
+## La station par défaut d'une carrosserie — l'idée de GTA 2 : on monte dans un
+## taxi et on tombe sur les ondes du village, dans une sportive sur la synthé.
+## Sans ça, changer de véhicule ne change que la tôle.
+const STATION_DU_MODELE := {
+	1: 0, 2: 0, 10: 0, 19: 0,          # les sportives : synthé
+	5: 3, 13: 3, 14: 3,                # taxi, bus, limousine : les ondes du village
+	6: 1, 7: 1, 8: 1, 22: 1,           # fourgons et camions : la taverne
+	20: 2, 21: 2,                      # tracteur et benne : le canal forêt
+	9: 4, 15: 4, 18: 4,                # police, ambulance, pompiers : la fréquence
+	23: 2, 24: 2, 25: 2, 26: 2, 27: 2, # sur l'eau, le canal forêt
+}
+
+## Ce qui n'est pas cité tombe sur PIKS FM — la station de la ville, pas un
+## pis-aller.
+func station_du_modele(modele: int) -> int:
+	return int(STATION_DU_MODELE.get(modele, 0))
+
+## `volume_db` permet à l'AUTORADIO de jouer plus bas que le thème d'un
+## menu : une station qu'on écoute en conduisant doit laisser passer les
+## sirènes et les klaxons, qui disent où sont les ennuis.
+func musique(nom: String, volume_db: float = MUSIQUE_DB) -> void:
 	if nom == _musique_en_cours:
 		return
 	_musique_en_cours = nom
-	_fondre(_musique, nom, MUSIQUE_DB)
+	_fondre(_musique, nom, volume_db)
 
 func ambiance(nom: String) -> void:
 	if nom == _ambiance_en_cours:

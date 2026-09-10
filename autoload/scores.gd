@@ -53,6 +53,12 @@ func demander_carnet(joueur_id: String) -> void:
 	requete.request(Config.url_rest(chemin), Config.entetes_rest(), HTTPClient.METHOD_GET)
 
 func deposer(jeu: String, code: String, duree_s: int, resultats: Array) -> void:
+	# En solo, il n'y a ni salle ni serveur : la manche reste chez soi. Sans
+	# ce garde, chaque partie hors ligne partait en erreur HTTP dans la
+	# console, à la seconde où l'on s'amusait le mieux.
+	if Reseau.solo:
+		print("[scores] partie solo : rien à déposer")
+		return
 	if not Config.est_configure():
 		depot_termine.emit(false, "clés absentes")
 		return

@@ -9,13 +9,13 @@ extends Ecran
 ## `donnees.retour` dit où revenir : « menu » d'ordinaire, mais on pourra
 ## rentrer ici depuis une partie sans se retrouver éjecté au menu.
 
-var _retour := "menu"
+var _retour := "salon"
 var _onglets: TabContainer
 var _en_attente := ""              ## action dont on attend la nouvelle touche
 var _cases: Dictionary = {}        ## action -> Button
 
 func demarrer() -> void:
-	_retour = String(donnees.get("retour", "menu"))
+	_retour = String(donnees.get("retour", "salon"))
 	Sons.musique(Sons.THEME)
 	_fond()
 
@@ -248,11 +248,11 @@ var _centre := Vector3.ZERO
 ## La même ville qu'au menu, au même crépuscule : les options ne sont pas un
 ## ailleurs. Un seul morceau bâti — la caméra ne bouge presque pas.
 func _fond() -> void:
-	var carte := PlanVille.new(MenuPrincipal.VITRINE)
+	var carte := PlanVille.new(PlanVille.VITRINE)
 	_ambiance = MatieresCarnage.ambiance()
 	for noeud in _ambiance:
 		monde().add_child(noeud)
-	MatieresCarnage.regler_heure(_ambiance[0], _ambiance[1], _ambiance[2], MenuPrincipal.heure())
+	MatieresCarnage.regler_heure(_ambiance[0], _ambiance[1], _ambiance[2], MatieresCarnage.heure_de_vitrine())
 	var sol := MatieresCarnage.sol()
 	sol.set_shader_parameter("rail", carte.rail())
 	sol.set_shader_parameter("lignes", carte.lignes_libres())

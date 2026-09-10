@@ -291,6 +291,137 @@ static func couche(z: int) -> TileMapLayer:
 	c.y_sort_enabled = false
 	return c
 
+# ---------------------------------------------------------- la ferme
+#
+## ⚠ CES SIX-LÀ AVAIENT DISPARU, ET AVEC ELLES TOUT UN JEU. `scenes/ferme.gd`
+## (l'écran ÉNIGME) les appelle depuis toujours ; la réécriture de ce fichier
+## pour Serene Village les a laissées derrière elle, et la ferme ne se
+## chargeait plus du tout — « Parse Error: Static function parcelle() not
+## found », six fois, à l'ouverture de l'écran. Personne ne l'a vu parce que
+## rien ne CHARGE les scripts entre deux parties : `--check-only` refuse tout
+## fichier qui parle à un autoload. C'est ce trou-là qui a donné
+## `outils/compiler.sh`.
+##
+## Elles sont réécrites AVEC le nouveau vocabulaire (cases en (colonne, ligne),
+## planche du village, sources teintées du jeu de tuiles) et non recopiées de
+## l'ancien : les teintes `TEINTE_LABOUR` et `TEINTE_MOUILLE` du jeu de tuiles
+## avaient été préparées pour la ferme et n'avaient jamais servi.
+
+## Ce qu'on sème sur la pelouse pour qu'elle ne soit pas une moquette : un
+## buisson, cinq fleurs, deux fleurettes, quatre cailloux.
+const DETAILS: Array[Vector2i] = [
+	Vector2i(7, 12),
+	Vector2i(2, 12), Vector2i(3, 12), Vector2i(4, 12), Vector2i(5, 12), Vector2i(6, 12),
+	Vector2i(2, 13), Vector2i(2, 14),
+	Vector2i(0, 15), Vector2i(1, 15), Vector2i(2, 15), Vector2i(3, 15),
+]
+
+static func detail(espece: int) -> Sprite2D:
+	return tuile(DETAILS[posmod(espece, DETAILS.size())])
+
+## Le dernier stade d'une culture — celui où elle se récolte.
+static func dernier_stade() -> int:
+	return STADES - 1
+
+## LA PELOUSE, en une seule couche de tuiles. `largeur` et `hauteur` sont en
+## PIXELS (c'est la taille du monde que l'appelant connaît), la graine rend le
+## semis reproductible : sans elle, la pelouse change à chaque partie et les
+## captures ne se comparent plus.
+static func nappe(largeur: int, hauteur: int, tuiles: Array, graine: int) -> TileMapLayer:
+	var couche_herbe := couche(-100)
+	var tirage := RandomNumberGenerator.new()
+	tirage.seed = graine
+	# ⚠ Une COUCHE de tuiles, pas mille Sprite2D. À seize pixels la case, un
+	# monde de 768 × 544 fait 1 632 cases : autant de nœuds, c'est autant
+	# d'appels de dessin, et le jeu tombait à vingt images par seconde avant
+	# d'avoir posé un seul légume.
+	for l in int(ceil(float(hauteur) / float(TUILE))):
+		for c in int(ceil(float(largeur) / float(TUILE))):
+			var case: Vector2i = tuiles[tirage.randi_range(0, tuiles.size() - 1)]
+			couche_herbe.set_cell(Vector2i(c, l), SOURCE_VILLAGE, case)
+	return couche_herbe
+
+## UNE PARCELLE labourée, de `cote` pixels de côté. `voisines` porte les côtés
+## où la terre CONTINUE (1 haut, 2 bas, 4 gauche, 8 droite) : c'est ce qui
+## donne le liseré d'herbe sur les bords libres, et une parcelle qui se fond
+## dans la suivante quand on laboure deux cases côte à côte.
+##
+## Arrosée, elle passe sur la source MOUILLÉE : la même planche, une teinte
+## plus sombre. C'est ce qui rend l'arrosage visible d'un coup d'œil sans
+## ajouter un seul sprite.
+static func parcelle(cote: int, graine: int, arrosee: bool, voisines: int) -> TileMapLayer:
+	var couche_terre := couche(-50)
+	var source := SOURCE_MOUILLE if arrosee else SOURCE_LABOUR
+	var cases := maxi(1, int(cote / TUILE))
+	var tirage := RandomNumberGenerator.new()
+	tirage.seed = graine
+	for l in cases:
+		for c in cases:
+			# Le masque LOCAL : la terre continue vers l'intérieur du carré, et
+			# vers l'extérieur seulement si la parcelle voisine est labourée.
+			var matiere := 0
+			matiere |= 1 if (l > 0 or (voisines & 1)) else 0
+			matiere |= 2 if (l < cases - 1 or (voisines & 2)) else 0
+			matiere |= 4 if (c > 0 or (voisines & 4)) else 0
+			matiere |= 8 if (c < cases - 1 or (voisines & 8)) else 0
+			couche_terre.set_cell(Vector2i(c, l), source, case_de_terre(matiere))
+	return couche_terre
+
+## La tuile de TERRE d'après les côtés où la terre continue (1 haut, 2 bas,
+## 4 gauche, 8 droite).
+##
+## ⚠ CE N'EST PAS `bord()`, et le premier jet s'y était trompé : `bord` donne
+## la tuile d'une case d'HERBE qui touche de la matière — l'inverse. Utilisée
+## ici, elle posait des bandes d'herbe au MILIEU du champ, et la parcelle
+## sortait trouée (vu au banc, `outils/ferme.sh`).
+##
+## Le bloc est un 4 × 4 classique : le plein au centre (2, 2), la colonne 0 une
+## bande verticale (l'herbe des deux côtés), la ligne 0 une bande horizontale.
+static func case_de_terre(matiere: int) -> Vector2i:
+	var haut := bool(matiere & 1)
+	var bas := bool(matiere & 2)
+	var gauche := bool(matiere & 4)
+	var droite := bool(matiere & 8)
+	# ⚠ LE SENS SE MESURE, IL NE SE DEVINE PAS. Dans cette planche, la ligne 1
+	# porte sa décoration EN BAS de la tuile et la ligne 3 EN HAUT (idem pour
+	# les colonnes 1 et 3, à droite et à gauche). Pris à l'envers, le liseré
+	# d'herbe se dessinait UNE CASE À L'INTÉRIEUR du champ, comme un cadre —
+	# vu au banc (`outils/ferme.sh`), invisible dans le code.
+	# Une case de terre dont la terre continue EN BAS a donc de l'herbe EN
+	# HAUT : ligne 3.
+	var colonne := 2 if (gauche and droite) else (3 if droite else (1 if gauche else 0))
+	var ligne := 2 if (haut and bas) else (3 if bas else (1 if haut else 0))
+	return Vector2i(BLOC_TERRE + colonne, ligne)
+
+## UN CAGEOT de récolte : une caisse de bois et ce qu'on y a mis. La caisse est
+## dessinée ici (la planche du village n'en a pas), le légume sort de la
+## planche des cultures à son dernier stade — c'est la même image que celle
+## qu'on vient de cueillir, et c'est ce qui rend la pile lisible.
+static func cageot(culture: int) -> Node2D:
+	var racine := Node2D.new()
+	var cle := "cageot"
+	if not _cache.has(cle):
+		var toile := Image.create(18, 12, false, Image.FORMAT_RGBA8)
+		toile.fill(Color(0, 0, 0, 0))
+		var bois := Color8(150, 103, 62)
+		var clair := Color8(184, 133, 84)
+		var sombre := Color8(104, 70, 42)
+		for y in 12:
+			for x in 18:
+				if y < 2:
+					continue
+				var bord_caisse := x == 0 or x == 17 or y == 11
+				var latte := (y - 2) % 4 == 0
+				toile.set_pixel(x, y, sombre if bord_caisse else (clair if latte else bois))
+		_cache[cle] = ImageTexture.create_from_image(toile)
+	var caisse := _sprite(_cache[cle])
+	caisse.offset = Vector2(-9, -12)
+	racine.add_child(caisse)
+	var recolte := plant(culture, STADES - 1)
+	recolte.position = Vector2(0, -4)
+	racine.add_child(recolte)
+	return racine
+
 # ---------------------------------------------------------- petits fabriqués
 
 ## Une ombre portée, à poser sous un personnage.

@@ -49,6 +49,17 @@ const RETRAIT := 15.0
 ## Ce qu'un quartier serré garde quand même — aucun réglage ne descend en
 ## dessous.
 const RETRAIT_MIN := 11.0
+## LA VILLE MONTRÉE DERRIÈRE LES MENUS. Les écrans de pseudo et d'options
+## posent un morceau de ville en fond ; il leur faut un code de ville, et il
+## doit être LE MÊME partout, sinon les deux écrans ne montrent pas la même
+## rue et le fond saute quand on passe de l'un à l'autre.
+##
+## ⚠ Cette constante vivait dans `scenes/menu.gd` (`MenuPrincipal.VITRINE`).
+## Le jour où le hub à portails a été retiré, les deux écrans qui l'utilisaient
+## ont cessé de compiler — c'est le genre de dépendance qu'on ne voit pas
+## avant de supprimer le fichier.
+const VITRINE := "PIKSTOWN"
+
 const RAYON_CENTRE := 8.0                    ## en pâtés : le centre d'affaires, neutre
 
 ## Les quartiers.
@@ -64,14 +75,44 @@ enum { S_ROUTE, S_PASSAGE_A, S_PASSAGE_B, S_CARREFOUR, S_TROTTOIR, S_PAVES, S_HE
 ## Les styles de façade, tels que le shader des immeubles les dessine.
 enum { F_BUREAUX, F_LOGEMENTS, F_COMMERCE, F_VIEUX, F_HANGAR, F_MAISON, F_PLEIN, F_TOUR }
 
-## Trois gangs, trois territoires, trois façons de bâtir. La couleur du gang
-## n'est jamais SÉRIE : le bleu est à la police, et on ne confond pas celui qui
-## vous verbalise avec celui qui vous canarde.
+## SEPT GANGS, MAIS TROIS PAR DISTRICT. La ville est découpée en trois
+## secteurs angulaires ; chacun est tenu par DEUX gangs locaux, et LE
+## CONSORTIUM tient boutique dans les trois. C'est la règle de GTA 2 — trois
+## gangs par district dont un commun aux trois — transposée sur nos secteurs.
+##
+## ⚠ Pourquoi pas trois gangs tout court, comme avant : avec un seul gang par
+## secteur, traverser son territoire ne posait aucune question. Le respect se
+## gagnait ou se perdait en bloc sur un tiers de la carte, et le joueur n'avait
+## jamais à CHOISIR. À deux locaux qui se détestent plus un commun qu'ils
+## détestent tous les deux, tuer devient un arbitrage : chaque mort réjouit
+## quelqu'un d'autre à trois rues de là.
+##
+## La couleur d'un gang n'est jamais SÉRIE : le bleu est à la police, et on ne
+## confond pas celui qui vous verbalise avec celui qui vous canarde. Elles sont
+## aussi choisies pour rester distinctes SUR UN PANTIN DE TROIS PIXELS de haut
+## vu de dessus, pas sur une pastille d'interface.
 const GANGS := [
 	{"nom": "Les Braises", "couleur": Palette.CRITIQUE, "quartier": INDUSTRIE},
 	{"nom": "La Fonte", "couleur": Palette.SERIEUX, "quartier": COMMERCE},
 	{"nom": "Le Lierre", "couleur": Palette.BON, "quartier": BANLIEUE},
+	{"nom": "Les Scories", "couleur": Color("#f2c53d"), "quartier": PORT},
+	{"nom": "Les Néons", "couleur": Color("#e0559b"), "quartier": AFFAIRES},
+	{"nom": "Les Ronces", "couleur": Color("#9159d6"), "quartier": RESIDENCES},
+	{"nom": "Le Consortium", "couleur": Color("#17b8a6"), "quartier": AFFAIRES},
 ]
+
+## Le gang commun aux trois districts — le Zaibatsu du guide. Il est le
+## dernier de la table pour que les six locaux gardent des indices contigus.
+const CONSORTIUM := 6
+
+## Le trio de chaque secteur : deux locaux, puis le commun.
+const TRIOS := [[0, 3, CONSORTIUM], [1, 4, CONSORTIUM], [2, 5, CONSORTIUM]]
+## Le secteur d'un gang, ou -1 pour celui qui est partout chez lui.
+const SECTEUR_DU_GANG := [0, 1, 2, 0, 1, 2, -1]
+## Part des graines qui reviennent au Consortium. À un tiers il tenait autant
+## de rues que les locaux et son territoire cessait d'être une anomalie ; à
+## moins d'un dixième on pouvait faire toute une manche sans jamais le croiser.
+const PART_CONSORTIUM := 0.20
 
 ## Les teintes de façade par style. Ce sont des matières de décor, pas des
 ## couleurs d'interface : elles restent sourdes pour que la palette (joueurs,
@@ -150,6 +191,11 @@ const LARGEUR_RAIL := 2.2                    ## en tuiles
 
 const RAYON_ARENE := 190.0
 const RAYON_GARAGE := 60.0
+## Ce que mordent les pièges de l'atelier. Ils sont ici, avec les autres
+## portées, parce que le décor les dessine et que la ville les applique : deux
+## chiffres, et une flaque plus large à l'écran que sous les roues.
+const RAYON_MINE := 44.0
+const RAYON_HUILE := 62.0
 const RAYON_CABINE := 68.0
 const RAYON_REPAIRE := 230.0
 const RAYON_HOPITAL := 90.0
@@ -564,7 +610,17 @@ func _semence(cellule: Vector2i) -> Dictionary:
 	var r := p.distance_to(milieu)
 	var au_bord: float = min(min(p.x, float(pates_x()) - p.x), min(p.y, float(pates_y()) - p.y))
 	var angle := (p - milieu).angle() + (_bruit(cellule.x, cellule.y, 13) - 0.5) * 0.9
-	var gang := posmod(int(floor((angle + PI * 0.5) / (TAU / 3.0))), 3)
+	var secteur_graine := posmod(int(floor((angle + PI * 0.5) / (TAU / 3.0))), 3)
+	# Le secteur dit QUEL TRIO tient la région ; un second tirage dit lequel des
+	# trois tient CETTE graine. Sans ce second tirage, les deux locaux d'un
+	# secteur se partageraient la carte en deux demi-lunes bien nettes — or une
+	# frontière de gang doit se découvrir au coin d'une rue, pas se lire de loin.
+	var tirage_gang := _bruit(cellule.x, cellule.y, 31)
+	var gang: int = CONSORTIUM
+	if tirage_gang < (1.0 - PART_CONSORTIUM) * 0.5:
+		gang = int(TRIOS[secteur_graine][0])
+	elif tirage_gang < 1.0 - PART_CONSORTIUM:
+		gang = int(TRIOS[secteur_graine][1])
 	var t := _bruit(cellule.x, cellule.y, 14)
 	var type := BANLIEUE
 	if r < RAYON_CENTRE + 9.0:
@@ -2232,6 +2288,49 @@ func _pate_proche(point: Vector2) -> Vector2i:
 	var ligne: int = clamp(int(floor(point.y / PAS)), 0, LIGNES - 1)
 	return _pate_proche_de(colonne, ligne)
 
+## LE SECTEUR ANGULAIRE d'un point : c'est lui qui dit quel TRIO de gangs tient
+## le district, indépendamment de qui tient le pâté. Le propriétaire ne suffit
+## pas — Le Consortium est chez lui dans les trois secteurs, et sa mort doit
+## réjouir les deux locaux D'ICI, pas deux gangs de l'autre bout de la ville.
+##
+## ⚠ L'angle est recalculé, pas relu : les graines l'ont bruité de ±0,45 rad
+## pour que la frontière serpente. Un pâté sur vingt tombe donc dans le trio
+## voisin de celui que sa couleur annonce. C'est un demi-pâté d'erreur au bord
+## d'un secteur, contre une table de deux mille entrées à porter partout.
+func secteur(point: Vector2) -> int:
+	return secteur_du_pate(_pate_proche(point))
+
+func secteur_du_pate(pate: Vector2i) -> int:
+	var gang := territoire_du_pate(pate)
+	if gang >= 0 and gang != CONSORTIUM:
+		return int(SECTEUR_DU_GANG[gang])
+	var ici := Vector2(pate) + Vector2(0.5, 0.5)
+	var milieu := Vector2(pates_x(), pates_y()) * 0.5
+	if ici.distance_squared_to(milieu) < 1.0:
+		return 0
+	return posmod(int(floor(((ici - milieu).angle() + PI * 0.5) / (TAU / 3.0))), 3)
+
+## Les trois gangs d'un district, dans l'ordre où le tableau de bord les
+## empile : les deux locaux, puis le commun.
+func trio(point: Vector2) -> Array:
+	return TRIOS[posmod(secteur(point), TRIOS.size())]
+
+## Qui se réjouit quand ce gang-là perd un homme. Pour un local, c'est l'autre
+## local de son secteur et le Consortium. Pour le Consortium, qui n'a pas de
+## secteur à lui, ce sont les deux locaux DE L'ENDROIT où le coup est parti :
+## sans le point, on arroserait de respect six gangs d'un coup et une seule
+## rafale suffirait à se faire aimer de toute la ville.
+func rivaux(gang: int, point: Vector2) -> Array:
+	var g := posmod(gang, GANGS.size())
+	var sect := int(SECTEUR_DU_GANG[g])
+	if sect < 0:
+		sect = secteur(point)
+	var liste: Array = []
+	for autre in TRIOS[posmod(sect, TRIOS.size())]:
+		if int(autre) != g:
+			liste.append(int(autre))
+	return liste
+
 func nom_du_gang(indice: int) -> String:
 	return String(GANGS[posmod(indice, GANGS.size())]["nom"])
 
@@ -2328,7 +2427,7 @@ func peindre_pate(image: Image, indice: int) -> void:
 	var zone: Color = COULEURS_CARTE[quartier_du_pate(pate)]
 	var gang := territoire_du_pate(pate)
 	if gang >= 0:
-		zone = zone.lerp(couleur_du_gang(gang), 0.25)
+		zone = zone.lerp(couleur_du_gang(gang), 0.45)
 	var cour := zone.darkened(0.15)
 	var k := pate.x
 	var kl := pate.y

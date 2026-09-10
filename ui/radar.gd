@@ -125,7 +125,12 @@ func _draw() -> void:
 	if not cible.is_empty():
 		var genre := String(cible.get("k", ""))
 		var visee := {}
-		if genre == "nettoyage":
+		# Une cible peut être un POINT tout court : c'est le cas de la course
+		# de taxi, qui n'a ni repaire ni garage à viser. Le reste du dessin ne
+		# change pas — flèche au bord, distance en pâtés.
+		if cible.has("p"):
+			visee = {"p": cible["p"]}
+		elif genre == "nettoyage":
 			visee = carte.repaire_le_plus_proche(moi, int(cible.get("g", -1)))
 		elif genre == "livraison":
 			visee = carte.garage_le_plus_proche(moi)

@@ -52,6 +52,7 @@ const DEFAUTS := {
 	"affaire": KEY_F,
 	"klaxon": KEY_H,
 	"carte": KEY_TAB,
+	"radio": KEY_R,
 	"tchat": KEY_T,
 }
 
@@ -66,6 +67,7 @@ const LIBELLES := {
 	"affaire": "Acheter, déposer, se soigner",
 	"klaxon": "Klaxonner",
 	"carte": "Voir la carte",
+	"radio": "Changer de station",
 	"tchat": "Parler",
 }
 

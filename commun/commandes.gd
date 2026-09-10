@@ -54,6 +54,12 @@ static var _action_avant := false
 static func action_tenue() -> bool:
 	if pilote_automatique:
 		return action_simulee
+	# ⚠ `saisie` ferme AUSSI cette touche depuis le menu de triche. Elle ne
+	# fermait que les déplacements et le tir, parce qu'elle n'avait servi qu'au
+	# tchat du village : la touche ENTRÉE qui valide une ligne du menu ouvrait
+	# donc la portière de la voiture en même temps.
+	if saisie:
+		return false
 	if Tactile.actif() and Tactile.bouton_action_tenu:
 		return true
 	return Reglages.enfoncee("action") or Input.is_key_pressed(KEY_ENTER)
@@ -73,6 +79,8 @@ static var _affaire_avant := false
 static func affaire_tenue() -> bool:
 	if pilote_automatique:
 		return affaire_simulee
+	if saisie:
+		return false
 	return Reglages.enfoncee("affaire")
 
 static func affaire_declenchee() -> bool:
@@ -88,6 +96,8 @@ static var klaxon_simule := false
 static func klaxon() -> bool:
 	if pilote_automatique:
 		return klaxon_simule
+	if saisie:
+		return false
 	return Reglages.enfoncee("klaxon")
 
 ## La carte de la ville : TAB tenu. Tenue, pas déclenchée — on la consulte
@@ -97,7 +107,84 @@ static var carte_simulee := false
 static func carte() -> bool:
 	if pilote_automatique:
 		return carte_simulee
+	if saisie:
+		return false
 	return Reglages.enfoncee("carte")
+
+## LE CODE KONAMI : ↑ ↑ ↓ ↓ ← → ← → B A.
+##
+## Il ouvre le menu de triche (`ui/triche.gd`). Pourquoi ici plutôt que dans
+## l'écran de jeu : c'est une LECTURE DE COMMANDES, et ce fichier est le seul
+## endroit du projet qui a le droit d'interroger `Input`.
+##
+## ⚠ B et A se lisent par CODE DE TOUCHE et non par code physique, à l'inverse
+## de tout le reste du fichier : le joueur tape les lettres IMPRIMÉES sur son
+## clavier. Sur un AZERTY, la touche physique « A » est le Q — celui qui fait
+## le code Konami sur un clavier français appuie sur la touche marquée A, pas
+## sur celle qui serait A en QWERTY.
+##
+## Les flèches conduisent la voiture en même temps. C'est voulu : on entre le
+## code en roulant, comme dans les GTA d'alors, et ça fait partie du plaisir.
+const KONAMI := [KEY_UP, KEY_UP, KEY_DOWN, KEY_DOWN, KEY_LEFT, KEY_RIGHT,
+	KEY_LEFT, KEY_RIGHT, KEY_B, KEY_A]
+const KONAMI_DELAI := 2.5     ## secondes entre deux touches avant d'oublier
+static var _konami_pas := 0
+static var _konami_tenue := 0
+static var _konami_reste := 0.0
+
+## Renvoie vrai UNE FOIS, à l'image où le code s'achève.
+static func konami(delta: float) -> bool:
+	if pilote_automatique:
+		return false
+	_konami_reste = max(0.0, _konami_reste - delta)
+	if _konami_reste == 0.0 and _konami_pas > 0:
+		# Trop lent : on oublie. Sans ce délai, un code entamé il y a deux
+		# minutes se terminerait tout seul en conduisant.
+		_konami_pas = 0
+	# La touche du moment : la PREMIÈRE du code qui est enfoncée. On ne lit
+	# que ces six touches-là — inutile de balayer le clavier.
+	var enfoncee := 0
+	for code in [KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_B, KEY_A]:
+		if Input.is_key_pressed(code):
+			enfoncee = code
+			break
+	if enfoncee == _konami_tenue:
+		return false          # rien de neuf : la même touche est tenue
+	_konami_tenue = enfoncee
+	if enfoncee == 0:
+		return false          # on a simplement relâché
+	if enfoncee != int(KONAMI[_konami_pas]):
+		# Faux pas. On repart de zéro — mais une flèche haut relance le code
+		# à son deuxième cran, sinon « ↑ ↑ » tapé trois fois n'aboutit jamais.
+		_konami_pas = 1 if enfoncee == int(KONAMI[0]) else 0
+		_konami_reste = KONAMI_DELAI if _konami_pas > 0 else 0.0
+		return false
+	_konami_pas += 1
+	_konami_reste = KONAMI_DELAI
+	if _konami_pas < KONAMI.size():
+		return false
+	_konami_pas = 0
+	_konami_reste = 0.0
+	return true
+
+## LA RADIO : R, au front. Une station se choisit, elle ne se module pas —
+## tenue, la touche ferait défiler les six stations en une seconde.
+static var radio_simulee := false
+static var _radio_avant := false
+
+## ⚠ Pas de garde `saisie` ici, contrairement aux autres touches : la roue des
+## stations SE TIENT, et c'est elle qui met `saisie` pendant qu'elle est
+## ouverte. Coupée par son propre effet, elle se refermait à l'image suivante.
+static func radio_tenue() -> bool:
+	if pilote_automatique:
+		return radio_simulee
+	return Reglages.enfoncee("radio")
+
+static func radio_declenchee() -> bool:
+	var maintenant := radio_tenue()
+	var front := maintenant and not _radio_avant
+	_radio_avant = maintenant
+	return front
 
 ## Pour la conduite : x = braquage (-1 à gauche), y = accélération (-1 en
 ## marche arrière). Non normalisé — accélérer en tournant ne doit pas coûter
@@ -105,6 +192,12 @@ static func carte() -> bool:
 static func conduite() -> Vector2:
 	if pilote_automatique:
 		return direction_simulee
+	# ⚠ `saisie` coupe AUSSI le volant : c'est ce qui permet à la roue des
+	# stations de se viser aux flèches sans envoyer la voiture dans le
+	# trottoir. La voiture ne freine pas pour autant — elle roule sur son élan,
+	# et c'est très bien ainsi : on n'ouvre pas un menu au milieu d'un virage.
+	if saisie:
+		return Vector2.ZERO
 	if Tactile.actif() and Tactile.direction != Vector2.ZERO:
 		return Tactile.direction_de_conduite()
 	var braquage := 0.0

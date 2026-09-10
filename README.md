@@ -5,18 +5,19 @@ Une ville qu'on parcourt à plusieurs — **Pikstown** — et des parties de 2 �
 exporté en WebAssembly, Supabase Realtime pour le réseau, Vercel pour
 l'hébergement.
 
-**On entre par un menu, pas par un village.** `scenes/menu.gd` ouvre sur
-Commencer / Options / Quitter, posés sur la ville elle-même : le fond du menu
-n'est pas une image, c'est `PlanVille` + `MorceauVille`, le générateur du jeu,
-bâti au couchant et tournant lentement sous l'effet maquette. Quand la ville
-change, le menu change avec elle. « Commencer » demande un pseudo et un
-personnage, « Options » règle le son, l'image et les touches, « Quitter »
-renvoie sur piks-l.com. La pochette du jeu est posée à gauche, dans une vraie boîte 3D qui se retourne au survol pour montrer son dos.
-**Le village n'existe plus.** Il a été l'écran d'accueil — une place, cinq
-maisons, des habitants, des portails — et Pikstown a pris sa place : c'est la
-ville, maintenant, qui est le hub. `scenes/hub.gd` et `scenes/accueil.gd` sont
-supprimés, avec les modèles qui ne servaient qu'à eux ; ce qui savait les
-bâtir dort encore dans `outils/voxel.py`, sous `VILLAGE = False`.
+**UN SEUL JEU.** Le dépôt a porté un hub à portails et trois jeux ; il ne porte
+plus que **CARNAGE**. Le hub en voxels, ÉNIGME (la ferme) et BOUSCULADE ont
+été retirés, avec les modules et les modèles qui n'existaient que pour eux —
+`SUPPRIMER-LES-AUTRES-JEUX.bat` garde la trace exacte de ce qui est parti, et
+tout se retrouve dans l'historique git.
+
+**On entre par le chargement, puis par le salon.** Le voile de chargement
+(`ui/chargement.gd` — l'affiche, l'astuce, la barre) se lève sur le **salon**,
+qui est devenu l'écran d'accueil : les tables de quatre, « Lancer la manche »,
+et deux portes de côté, *Pseudo* et *Options*. La fin d'une manche y ramène,
+avec le classement affiché au-dessus des tables : il n'y a plus d'écran de
+résultats, et donc plus un clic entre deux parties. L'éditeur de carte reste
+accessible en atelier (`--ecran=editeur`), sans entrée dans l'interface.
 
 **Dans le navigateur, la page EST la maquette.** Le kit fourni (un `.dc.html`
 de Claude Design) n'est pas réinterprété : il est HÉBERGÉ. `web/kit/` porte son
@@ -108,18 +109,7 @@ En ligne : **https://multijoueur.piks-l.com**
 
 | | |
 | --- | --- |
-| **Hub** | Un village en **voxels**, vu de trois quarts : on s'y croise, et on ENTRE dans les maisons. Une esplanade pavée adossée à une falaise, cinq maisons, un potager, une mare, la forêt autour, le jour qui tombe toutes les quinze minutes (même heure pour tous) et les feux qui s'allument. On choisit son héros à l'entrée (chevalier, voleur, mage), on se fait des signes (émotes 1-4), on ouvre son carnet (K : records, place au mur). La taverne, l'armurerie et l'auberge se visitent, avec leurs habitants qui parlent, le classement au mur et le portail qui lance la partie (Carnage, Énigme, Bousculade). Des réverbères s'allument le soir. On se parle : Entrée (ou T) ouvre le tchat, le message part à tout le hub — fil en bas à gauche, bulle au-dessus de la tête — et les touches de marche restent au texte tant qu'on écrit. L'image passe par un effet **maquette** (tilt-shift, `commun/maquette.gd`) : nette à hauteur du joueur, floue en haut et en bas, un peu plus saturée — un petit monde qu'on regarde de haut. Les volumes portent une **occlusion
-ambiante cuite** dans leurs sommets, les masses (feuillages, pelouse, dallage)
-sont teintées par un bruit de taches mêlé à la hauteur, la forêt roule en
-collines autour de la clairière — restée plate, puisque c'est là qu'on marche
-— et chaque maison est assise sur un socle de pierre avec son perron. Les personnages
-sont bâtis deux fois plus fin que le décor — trente-deux voxels de haut — ce
-qui leur donne un visage (nez, oreilles, frange), des mains, des épaules, et à
-chaque héros sa silhouette : heaume à cimier et écu, capuche pointue et cape
-évasée, chapeau à large bord et bâton à cristal. Le champion d'un jeu porte une étoile devant son nom. |
-| **CARNAGE** | Un GTA 2 à l'heure bleue. Une ville PROCÉDURALE de six cent quatre-vingts par cinq cent vingt tuiles — cent fois la précédente — tirée du code de la manche et générée À LA DEMANDE, morceau par morceau, autour de chaque joueur : un centre d'affaires neutre et ses tours, des quartiers de bureaux, des rues commerçantes à néons, la vieille ville, les cités, la banlieue pavillonnaire, la zone industrielle, le port, des parcs et des lacs. Trois gangs se partagent tout ça par secteurs aux frontières irrégulières. Les immeubles sont des boîtes dont un shader dessine les étages et allume les fenêtres ; le sol, les trottoirs, les passages piétons et l'eau sont un autre shader. Des dizaines de milliers de voitures dorment le long des rues et se volent toutes ; les taxis roulent au centre, les fourgons dans la zone. On conduit, on **descend** (E), on court, on tire. Les passants rapportent, les gangs plus, les flics encore plus — et tout cela fait monter les **étoiles de recherche**. Chaque secteur a son **garage** qui efface le casier, sa **cabine** qui donne des contrats, ses **repaires** tagués au sol, une **arène** une fois sur deux — le seul endroit où les joueurs peuvent se blesser. Manche de 4 minutes, radar centré sur soi en haut à droite. |
-| **BOUSCULADE** | Une île en voxels qui flotte dans le vide, quatre joueurs qui se poussent. Z Q S D pour courir, **ESPACE** pour charger : un coup d'épaule qui envoie l'autre valser. L'île s'effrite par le bord, anneau après anneau, jusqu'à un disque de trois unités. Tombé ? Repêché au centre trois secondes plus tard — mais celui qui vous a poussé a marqué cent points ; deux points par seconde debout. Chacun simule son propre pantin (pas, charge, poussée reçue, chute) ; l'hôte compte les points. Manche de 90 secondes, portail à l'auberge. |
-| **ÉNIGME** | Coopératif, trois chambres. Une dalle ne reste enfoncée que si quelqu'un — ou une caisse — pèse dessus, et la sortie d'une chambre n'accepte l'équipe qu'au complet. 3 minutes. |
+| **CARNAGE** | Un GTA 2 à l'heure bleue. Une ville PROCÉDURALE de six cent quatre-vingts par cinq cent vingt tuiles — cent fois la précédente — tirée du code de la manche et générée À LA DEMANDE, morceau par morceau, autour de chaque joueur : un centre d'affaires neutre et ses tours, des quartiers de bureaux, des rues commerçantes à néons, la vieille ville, les cités, la banlieue pavillonnaire, la zone industrielle, le port, des parcs et des lacs. Sept gangs se partagent tout ça — trois par district, dont Le Consortium qui est partout — par secteurs aux frontières irrégulières. Les immeubles sont des boîtes dont un shader dessine les étages et allume les fenêtres ; le sol, les trottoirs, les passages piétons et l'eau sont un autre shader. Des dizaines de milliers de voitures dorment le long des rues et se volent toutes ; les taxis roulent au centre, les fourgons dans la zone. On conduit, on **descend** (E), on court, on tire. Les passants rapportent, les gangs plus, les flics encore plus — et tout cela fait monter les **étoiles de recherche**. Chaque secteur a son **garage** qui efface le casier, sa **cabine** qui donne des contrats, ses **repaires** tagués au sol, une **arène** une fois sur deux — le seul endroit où les joueurs peuvent se blesser. Manche de 4 minutes, radar centré sur soi en haut à droite. |
 
 ### CARNAGE, dans le détail
 
@@ -144,17 +134,102 @@ patrouille par étoile, des flics à pied dès la deuxième, des barrages de rue
 échappatoire, cinq étoiles sont une condamnation et le joueur repose la
 manette.
 
-**Le respect.** Trois gangs, trois bandes de ville, une jauge par gang et par
-joueur. Tuer chez l'un fait perdre vingt-deux points chez lui et en gagner
-douze chez les deux autres. En dessous de −60 — soit trois morts, pas une — le
-gang tire à vue ; au-dessus de +50 il laisse passer. Brûler une de leurs
-voitures compte aussi, sinon on ferait le vide au lance-roquettes sans jamais
-fâcher personne.
+**Le respect.** SEPT gangs, mais TROIS par district : la ville est coupée en
+trois secteurs, chacun tenu par deux gangs locaux, et **Le Consortium** tient
+boutique dans les trois. Une jauge de 0 à 100 par gang et par joueur, qui part
+à 50 — inconnu, ni attendu ni chassé — et cinq paliers : sous 20 on vous tire
+à vue, sous 40 on ne vous confie rien, entre 40 et 60 on vous ignore, au-dessus
+de 60 on vous laisse passer, au-dessus de 80 **on se bat à côté de vous**.
+Tuer chez l'un coûte onze points chez lui et en rapporte cinq chez ses deux
+rivaux *du secteur* — trois morts pour se faire tirer dessus, et la sanction
+s'annonce deux fois avant de tomber. Brûler une de leurs voitures compte
+aussi, sinon on ferait le vide au lance-roquettes sans jamais fâcher personne.
+Détail : `CONCEPTION-GANGS.md`.
 
-**Les contrats.** Une cabine par territoire. Le gang du quartier paie pour
-nettoyer chez un rival, faire repeindre une voiture, ou tenir deux étoiles
-jusqu'au bout. La prime se touche en argent ET en respect : c'est la seule
-façon de remonter une jauge qu'on a fait plonger.
+**Les alliés.** Au-dessus de quatre-vingts, un homme de gang ne se contente
+plus de laisser passer : il tire sur ce qui vous tire dessus — le flic qui
+vous poursuit, l'homme du gang qui vous canarde. Il ne vise jamais un autre
+JOUEUR : le respect serait une arme à distance. Un anneau au sol sous ses
+pieds dit son humeur, et les trois barres du district s'empilent au-dessus de
+la fiche.
+
+**Les contrats.** Une cabine par territoire, et l'employeur est le gang **du
+territoire** — pas le numéro de la cabine, comme c'était le cas jusqu'à la
+phase 4. Il paie pour nettoyer chez un rival, faire repeindre une voiture, ou
+tenir deux étoiles jusqu'au bout. Sous quarante de respect il n'a rien pour
+vous ; au-dessus de soixante le travail est plus dur et paie une fois et demie
+plus ; au-dessus de quatre-vingts, deux fois et demie. La prime se touche en
+argent ET en respect — et fâche d'autant le gang qu'on a servi contre lui.
+
+**La recherche monte en six crans** (`CONCEPTION-RECHERCHE.md`). Une voiture de
+patrouille, puis la police à pied, puis **le SWAT** dont le fourgon débarque
+quatre hommes, les barrages, **les agents spéciaux** et l'hélicoptère, et enfin
+**l'armée** : un camion olive et un char qui canonne — un obus toutes les deux
+secondes et demie, qui souffle tout dans cent vingt pixels, tôle comprise. Les
+quatre corps ont leur tenue, leur carrosserie, leur cadence et leurs dégâts ;
+la police ordinaire reste de la partie même à six, sinon la rue n'a plus l'air
+d'une ville en panique.
+
+**L'autoradio** (phase 10). Six stations — PIKS FM, Radio Taverne, Canal Forêt,
+Ondes du village, Fréquence police, Silence — et **chaque carrosserie a la
+sienne** : on monte dans un taxi et on tombe sur les ondes du village, dans une
+sportive sur la synthé, dans un camion sur la taverne. C'est le détail de GTA 2
+qui donne une personnalité à une voiture volée ; sans lui, en changer ne change
+que la tôle. On tient `R` : une **roue** s'ouvre, six secteurs, on pousse dans une direction
+et on relâche. C'est le geste de la roue d'armes des GTA modernes, et il vaut
+mieux qu'un défilement — à six stations, appuyer cinq fois pour revenir à la
+précédente, ça se paie en tôle. Elle ne met rien en pause (la manche est
+multijoueur), mais le volant est neutralisé pendant qu'on vise : pousser à
+gauche pour choisir enverrait la voiture dans le trottoir. Une pastille marque
+la station qui joue.
+
+**Ajouter une station** : déposer le `.ogg` dans `sons/`, ajouter une ligne à
+`Sons.STATIONS` (nom, piste, couleur), et `outils/radio.tscn` vérifie que le
+fichier existe — une piste mal orthographiée ne fait sinon aucun bruit et
+aucune erreur.
+La radio s'allume en montant et s'éteint en descendant — un autoradio qui joue
+pendant qu'on court dans la rue, c'est une bande-son, pas une radio. La
+fréquence de la police n'a pas de morceau : elle DIT des choses, en empruntant
+les voix de la radio de bord. Les morceaux sont ceux du dépôt (CC0).
+
+**Le mode solo.** `--solo` (ou `?solo=1`) fait tourner le jeu SANS SERVEUR : le
+canal se rejoint lui-même, le joueur est seul dans la salle et il en est
+l'hôte. Sans ça, le jeu était injouable dès que le réseau manquait — le salon
+attendait un hôte qui ne venait jamais : clone du dépôt sans `config.cfg`,
+Supabase en panne, avion. C'est aussi ce qui permet de jouer une manche
+ENTIÈRE au banc et de la photographier :
+
+```bash
+godot --headless --path . --banc-jeu=carnage --manche=20 --solo
+xvfb-run -s "-screen 0 1280x720x24" godot --path . --rendering-driver opengl3 \
+  --banc-jeu=carnage --manche=40 --solo --banc-etoiles=3 --photo=/tmp/vues
+```
+
+**Le menu de triche** s'ouvre au code Konami — ↑ ↑ ↓ ↓ ← → ← → B A, tapé en
+roulant. Dix codes : blindage, arsenal, cinquante mille dollars, casier vierge,
+six étoiles, atelier complet, respect au maximum ou à zéro, un char pour vous,
+et la nuit qui s'arrête. Ils passent par les mêmes fonctions que le jeu (le
+magot par `_encaisser_argent`, le char par `_naitre_auto`) : un code qui
+écrirait dans les variables finirait par mentir. ⚠ **Il coûte le classement** :
+dès qu'un code est activé, le score de ce joueur n'est plus déposé en base —
+on écarte le tricheur, pas la manche, sinon dix touches suffiraient à effacer
+le score des trois autres. B et A se lisent par code de touche et non par code
+physique : sur un AZERTY, on appuie sur les lettres imprimées.
+
+**Les à-côtés** (`CONCEPTION-A-COTES.md`). Huit colis dorés dans la ville, dix
+à trouver et une prime de collection ; un crâne rouge qui lance un **Kill
+Frenzy** — huit victimes en trente secondes, l'arme fournie ; la **course de
+taxi**, un métier attaché à une carrosserie (on devient chauffeur en volant un
+taxi) ; et les **cascades**, qui sont des FRÔLEMENTS faute d'axe vertical :
+passer au ras d'une voiture qui roule, à pleine vitesse, sans la toucher.
+
+**L'atelier.** Un garage de peinture sur deux vend aussi des modifications, sur
+cinq pastilles peintes en couronne : on se gare sur celle qu'on veut et `F`
+achète. Plaques maquillées (la recherche cesse de monter quarante-cinq
+secondes, elle ne redescend pas), mitrailleuse de bord, mines, taches d'huile,
+bombe qui saute six secondes après qu'on a quitté la voiture. Mines et flaques
+vivent chez l'hôte comme les caisses ; une mine s'amorce avant de mordre, une
+flaque glisse aussi sous celui qui l'a posée. Détail : `CONCEPTION-ATELIER.md`.
 
 **Les arènes.** Deux esplanades qui enjambent une frontière de territoire —
 contestées par construction. Le tir ami n'existe QUE là, et seulement si le
@@ -449,9 +524,10 @@ de pompiers est le dix-neuvième gabarit : caisse rouge, échelle couchée sur l
 toit, bande blanche, deux gyrophares, tuyau enroulé à l'arrière.
 
 **La cabine dit ce que le gang pense de vous.** L'enseigne au-dessus de chaque
-téléphone est verte quand le gang du quartier vous embauche (respect ≥ 50),
-jaune quand il tolère, rouge quand il vous tire dessus (respect ≤ −60) : la
-jauge de respect se lit depuis la rue, sans ouvrir un menu.
+téléphone porte une couleur par palier de respect — du rouge « on vous tire
+dessus » au vert clair « on se bat avec vous » —, et c'est la MÊME table
+(`FormesCarnage.COULEURS_HUMEUR`) que l'anneau sous les pieds de ses hommes :
+la jauge de respect se lit depuis la rue, sans ouvrir un menu.
 
 **Le jour et la nuit.** La même horloge que le village : un cycle de quinze
 minutes (`MatieresCarnage.nuit()`), neuf de jour, une de crépuscule, quatre de
@@ -519,16 +595,16 @@ rentre à la base que quand la jauge redescend. La seule sortie est le garage.
 
 **L'interface est celle d'une borne d'arcade, du premier écran au dernier.**
 Angles droits, cadres de deux pixels, polices pixel à leur taille native, une
-barre d'accent à gauche de chaque panneau (`ui/fabrique.gd`) — l'accueil, le
-village, le salon, la manche et les résultats partagent la même main. En
+barre d'accent à gauche de chaque panneau (`ui/fabrique.gd`) — le chargement,
+le salon, le pseudo, les options et la manche partagent la même main. En
 manche, `ui/hud.gd` peint tout en un `_draw` : chrono et scores en cartouche
-(une barre de course sous chaque nom), les cinq étoiles de recherche toujours
+(une barre de course sous chaque nom), les six têtes de recherche toujours
 visibles au milieu, la fiche du joueur en bas à gauche — jauges de vie et de
 tôle, arme et munitions, puces d'état (qui vous chasse, arène, garage) —, le
 contrat en bas au milieu avec son sablier, et les touches en cabochons sur la
 dernière ligne, qui s'estompent quinze secondes après le départ. Le jeu ne
-donne au HUD qu'une fiche (`Partie.fiche_joueur`) : l'énigme et Carnage ont
-le même habillage avec leurs propres rubriques.
+donne au HUD qu'une fiche (`Partie.fiche_joueur`) : le HUD ne connaît pas le
+jeu, seulement la fiche qu'on lui tend.
 
 **Le radar, en haut à droite.** Centré sur soi, le nord en haut : la ville
 fait six cent quatre-vingts tuiles, un plan entier n'y montrerait plus rien.
@@ -537,9 +613,6 @@ rues en sombre, les lieux à portée en pastilles nommées. La cible d'un contra
 clignote ; hors du cadre, une flèche au bord dit où aller et à combien de
 tuiles. On réapparaît aussi près de là où l'on est tombé, jamais au centre —
 dans une ville de soixante-huit mille pixels, ce serait repartir de zéro.
-
-Les deux portails restants sont éteints : ils marquent la place des jeux
-suivants sans faire croire qu'ils existent.
 
 ## L'architecture, en une page
 
@@ -672,6 +745,30 @@ ailleurs. Sans ce passage obligé, la seule façon de vérifier une partie de
 bout en bout serait de la jouer à la main — et personne ne le fait avant
 chaque livraison.
 
+### Les bancs de la ville vivante
+
+Ceux-là ne demandent ni réseau ni image : le plan et la ville vivante sont du
+code pur, et c'est ce qui permet de les interroger.
+
+```bash
+godot --headless --path . res://outils/compiler.tscn   # tout se compile-t-il ?
+godot --headless --path . -s outils/respect.gd         # gangs, paliers, contrats, alliés
+godot --headless --path . -s outils/atelier.gd         # baies, mines, huile, bombe, plaques
+godot --headless --path . -s outils/recherche.gd       # les six crans, les quatre corps, le char
+godot --headless --path . -s outils/missions.gd        # colis, Kill Frenzy, taxi
+godot --headless --path . res://outils/konami.tscn     # la suite ↑↑↓↓←→←→BA
+godot --headless --path . res://outils/radio.tscn      # les stations et leurs pistes
+./outils/tableau.sh /tmp/triche.png oui                # le menu de triche en image
+godot --headless --path . -s outils/flotte.gd          # mouillages et navigation
+godot --headless --path . -s outils/territoires.gd     # la carte des territoires en PNG
+./outils/tableau.sh                                    # les barres de respect à l'écran
+```
+
+`outils/compiler.sh` mérite un mot : `--check-only --script` refuse tout
+fichier qui parle à un autoload, si bien que les deux plus gros fichiers du
+jeu n'étaient vérifiés par rien entre deux parties. Le banc les charge dans
+une scène — donc avec les autoloads — et liste les refus.
+
 ### Photographier un jeu sans y jouer
 
 ```bash
@@ -711,6 +808,20 @@ La revalidation coûte un aller-retour et répond 304.
 L'export est en variante *sans fils d'exécution* (`thread_support=false`) :
 avec les fils, le navigateur exige les en-têtes d'isolation `COOP`/`COEP`, qui
 cassent le chargement de ressources tierces. Pour de la 2D, on n'y perd rien.
+
+### Ce que la ferme a laissé derrière elle
+
+L'écran ÉNIGME a été retiré du dépôt — mais il vaut la peine de retenir
+pourquoi il avait cessé de fonctionner. La réécriture de `commun/terrain.gd`
+avait emporté six fonctions dont il dépendait, et il **ne se chargeait plus du
+tout** : six « Static function not found » à l'ouverture. Personne ne l'a vu
+pendant des jours, pour une raison qui vaut d'être retenue — **rien ne
+chargeait les scripts entre deux parties**. `--check-only` refuse tout fichier
+qui parle à un autoload, et un jeu qu'on n'ouvre pas ne dit rien.
+
+C'est ce trou-là qui a donné `outils/compiler.sh`, qui charge maintenant TOUS
+les scripts du dépôt, autoloads compris, et liste les refus. Il reste après le
+départ de la ferme : c'est le filet qui manquait.
 
 ## Ce qui n'est pas fait
 

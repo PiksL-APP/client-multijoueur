@@ -1,5 +1,12 @@
 extends Ecran
-## Salon d'attente d'un jeu : on s'y répartit en tables de quatre, l'hôte lance.
+## LE SALON — l'écran d'accueil du jeu, et sa salle d'attente.
+##
+## Depuis que le projet ne porte plus que CARNAGE, c'est ici qu'on entre (le
+## voile de chargement se lève dessus) et ici qu'on revient à la fin d'une
+## manche, avec le classement. Il n'y a plus ni hub à portails, ni écran de
+## résultats : deux écrans de moins entre deux parties.
+##
+## On s'y répartit en tables de quatre, l'hôte lance.
 ##
 ## Il n'y a pas de service d'appariement : la répartition se lit dans la
 ## présence du canal. Chacun calcule la même chose à partir des mêmes métas,
@@ -17,6 +24,10 @@ var _bouton_lancer: Button
 var _bouton_changer: Button
 var _info: Label
 var _etat: HBoxContainer
+var _voile: VoileChargement
+var _depuis_ouverture := 0.0
+## Le classement de la manche qu'on vient de jouer, s'il y en a une.
+var _classement: Array = []
 
 func demarrer() -> void:
 	# Le salon est encore une salle d'attente : le thème y tient jusqu'au
@@ -24,6 +35,13 @@ func demarrer() -> void:
 	Sons.musique(Sons.THEME)
 	_jeu = String(donnees.get("jeu", "carnage"))
 	_titre = String(donnees.get("titre", _jeu.to_upper()))
+	_classement = donnees.get("classement", [])
+	# LE VOILE DE CHARGEMENT — celui du hub, qui n'avait plus de maison. Il ne
+	# se lève qu'une fois le canal rejoint : ce qu'il cache, c'est l'attente du
+	# réseau, et une affiche vaut mieux qu'un écran noir. À la sortie d'une
+	# manche, on ne le remet pas : on est déjà connecté.
+	if _classement.is_empty():
+		_voile = VoileChargement.poser(self)
 	var fond := ColorRect.new()
 	fond.color = Charte.NUIT
 	fond.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -120,6 +138,7 @@ var _attente_pilote := 0.0
 var _parti := false
 
 func _process(delta: float) -> void:
+	_lever_le_voile(delta)
 	if not Commandes.pilote_automatique or _parti:
 		return
 	if not _je_suis_hote():
@@ -130,6 +149,24 @@ func _process(delta: float) -> void:
 		_parti = true
 		print("[banc] manche lancée depuis le salon")
 		_lancer()
+
+## LE VOILE se lève quand le canal est rejoint — et jamais avant une seconde
+## et demie : un chargement qui clignote une demi-seconde passe pour un défaut
+## d'affichage, pas pour un chargement. Hors ligne (mode solo), le canal est
+## rejoint tout de suite, et c'est ce plancher qui laisse le temps de lire.
+const VOILE_MINIMUM := 1.5
+
+func _lever_le_voile(delta: float) -> void:
+	if _voile == null or not is_instance_valid(_voile):
+		return
+	_depuis_ouverture += delta
+	var pret: bool = _canal != null and _canal.est_rejoint
+	# La barre avance sur le temps tant qu'on attend le réseau, puis d'un coup.
+	_voile.avancer(1.0 if pret and _depuis_ouverture >= VOILE_MINIMUM
+		else minf(0.85, _depuis_ouverture / VOILE_MINIMUM * 0.85))
+	if pret and _depuis_ouverture >= VOILE_MINIMUM:
+		_voile.effacer()
+		_voile = null
 
 ## Point d'entrée du banc d'essai : lance si et seulement si on est hôte.
 func lancer_pour_banc() -> bool:
@@ -185,6 +222,21 @@ func _construire() -> void:
 	_info = Charte.texte("", 17, Color(1, 1, 1, 0.6), true)
 	colonne.add_child(_info)
 
+	# LE CLASSEMENT de la manche qu'on vient de jouer. Il prend la place de
+	# l'écran de résultats : on le lit, et on est déjà là où l'on relance.
+	if not _classement.is_empty():
+		var fin := VBoxContainer.new()
+		fin.add_theme_constant_override("separation", 4)
+		colonne.add_child(fin)
+		fin.add_child(Charte.titre("Manche terminée", 24))
+		var rang := 1
+		for ligne in _classement:
+			var texte := "%d.  %-16s %6d" % [rang, String(ligne.get("pseudo", "?")),
+				int(ligne.get("score", 0))]
+			fin.add_child(Charte.texte(texte, 18,
+				Charte.ROSE if String(ligne.get("cle", "")) == Session.cle else Color(1, 1, 1, 0.7)))
+			rang += 1
+
 	var panneau := PanelContainer.new()
 	var boite_p := StyleBoxFlat.new()
 	boite_p.bg_color = Color(1, 1, 1, 0.03)
@@ -215,9 +267,15 @@ func _construire() -> void:
 	_bouton_changer.pressed.connect(func(): _rejoindre_table(_table_libre(_table)))
 	actions.add_child(_bouton_changer)
 
-	var retour := Charte.bouton("Retour au menu")
-	retour.pressed.connect(func(): demande_ecran.emit("menu", {}))
-	actions.add_child(retour)
+	# Les deux écrans qui restent à côté du jeu. Il n'y a plus de hub où
+	# retourner : c'est ici, la maison.
+	var pseudo := Charte.bouton("Pseudo")
+	pseudo.pressed.connect(func(): demande_ecran.emit("creation", {}))
+	actions.add_child(pseudo)
+
+	var options := Charte.bouton("Options")
+	options.pressed.connect(func(): demande_ecran.emit("options", {"retour": "salon"}))
+	actions.add_child(options)
 
 func _rafraichir() -> void:
 	Charte.rafraichir_etat(_etat)

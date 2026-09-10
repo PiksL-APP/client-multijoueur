@@ -91,12 +91,6 @@ const ECLAT := {
 ## lent et rapporte beaucoup : semer l'un ou l'autre est un choix, et un champ
 ## de radis n'est pas un champ de choux. Sans ça, changer de graine est une
 ## question de couleur.
-const FICHES := {
-	"radis":    {"nuits": 2, "graine": 2, "prix": 5},
-	"carottes": {"nuits": 3, "graine": 3, "prix": 9},
-	"laitues":  {"nuits": 3, "graine": 3, "prix": 8},
-	"choux":    {"nuits": 4, "graine": 5, "prix": 15},
-}
 const PIECES_DEPART := 20
 
 ## Où s'empilent les cageots : à droite de la grange, quatre par rangée.
@@ -531,8 +525,14 @@ func _empiler(culture: int) -> void:
 	_cageots_noeuds.append(cageot)
 	_cageots += 1
 
+## ⚠ LA TABLE DES CULTURES VIT DANS `Terrain`, PAS ICI. Ce fichier en gardait
+## une copie, indexée par NOM, avec les quatre légumes d'avant (radis,
+## carottes, laitues, choux) : le jour où `Terrain` est passé à six cultures
+## (navet, pomme de terre, blé, tomate, fraise, maïs), semer du blé plantait
+## le jeu — « Invalid access to key 'blé' ». Deux tables pour la même chose ne
+## divergent pas « si », elles divergent « quand ».
 func _fiche(culture: int) -> Dictionary:
-	return FICHES[Terrain.nom_culture(culture)]
+	return Terrain.fiche(culture)
 
 func _dire(texte: String) -> void:
 	_message = texte

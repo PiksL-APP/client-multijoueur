@@ -22,6 +22,22 @@ const EVENEMENT_ICI := "__ici"
 const DELAI_BATTEMENT := 25.0          ## le serveur coupe à 60 s de silence
 const DELAIS_RECONNEXION := [1.0, 2.0, 4.0, 8.0, 15.0]
 
+## LE MODE SOLO. Le jeu tourne alors SANS SERVEUR : le canal se rejoint
+## lui-même, le joueur est seul dans la salle, et il en est l'hôte — donc c'est
+## lui qui simule la ville, exactement comme s'il avait gagné l'élection.
+##
+## ⚠ Pourquoi ça vaut la peine. D'abord, sans réseau le jeu était INJOUABLE :
+## le salon attendait un hôte qui ne venait jamais, et rien ne démarrait —
+## clone du dépôt sans `config.cfg`, Supabase en panne, avion. Ensuite, c'est
+## la seule façon de faire tourner une manche ENTIÈRE au banc et de la
+## photographier : le socket temps réel ne passe pas par un mandataire HTTP,
+## donc aucun conteneur d'intégration ne verra jamais le Realtime.
+##
+## Rien d'autre ne change : les messages qu'on s'envoyait à soi-même par le
+## serveur, le jeu les applique déjà en local (`_vider_les_evenements`), et
+## `diffuser` n'a donc qu'à ne rien faire.
+var solo := false
+
 var etat: int = HORS_LIGNE
 
 var _ws: WebSocketPeer = null
@@ -35,7 +51,7 @@ func _ready() -> void:
 	set_process(true)
 
 func connecter() -> void:
-	if _ws != null or not Config.est_configure():
+	if solo or _ws != null or not Config.est_configure():
 		return
 	_ouvrir()
 
@@ -99,11 +115,26 @@ func rejoindre(nom: String, meta: Dictionary = {}) -> CanalTempsReel:
 	canal.meta = meta
 	_canaux[topic] = canal
 
-	if etat == EN_LIGNE:
+	if solo or not Config.est_configure():
+		# Pas de serveur, ou pas de clés : on se rejoint soi-même.
+		solo = true
+		_rejoindre_seul(canal)
+	elif etat == EN_LIGNE:
 		_envoyer_jonction(canal)
 	else:
 		connecter()
 	return canal
+
+## ⚠ EN DIFFÉRÉ. L'appelant vient de recevoir le canal et n'a pas encore
+## branché ses signaux : émis tout de suite, `rejoint` et `presences_changees`
+## tombent dans le vide et l'écran attend pour toujours.
+func _rejoindre_seul(canal: CanalTempsReel) -> void:
+	canal.est_rejoint = true
+	var meta := canal.meta.duplicate()
+	meta["cle"] = canal.cle
+	canal.presences[canal.cle] = meta
+	canal.rejoint.emit.call_deferred()
+	canal.presences_changees.emit.call_deferred(canal.presences)
 
 func quitter(nom: String) -> void:
 	var topic := "realtime:" + nom
@@ -120,6 +151,9 @@ func quitter(nom: String) -> void:
 ## fois pour toutes. L'oublier dans un seul appelant donne des messages
 ## fantômes qu'on met une soirée à attribuer.
 func diffuser(canal: CanalTempsReel, evenement: String, charge: Dictionary) -> void:
+	# En solo, personne n'écoute : le jeu applique déjà ses propres évènements.
+	if solo:
+		return
 	if etat != EN_LIGNE or not canal.est_rejoint:
 		return
 	charge = charge.duplicate()
@@ -150,6 +184,12 @@ func _accueillir(canal: CanalTempsReel, meta: Dictionary) -> void:
 		_saluer(canal)
 
 func suivre_presence(canal: CanalTempsReel) -> void:
+	if solo:
+		var meta := canal.meta.duplicate()
+		meta["cle"] = canal.cle
+		canal.presences[canal.cle] = meta
+		canal.presences_changees.emit(canal.presences)
+		return
 	if etat != EN_LIGNE or not canal.est_rejoint:
 		return
 	_saluer(canal)
@@ -301,6 +341,8 @@ func _passer(nouvel_etat: int) -> void:
 	etat_change.emit(etat)
 
 func libelle_etat() -> String:
+	if solo:
+		return "solo"
 	match etat:
 		EN_LIGNE: return "en ligne"
 		CONNEXION: return "connexion…"

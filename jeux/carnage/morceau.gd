@@ -595,7 +595,9 @@ func _poser_les_lieux(plan: PlanVille, c0: int, l0: int) -> void:
 		var coin_g := PlanVille.coin_pate(g["pate"])
 		if not rect.has_point(PlanVille.centre_tuile(coin_g.x, coin_g.y)):
 			continue
-		var dalle := FormesCarnage.dalle_garage()
+		# Un garage sur deux est un ATELIER : même dalle, cinq pastilles en plus.
+		var dalle := FormesCarnage.dalle_atelier() if FormesCarnage.est_atelier(int(g["id"])) \
+			else FormesCarnage.dalle_garage()
 		dalle.position = Decor.vers3d(g["p"])
 		add_child(dalle)
 	for c in lieux["cabines"]:

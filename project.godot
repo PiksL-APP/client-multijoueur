@@ -6,8 +6,8 @@ config_version=5
 
 [application]
 
-config/name="Piks-l Multijoueur"
-config/description="Hub à portails : chaque portail lance un jeu multijoueur de 2 à 4 joueurs."
+config/name="Piks Theft Auto"
+config/description="CARNAGE : un GTA 2 en voxels, deux à quatre joueurs dans la même ville."
 config/version="0.1.0"
 run/main_scene="res://scenes/racine.tscn"
 config/features=PackedStringArray("4.5", "GL Compatibility")

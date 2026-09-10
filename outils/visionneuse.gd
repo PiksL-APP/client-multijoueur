@@ -62,6 +62,36 @@ func _ready() -> void:
 				add_child(etiquette)
 				x += ecart
 			continue
+		# `d:<chose>` sort un DÉCOR de la ville : la dalle d'un atelier, une
+		# mine, une flaque. Bâti par la fonction du jeu, pas par le banc —
+		# c'est la seule façon de voir ce que le joueur verra.
+		if String(nom).begins_with("d:"):
+			var quoi := String(nom).substr(2)
+			var piece: Node3D = FormesCarnage.dalle_garage()
+			match quoi:
+				"atelier": piece = FormesCarnage.dalle_atelier()
+				"mine": piece = FormesCarnage.mine()
+				"huile": piece = FormesCarnage.flaque_huile()
+				"char": piece = FormesCarnage.char_arme()
+				"colis": piece = FormesCarnage.colis()
+				"frenzy": piece = FormesCarnage.icone_frenzy()
+			piece.position = Vector3(x, 0, 0)
+			add_child(piece)
+			x += ecart
+			continue
+		# `u:<corps>` sort un UNIFORME : police, SWAT, agent, armée.
+		if String(nom).begins_with("u:"):
+			var corps := int(String(nom).substr(2))
+			var homme := FormesCarnage.uniforme(corps)
+			homme.position = Vector3(x, 0, 0)
+			homme.rotation.y = PI
+			add_child(homme)
+			var mot := Decor.etiquette(String(VilleVivante.CORPS[corps]["nom"]).to_upper(),
+				FormesCarnage.TENUES_CORPS[corps].lightened(0.35), 20)
+			mot.position = Vector3(x, 3.2, 0)
+			add_child(mot)
+			x += ecart
+			continue
 		if String(nom).begins_with("k:"):
 			var perso := Personnages.creer(String(nom).substr(2))
 			perso.position = Vector3(x, 0, 0)

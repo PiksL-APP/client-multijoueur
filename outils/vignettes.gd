@@ -41,12 +41,33 @@ var _sortie := "res://images/pinceaux/"
 ## deux rives — mais trois pour un sol ou un buisson : sur sept cases, le
 ## chantier et le sable se noyaient dans le pré, et le recadrage automatique ne
 ## pouvait rien puisque le pré, lui, est opaque jusqu'au bord du cadre.
+## ⚠ UN OBJET MENU N'A PAS DE PARCELLE. La cabine et la caisse font quelques
+## unités dans une case qui en fait vingt : posées sur trois cases sur trois,
+## elles sortaient à huit pour cent de la vignette, sur quatre-vingt-douze pour
+## cent de pelouse — une vignette verte de plus dans une colonne qui en compte
+## déjà quatre. Une case, et le cadre se serre dessus.
+const MENUS := "?*"
+
 static func cote_de(c: String) -> int:
-	if c in "#=O~.":
+	if c in "#=O~.(/":
 		return 7
 	if c.to_upper() in "TBCMVH":
 		return 4
+	if c in MENUS:
+		return 1
 	return 3
+
+## ⚠ LA RAMPE A BESOIN D'UN RELIEF, pas seulement d'un dessin. `road-slant-curve`
+## ne se pose que si la case d'à côté est DEUX PALIERS plus haut ; sur une
+## parcelle plate, la pièce est refusée et la vignette montre une rue banale.
+static func relief_de(c: String, n: int) -> Array:
+	var g: Array = []
+	for _j in n:
+		g.append("0".repeat(n))
+	if c == "/":
+		for j in n:
+			g[j] = "0".repeat(3) + "2".repeat(n - 3)
+	return g
 
 static func parcelle(c: String) -> Array:
 	var fond := "." if SUR_EAU.contains(c) else ","
@@ -73,6 +94,22 @@ static func parcelle(c: String) -> Array:
 			for k in [0, 1, 5, 6]:
 				for j in [2, 3, 4]:
 					mettre.call(k, j, "," if j != 3 else "#")
+		"(":
+			# LA BRETELLE se reconnaît à ce qu'elle relie : une rue qui arrive
+			# par l'ouest, une autre qui repart par le sud, DEUX CASES PLUS
+			# LOIN. Posée seule au milieu du pré, elle serait refusée — la
+			# pièce exige une rue à chaque bout.
+			for k in range(0, 3):
+				mettre.call(k, 2, "#")
+			for k in range(4, 7):
+				mettre.call(4, k, "#")
+			mettre.call(3, 2, "(")
+		"/":
+			# LA RAMPE DOUCE ne se lit que de profil et que si le relief
+			# monte : la parcelle porte donc une rue droite dont la moitié est
+			# deux paliers plus haut.
+			for k in n:
+				mettre.call(k, 3, "/" if k == 2 else "#")
 		"~":
 			for k in range(1, 6):
 				mettre.call(k, 3, "~")
@@ -133,7 +170,11 @@ var _camera: Camera3D
 func _cadrer(n: int) -> void:
 	var c := float(n) * 0.5 * Quartiers.CASE
 	var centre := Vector3(c, 0.6 * Quartiers.PALIER, c)
-	_camera.size = (float(n) - 1.2) * Quartiers.CASE
+	var large := maxf(1.0, float(n) - 1.2)
+	if MENUS.contains(_en_cours):
+		large = 0.5                    # la case, moins ce qui déborde autour
+		centre = Vector3(c, 0.16 * Quartiers.CASE, c)
+	_camera.size = large * Quartiers.CASE
 	_camera.look_at_from_position(centre + Vector3(1.0, 1.15, 1.0).normalized() * 900.0,
 		centre, Vector3.UP)
 
@@ -156,9 +197,7 @@ func _poser(c: String) -> void:
 		_vue.remove_child(_porte)
 		_porte.queue_free()
 	var g := parcelle(c)
-	var relief: Array = []
-	for _j in g.size():
-		relief.append("0".repeat(g.size()))
+	var relief := relief_de(c, g.size())
 	var fiche := {
 		"nom": "vignette", "origine": Vector2.ZERO, "angle": 0.0, "graine": 4,
 		"herbe": Color("#7f9464"), "roche": Color("#8b8578"),

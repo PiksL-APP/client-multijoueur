@@ -94,7 +94,7 @@ func demarrer() -> void:
 	var retour := Charte.bouton("Retour au menu")
 	retour.pressed.connect(func() -> void:
 		Sons.interface("retour", -8.0)
-		demande_ecran.emit("menu", {}))
+		demande_ecran.emit("salon", {}))
 	gauche.add_child(retour)
 
 	_avertissement = Charte.texte("", 15, Charte.ORANGE, true)
@@ -206,11 +206,11 @@ func _vitrine() -> SubViewportContainer:
 func _fond() -> void:
 	# La même ville qu'au menu, prise de très haut et immobile : un fond, pas
 	# une scène. Bâtir un seul morceau suffit — le reste est hors champ.
-	var carte := PlanVille.new(MenuPrincipal.VITRINE)
+	var carte := PlanVille.new(PlanVille.VITRINE)
 	var ambiance := MatieresCarnage.ambiance()
 	for noeud in ambiance:
 		monde().add_child(noeud)
-	MatieresCarnage.regler_heure(ambiance[0], ambiance[1], ambiance[2], MenuPrincipal.heure())
+	MatieresCarnage.regler_heure(ambiance[0], ambiance[1], ambiance[2], MatieresCarnage.heure_de_vitrine())
 	var sol := MatieresCarnage.sol()
 	sol.set_shader_parameter("rail", carte.rail())
 	sol.set_shader_parameter("lignes", carte.lignes_libres())
@@ -308,4 +308,4 @@ func _input(evenement: InputEvent) -> void:
 	var touche := evenement as InputEventKey
 	if touche != null and touche.pressed and not touche.echo and touche.keycode == KEY_ESCAPE:
 		Sons.interface("retour", -8.0)
-		demande_ecran.emit("menu", {})
+		demande_ecran.emit("salon", {})

@@ -84,11 +84,21 @@ func recevoir(_evenement: String, _charge: Dictionary) -> void:
 func rafraichir_scene(_delta: float) -> void:
 	pass
 
+## LES TRICHEURS de la manche, par clé de joueur. Un code activé (menu Konami)
+## inscrit son auteur ici, et son score n'est PAS déposé en base.
+##
+## ⚠ On écarte le TRICHEUR, pas la manche : voider la partie entière laisserait
+## n'importe qui effacer le score des trois autres en tapant dix touches.
+var tricheurs: Dictionary = {}
+
 func classement_final() -> Array:
 	var lignes: Array = []
 	for cle in joueurs:
 		var j: Dictionary = joueurs[cle]
 		lignes.append({
+			# La clé d'onglet sert à repérer les tricheurs ; elle ne part pas
+			# en base (voir `terminer`, qui ne recopie que trois champs).
+			"cle": String(cle),
 			# Le score se rattache à l'identité stable, pas à la clé d'onglet.
 			"joueur_id": String(j.get("id", cle)),
 			"pseudo": String(j.get("pseudo", "?")),
@@ -219,6 +229,8 @@ func terminer(note: String) -> void:
 	canal.envoyer("fin", {"classement": lignes, "note": note})
 	var resultats: Array = []
 	for ligne in lignes:
+		if tricheurs.has(String(ligne.get("cle", ""))):
+			continue
 		resultats.append({
 			"joueur_id": ligne["joueur_id"],
 			"pseudo": ligne["pseudo"],
@@ -233,11 +245,13 @@ func _afficher_resultats(lignes, note: String) -> void:
 	await get_tree().create_timer(1.2).timeout
 	if not is_inside_tree():
 		return
-	demande_ecran.emit("resultats", {
-		"titre": titre + " — manche terminée",
-		"jeu": jeu,
-		"note": note,
-		"classement": lignes,
+	# ⚠ ON REVIENT AU SALON, il n'y a plus d'écran de résultats. Le classement
+	# voyage avec : c'est le salon qui l'affiche, au-dessus des tables, le
+	# temps qu'on décide de rejouer. Un écran de plus pour six lignes de
+	# tableau, c'était un clic de plus entre deux manches.
+	demande_ecran.emit("salon", {
+		"jeu": jeu, "titre": jeu.to_upper(),
+		"classement": lignes, "note": note,
 	})
 
 func ajouter_score(cle: String, points: int) -> void:

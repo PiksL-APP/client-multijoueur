@@ -950,6 +950,19 @@ const CYCLE := 900.0
 static var nuit_forcee := -1.0
 
 ## De 0 (plein jour) à 1 (pleine nuit), continue.
+## L'heure du fond des MENUS : le couchant, sauf si `--nuit=` en décide
+## autrement. C'est ainsi qu'on règle une capture sans recompiler.
+##
+## ⚠ Elle aussi vivait dans `scenes/menu.gd` : elle est descendue ici avec la
+## ville de vitrine quand le hub a été retiré.
+const CREPUSCULE := 0.50            ## 0 plein jour, 1 nuit noire
+
+static func heure_de_vitrine() -> float:
+	for argument in OS.get_cmdline_args():
+		if String(argument).begins_with("--nuit="):
+			return clampf(float(String(argument).substr(7)), 0.0, 1.0)
+	return CREPUSCULE
+
 static func nuit() -> float:
 	if nuit_forcee >= 0.0:
 		return nuit_forcee
