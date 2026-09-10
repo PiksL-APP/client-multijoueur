@@ -574,6 +574,33 @@ python3 outils/verifier.py        # -> TOTAL 0
 godot --headless -s outils/marche.gd
 ```
 
+## La boutique : où loger
+
+Sur la carte (`TAB`), sous la légende, tant qu'on n'a **pas** de planque :
+
+| appartement | quartier | prix catalogue |
+|---|---|---|
+| Le Taudis | les cités | 0 |
+| L'Appart ouvrier | vieille ville | 12 000 |
+| La Planque | zone industrielle | 24 000 |
+| L'Atelier | le port | 38 000 |
+| Le Pavillon | banlieue pavillonnaire | 55 000 |
+| L'Ancien poste | rues commerçantes | 72 000 |
+| Le Loft | quartier des bureaux | 110 000 |
+| Le Penthouse | centre d'affaires | 250 000 |
+
+C'est la lecture **inverse** de `PAR_QUARTIER`, et c'est celle qui intéresse le
+joueur : il ne se demande pas « qu'est-ce qu'on trouve ici », il se demande « où
+vais-je pour avoir le penthouse ». Sans ce tableau on achetait la première
+planque croisée, sans savoir qu'une autre rue donnait mieux — et les huit noms
+du catalogue ne servaient à rien.
+
+Deux règles : un quartier qui renvoie un appartement déjà pris (le parc donne le
+pavillon, l'eau le taudis) ne fait **pas** une deuxième ligne, on garde le
+premier ; et le tableau **disparaît** dès qu'on a sa planque, parce qu'à ce
+moment-là c'est du bruit sur une carte qu'on ouvre pour se repérer, pas pour
+faire des courses.
+
 ## Ce qui reste à faire
 
 - Le Pavillon : c'est le plan le plus meublé des huit, et son coffre reste à un
@@ -583,8 +610,8 @@ godot --headless -s outils/marche.gd
 - La boutique : aujourd'hui la planque s'achète au prix de `PlanVille`, et
   l'appartement suit le quartier. Une vraie boutique montrerait le catalogue,
   ses prix et ses résumés avant l'achat.
-- Une vraie boutique : aujourd'hui on lit le nom et le résumé de l'appartement
-  sur place, mais on ne les compare pas. Un écran de catalogue (les huit, leurs
-  prix, leurs quartiers) rendrait le choix d'une planque intéressant.
+- Le tableau « où loger » n'a été vérifié qu'en DONNÉES (`Interieurs.logements()`
+  sort les huit lignes attendues) : son dessin sur la carte n'a pas encore été
+  photographié, faute de pouvoir lancer une manche d'ici.
 - Vérifier le tout en partie réelle : le branchement compile et les intérieurs
   sont photographiés à l'angle du jeu, mais aucune manche ne l'a encore joué.

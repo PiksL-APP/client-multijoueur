@@ -804,6 +804,29 @@ const PAR_QUARTIER := {
 static func pour_quartier(quartier: int) -> String:
 	return String(PAR_QUARTIER.get(quartier, "taudis"))
 
+## LE TABLEAU DE LA BOUTIQUE : quel appartement dans quel quartier, du gratuit
+## au hors de prix. C'est la lecture INVERSE de `PAR_QUARTIER`, et c'est celle
+## qui intéresse le joueur : il ne se demande pas « qu'est-ce qu'on trouve
+## ici », il se demande « où vais-je pour avoir le penthouse ». Sans ce
+## tableau, on achetait la première planque croisée sans savoir qu'une autre
+## rue donnait mieux.
+##
+## ⚠ Un quartier peut renvoyer un appartement déjà pris (le parc donne le
+## pavillon, l'eau le taudis) : on garde le PREMIER, dans l'ordre de l'énumé-
+## ration, pour ne nommer qu'un quartier par appartement. Deux lignes pour la
+## même porte n'aideraient personne.
+static func logements() -> Array:
+	var vus := {}
+	var table: Array = []
+	for id in liste():
+		for q in PAR_QUARTIER:
+			if String(PAR_QUARTIER[q]) != String(id) or vus.has(id):
+				continue
+			vus[id] = true
+			table.append({"id": String(id), "nom": String(CATALOGUE[id]["nom"]),
+				"quartier": int(q), "prix": int(CATALOGUE[id]["prix"])})
+	return table
+
 ## L'ordre de la boutique : du gratuit au hors de prix.
 static func liste() -> Array:
 	var ids := CATALOGUE.keys()

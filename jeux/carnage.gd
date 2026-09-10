@@ -638,6 +638,32 @@ func _dessiner_le_plan() -> void:
 		_plan_vue.draw_rect(Rect2(Vector2(x - 4.0, y - 9.0), Vector2(8, 8)), entree[1], true)
 		_plan_vue.draw_string(police, Vector2(x + 9.0, y), String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_DOUCE)
 		x += 12.0 + police.get_string_size(String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 16.0
+	_dessiner_la_boutique(cadre, y + 22.0, police)
+
+## LA BOUTIQUE DES PLANQUES, sous la carte, tant qu'on n'en a pas.
+##
+## L'appartement se déduit du QUARTIER : le joueur ne se demande pas « qu'est-ce
+## qu'on trouve ici », il se demande « où vais-je pour avoir le penthouse ».
+## Sans ce tableau on achetait la première planque croisée, sans savoir qu'une
+## autre rue donnait mieux — et les huit noms du catalogue ne servaient à rien.
+##
+## ⚠ Il DISPARAÎT une fois qu'on a sa planque : à ce moment-là c'est du bruit
+## sur une carte qu'on ouvre pour se repérer, pas pour faire des courses.
+func _dessiner_la_boutique(cadre: Rect2, haut: float, police: Font) -> void:
+	if _planque >= 0:
+		return
+	_plan_vue.draw_string(police, Vector2(cadre.position.x, haut),
+		"OÙ LOGER — le quartier décide de l'appartement", HORIZONTAL_ALIGNMENT_LEFT,
+		-1, 11, Palette.ENCRE_FAIBLE)
+	var table := Interieurs.logements()
+	var colonne := cadre.size.x * 0.5
+	for i in table.size():
+		var f: Dictionary = table[i]
+		var quartier := String(PlanVille.NOMS_QUARTIERS[int(f["quartier"])])
+		_plan_vue.draw_string(police,
+			Vector2(cadre.position.x + float(i % 2) * colonne, haut + 16.0 + float(i / 2) * 14.0),
+			"%s — %s" % [String(f["nom"]), quartier],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_DOUCE)
 
 ## Un IMPACT sur une façade. ⚠ Plus rien ne part du décor depuis la v12 : le
 ## morceau rend seulement la couleur et le point touchés, et on en tire les
