@@ -160,6 +160,11 @@ const SERVICES := {
 	"F": ["piksl/firestation", 0.61, "Caserne de pompiers"],
 	"S": ["piksl/supermarket", 0.30, "Supermarché"],
 	"$": ["piksl/garage_de_peinture", 0.50, "Garage de peinture"],
+	# Les deux bâtiments livrés le 11 septembre. Le ratio est hauteur / plus
+	# petit côté, mesuré sur le maillage : l'église fait 20,3 de haut pour
+	# 14,6 de large, la casse 8,6 pour 12.
+	"E": ["piksl/eglise", 1.39, "Église"],
+	"K": ["piksl/compacteur_voitures", 0.72, "Casse automobile"],
 }
 ## Les deux objets à ramasser : ils ne remplissent pas de rectangle, ils se
 ## posent sur une case comme un arbre.
@@ -713,6 +718,21 @@ static func _site_panneau(carte: CarteVille, dessin: Array, c: Vector2i) -> Vect
 static func _panneau_du_pave(carte: CarteVille, dessin: Array, c: Vector2i) -> bool:
 	var b := Vector2i(floori(float(c.x) / PUB_ECART) * PUB_ECART,
 		floori(float(c.y) / PUB_ECART) * PUB_ECART)
+	return _elu_du_pave(carte, dessin, b) == c
+
+## ⚠ L'ÉLU D'UN PAVÉ SE CALCULE UNE FOIS, PAS UNE FOIS PAR CASE. Chaque case
+## candidate d'un morceau demandait « suis-je l'élue ? », et la réponse
+## balayait les 1 156 cases du pavé à chaque fois : jusqu'à 900 ms par morceau,
+## le tiers de seconde de gel qu'on sentait à chaque bord de morceau. Mémorisé
+## par pavé et par carte, le balayage se fait une fois pour toute la ville. La
+## clé porte la carte : l'éditeur en prépare une nouvelle à chaque retouche, et
+## l'ancienne réponse ne vaut plus.
+static var _elus_pave: Dictionary = {}
+
+static func _elu_du_pave(carte: CarteVille, dessin: Array, b: Vector2i) -> Vector2i:
+	var cle := "%d:%d,%d" % [carte.get_instance_id(), b.x, b.y]
+	if _elus_pave.has(cle):
+		return _elus_pave[cle]
 	var h := posmod(b.x * 73856093 ^ b.y * 19349663, PUB_ECART * PUB_ECART)
 	var mire := b + Vector2i(h % PUB_ECART, (h / PUB_ECART) % PUB_ECART)
 	var elu := Vector2i(-999, -999)
@@ -732,7 +752,10 @@ static func _panneau_du_pave(carte: CarteVille, dessin: Array, c: Vector2i) -> b
 			if d < dmin or (d == dmin and (v.y < elu.y or (v.y == elu.y and v.x < elu.x))):
 				dmin = d
 				elu = v
-	return elu == c
+	if _elus_pave.size() > 4096:
+		_elus_pave.clear()
+	_elus_pave[cle] = elu
+	return elu
 
 static func _poser_panneaux(racine: Node3D, carte: CarteVille, dessin: Array,
 		alea: RandomNumberGenerator, zone: Rect2i = Rect2i()) -> void:
@@ -1616,6 +1639,13 @@ static func _poser_verdure(racine: Node3D, carte: CarteVille, dessin: Array,
 	var plafond := maxi(1, int(float(depots_de(carte, dessin)) * PART_CUVES))
 	for c in _cases_de(carte, zone):
 		_resemer(alea, 7717, c)
+		# ⚠ RIEN NE POUSSE SOUS UNE PIÈCE PLEINE. Les deux cases « de décor »
+		# d'une courbe large gardent leur caractère de sol, mais
+		# `road-curve-pavement` remplit tout son carré de trottoir et de
+		# bitume : un banc ou un buisson posé là traverse la chaussée. Les
+		# pièces AJOURÉES (rond-point, courbe simple) laissent voir le sol,
+		# et là le décor a sa place.
+		if carte.case_couverte(c): continue
 		var car := _car(dessin, c.x, c.y)
 		var y := carte.hauteur(c)
 		# ⚠ LA FALAISE A SES ROCHERS, QUELLE QUE SOIT LA CASE. Une terrasse qui
@@ -1804,6 +1834,20 @@ const VOITURES := ["sedan", "sedan", "sedan", "sedan-sports", "hatchback-sports"
 	"delivery-flat", "taxi", "taxi", "truck", "truck-flat", "police",
 	"garbage-truck", "ambulance", "firetruck", "race"]
 
+## ⚠ LES VÉHICULES PIKS-L SONT LONGS SELON X, LES KENNEY SELON Z. Livrés le
+## 11 septembre — bus, limousine, dépanneuse, fourgon du SWAT, camion de glaces,
+## camion à hot-dogs, taxi express, deux motos — ce sont exactement ceux que le
+## README listait comme « ce que les kits n'ont pas ». Mesurés sur le maillage :
+## la longueur est en X, donc pas de quart de tour, là où une carrosserie Kenney
+## en prend un. La longueur voulue suit la vraie : un bus fait deux berlines et
+## demie, une moto en fait moins d'une demie. Le char reste au garage — c'est
+## un véhicule d'escalade de la recherche, pas une voiture garée.
+const VOITURES_PIKSL := [
+	["taxixpress", 10.0], ["taxixpress", 10.0], ["depanneuse", 14.0],
+	["fourgonswat", 13.5], ["camionglaces", 11.0], ["hotdogtruck", 11.5],
+	["limousine", 17.0], ["bus", 17.0], ["moto", 4.2], ["racemoto", 4.2],
+]
+
 ## ⚠ LE FEU REGARDE VERS −X SANS ROTATION, la tête en porte-à-faux au-dessus
 ## de la voie, le mât à l'origine (mesuré sur le maillage, tranche par tranche
 ## en Y : le mât est un cylindre centré, la tête déborde de 0,07 vers −X et de
@@ -1870,14 +1914,24 @@ static func _poser_mobilier(racine: Node3D, carte: CarteVille, dessin: Array,
 			# pose du côté où la case voisine est LIBRE — et sur un tablier,
 			# les deux côtés sont libres : c'est le chenal. On voyait donc des
 			# chênes debout au milieu de l'eau, sous le tablier.
-			if alea.randf() < 0.30 and _car(dessin, c.x, c.y) != "=":
+			# ⚠ « LIBRE » VOULAIT DIRE « PAS UN BÂTIMENT » — ET UNE RUE N'EST PAS UN
+			# BÂTIMENT. Le long d'une avenue à deux chaussées parallèles, le côté
+			# « libre » était l'autre chaussée : l'arbre d'alignement se plantait
+			# EN PLEINE RUE. Cent cinq arbres sur le bitume, comptés par le banc
+			# `outils/coherence.gd`. Le côté doit être du SOL — pelouse, sable,
+			# esplanade, parking —, pas de la voirie. Et pas d'arbre sur une
+			# rampe : le trottoir y monte, le pied de l'arbre non.
+			if alea.randf() < 0.30 and _car(dessin, c.x, c.y) != "=" \
+					and nom == "road-straight":
 				var libres: Array = []
-				if _lettre(_car(dessin, c.x + vers.x, c.y + vers.y)) == "": libres.append(d)
-				if _lettre(_car(dessin, c.x - vers.x, c.y - vers.y)) == "": libres.append(-d)
+				if ",;^'oP".contains(_car(dessin, c.x + vers.x, c.y + vers.y)): libres.append(d)
+				if ",;^'oP".contains(_car(dessin, c.x - vers.x, c.y - vers.y)): libres.append(-d)
 				if not libres.is_empty():
+					# À 0,44 case du centre, le pied est sur le trottoir et la
+					# couronne, plus petite qu'avant, ne déborde pas la chaussée.
 					_objet(racine, ARBRES[alea.randi() % ARBRES.size()],
-						centre + libres[alea.randi() % libres.size()] * 0.82,
-						alea.randf_range(8.0, 12.0), alea.randf() * TAU)
+						centre + libres[alea.randi() % libres.size()] * (0.44 / BORD),
+						alea.randf_range(6.5, 9.5), alea.randf() * TAU)
 			# LE POTEAU ÉLECTRIQUE EST UN SIGNE DE ZONE, pas une décoration : il
 			# ne sort que le long de l'industrie et des dépôts. Une ligne
 			# électrique au pied d'une tour de bureaux ne se voit nulle part.
@@ -1980,13 +2034,23 @@ static func _industriel(dessin: Array, c: Vector2i, vers: Vector2i) -> bool:
 	return false
 
 static func _voiture(racine: Node3D, ou: Vector3, selon_x: bool, alea: RandomNumberGenerator) -> void:
-	var chemin := "res://modeles/kenney/voitures/%s.glb" % VOITURES[alea.randi() % VOITURES.size()]
-	if not ResourceLoader.exists(chemin): return
-	if inventaire: _noter(chemin)
+	var chemin: String
 	var n := MeshInstance3D.new()
-	# ⚠ Les carrosseries du Car Kit regardent +Z là où le reste du kit regarde
-	# −Z : un quart de tour dans l'AUTRE sens, sinon la ville roule à reculons.
-	n.mesh = FormesCarnage.maillage_kenney(chemin, 10.0, Vector3.AXIS_Z, PI * 0.5)
+	# Une voiture garée sur quatre vient des modèles Piks-l.
+	if alea.randf() < 0.25:
+		var v: Array = VOITURES_PIKSL[alea.randi() % VOITURES_PIKSL.size()]
+		chemin = "res://modeles/piksl/%s.glb" % String(v[0])
+		if not ResourceLoader.exists(chemin): return
+		if inventaire: _noter(chemin)
+		n.mesh = FormesCarnage.maillage_kenney(chemin, float(v[1]), Vector3.AXIS_X, 0.0)
+	else:
+		chemin = "res://modeles/kenney/voitures/%s.glb" % VOITURES[alea.randi() % VOITURES.size()]
+		if not ResourceLoader.exists(chemin): return
+		if inventaire: _noter(chemin)
+		# ⚠ Les carrosseries du Car Kit regardent +Z là où le reste du kit
+		# regarde −Z : un quart de tour dans l'AUTRE sens, sinon la ville
+		# roule à reculons.
+		n.mesh = FormesCarnage.maillage_kenney(chemin, 10.0, Vector3.AXIS_Z, PI * 0.5)
 	n.material_override = FormesCarnage.matiere_kenney(chemin)
 	var voie := CASE * 0.16 * (1.0 if alea.randf() < 0.5 else -1.0)
 	var sens := 0.0 if voie > 0.0 else PI
@@ -2007,6 +2071,9 @@ static func _objet(parent: Node3D, sous_chemin: String, ou: Vector3, hauteur: fl
 	n.mesh = FormesCarnage.maillage_kenney(chemin, hauteur, Vector3.AXIS_Y, 0.0)
 	n.material_override = _matiere(chemin, teinte)
 	n.transform = Transform3D(Basis(Vector3.UP, tourne), ou)
+	# Le banc de cohérence (`outils/coherence.gd`) relit ce nom pour dire QUEL
+	# modèle est posé sur une chaussée. Une méta par objet ne coûte rien.
+	if inventaire: n.set_meta("modele", sous_chemin)
 	parent.add_child(n)
 
 # ------------------------------------------------------------ les bateaux

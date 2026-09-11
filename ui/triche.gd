@@ -14,8 +14,8 @@ extends Control
 ## Le dessin suit la charte du reste : tout se peint dans `_draw`, comme le
 ## tableau de bord — une quinzaine de rectangles, pas un arbre de contrôles.
 
-const LARGEUR := 460.0
-const LIGNE := 26.0
+const LARGEUR := 520.0
+const LIGNE := 24.0
 
 ## LE CATALOGUE. Il vit ICI et pas dans l'écran de jeu : le menu le dessine, le
 ## banc d'image le photographie, et Carnage en fait une copie de travail
@@ -46,6 +46,7 @@ const CODES := [
 	{"cle": "express", "nom": "L'EXPRESS — le train s'arrête ici", "unique": true},
 	{"cle": "immobilier", "nom": "L'IMMOBILIER — la planque et ses trois améliorations", "unique": true},
 	{"cle": "fantome", "nom": "FANTÔME — la police vous oublie", "unique": false},
+	{"cle": "meteo", "nom": "MÉTÉO — le temps suivant, à chaque allumage", "unique": false},
 ]
 
 ## Une copie de travail : le menu y coche ce qui est allumé, sans toucher au
@@ -64,48 +65,32 @@ var temps := 0.0
 
 func _draw() -> void:
 	var taille := get_viewport_rect().size
-	var hauteur := 96.0 + codes.size() * LIGNE
-	var rect := Rect2(Vector2((taille.x - LARGEUR) * 0.5, (taille.y - hauteur) * 0.5),
-		Vector2(LARGEUR, hauteur))
+	var hauteur := 116.0 + codes.size() * LIGNE
 	# Un voile sur toute la ville : le menu est une PAUSE de l'attention, même
 	# si la manche continue de tourner derrière.
-	draw_rect(Rect2(Vector2.ZERO, taille), Color(0, 0, 0, 0.55), true)
-	UI.cartouche(self, rect, Palette.CRITIQUE)
-	var x := rect.position.x + UI.ACCENT + 16.0
-	var y := rect.position.y + 30.0
-	draw_string(UI.TITRE_POLICE, Vector2(x, y), "TRICHE", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Palette.CRITIQUE)
-	var mot := "la manche ne comptera pas"
-	var lm := UI.TEXTE_POLICE.get_string_size(mot, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	draw_string(UI.TEXTE_POLICE, Vector2(rect.end.x - 16.0 - lm, y), mot,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Palette.AVERTISSEMENT)
-	y += 22.0
+	var rect := Charte.menu(self, taille, LARGEUR, hauteur, "Triche", "la manche ne comptera pas", Charte.ROSE)
+	var x := rect.position.x + Charte.MARGE_MENU
+	var y := Charte.haut_contenu(rect) + 8.0
 
 	for i in codes.size():
 		var code: Dictionary = codes[i]
 		var vise := i == choix
-		var couleur: Color = Palette.ENCRE_DOUCE
-		if bool(code.get("actif", false)):
-			couleur = Palette.BON
+		var actif := bool(code.get("actif", false))
+		var couleur: Color = Charte.VERT if actif else Charte.ENCRE_DOUCE
 		if vise:
-			# La ligne visée est surlignée ET fléchée : à la manette comme au
-			# clavier, une simple couleur se perd sur un fond de ville.
-			draw_rect(Rect2(Vector2(rect.position.x + UI.ACCENT + 6.0, y - 12.0),
-				Vector2(rect.size.x - UI.ACCENT - 22.0, LIGNE - 4.0)), Color(couleur, 0.16), true)
-			draw_string(UI.TEXTE_POLICE, Vector2(x - 10.0, y), ">", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, couleur)
-		draw_string(UI.TEXTE_POLICE, Vector2(x + 6.0, y), String(code.get("nom", "")),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, couleur)
+			# La ligne visée est surlignée ET barrée de rose : à la manette
+			# comme au clavier, une simple couleur se perd sur un fond de ville.
+			Charte.ligne_visee(self, Rect2(Vector2(rect.position.x + 10.0, y - 16.0),
+				Vector2(rect.size.x - 20.0, LIGNE - 3.0)))
+		Charte.texte_dessine(self, Vector2(x, y), String(code.get("nom", "")), 14,
+			Color.WHITE if vise else couleur, 0)
 		var etat := ""
 		if bool(code.get("unique", false)):
-			etat = "fait" if bool(code.get("actif", false)) else ""
+			etat = "fait" if actif else ""
 		else:
-			etat = "ON" if bool(code.get("actif", false)) else "off"
-		var le := UI.TEXTE_POLICE.get_string_size(etat, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		draw_string(UI.TEXTE_POLICE, Vector2(rect.end.x - 16.0 - le, y), etat,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, couleur)
+			etat = "on" if actif else "off"
+		var le := Charte.largeur_capitales(etat, 11, 0.16)
+		Charte.capitales_dessinees(self, Vector2(rect.end.x - Charte.MARGE_MENU - le, y), etat, 11, couleur, 0.16)
 		y += LIGNE
 
-	# La ligne d'aide, en bas du cartouche.
-	var aide := "↑ ↓ choisir · ENTRÉE activer · ÉCHAP fermer"
-	var la := UI.TEXTE_POLICE.get_string_size(aide, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	draw_string(UI.TEXTE_POLICE, Vector2(rect.position.x + (rect.size.x - la) * 0.5, rect.end.y - 14.0),
-		aide, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Palette.ENCRE_FAIBLE)
+	Charte.aide_menu(self, rect, "↑ ↓ choisir · entrée activer · échap fermer")

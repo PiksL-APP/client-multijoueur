@@ -110,6 +110,34 @@ l'envers une fois sur trois et qui ne se voit jamais en jouant.
   (nos coups de feu de PNJ ne font pas monter la recherche de toute façon) ;
 - le guide parle de **véhicules blindés** au cran 6 : nous n'avons que le
   camion olive et le char ;
-- **baisser** la recherche reste le garage de peinture, l'attente, ou les
-  plaques de l'atelier (qui la gèlent). Changer de véhicule ne la baisse pas
-  encore, alors que le guide le prévoit (§5.2).
+- **baisser** la recherche : le garage de peinture (remise à zéro), l'attente,
+  les plaques de l'atelier (qui la gèlent) — et changer de voiture, qui sème
+  d'un cran (voir ci-dessous).
+
+## Le gyrophare tourne
+
+Les deux cubes du toit d'une patrouille étaient fixes et ne se voyaient pas de
+soixante unités de haut. `FormesCarnage.clignoter_gyrophare` alterne bleu et
+rouge quatre fois par seconde, **feu du toit et lueur au sol ensemble** — deux
+flaques additives (`MatieresCarnage.FLAQUE`), une par couleur, sous le nœud
+« Gyrophare ». Une patrouille garée garde ses feux fixes et ses lueurs
+éteintes : elle n'est pas en poursuite. La voiture de police qu'on vole tourne
+aussi — c'est ce qui la rend reconnaissable, et voyante. Sur sol mouillé, la
+lueur rend son trait comme les lampadaires (voir `CONCEPTION-METEO.md`).
+
+## Changer de voiture sème la police d'un cran (§5.2)
+
+`VilleVivante.semer(cle)`, appelé par `accorder_vehicule` : on retombe juste
+**sous** le palier courant — à trois étoiles on en garde deux, tout au bord, et
+la prochaine faute nous y renvoie. Un cran, pas deux : le garage reste la seule
+remise à zéro, et voler une voiture pour perdre une étoile doit rester un pari
+(on descend, on court, on se fait tirer dessus) et pas une méthode.
+
+⚠ **Pas pour une voiture de police.** Voler une patrouille en pleine poursuite
+est un crime de plus (`crime(cle, "pieton")`), et un crime qui ferait baisser la
+recherche, c'est le jeu qui se contredit. Le client est prévenu par l'événement
+`seme` (« ils cherchent l'autre voiture »).
+
+Au banc : `outils/recherche.gd` §6 — trois étoiles → deux, le crime suivant → trois,
+une étoile → zéro, rien sans étoile, et une patrouille volée fait MONTER la
+chaleur.

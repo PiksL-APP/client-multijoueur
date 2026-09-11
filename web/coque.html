@@ -167,9 +167,9 @@ $GODOT_HEAD_INCLUDE
         <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(12px,1.15vw,17px); letter-spacing:.2em; text-transform:uppercase; color:rgba(255,255,255,.6)">Votre personnage</div>
         <div style="margin-top:4px; font-family:'Archivo Black',sans-serif; font-size:clamp(17px,1.8vw,28px); text-transform:uppercase; color:#ff9d2e; text-shadow:0 0 20px rgba(255,157,46,.5)">{{ charName }}</div>
         <div style="margin-top:4px; font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(11px,1.05vw,16px); letter-spacing:.1em; color:rgba(255,255,255,.5)">{{ charDesc }}</div>
-        <div style="margin-top:12px; display:grid; grid-template-columns:repeat(auto-fill, minmax(64px,1fr)); gap:10px">
+        <div style="margin-top:12px; display:grid; grid-template-columns:repeat(auto-fill, minmax(56px,1fr)); gap:10px; max-height:clamp(150px,30vh,320px); overflow-y:auto; padding:4px; scrollbar-width:thin">
           <sc-for list="{{ chars }}" as="c" hint-placeholder-count="8">
-            <button onClick="{{ c.onClick }}" title="{{ c.name }}" style="{{ c.style }}">{{ c.glyph }}</button>
+            <button onClick="{{ c.onClick }}" title="{{ c.name }}" style="{{ c.style }}"><img src="{{ c.image }}" alt="" style="width:80%; height:80%; object-fit:contain; pointer-events:none"></button>
           </sc-for>
         </div>
       </div>
@@ -184,7 +184,7 @@ $GODOT_HEAD_INCLUDE
       </div>
 
       <div style="display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:14px; min-width:0">
-        <div style="{{ bigHeadStyle }}">{{ charGlyph }}</div>
+        <div style="{{ bigHeadStyle }}"><img src="{{ charImage }}" alt="" style="width:84%; height:84%; object-fit:contain"></div>
         <div style="font-family:'Archivo Black',sans-serif; font-size:clamp(15px,1.5vw,24px); text-transform:uppercase; color:#fff; text-align:center; text-shadow:0 4px 18px rgba(0,0,0,.9)">{{ pseudoLabel }}</div>
         <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(11px,1.05vw,15px); letter-spacing:.28em; text-transform:uppercase; color:#22e3f2; text-align:center">{{ charName }}</div>
       </div>
@@ -449,15 +449,64 @@ class Component extends DCLogic {
   ];
   defaults = { master: 100, music: 100, sfx: 100, effects: true, shadows: true, fullscreen: false, res: 100 };
 
+  // Les 55 logos de carton (outils/logos.py → outils/cartons.py) : le nom, l'image, la phrase.
+  // L'indice est celui que le moteur reçoit dans PK.entrer({personnage}) — même ordre que modeles/cartons/cartons.json.
   characters = [
-    ["Le Roi", "♛", "Couronne au marqueur. Il dirige le crew."],
-    ["Le Coeur", "♥", "Charme d'abord, braquage ensuite."],
-    ["Le Fantôme", "✕", "Personne ne l'a jamais identifié."],
-    ["Le Comptable", "$", "Blanchit tout, ne salit rien."],
-    ["Le Souriant", "‿", "Toujours de bonne humeur, même armé."],
-    ["Le Vétéran", "≡", "Vice City, première génération."],
-    ["La Recrue", "?", "Vient d'arriver. Ça se voit."],
-    ["Le Boss", "▲", "On ne le voit jamais deux fois."]
+    ["Le Roi", "kit/logos/00_couronne.png", "Couronne au marqueur. Il dirige le crew."],
+    ["Le Cœur", "kit/logos/01_coeur.png", "Charme d'abord, braquage ensuite."],
+    ["Le Fantôme", "kit/logos/02_croix.png", "Personne ne l'a jamais identifié."],
+    ["Le Comptable", "kit/logos/03_dollar.png", "Blanchit tout, ne salit rien."],
+    ["Le Souriant", "kit/logos/04_sourire.png", "Toujours de bonne humeur, même armé."],
+    ["Le Vétéran", "kit/logos/05_trois_traits.png", "Vice City, première génération."],
+    ["La Recrue", "kit/logos/06_question.png", "Vient d'arriver. Ça se voit."],
+    ["Le Boss", "kit/logos/07_triangle.png", "On ne le voit jamais deux fois."],
+    ["La Star", "kit/logos/08_etoile.png", "Se prend pour une affiche. En est une."],
+    ["Le Voltage", "kit/logos/09_eclair.png", "Ne s'arrête jamais au rouge."],
+    ["Le Diamant", "kit/logos/10_losange.png", "Tout ce qui brille lui appartient."],
+    ["Le Vertige", "kit/logos/11_spirale.png", "Tourne en rond, mais vite."],
+    ["Le Louche", "kit/logos/12_louche.png", "Un œil sur toi, l'autre sur la sortie."],
+    ["Le Moustachu", "kit/logos/13_moustache.png", "Elle a son propre casier."],
+    ["Le Cool", "kit/logos/14_lunettes.png", "Nuit et jour. Surtout la nuit."],
+    ["Le Rieur", "kit/logos/15_lol.png", "Rit avant, pendant, après."],
+    ["Le Refus", "kit/logos/16_nope.png", "Sa réponse à tout."],
+    ["L'Approbateur", "kit/logos/17_pouce.png", "Valide tout, y compris les mauvaises idées."],
+    ["Le Livreur", "kit/logos/18_pizza.png", "Trente minutes ou c'est offert."],
+    ["La Banane", "kit/logos/19_banane.png", "Glisse toujours entre les doigts."],
+    ["Le Noctambule", "kit/logos/20_cocktail.png", "Sa tournée, ses règles."],
+    ["Le Veilleur", "kit/logos/21_ouvert.png", "Ouvert 24 h sur 24. Fermé pour vous."],
+    ["Le Recherché", "kit/logos/22_wanted.png", "Sa tête vaut plus que la vôtre."],
+    ["Le Guetteur", "kit/logos/23_oeil.png", "Voit tout, ne dit rien, vend tout."],
+    ["L'Insolent", "kit/logos/24_langue.png", "Tire la langue aux flics. Depuis la voiture."],
+    ["Le Dormeur", "kit/logos/25_dormeur.png", "Réveillé pour les braquages seulement."],
+    ["Les Cobras", "kit/logos/26_serpent.png", "Ils mordent, ils ne préviennent pas."],
+    ["Les Griffes", "kit/logos/27_griffes.png", "Trois traits, pas de pardon."],
+    ["Les Poings", "kit/logos/28_poing.png", "Ils négocient à la main."],
+    ["Les Docks", "kit/logos/29_ancre.png", "Tout ce qui arrive par la mer est à eux."],
+    ["Les Crânes", "kit/logos/30_crane.png", "Ils ne rient que des autres."],
+    ["Les Brûlés", "kit/logos/31_flamme.png", "Ils allument, les pompiers arrivent."],
+    ["Les Marées", "kit/logos/32_vague.png", "Ils passent, ils reviennent, ils emportent."],
+    ["Les Solaires", "kit/logos/33_soleil.png", "Jamais avant midi."],
+    ["Les Nocturnes", "kit/logos/34_lune.png", "La ville leur appartient de minuit à six."],
+    ["Le Treize", "kit/logos/35_treize.png", "Ni chanceux, ni malchanceux : dangereux."],
+    ["Les Tireurs", "kit/logos/36_cible.png", "Ils ne ratent que ce qu'ils veulent."],
+    ["Les Détonateurs", "kit/logos/37_bombe.png", "Comptez jusqu'à trois. Ou pas."],
+    ["Les Tropicaux", "kit/logos/38_palmier.png", "Pikstown est leur plage privée."],
+    ["Le Fan", "kit/logos/39_pta.png", "Il a la casquette, le tee-shirt, le carton."],
+    ["Le Local", "kit/logos/40_piks.png", "Né ici, restera ici."],
+    ["Le Grimpeur", "kit/logos/41_fleche.png", "Toujours plus haut. Surtout en voiture."],
+    ["L'Alerte", "kit/logos/42_exclamation.png", "Il a toujours quelque chose à crier."],
+    ["L'Éconduit", "kit/logos/43_coeur_brise.png", "Une histoire par quartier."],
+    ["Le Pilote", "kit/logos/44_damier.png", "Drapeau à damier, ligne d'arrivée, garde à vue."],
+    ["Le Détenu", "kit/logos/45_rayures.png", "Sorti hier. Rentre demain."],
+    ["Le Naufragé", "kit/logos/46_sos.png", "Appelle à l'aide. Personne ne vient."],
+    ["Le Privilégié", "kit/logos/47_vip.png", "Entre partout, ne paie jamais."],
+    ["Le Barré", "kit/logos/48_interdit.png", "Ce qu'il voulait faire est interdit. Il le fait."],
+    ["Le Flambeur", "kit/logos/49_billets.png", "Tout ce qu'il gagne part le soir même."],
+    ["Le Rétro", "kit/logos/50_cassette.png", "Il a encore les cassettes de la radio."],
+    ["Le Pacifiste", "kit/logos/51_paix.png", "Ne tire jamais le premier. Rarement le second."],
+    ["Le Défunt", "kit/logos/52_mort.png", "Officiellement. Pas vraiment."],
+    ["Le Shérif", "kit/logos/53_sherif.png", "Autoproclamé. Personne n'a contesté."],
+    ["Le Sans-Loi", "kit/logos/54_anarchie.png", "Il a lu la loi. Une fois. De travers."]
   ];
 
   activate = (i) => {
@@ -580,7 +629,7 @@ class Component extends DCLogic {
       pseudoLabel: this.state.pseudo.trim() || "Anonyme",
       onPseudo: (e) => this.setState({ pseudo: e.target.value }),
       charName: this.characters[this.state.char][0],
-      charGlyph: this.characters[this.state.char][1],
+      charImage: this.characters[this.state.char][1],
       charDesc: this.characters[this.state.char][2],
       bigHeadStyle: {
         display: "flex", alignItems: "center", justifyContent: "center",
@@ -606,10 +655,10 @@ class Component extends DCLogic {
       table: this.state.table,
       nextTable: () => this.setState(s => ({ table: (s.table % 4) + 1 })),
       closeStart: () => this.setState({ start: false, session: false }),
-      chars: this.characters.map(([name, glyph], i) => {
+      chars: this.characters.map(([name, image], i) => {
         const on = i === this.state.char;
         return {
-          name, glyph,
+          name, image,
           onClick: () => this.setState({ char: i }),
           style: {
             aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center",

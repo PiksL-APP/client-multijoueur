@@ -45,14 +45,13 @@ func _draw() -> void:
 		# celui qu'on vise. Dehors, il est toujours sur le fond de la ville.
 		var ou := centre + Vector2.RIGHT.rotated(milieu) * (rayon + largeur * 0.62)
 		var nom := String(station.get("nom", ""))
-		var taille := UI.TEXTE_POLICE.get_string_size(nom, HORIZONTAL_ALIGNMENT_LEFT, -1, 11)
-		var coin := ou - taille * Vector2(0.5, -0.25)
+		var taille := Vector2(Charte.largeur_capitales(nom, 12, 0.14), 12.0)
+		var coin := ou - taille * Vector2(0.5, -0.35)
 		# Un cartouche derrière le nom : la ville est claire par endroits, et
 		# un texte blanc sur un mur beige ne se lit pas.
-		draw_rect(Rect2(coin - Vector2(5.0, 11.0), taille + Vector2(10.0, 5.0)),
-			Color(0, 0, 0, 0.55), true)
-		draw_string(UI.TEXTE_POLICE, coin, nom, HORIZONTAL_ALIGNMENT_LEFT, -1, 11,
-			Palette.ENCRE if vise else Palette.ENCRE_DOUCE)
+		draw_rect(Rect2(coin - Vector2(7.0, 13.0), taille + Vector2(14.0, 7.0)),
+			Color(Charte.NUIT, 0.7), true)
+		Charte.capitales_dessinees(self, coin, nom, 12, Color.WHITE if vise else Charte.ENCRE_DOUCE, 0.14)
 		# Une pastille sur la station qui JOUE : sans elle, on ne sait pas d'où
 		# l'on part, et on relâche sur une autre par erreur.
 		if i == actuelle:
@@ -60,6 +59,6 @@ func _draw() -> void:
 				4.0, couleur)
 
 	var vise: Dictionary = stations[posmod(choix, stations.size())]
-	UI.inscription(self, centre - Vector2(0, 8), String(vise.get("nom", "")), 13,
-		vise.get("couleur", Palette.ENCRE))
-	UI.inscription(self, centre + Vector2(0, 14), "relâchez R", 8, Palette.ENCRE_FAIBLE)
+	Charte.inscription(self, centre - Vector2(0, 8), String(vise.get("nom", "")), 15,
+		vise.get("couleur", Color.WHITE), 0.24)
+	Charte.inscription(self, centre + Vector2(0, 14), "relâchez R", 10, Charte.ENCRE_FAIBLE, 0.20)

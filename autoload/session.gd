@@ -19,6 +19,9 @@ var pseudo: String = ""
 ## est simplement ignorée, ce qui est le comportement voulu : un joueur déjà
 ## installé ne doit rien perdre parce qu'on a retiré un jeu.
 var personnage: String = ""
+## Le logo sur le carton qu'on porte sur la tête ; -1 = celui que
+## l'identifiant désigne.
+var carton: int = -1
 
 func _ready() -> void:
 	var fichier := ConfigFile.new()
@@ -26,6 +29,7 @@ func _ready() -> void:
 		id = String(fichier.get_value("joueur", "id", ""))
 		pseudo = String(fichier.get_value("joueur", "pseudo", ""))
 		personnage = String(fichier.get_value("joueur", "personnage", ""))
+		carton = int(fichier.get_value("joueur", "carton", -1))
 	if id.length() < 8:
 		id = _tirer_identifiant()
 		_ecrire()
@@ -42,6 +46,15 @@ func definir_pseudo(nouveau: String) -> void:
 func definir_personnage(cle: String) -> void:
 	personnage = cle
 	_ecrire()
+
+func definir_carton(indice: int) -> void:
+	carton = indice
+	_ecrire()
+
+## Le carton affiché : celui qu'on a choisi, sinon celui que l'identifiant
+## désigne — le même calcul chez tous les clients.
+func carton_affiche() -> int:
+	return carton if carton >= 0 else Personnages.carton_par_defaut(id)
 
 ## Le personnage affiché : celui qu'on a choisi, sinon celui que l'identifiant
 ## désigne — le même calcul chez tous les clients, donc chacun voit l'autre
@@ -77,4 +90,5 @@ func _ecrire() -> void:
 	fichier.set_value("joueur", "id", id)
 	fichier.set_value("joueur", "pseudo", pseudo)
 	fichier.set_value("joueur", "personnage", personnage)
+	fichier.set_value("joueur", "carton", carton)
 	fichier.save(FICHIER)

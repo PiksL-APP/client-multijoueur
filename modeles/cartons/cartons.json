@@ -1,0 +1,387 @@
+[
+ {
+  "indice": 0,
+  "cle": "couronne",
+  "nom": "Le Roi",
+  "phrase": "Couronne au marqueur. Il dirige le crew.",
+  "groupe": "tag"
+ },
+ {
+  "indice": 1,
+  "cle": "coeur",
+  "nom": "Le Cœur",
+  "phrase": "Charme d'abord, braquage ensuite.",
+  "groupe": "tag"
+ },
+ {
+  "indice": 2,
+  "cle": "croix",
+  "nom": "Le Fantôme",
+  "phrase": "Personne ne l'a jamais identifié.",
+  "groupe": "tag"
+ },
+ {
+  "indice": 3,
+  "cle": "dollar",
+  "nom": "Le Comptable",
+  "phrase": "Blanchit tout, ne salit rien.",
+  "groupe": "tag"
+ },
+ {
+  "indice": 4,
+  "cle": "sourire",
+  "nom": "Le Souriant",
+  "phrase": "Toujours de bonne humeur, même armé.",
+  "groupe": "tag"
+ },
+ {
+  "indice": 5,
+  "cle": "trois_traits",
+  "nom": "Le Vétéran",
+  "phrase": "Vice City, première génération.",
+  "groupe": "tag"
+ },
+ {
+  "indice": 6,
+  "cle": "question",
+  "nom": "La Recrue",
+  "phrase": "Vient d'arriver. Ça se voit.",
+  "groupe": "tag"
+ },
+ {
+  "indice": 7,
+  "cle": "triangle",
+  "nom": "Le Boss",
+  "phrase": "On ne le voit jamais deux fois.",
+  "groupe": "tag"
+ },
+ {
+  "indice": 8,
+  "cle": "etoile",
+  "nom": "La Star",
+  "phrase": "Se prend pour une affiche. En est une.",
+  "groupe": "tag"
+ },
+ {
+  "indice": 9,
+  "cle": "eclair",
+  "nom": "Le Voltage",
+  "phrase": "Ne s'arrête jamais au rouge.",
+  "groupe": "tag"
+ },
+ {
+  "indice": 10,
+  "cle": "losange",
+  "nom": "Le Diamant",
+  "phrase": "Tout ce qui brille lui appartient.",
+  "groupe": "tag"
+ },
+ {
+  "indice": 11,
+  "cle": "spirale",
+  "nom": "Le Vertige",
+  "phrase": "Tourne en rond, mais vite.",
+  "groupe": "tag"
+ },
+ {
+  "indice": 12,
+  "cle": "louche",
+  "nom": "Le Louche",
+  "phrase": "Un œil sur toi, l'autre sur la sortie.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 13,
+  "cle": "moustache",
+  "nom": "Le Moustachu",
+  "phrase": "Elle a son propre casier.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 14,
+  "cle": "lunettes",
+  "nom": "Le Cool",
+  "phrase": "Nuit et jour. Surtout la nuit.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 15,
+  "cle": "lol",
+  "nom": "Le Rieur",
+  "phrase": "Rit avant, pendant, après.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 16,
+  "cle": "nope",
+  "nom": "Le Refus",
+  "phrase": "Sa réponse à tout.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 17,
+  "cle": "pouce",
+  "nom": "L'Approbateur",
+  "phrase": "Valide tout, y compris les mauvaises idées.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 18,
+  "cle": "pizza",
+  "nom": "Le Livreur",
+  "phrase": "Trente minutes ou c'est offert.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 19,
+  "cle": "banane",
+  "nom": "La Banane",
+  "phrase": "Glisse toujours entre les doigts.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 20,
+  "cle": "cocktail",
+  "nom": "Le Noctambule",
+  "phrase": "Sa tournée, ses règles.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 21,
+  "cle": "ouvert",
+  "nom": "Le Veilleur",
+  "phrase": "Ouvert 24 h sur 24. Fermé pour vous.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 22,
+  "cle": "wanted",
+  "nom": "Le Recherché",
+  "phrase": "Sa tête vaut plus que la vôtre.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 23,
+  "cle": "oeil",
+  "nom": "Le Guetteur",
+  "phrase": "Voit tout, ne dit rien, vend tout.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 24,
+  "cle": "langue",
+  "nom": "L'Insolent",
+  "phrase": "Tire la langue aux flics. Depuis la voiture.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 25,
+  "cle": "dormeur",
+  "nom": "Le Dormeur",
+  "phrase": "Réveillé pour les braquages seulement.",
+  "groupe": "humour"
+ },
+ {
+  "indice": 26,
+  "cle": "serpent",
+  "nom": "Les Cobras",
+  "phrase": "Ils mordent, ils ne préviennent pas.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 27,
+  "cle": "griffes",
+  "nom": "Les Griffes",
+  "phrase": "Trois traits, pas de pardon.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 28,
+  "cle": "poing",
+  "nom": "Les Poings",
+  "phrase": "Ils négocient à la main.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 29,
+  "cle": "ancre",
+  "nom": "Les Docks",
+  "phrase": "Tout ce qui arrive par la mer est à eux.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 30,
+  "cle": "crane",
+  "nom": "Les Crânes",
+  "phrase": "Ils ne rient que des autres.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 31,
+  "cle": "flamme",
+  "nom": "Les Brûlés",
+  "phrase": "Ils allument, les pompiers arrivent.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 32,
+  "cle": "vague",
+  "nom": "Les Marées",
+  "phrase": "Ils passent, ils reviennent, ils emportent.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 33,
+  "cle": "soleil",
+  "nom": "Les Solaires",
+  "phrase": "Jamais avant midi.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 34,
+  "cle": "lune",
+  "nom": "Les Nocturnes",
+  "phrase": "La ville leur appartient de minuit à six.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 35,
+  "cle": "treize",
+  "nom": "Le Treize",
+  "phrase": "Ni chanceux, ni malchanceux : dangereux.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 36,
+  "cle": "cible",
+  "nom": "Les Tireurs",
+  "phrase": "Ils ne ratent que ce qu'ils veulent.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 37,
+  "cle": "bombe",
+  "nom": "Les Détonateurs",
+  "phrase": "Comptez jusqu'à trois. Ou pas.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 38,
+  "cle": "palmier",
+  "nom": "Les Tropicaux",
+  "phrase": "Pikstown est leur plage privée.",
+  "groupe": "gang"
+ },
+ {
+  "indice": 39,
+  "cle": "pta",
+  "nom": "Le Fan",
+  "phrase": "Il a la casquette, le tee-shirt, le carton.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 40,
+  "cle": "piks",
+  "nom": "Le Local",
+  "phrase": "Né ici, restera ici.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 41,
+  "cle": "fleche",
+  "nom": "Le Grimpeur",
+  "phrase": "Toujours plus haut. Surtout en voiture.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 42,
+  "cle": "exclamation",
+  "nom": "L'Alerte",
+  "phrase": "Il a toujours quelque chose à crier.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 43,
+  "cle": "coeur_brise",
+  "nom": "L'Éconduit",
+  "phrase": "Une histoire par quartier.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 44,
+  "cle": "damier",
+  "nom": "Le Pilote",
+  "phrase": "Drapeau à damier, ligne d'arrivée, garde à vue.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 45,
+  "cle": "rayures",
+  "nom": "Le Détenu",
+  "phrase": "Sorti hier. Rentre demain.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 46,
+  "cle": "sos",
+  "nom": "Le Naufragé",
+  "phrase": "Appelle à l'aide. Personne ne vient.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 47,
+  "cle": "vip",
+  "nom": "Le Privilégié",
+  "phrase": "Entre partout, ne paie jamais.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 48,
+  "cle": "interdit",
+  "nom": "Le Barré",
+  "phrase": "Ce qu'il voulait faire est interdit. Il le fait.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 49,
+  "cle": "billets",
+  "nom": "Le Flambeur",
+  "phrase": "Tout ce qu'il gagne part le soir même.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 50,
+  "cle": "cassette",
+  "nom": "Le Rétro",
+  "phrase": "Il a encore les cassettes de la radio.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 51,
+  "cle": "paix",
+  "nom": "Le Pacifiste",
+  "phrase": "Ne tire jamais le premier. Rarement le second.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 52,
+  "cle": "mort",
+  "nom": "Le Défunt",
+  "phrase": "Officiellement. Pas vraiment.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 53,
+  "cle": "sherif",
+  "nom": "Le Shérif",
+  "phrase": "Autoproclamé. Personne n'a contesté.",
+  "groupe": "divers"
+ },
+ {
+  "indice": 54,
+  "cle": "anarchie",
+  "nom": "Le Sans-Loi",
+  "phrase": "Il a lu la loi. Une fois. De travers.",
+  "groupe": "divers"
+ }
+]

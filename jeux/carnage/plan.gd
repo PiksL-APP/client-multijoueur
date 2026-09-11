@@ -238,6 +238,24 @@ func _init(code_de_manche: String) -> void:
 		_phases[i] = _bruit(i, 0, 5) * TAU
 	_tracer_les_voies_libres()
 
+## ⚠ LES DIMENSIONS SONT DES FONCTIONS, PAS DES CONSTANTES. `PlanDessine`
+## (la ville dessinée) n'a pas la même étendue que la ville procédurale, et une
+## constante ne se redéfinit pas dans une classe fille. Tout consommateur qui
+## veut la taille de la ville passe par ici.
+func colonnes() -> int:
+	return COLONNES
+
+func lignes() -> int:
+	return LIGNES
+
+func nombre_de_pates() -> int:
+	return pates_x() * pates_y()
+
+## L'altitude du sol en un point, en unités 3D. La ville procédurale est
+## plate ; la ville dessinée a dix paliers et redéfinit ceci.
+func hauteur_en(_point: Vector2) -> float:
+	return 0.0
+
 func etendue() -> Vector2:
 	return Vector2(COLONNES, LIGNES) * PAS
 

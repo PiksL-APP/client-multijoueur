@@ -271,3 +271,173 @@ static func rafraichir_etat(boite: HBoxContainer) -> void:
 	pastille.color = teinte
 	libelle.text = Reseau.libelle_etat().to_upper()
 	libelle.add_theme_color_override("font_color", teinte)
+
+# ------------------------------------------------------- dessin direct
+# Le tableau de bord, le radar, la carte et les menus de la ville se peignent
+# dans `_draw` : trente rectangles à recaler à chaque image, c'est un dessin,
+# pas un arbre de nœuds. Ces fonctions leur donnent la même main qu'aux écrans
+# d'avant-partie — c'est ce qui fait qu'on ne change pas de logiciel en
+# passant du menu à la rue. Elles remplacent, pour Carnage, celles de `UI`
+# (la borne d'arcade), qui restent aux autres jeux.
+
+const VOILE := Color(0.02, 0.016, 0.04, 0.74)     ## le fond d'un cartouche posé sur la ville
+const CADRE := Color(1, 1, 1, 0.16)               ## son filet
+const ENCRE_DOUCE := Color(1, 1, 1, 0.66)
+const ENCRE_FAIBLE := Color(1, 1, 1, 0.40)
+const FILET_HAUT := 2.0                           ## le dégradé qui coiffe chaque cartouche
+
+## Le cartouche de la ville : voile nuit, filet blanc léger, et le dégradé
+## violet–rose–cyan sur son bord haut — la signature de la maquette. `accent`
+## remplace le dégradé par une couleur pleine : un cartouche qui a quelque
+## chose à dire (le contrat, la supérette) prend la couleur de son sujet.
+static func cartouche(sur: CanvasItem, rect: Rect2, accent: Color = Color(0, 0, 0, 0),
+		voile: Color = VOILE) -> void:
+	sur.draw_rect(rect, voile, true)
+	sur.draw_rect(rect.grow(-0.5), CADRE, false, 1.0)
+	if accent.a > 0.0:
+		sur.draw_rect(Rect2(rect.position, Vector2(rect.size.x, FILET_HAUT)), accent, true)
+	else:
+		filet_dessine(sur, rect.position, rect.size.x)
+
+## Le dégradé de la maquette, en trois aplats fondus : VIOLET, ROSE, CYAN.
+## Douze segments suffisent — sur deux pixels de haut, l'œil ne voit pas les
+## marches.
+static func filet_dessine(sur: CanvasItem, ou: Vector2, largeur: float, epaisseur: float = FILET_HAUT) -> void:
+	var n := 12
+	for i in n:
+		var t0 := float(i) / float(n)
+		var t1 := float(i + 1) / float(n)
+		var c := VIOLET.lerp(ROSE, t0 * 2.0) if t0 < 0.5 else ROSE.lerp(CYAN, (t0 - 0.5) * 2.0)
+		sur.draw_rect(Rect2(ou + Vector2(largeur * t0, 0.0), Vector2(largeur * (t1 - t0) + 0.5, epaisseur)), c, true)
+
+## Des CAPITALES ESPACÉES, dessinées lettre à lettre : `draw_string` ne connaît
+## pas l'interlettrage, et c'est l'interlettrage qui fait le style. Renvoie
+## la largeur occupée. `cerne` : l'ourlet sombre qui garde la lettre lisible
+## sur une rue claire.
+static func capitales_dessinees(sur: CanvasItem, ou: Vector2, texte_: String, taille: int,
+		couleur: Color, espacement: float = 0.22, cerne: int = 0) -> float:
+	var x := ou.x
+	var pas := roundf(taille * espacement)
+	for lettre in texte_.to_upper():
+		var l := CAPITALES.get_string_size(lettre, HORIZONTAL_ALIGNMENT_LEFT, -1, taille).x
+		if cerne > 0:
+			sur.draw_string_outline(CAPITALES, Vector2(x, ou.y), lettre, HORIZONTAL_ALIGNMENT_LEFT, -1, taille, cerne, Color(CERNE, couleur.a))
+		sur.draw_string(CAPITALES, Vector2(x, ou.y), lettre, HORIZONTAL_ALIGNMENT_LEFT, -1, taille, couleur)
+		x += l + pas
+	return x - ou.x - pas
+
+static func largeur_capitales(texte_: String, taille: int, espacement: float = 0.22) -> float:
+	var total := 0.0
+	var pas := roundf(taille * espacement)
+	for lettre in texte_.to_upper():
+		total += CAPITALES.get_string_size(lettre, HORIZONTAL_ALIGNMENT_LEFT, -1, taille).x + pas
+	return maxf(0.0, total - pas)
+
+## Un chiffre ou un titre en Archivo Black, cerné : le chrono, l'argent, le
+## nom de l'arme. C'est la police du lettrage de l'affiche.
+static func titre_dessine(sur: CanvasItem, ou: Vector2, texte_: String, taille: int, couleur: Color, cerne: int = 4) -> float:
+	if cerne > 0:
+		sur.draw_string_outline(TITRE, ou, texte_, HORIZONTAL_ALIGNMENT_LEFT, -1, taille, cerne, Color(CERNE, couleur.a))
+	sur.draw_string(TITRE, ou, texte_, HORIZONTAL_ALIGNMENT_LEFT, -1, taille, couleur)
+	return TITRE.get_string_size(texte_, HORIZONTAL_ALIGNMENT_LEFT, -1, taille).x
+
+static func largeur_titre(texte_: String, taille: int) -> float:
+	return TITRE.get_string_size(texte_, HORIZONTAL_ALIGNMENT_LEFT, -1, taille).x
+
+## Du texte courant condensé, cerné.
+static func texte_dessine(sur: CanvasItem, ou: Vector2, texte_: String, taille: int, couleur: Color, cerne: int = 3) -> float:
+	if cerne > 0:
+		sur.draw_string_outline(COURANTE, ou, texte_, HORIZONTAL_ALIGNMENT_LEFT, -1, taille, cerne, Color(CERNE, couleur.a))
+	sur.draw_string(COURANTE, ou, texte_, HORIZONTAL_ALIGNMENT_LEFT, -1, taille, couleur)
+	return COURANTE.get_string_size(texte_, HORIZONTAL_ALIGNMENT_LEFT, -1, taille).x
+
+static func largeur_texte(texte_: String, taille: int) -> float:
+	return COURANTE.get_string_size(texte_, HORIZONTAL_ALIGNMENT_LEFT, -1, taille).x
+
+## Une inscription centrée, en capitales cernées : « RECHERCHE », le décompte,
+## la station qu'on vise.
+static func inscription(sur: CanvasItem, centre: Vector2, texte_: String, taille: int, couleur: Color,
+		espacement: float = 0.22) -> void:
+	var l := largeur_capitales(texte_, taille, espacement)
+	capitales_dessinees(sur, centre + Vector2(-l * 0.5, taille * 0.36), texte_, taille, couleur, espacement, 5)
+
+## Une inscription en Archivo Black, centrée, cernée : le décompte du départ.
+static func inscription_titre(sur: CanvasItem, centre: Vector2, texte_: String, taille: int, couleur: Color) -> void:
+	var l := largeur_titre(texte_, taille)
+	titre_dessine(sur, centre + Vector2(-l * 0.5, taille * 0.36), texte_, taille, couleur, 8)
+
+## Une jauge de la maquette : le libellé en capitales à gauche, la valeur à
+## droite, et dessous une barre fine sur un fond à peine plus clair que le
+## voile — celle des réglages du son, pas celle d'une borne. Elle vire au rose
+## sous un quart : une jauge qu'on ne lit pas est une jauge qui ne sert à rien.
+static func jauge(sur: CanvasItem, rect: Rect2, libelle: String, part: float, couleur: Color, valeur: String = "") -> void:
+	var haut := rect.position.y + 11.0
+	capitales_dessinees(sur, Vector2(rect.position.x, haut), libelle, 11, ENCRE_DOUCE, 0.20)
+	if valeur != "":
+		var l := largeur_texte(valeur, 12)
+		texte_dessine(sur, Vector2(rect.end.x - l, haut), valeur, 12, Color.WHITE, 0)
+	var barre := Rect2(Vector2(rect.position.x, rect.end.y - 4.0), Vector2(rect.size.x, 4.0))
+	sur.draw_rect(barre, Color(1, 1, 1, 0.10), true)
+	var p := clampf(part, 0.0, 1.0)
+	var teinte := couleur if p > 0.25 else ROSE
+	if p > 0.0:
+		sur.draw_rect(Rect2(barre.position, Vector2(maxf(1.0, barre.size.x * p), barre.size.y)), teinte, true)
+		# La perle au bout de la barre : le curseur des réglages, en plus petit.
+		sur.draw_circle(barre.position + Vector2(barre.size.x * p, 2.0), 3.0, Color.WHITE)
+
+## Un cabochon de touche : le cadre nu des boutons secondaires de la maquette,
+## la touche en capitales, l'action en texte courant à côté. Renvoie la
+## largeur occupée pour enchaîner les touches sur une ligne.
+static func cabochon(sur: CanvasItem, ou: Vector2, cle: String, action: String, alpha: float = 1.0) -> float:
+	var lc := largeur_capitales(cle, 11, 0.12)
+	var boite := Rect2(ou, Vector2(lc + 14.0, 20.0))
+	sur.draw_rect(boite, Color(1, 1, 1, 0.07 * alpha), true)
+	sur.draw_rect(boite.grow(-0.5), Color(1, 1, 1, 0.28 * alpha), false, 1.0)
+	capitales_dessinees(sur, ou + Vector2(7.0, 14.0), cle, 11, Color(1, 1, 1, alpha), 0.12)
+	var la := texte_dessine(sur, ou + Vector2(boite.size.x + 7.0, 14.5), action, 13, Color(ENCRE_DOUCE, alpha), 3)
+	return boite.size.x + 7.0 + la + 20.0
+
+## Une étoile à cinq branches, pleine : celles de la recherche.
+static func etoile(sur: CanvasItem, centre: Vector2, rayon: float, couleur: Color) -> void:
+	var points := PackedVector2Array()
+	for i in 10:
+		var r := rayon if i % 2 == 0 else rayon * 0.45
+		var angle := -PI * 0.5 + i * PI / 5.0
+		points.append(centre + Vector2(cos(angle), sin(angle)) * r)
+	sur.draw_colored_polygon(points, couleur)
+
+## La ligne visée d'un menu : un surlignage plein, et une barre rose à gauche
+## — le « bouton principal » de la maquette, couché.
+static func ligne_visee(sur: CanvasItem, rect: Rect2, couleur: Color = ROSE) -> void:
+	sur.draw_rect(rect, Color(couleur, 0.14), true)
+	sur.draw_rect(Rect2(rect.position, Vector2(3.0, rect.size.y)), couleur, true)
+
+## LE MENU POSÉ SUR LA VILLE : un voile sur tout l'écran, le cartouche, son
+## titre en Archivo Black avec le filet dessous — l'en-tête des écrans
+## d'avant-partie, en réduction. Renvoie le rectangle du cartouche ; le
+## contenu commence sous `haut_contenu(rect)`.
+static func menu(sur: CanvasItem, taille_ecran: Vector2, largeur: float, hauteur: float,
+		titre_: String, sous_titre: String = "", couleur_titre: Color = Color.WHITE) -> Rect2:
+	var rect := Rect2((taille_ecran - Vector2(largeur, hauteur)) * 0.5, Vector2(largeur, hauteur))
+	sur.draw_rect(Rect2(Vector2.ZERO, taille_ecran), Color(NUIT, 0.60), true)
+	sur.draw_rect(rect, Color(NUIT, 0.90), true)
+	sur.draw_rect(rect.grow(-0.5), CADRE, false, 1.0)
+	var x := rect.position.x + MARGE_MENU
+	var y := rect.position.y + 40.0
+	titre_dessine(sur, Vector2(x, y), titre_.to_upper(), 24, couleur_titre, 0)
+	if sous_titre != "":
+		var l := largeur_texte(sous_titre, 13)
+		texte_dessine(sur, Vector2(rect.end.x - MARGE_MENU - l, y - 1.0), sous_titre, 13, ENCRE_DOUCE, 0)
+	filet_dessine(sur, Vector2(x, y + 12.0), rect.size.x - 2.0 * MARGE_MENU)
+	return rect
+
+const MARGE_MENU := 26.0
+
+static func haut_contenu(rect: Rect2) -> float:
+	return rect.position.y + 78.0
+
+## La ligne d'aide d'un menu, centrée en bas du cartouche.
+static func aide_menu(sur: CanvasItem, rect: Rect2, texte_: String) -> void:
+	var l := largeur_capitales(texte_, 11, 0.14)
+	capitales_dessinees(sur, Vector2(rect.position.x + (rect.size.x - l) * 0.5, rect.end.y - 16.0),
+		texte_, 11, ENCRE_FAIBLE, 0.14)

@@ -537,11 +537,30 @@ montent en émission quand la nuit tombe, et la rue passe du gris chaud au bleu
 sourd — jamais noire : une nuit noire vue de dessus, c'est un écran vide.
 `--nuit=<0..1>` (`?nuit=` dans l'URL) force l'heure pour photographier.
 
+**Le temps qu'il fait.** Sur la même horloge, un temps toutes les dix minutes
+— clair, couvert, pluie, orage ou brouillard, tiré du créneau et donc le même
+pour les quatre joueurs sans un octet de réseau (`MeteoCarnage`). Le couvert
+grise le ciel et le soleil et efface l'ombre ; la pluie mouille le bitume de
+jour (flaques, reflets, éclats d'impacts), trace ses traits sur l'écran, fait
+son bruit (synthétisé : le dossier des sons n'a pas de pluie) et retire 18 %
+d'adhérence ; l'orage ajoute l'éclair qui blanchit tout un dixième de seconde
+et le tonnerre qui arrive avec le retard de la distance ; le brouillard mange
+l'horizon. Pas une particule : des calques d'écran et des uniformes de shader,
+comme GTA 2. `--meteo=pluie` fige un temps, le code MÉTÉO passe au suivant,
+`--banc-eclair` tient l'éclair pour la photo. Sur sol mouillé, chaque flaque de
+lumière rend un trait allongé (le reflet), et un faisceau additif part des
+phares de toute voiture qui roule — une lueur par temps clair, un vrai coin de
+lumière dans la brume. Détail : `CONCEPTION-METEO.md`.
+
 **Deux vraies lumières, pas une de plus.** Le mode compatibilité n'en supporte
 que huit par objet ; une flaque additive au sol sous chaque lampadaire fait le
 même effet pour rien. Les deux exceptions sont les phares de VOTRE voiture,
 deux projecteurs qui ne s'allument que la nuit et font surgir les façades dans
-leur faisceau. Le reste de l'ambiance est du shader : l'ombre des nuages qui
+leur faisceau. Le **gyrophare** d'une patrouille tourne pour de vrai : bleu puis
+rouge quatre fois par seconde, feu du toit et flaque additive au sol ensemble
+(`FormesCarnage.clignoter_gyrophare`) — deux cubes émissifs sur un toit ne se
+voient pas de soixante unités de haut, une rue qui passe au bleu puis au rouge,
+si. Le reste de l'ambiance est du shader : l'ombre des nuages qui
 glisse sur la ville, le bitume qui se mouille la nuit, une ombre de contact
 multiplicative au pied de chaque immeuble (sans elle, ils flottent), les
 traces de pneus qu'on laisse en freinant, les étincelles d'une tôle qui racle
@@ -765,12 +784,15 @@ godot --headless --path . -s outils/marche.gd          # les 15 intérieurs sont
 godot --headless --path . -s outils/provisions.gd      # faim, soif, catalogue, supérettes
 ./outils/tableau.sh /tmp/menu.png superette            # le menu de la supérette
 ./outils/tableau.sh /tmp/pause.png pause               # le menu de pause et la sortie
-./outils/tableau.sh /tmp/triche.png triche             # les 17 codes du menu Konami
+./outils/tableau.sh /tmp/triche.png triche             # les 18 codes du menu Konami
 godot --path . --solo --banc-jeu=carnage --manche=40 --banc-subjectif --photo=/tmp/vues
 ./outils/apercu.sh PROVISIONS /tmp/sup.png superette 55 # la façade dans la ville
 ./outils/voir.sh "v:0+,v:13+,v:16+,v:18+" 11           # la mitrailleuse de toit sur quatre gabarits
+./outils/voir.sh v:peintures 3.2                       # les dix peintures du garage sur le 4x4
+./outils/voir.sh v:peintures:0-8 3.4                   # les carrosseries de la ville, une peinture chacune
 ./outils/voir.sh "c:0,c:1,c:2,c:2-" 7                  # les trois cabines, dont une éteinte
 godot --headless --path . res://outils/konami.tscn     # la suite ↑↑↓↓←→←→BA
+godot --headless -s outils/meteo.gd                     # le tirage, le fondu, le temps forcé, le bruit de pluie
 godot --headless --path . res://outils/radio.tscn      # les stations et leurs pistes
 ./outils/tableau.sh /tmp/triche.png oui                # le menu de triche en image
 godot --headless --path . -s outils/flotte.gd          # mouillages et navigation
@@ -798,8 +820,13 @@ n'en croisait aucun.
 
 `--manche` raccourcit la manche : attendre deux minutes par vérification,
 personne ne le fait deux fois. `--banc-etoiles=3` fait partir déjà recherché,
+`--meteo=clair|couvert|pluie|orage|brouillard` fige le temps, `--banc-eclair`
+tient l'éclair allumé.
 `--banc-position=colonne,ligne` (en tuiles) fait partir ailleurs qu'au centre —
-sans ça, le banc ne photographie jamais le port ni la banlieue. Dans le
+sans ça, le banc ne photographie jamais le port ni la banlieue ; `=etoile`,
+`=pont`, `=rail`, `=superette` et `=garage` visent un lieu dont la place
+dépend du code de la manche (sous le portail du garage, la voiture ressort
+repeinte à la première image). Dans le
 navigateur, les mêmes réglages passent par l'adresse :
 `?pilote=carnage&manche=60&etoiles=3&position=120,110`.
 

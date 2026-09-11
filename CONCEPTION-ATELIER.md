@@ -107,11 +107,37 @@ tombe toujours sur l'une des deux, l'amorce et l'unicité d'une mine, le plafond
 de pièges, que l'huile fait tourner sans abîmer, que la bombe attend, et que
 les plaques gèlent la recherche puis se font repérer.
 
+## Le garage repeint pour de vrai (§1.3)
+
+Le garage effaçait le casier et rendait la voiture telle quelle. GTA 2 la
+**repeint**, et c'est ce qui fait qu'une voiture qui sort du garage n'est plus
+celle que la police cherchait : la mécanique et l'image racontent enfin la
+même chose.
+
+- Dix peintures (`FormesCarnage.PEINTURES`), **aucune couleur de gang** — une
+  voiture repeinte aux couleurs des Braises serait prise pour une voiture des
+  Braises. Jamais deux fois la même à la suite (`peinture_au_hasard`) : un
+  garage qui rend la voiture de la couleur d'entrée n'a rien fait.
+- La teinte **voyage** : dans le paquet de position (`tc`), dans le « pris »
+  (`t`), dans le « sort » (`t`), et l'hôte la garde sur la voiture
+  (`auto["teinte"]`, dixième colonne de la ligne `a` de l'instantané). Une
+  voiture repeinte puis garée se retrouve de sa couleur, chez tout le monde.
+  ⚠ `Color(int)` n'existe pas en 4.5 : c'est `Color.hex(int)` qui relit ce
+  que `Color.to_rgba32()` a écrit (vérifié au banc, aller et retour).
+- Le **halo** garde la couleur du joueur : `voiture(peinture)` le repeignait
+  aussi, et un halo violet sous un joueur bleu est un joueur qu'on ne
+  retrouve plus.
+- La peinture ne touche que la **tôle** : voir « La peinture ne recouvre que la
+  tôle » dans `CONCEPTION-VEHICULES.md`.
+
+Au banc : `--banc-position=garage` pose le pilote sous un portail — la voiture
+ressort repeinte à la première image et le journal l'écrit (`[banc] repeinte
+en #… au garage …`). `outils/voir.sh v:peintures` sort les dix peintures sur
+une même carrosserie ; `outils/recherche.gd` §7 vérifie l'aller-retour hôte →
+instantané → client → « pris ».
+
 ## Ce qui reste
 
-- la **peinture** de l'atelier est encore celle du garage (étoiles à zéro à
-  l'entrée) : GTA 2 fait aussi changer la COULEUR de la voiture, ce qui
-  demanderait de faire voyager la teinte sur le réseau ;
 - la **bombe à distance** du guide (un bouton pour la déclencher) n'existe pas :
   on n'a plus de touche libre ;
 - le **lance-flammes monté** sur le camion de pompiers (§6.2) reste à faire, et

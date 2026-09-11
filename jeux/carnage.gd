@@ -209,6 +209,7 @@ const ID_VOITURE_GARAGE := 11000
 var carte: PlanVille
 var ville: VilleVivante
 var _ambiance: Array = []            ## [WorldEnvironment, soleil, lune], réglés à l'heure du village
+var _meteo: MeteoCarnage = null      ## le temps qu'il fait, lu sur l'horloge universelle comme l'heure
 var _morceaux: Dictionary = {}       ## Vector2i -> MorceauVille, les morceaux bâtis ou en chantier
 var _chantier: MorceauVille = null   ## le morceau en cours de construction, une étape par image
 var _cachees: Dictionary = {}        ## id dormante -> vrai : déjà effacée de sa nappe
@@ -357,6 +358,11 @@ var _recharge := 0.0
 var _dernier_agresseur := ""
 var _hors_ville := 0.0
 var _garage_en_cours := -1
+## LA PEINTURE de la voiture qu'on conduit. `Color.WHITE` = la teinte d'origine
+## du modèle. Elle voyage avec la position (`tc`) et suit la carrosserie quand
+## on descend — une voiture repeinte qu'on retrouve rouge en revenant, c'est
+## un garage qui ment.
+var _teinte := Color.WHITE
 var _etoiles_vues := 0             ## pour n'annoncer une escalade qu'en MONTANT
 ## L'AUTORADIO (guide, phase 10). Six stations, et CHAQUE CARROSSERIE a la
 ## sienne par défaut : on monte dans un taxi, on tombe sur les infos ; dans une
@@ -519,6 +525,15 @@ func preparer() -> void:
 					var pres: Array = carte.lieux_autour(_position, PlanVille.SECTEUR * PlanVille.PAS * 2.0)["superettes"]
 					if not pres.is_empty():
 						_position = Vector2(pres[0]["p"])
+				elif String(argument).ends_with("garage"):
+					# `--banc-position=garage` : sous le portail d'un garage de
+					# peinture. La voiture ressort repeinte à la première image :
+					# c'est la seule façon de photographier une peinture du
+					# garage dans la ville, avec sa lumière et ses ombres, et pas
+					# sur l'herbe de la visionneuse.
+					var garages: Array = carte.lieux_autour(_position, PlanVille.SECTEUR * PlanVille.PAS * 2.0)["garages"]
+					if not garages.is_empty():
+						_position = Vector2(garages[0]["p"])
 				elif String(argument).ends_with("rail"):
 					# `--banc-position=rail` : au quai le plus central. La voie
 					# dépend du code de la manche, qui est tiré au lancement —
@@ -701,18 +716,26 @@ func preparer() -> void:
 func _rebatir_ma_voiture() -> void:
 	if _corps_auto != null:
 		_corps_auto.queue_free()
-	_corps_auto = _batir_voiture_de(_modele_vehicule, _ma_couleur(), Session.pseudo)
+	_corps_auto = _batir_voiture_de(_modele_vehicule, _ma_couleur(), Session.pseudo, _teinte)
 	FormesCarnage.armer_la_voiture(_corps_auto, bool(_mods.get("mitrailleuse", false)))
 	FormesCarnage.projecteurs(_corps_auto, 2.2)
 	_corps_auto.add_child(FormesCarnage.echappement(-2.4 if _modele_vehicule < 0 else -2.2))
 	monde().add_child(_corps_auto)
 
-func _batir_voiture_de(modele: int, couleur: Color, pseudo: String) -> Node3D:
+func _batir_voiture_de(modele: int, couleur: Color, pseudo: String,
+		peinture: Color = Color.WHITE) -> Node3D:
 	if modele < 0:
+		# La voiture de départ : sa tôle est la couleur du joueur, sauf si le
+		# garage l'a repeinte. ⚠ Le HALO garde la couleur du joueur dans les
+		# deux cas — `voiture(peinture)` le repeignait aussi, et un halo violet
+		# sous un joueur bleu, c'est un joueur qu'on ne retrouve plus.
+		if peinture != Color.WHITE:
+			return FormesCarnage.voiture_kit(0, peinture, couleur, pseudo, true)
 		return FormesCarnage.voiture(couleur, pseudo)
 	# Une voiture volée garde sa peinture ; c'est le halo qui dit à qui elle
-	# est. Une voiture de gang volée, elle, garde les couleurs du gang.
-	return FormesCarnage.voiture_kit(modele, Color.WHITE, couleur, pseudo, true)
+	# est. Une voiture de gang volée, elle, garde les couleurs du gang — sauf
+	# passage au garage, qui repeint tout.
+	return FormesCarnage.voiture_kit(modele, peinture, couleur, pseudo, true)
 
 ## La couleur vient de la place à la TABLE, pas de la place dans la présence :
 ## celle-ci n'arrive qu'après le premier échange, et la voiture serait bleue
@@ -732,6 +755,15 @@ func _planter_decor() -> void:
 	_ambiance = MatieresCarnage.ambiance()
 	for noeud in _ambiance:
 		monde().add_child(noeud)
+	# LA MÉTÉO. `--meteo=pluie` (ou le code MÉTÉO) fige un temps ; sinon
+	# c'est l'horloge universelle qui décide, la même pour tous.
+	for argument in OS.get_cmdline_args():
+		if String(argument).begins_with("--meteo="):
+			MeteoCarnage.meteo_forcee = MeteoCarnage.indice_du_temps(String(argument).substr(8))
+	_meteo = MeteoCarnage.new()
+	_meteo.name = "Meteo"
+	_meteo.brancher_le_tonnerre(_tonnerre)
+	monde().add_child(_meteo)
 	# La voie ferrée est une droite de la ville : le shader du sol la trace en
 	# espace monde, il lui faut ses paramètres.
 	MatieresCarnage.sol().set_shader_parameter("rail", carte.rail())
@@ -1007,6 +1039,7 @@ func simuler_local(delta: float) -> void:
 			"ep": 1 if _eperon > 0.0 else 0,
 			"tr": 1 if _train >= 0 else 0,
 			"mg": 1 if bool(_mods.get("mitrailleuse", false)) else 0,
+			"tc": 0 if _teinte == Color.WHITE else _teinte.to_rgba32(),
 		})
 
 	if not est_hote():
@@ -1054,11 +1087,14 @@ func _piloter_pour_le_banc() -> void:
 				train_le_plus_proche = d
 		print("[banc] faim %d · soif %d · %d provision(s) en poche, %d au frigo"
 			% [int(_faim), int(_soif), Provisions.compte(_provisions), Provisions.compte(_frigo)])
-		print("[banc] t=%ds fps=%d gens=%d autos=%d feux=%d secours=%d morceaux=%d cubes=%d quads=%d maillage_max=%.1fms fiches=%d noeuds=%d trains=%d/%dpx %s" % [int(temps),
+		print("[banc] t=%ds fps=%d gens=%d autos=%d feux=%d secours=%d morceaux=%d cubes=%d quads=%d maillage_max=%.1fms fiches=%d noeuds=%d trains=%d/%dpx %s meteo=%s(pluie %.2f nuages %.2f brume %.2f)" % [int(temps),
 			Engine.get_frames_per_second(), ville.gens.size(), ville.autos.size(), ville.feux.size(), secours,
 			_morceaux.size(), cubes, MorceauVille.quads_total, MorceauVille.maillage_max_ms,
 			carte.fiches_en_cache(), get_tree().get_node_count(),
-			ville.trains.size(), train_le_plus_proche, "hôte" if est_hote() else "client"])
+			ville.trains.size(), train_le_plus_proche, "hôte" if est_hote() else "client",
+			MeteoCarnage.nom_du_temps(_meteo.temps_courant()) if _meteo != null else "-",
+			_meteo.pluie if _meteo != null else 0.0, _meteo.nuages if _meteo != null else 0.0,
+			_meteo.brume if _meteo != null else 0.0])
 	# ⚠ L'action se PULSE. Maintenue, elle ne produit qu'un seul front : le
 	# pilote descendait de voiture et ne remontait jamais, et la moitié du jeu
 	# passait le banc sans être exercée.
@@ -1191,11 +1227,22 @@ func _basculer_portiere() -> void:
 	var angle_rendu := _angle
 	var modele_rendu := _modele_vehicule
 	var genre_rendu := _genre_vehicule
+	var teinte_rendue := 0 if _teinte == Color.WHITE else _teinte.to_rgba32()
+	# LA VOITURE DE DÉPART GARDE LA COULEUR DU JOUEUR. Sa tôle n'a pas de
+	# peinture propre : c'est `_ma_couleur()` qui la peint. Rendue sans teinte,
+	# elle retombait sur la couleur tirée de son identifiant — grise — et le
+	# joueur remontait dans une voiture qui n'était plus la sienne.
+	if teinte_rendue == 0 and _modele_vehicule < 0:
+		teinte_rendue = _ma_couleur().to_rgba32()
 	canal.envoyer("sort", {"id": id_rendu, "x": int(_position.x), "y": int(_position.y),
-		"a": snapped(angle_rendu, 0.01), "pv": int(pv), "g": genre_rendu, "m": modele_rendu})
+		"a": snapped(angle_rendu, 0.01), "pv": int(pv), "g": genre_rendu, "m": modele_rendu,
+		"t": teinte_rendue})
 	if est_hote():
-		ville.rendre_vehicule(Session.cle, id_rendu, _position, angle_rendu, pv, modele_rendu, genre_rendu)
+		ville.rendre_vehicule(Session.cle, id_rendu, _position, angle_rendu, pv, modele_rendu,
+			genre_rendu, teinte_rendue)
 		_vider_les_evenements()
+	# La peinture reste sur la carrosserie, pas sur le joueur.
+	_teinte = Color.WHITE
 	# LA BOMBE part avec la voiture qu'on laisse : c'est le seul moment où elle
 	# s'arme, et c'est ce qui en fait un piège et pas une arme.
 	if bool(_mods.get("bombe", false)):
@@ -1403,6 +1450,12 @@ func _conduire(delta: float) -> void:
 		var adherence: float = lerp(ADHERENCE_LENTE, ADHERENCE_RAPIDE, clamp(abs(_vitesse) / VITESSE_MAX, 0.0, 1.0))
 		if FormesCarnage.est_moto(_modele_vehicule):
 			adherence *= 1.8
+		# SOUS LA PLUIE, ÇA GLISSE : dix-huit pour cent d'adhérence en moins à
+		# pleine averse. Assez pour rater un virage qu'on prenait les yeux
+		# fermés, pas assez pour que la voiture parte seule — l'huile de
+		# l'atelier reste le vrai piège.
+		if _meteo != null:
+			adherence *= 1.0 - 0.18 * _meteo.pluie
 		_glisse = _glisse.slerp(cap, clamp(delta * adherence, 0.0, 1.0)).normalized()
 	_position += _glisse * _vitesse * delta
 	_crisser(delta, cap)
@@ -1665,6 +1718,14 @@ func _surveiller_les_lieux(delta: float) -> void:
 	if garage < 0:
 		return
 	_pv_vehicule = PV_VOITURE
+	# ON REPEINT POUR DE VRAI (§1.3). La couleur change, la voiture se rebâtit
+	# sous le joueur, et les autres la reçoivent avec la position. C'est ce
+	# qui manquait pour que « la police ne vous reconnaît plus » se VOIE.
+	_teinte = FormesCarnage.peinture_au_hasard(_rng, _teinte)
+	_rebatir_ma_voiture()
+	_dire_affaire("repeinte — le casier est vierge")
+	if Commandes.pilote_automatique:
+		print("[banc] repeinte en #%s au garage %d" % [_teinte.to_html(false), garage])
 	Sons.jouer("portail", 1.0, -8.0)
 	canal.envoyer("garage", {"i": garage})
 	if est_hote():
@@ -2694,6 +2755,15 @@ func _activer_le_code(indice: int) -> void:
 			# `nuit_forcee` est le réglage du banc de photo : on s'en sert ici
 			# pour arrêter l'horloge, et `-1` la rend au cycle.
 			MatieresCarnage.nuit_forcee = 0.9 if bool(code["actif"]) else -1.0
+		"meteo":
+			# Chaque allumage passe au temps SUIVANT (clair, couvert, pluie,
+			# orage, brouillard) et l'annonce ; éteint, le ciel revient à
+			# l'horloge. Cinq codes pour cinq temps auraient noyé la liste.
+			if bool(code["actif"]):
+				MeteoCarnage.meteo_forcee = posmod(MeteoCarnage.meteo_forcee + 1, MeteoCarnage.NOMS.size())
+				_annoncer(MeteoCarnage.nom_du_temps(MeteoCarnage.meteo_forcee).to_upper(), Palette.SERIE, 2.0)
+			else:
+				MeteoCarnage.meteo_forcee = -1
 		"garde_manger":
 			# Un de chaque dans les poches, le reste au frigo : c'est la façon
 			# la plus rapide de voir l'inventaire, la touche `G` et le choix de
@@ -2984,7 +3054,8 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 				ville.rendre_vehicule(String(charge.get("cle", "")), int(charge.get("id", 0)),
 					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
 					float(charge.get("a", 0.0)), float(charge.get("pv", PV_VOITURE)),
-					int(charge.get("m", -1)), int(charge.get("g", VilleVivante.CIVILE)))
+					int(charge.get("m", -1)), int(charge.get("g", VilleVivante.CIVILE)),
+					int(charge.get("t", 0)))
 				_vider_les_evenements()
 		"terrain":
 			if est_hote():
@@ -3116,6 +3187,13 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 				ville.reveillees[id_pris] = true
 				_effacer_la_dormante(id_pris)
 			if qui == Session.cle:
+				# LA VOITURE GARDE SA COULEUR quand on monte dedans : la peinture
+				# du garage si elle en a une, la bannière du gang, sinon celle que
+				# la nappe lui avait donnée. ⚠ Avant, une voiture volée
+				# redevenait orange d'usine à l'instant où on ouvrait la porte.
+				var g := int(charge.get("g", 0))
+				_teinte = FormesCarnage.couleur_de_l_auto(carte, int(charge.get("m", 0)), id_pris,
+					g == VilleVivante.VOITURE_GANG, int(charge.get("gg", 0)), int(charge.get("t", 0)))
 				_prendre_le_volant(int(charge.get("id", 0)), int(charge.get("g", 0)),
 					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
 					float(charge.get("a", 0.0)), float(charge.get("pv", PV_VOITURE)),
@@ -3262,6 +3340,9 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 				Sons.jouer("klaxon", _rng.randf_range(0.9, 1.1), -12.0 - loin * 0.012)
 			if est_hote():
 				ville.paniquer(ou, 260.0, 1.6)
+		"seme":
+			if String(charge.get("j", "")) == Session.cle and ville.etoiles(Session.cle) >= 0:
+				_annoncer("ils cherchent l'autre voiture", Palette.SERIE, 2.0)
 		"helico":
 			if Commandes.pilote_automatique:
 				print("[banc] hélicoptère lancé sur %s" % String(charge.get("j", "")))
@@ -3382,13 +3463,17 @@ func _recevoir_joueur(charge: Dictionary) -> void:
 		ville.reveillees[w] = true
 		_effacer_la_dormante(w)
 	var modele := int(charge.get("vm", -1))
-	if modele != int(a.get("modele", -1)):
-		# Il a changé de voiture : on rebâtit la sienne. Le nœud d'avant part.
+	var teinte_recue := int(charge.get("tc", 0))
+	if modele != int(a.get("modele", -1)) or teinte_recue != int(a.get("teinte", 0)):
+		# Il a changé de voiture — ou de PEINTURE : on rebâtit la sienne. Le
+		# nœud d'avant part.
 		a["modele"] = modele
+		a["teinte"] = teinte_recue
 		(a["auto"] as Node3D).queue_free()
 		var neuf := _batir_voiture_de(modele,
 			Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 1))),
-			String(joueurs.get(cle, {}).get("pseudo", "")))
+			String(joueurs.get(cle, {}).get("pseudo", "")),
+			Color.hex(teinte_recue) if teinte_recue != 0 else Color.WHITE)
 		neuf.position = Decor.vers3d(cible)
 		monde().add_child(neuf)
 		a["auto"] = neuf
@@ -3582,6 +3667,13 @@ func _effet_broyage(position: Vector2) -> void:
 			anim.tween_interval(0.5)
 			anim.tween_property(machoire, "position:x", depart, 0.7)
 
+## LE TONNERRE. Pas de fichier de tonnerre dans le dossier des sons : c'est la
+## grande explosion, ralentie de moitié — plus grave, plus longue, elle roule
+## comme il faut. `force` suit la distance de l'éclair (voir `MeteoCarnage`).
+func _tonnerre(force: float) -> void:
+	Sons.jouer("explosion_grande", lerpf(0.36, 0.5, force), lerpf(-20.0, -9.0, force))
+	_secousse = max(_secousse, 0.12 * force)
+
 ## `ampleur` de 0 à 1 : une caisse qui saute et le char qui canonne ne sont
 ## pas le même événement, et jusqu'ici ils faisaient le même bruit.
 func _effet_explosion(position: Vector2, ampleur: float = 1.0) -> void:
@@ -3669,6 +3761,9 @@ func rafraichir_scene(delta: float) -> void:
 	# L'heure du village, à chaque image : le jour tombe pendant la manche.
 	if _ambiance.size() == 3:
 		MatieresCarnage.regler_heure(_ambiance[0], _ambiance[1], _ambiance[2], MatieresCarnage.nuit())
+		# Le temps qu'il fait retouche l'heure : après elle, jamais avant.
+		if _meteo != null:
+			_meteo.appliquer(delta, _ambiance[0], _ambiance[1], MatieresCarnage.nuit())
 	# Les vrais phares ne s'allument que la nuit, et les bords de l'écran
 	# rougissent le temps d'une secousse.
 	if _corps_auto != null:
@@ -3933,6 +4028,10 @@ func _placer_le_joueur(delta: float) -> void:
 		var buffle := _corps_auto.get_node_or_null("Buffle") as MeshInstance3D
 		if buffle:
 			buffle.visible = _eperon > 0.0
+		# Au volant d'une voiture de police volée, le gyrophare tourne aussi :
+		# c'est ce qui la rend reconnaissable — et voyante.
+		if _genre_vehicule == VilleVivante.PATROUILLE:
+			FormesCarnage.clignoter_gyrophare(_corps_auto, Time.get_ticks_msec() / 1000.0, true)
 		# La fumée : un filet à l'accélération, un panache noir quand la tôle
 		# est à bout. C'est ce qui dit qu'il est temps de changer de voiture.
 		var fumee := _corps_auto.get_node_or_null("Fumee") as CPUParticles3D
@@ -3972,6 +4071,7 @@ func _placer_les_autres() -> void:
 			var gyro := auto.get_node_or_null("Gyrophare")
 			if gyro:
 				gyro.visible = int(a.get("genre", 0)) == VilleVivante.PATROUILLE
+				FormesCarnage.clignoter_gyrophare(auto, Time.get_ticks_msec() / 1000.0, true)
 			var buffle := auto.get_node_or_null("Buffle") as MeshInstance3D
 			if buffle:
 				buffle.visible = bool(a.get("eperon", false))
@@ -4072,9 +4172,12 @@ func _placer_les_autos() -> void:
 			elif bool(auto.get("canon", false)):
 				noeud = FormesCarnage.char_arme()
 			else:
-				var couleur := Color.WHITE
-				if genre == VilleVivante.VOITURE_GANG:
-					couleur = carte.couleur_du_gang(int(auto.get("gang", 0)))
+				# Une carrosserie repeinte au garage garde sa peinture une fois
+				# garée ; une dormante réveillée garde celle de la nappe : c'est
+				# la même fonction qui décide pour toutes.
+				var couleur := FormesCarnage.couleur_de_l_auto(carte, int(auto.get("modele", 0)),
+					int(auto["id"]), genre == VilleVivante.VOITURE_GANG, int(auto.get("gang", 0)),
+					int(auto.get("teinte", 0)))
 				noeud = FormesCarnage.voiture_kit(int(auto.get("modele", 0)), couleur)
 			monde().add_child(noeud)
 			auto["noeud"] = noeud
@@ -4099,6 +4202,9 @@ func _placer_les_autos() -> void:
 		var phares := corps.get_node_or_null("Phares") as Node3D
 		if phares:
 			phares.visible = not bool(auto.get("garee", false))
+		if genre == VilleVivante.PATROUILLE:
+			FormesCarnage.clignoter_gyrophare(corps, Time.get_ticks_msec() / 1000.0,
+				not bool(auto.get("garee", false)))
 		_regler_jauge(corps, float(auto["pv"]) / PV_VOITURE)
 
 func _placer_les_objets() -> void:

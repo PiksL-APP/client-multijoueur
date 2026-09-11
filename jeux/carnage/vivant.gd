@@ -281,6 +281,26 @@ func crime(cle: String, genre_de_crime: String) -> void:
 	if etoiles(cle) != avant:
 		emettre("etoiles", {"j": cle, "r": etoiles(cle)})
 
+## CHANGER DE VOITURE SÈME LA POLICE D'UN CRAN (§5.2). Ils cherchaient l'autre
+## carrosserie : celle-ci, personne ne l'a encore signalée. Un cran, pas deux —
+## le garage reste la seule remise à zéro, et voler une voiture pour perdre
+## une étoile doit rester un pari (on descend, on court, on se fait tirer
+## dessus) et pas une méthode.
+##
+## ⚠ PAS POUR UNE VOITURE DE POLICE. Voler une patrouille en pleine poursuite
+## est un crime de plus (`accorder_vehicule` l'inscrit), et un crime qui
+## ferait baisser la recherche, c'est le jeu qui se contredit.
+func semer(cle: String) -> void:
+	var niveau := etoiles(cle)
+	if niveau <= 0:
+		return
+	# On retombe juste SOUS le palier courant : à trois étoiles on en garde
+	# deux, tout au bord — la prochaine faute nous y renvoie.
+	var plancher: float = 0.0 if niveau <= 1 else float(PALIERS[niveau - 1]) - 1.0
+	chaleur[cle] = minf(float(chaleur.get(cle, 0.0)), plancher)
+	emettre("etoiles", {"j": cle, "r": etoiles(cle)})
+	emettre("seme", {"j": cle})
+
 ## Le garage de peinture : la seule remise à zéro du jeu. Sans échappatoire,
 ## cinq étoiles sont une condamnation et le joueur repose la manette.
 func repeindre(cle: String) -> void:
@@ -2638,7 +2658,9 @@ func accorder_vehicule(cle: String, id: int, position: Vector2) -> void:
 	if int(auto["genre"]) == PATROUILLE:
 		# Voler une voiture de police, ça se paie.
 		crime(cle, "pieton")
-	elif int(auto["genre"]) == VOITURE_GANG:
+	else:
+		semer(cle)
+	if int(auto["genre"]) == VOITURE_GANG:
 		# Voler la voiture d'un gang aussi — moins qu'un mort, plus qu'un rien.
 		# Et depuis qu'elle vient AVEC SA MITRAILLEUSE (§1.3), ce n'est plus
 		# une berline de couleur : c'est une prise, et elle a un prix.
@@ -2651,12 +2673,14 @@ func accorder_vehicule(cle: String, id: int, position: Vector2) -> void:
 		# leurs fenêtres se remarque, mais ça ne remplace pas un contrat.
 		_repercuter(cle, int(auto.get("gang", 0)), Vector2(auto["p"]),
 			RESPECT_PERDU * 0.4, RESPECT_GAGNE * 0.25)
+	# `gg` : le gang de la voiture, pour que le voleur garde sa bannière sur la
+	# tôle ; `t` : la peinture du garage si elle en a une.
 	emettre("pris", {"j": cle, "id": id, "g": int(auto["genre"]), "m": int(auto.get("modele", 0)),
 		"x": int(auto["p"].x), "y": int(auto["p"].y), "a": snapped(float(auto["a"]), 0.01),
-		"pv": int(auto["pv"])})
+		"pv": int(auto["pv"]), "t": int(auto.get("teinte", 0)), "gg": int(auto.get("gang", 0))})
 
 func rendre_vehicule(cle: String, id: int, position: Vector2, angle: float, pv: float,
-		modele: int = -1, genre_rendu: int = CIVILE) -> void:
+		modele: int = -1, genre_rendu: int = CIVILE, teinte: int = 0) -> void:
 	var auto := auto_par_id(id)
 	if auto.is_empty():
 		# L'hôte a changé en cours de route et ne connaît plus cette voiture —
@@ -2667,7 +2691,7 @@ func rendre_vehicule(cle: String, id: int, position: Vector2, angle: float, pv: 
 			"vitesse": 0.0, "genre": EPAVE if pv <= 0.0 else genre_rendu,
 			"gang": plan.territoire(position),
 			"pv": pv, "pilote": "", "cible": "", "minuterie": 7.0 if pv <= 0.0 else 0.0,
-			"recharge": 0.0, "modele": modele, "garee": true,
+			"recharge": 0.0, "modele": modele, "garee": true, "teinte": teinte,
 		})
 		if PlanVille.est_dormante(id):
 			reveillees[id] = true
@@ -2679,6 +2703,9 @@ func rendre_vehicule(cle: String, id: int, position: Vector2, angle: float, pv: 
 	auto["a"] = angle
 	auto["d"] = Vector2.RIGHT.rotated(angle)
 	auto["pv"] = pv
+	# LA PEINTURE RESTE SUR LA CARROSSERIE : une voiture repeinte au garage et
+	# retrouvée de sa couleur d'origine en revenant, c'est un garage qui ment.
+	auto["teinte"] = teinte
 	auto["vitesse"] = 0.0
 	# Abandonnée, elle reste là où on l'a laissée : une voiture qu'on quitte et
 	# qui repart toute seule dans la circulation, c'est une voiture qu'on ne
@@ -2739,7 +2766,8 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 		vus_autos.append([int(auto["id"]), int(auto["p"].x), int(auto["p"].y),
 			int(float(auto["a"]) * 100.0), int(auto["genre"]), int(auto["pv"]),
 			int(auto.get("modele", 0)), 1 if bool(auto.get("garee", false)) else 0,
-			int(auto.get("corps", CORPS_POLICE)), 1 if bool(auto.get("canon", false)) else 0])
+			int(auto.get("corps", CORPS_POLICE)), 1 if bool(auto.get("canon", false)) else 0,
+			int(auto.get("teinte", 0))])
 
 	var vues_caisses: Array = []
 	for c in caisses:
@@ -2858,6 +2886,7 @@ func appliquer_instantane(charge: Dictionary) -> void:
 			"garee": (int(entree[7]) == 1) if entree.size() > 7 else false,
 			"corps": int(entree[8]) if entree.size() > 8 else CORPS_POLICE,
 			"canon": (int(entree[9]) == 1) if entree.size() > 9 else false,
+			"teinte": int(entree[10]) if entree.size() > 10 else 0,
 			"gang": plan.territoire(Vector2(float(entree[1]), float(entree[2]))),
 			"d": Vector2.RIGHT, "vitesse": 0.0, "pilote": "", "cible": "", "minuterie": 0.0})
 	caisses = _fusionner(caisses, charge.get("c", []), func(entree: Array) -> Dictionary:
@@ -2931,7 +2960,7 @@ func _fusionner(existants: Array, recus, fabrique: Callable) -> Array:
 			# affichée glisse vers elle image par image, sinon un instantané
 			# à huit par seconde donne une ville qui saute.
 			for champ in ["genre", "gang", "pv", "a", "arme", "garee", "cap", "corps", "canon",
-					"s", "sens", "v", "arret", "age"]:
+					"s", "sens", "v", "arret", "age", "teinte"]:
 				if neuf.has(champ):
 					objet[champ] = neuf[champ]
 			objet["cible"] = neuf["p"]

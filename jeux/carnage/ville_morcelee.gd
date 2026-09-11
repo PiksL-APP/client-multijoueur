@@ -44,9 +44,11 @@ const PASSES := [
 	Quartiers.P_SOLS | Quartiers.P_EAU,
 	Quartiers.P_CHAUSSEES | Quartiers.P_BATEAUX,
 	Quartiers.P_BATIMENTS,
-	# Le mobilier libre arrive avec la verdure : c'est de la décoration, elle
-	# n'a aucune raison de paraître avant les façades.
-	Quartiers.P_VERDURE | Quartiers.P_MOBILIER | Quartiers.P_OBJETS,
+	# ⚠ LA VERDURE ET LE MOBILIER EN DEUX IMAGES, PAS UNE. Depuis le relief et
+	# les arbres voxel, chacune des deux coûte autant que les façades : réunies,
+	# c'était l'image la plus lourde du morceau, deux fois celle du sol.
+	Quartiers.P_VERDURE,
+	Quartiers.P_MOBILIER | Quartiers.P_OBJETS,
 ]
 
 var _prete: Dictionary = {}
@@ -124,7 +126,7 @@ func _revoir() -> void:
 		return (a - ici).length_squared() < (b - ici).length_squared())
 
 ## Une PASSE par image, pas un morceau. `par_image` compte maintenant des
-## passes : à 1, un morceau paraît en quatre images sans jamais en figer une.
+## passes : à 1, un morceau paraît en cinq images sans jamais en figer une.
 func _process(_delta: float) -> void:
 	var faits := 0
 	while faits < par_image:

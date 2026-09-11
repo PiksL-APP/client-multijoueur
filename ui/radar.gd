@@ -33,6 +33,47 @@ func _draw() -> void:
 	UI.cartouche(self, cadre, Color(0, 0, 0, 0), Color(Palette.FOND, 0.88))
 	var rayon_vue := COTE * 0.5 / ECHELLE     # en pixels de jeu, la moitié du cadre
 
+	if carte is PlanDessine:
+		_fond_dessine(carte as PlanDessine, cadre, centre, rayon_vue)
+	else:
+		_fond_procedural(cadre, centre, rayon_vue)
+	_lieux_et_pions(cadre, centre, rayon_vue)
+
+## ⚠ LA VILLE DESSINÉE N'A PAS DE GRILLE. Le fond procédural dessine des rues
+## tous les cinq pâtés : sur Pikstown, ça peignait un quadrillage qui n'existe
+## pas. Ici on lit la carte case par case — eau, rue, bâtiment, sol — dans les
+## vingt-deux cases que le cadre montre.
+func _fond_dessine(plan: PlanDessine, cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
+	var taille := PlanDessine.CASE_PX * ECHELLE
+	var c0 := plan.case_de_point(moi - Vector2(rayon_vue, rayon_vue)) - Vector2i.ONE
+	var c1 := plan.case_de_point(moi + Vector2(rayon_vue, rayon_vue)) + Vector2i.ONE
+	var bitume := Color(0.05, 0.05, 0.06, 0.9)
+	for j in range(c0.y, c1.y + 1):
+		for i in range(c0.x, c1.x + 1):
+			var c := Vector2i(i, j)
+			var rect := Rect2(_vers_radar(Vector2(c) * PlanDessine.CASE_PX, centre), Vector2(taille, taille))
+			var visible := rect.intersection(cadre)
+			if visible.size.x <= 0.0 or visible.size.y <= 0.0:
+				continue
+			var couleur: Color
+			if not plan.carte.terre(c):
+				couleur = Color(Palette.SERIE, 0.22)
+			elif plan.carte.route(c):
+				couleur = bitume
+			else:
+				var lettre := plan._car(i, j)
+				if plan.district_de_case(c) == PlanVille.PARC or lettre == "^":
+					couleur = Color(Palette.BON, 0.16)
+				else:
+					var gang := plan.gang_de_case(c)
+					couleur = Color(plan.couleur_du_gang(gang), 0.24) if gang >= 0 else Color(Palette.ENCRE, 0.10)
+				# Un bâtiment se lit plus sombre que le sol : c'est ce qui fait
+				# voir les rues sans les avoir dessinées.
+				if Quartiers._lettre(lettre) != "":
+					couleur = Color(couleur.darkened(0.5), couleur.a + 0.35)
+			draw_rect(visible, couleur, true)
+
+func _fond_procedural(cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
 	# Les pâtés : un aplat par territoire, plus fort pour les parcs et l'eau,
 	# qui se lisent comme du relief sur un plan.
 	var pas := PlanVille.PAS
@@ -89,7 +130,8 @@ func _draw() -> void:
 			draw_line(Vector2(clamp(x0, cadre.position.x, cadre.end.x), y), Vector2(clamp(x1, cadre.position.x, cadre.end.x), y),
 				avenue if posmod(kl, PlanVille.AVENUE) == 0 else bitume, largeur_rue)
 
-	# Les lieux à portée : repaires, arènes, garages, cabines, supérettes.
+func _lieux_et_pions(cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
+	# Les lieux à portée : repaires, arènes, garages, cabines.
 	var lieux := carte.lieux_autour(moi, rayon_vue * 1.5)
 	for r in lieux["repaires"]:
 		var ou := _vers_radar(r["p"], centre)
@@ -118,14 +160,6 @@ func _draw() -> void:
 		if cadre.has_point(ou):
 			_pastille(ou, 4.0, Color("#b070d0"))
 
-	# LA SUPÉRETTE : un carré vert d'eau, pas un rond. À quatre pastilles rondes
-	# dans un cadre de cent pixels, la cinquième couleur ne se distingue plus —
-	# c'est la forme qui fait la différence, pas la teinte.
-	for sp in lieux["superettes"]:
-		var ou := _vers_radar(sp["p"], centre)
-		if cadre.has_point(ou):
-			draw_rect(Rect2(ou - Vector2(3.5, 3.5), Vector2(7, 7)), PlanVille.COULEUR_SUPERETTE, true)
-
 	# La cible du contrat : le repaire du gang à nettoyer ou le garage où livrer.
 	# Dans le cadre, elle clignote ; hors du cadre, une flèche au bord dit où
 	# aller. Un contrat sans cible visible, c'est un chrono qui tourne pendant
@@ -133,12 +167,7 @@ func _draw() -> void:
 	if not cible.is_empty():
 		var genre := String(cible.get("k", ""))
 		var visee := {}
-		# Une cible peut être un POINT tout court : c'est le cas de la course
-		# de taxi, qui n'a ni repaire ni garage à viser. Le reste du dessin ne
-		# change pas — flèche au bord, distance en pâtés.
-		if cible.has("p"):
-			visee = {"p": cible["p"]}
-		elif genre == "nettoyage":
+		if genre == "nettoyage":
 			visee = carte.repaire_le_plus_proche(moi, int(cible.get("g", -1)))
 		elif genre == "livraison":
 			visee = carte.garage_le_plus_proche(moi)
@@ -189,8 +218,7 @@ func _draw() -> void:
 	var x := MARGE + 4.0
 	var y := MARGE + COTE + 14.0
 	for entree in [["garage", Palette.SERIE], ["cabine", Palette.AVERTISSEMENT],
-			["arène", Palette.CRITIQUE], ["repaire", Palette.ENCRE],
-			["supérette", PlanVille.COULEUR_SUPERETTE]]:
+			["arène", Palette.CRITIQUE], ["repaire", Palette.ENCRE]]:
 		draw_circle(Vector2(x, y - 4.0), 3.0, entree[1])
 		draw_string(police, Vector2(x + 7.0, y), String(entree[0]),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_DOUCE)

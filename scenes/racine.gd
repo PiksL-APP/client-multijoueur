@@ -98,9 +98,10 @@ func _partir_de_la_page(choix: Dictionary) -> void:
 	if pseudo.length() < 2:
 		pseudo = "Joueur-" + Session.id.substr(0, 4)
 	Session.definir_pseudo(pseudo)
-	# Le kit numérote ses personnages ; nous les nommons. L'indice tombe dans
-	# la liste du casting, et déborde sans casser si le kit en ajoute.
+	# L'indice qu'on choisit dans le kit est un LOGO de carton (le visage,
+	# à Pikstown, c'est la boîte) ; la peau du bonhomme en découle.
 	var indice := int(choix.get("personnage", 0))
+	Session.definir_carton(posmod(indice, Personnages.nombre_de_cartons()))
 	Session.definir_personnage(String(Personnages.LISTE[posmod(indice, Personnages.LISTE.size())]["cle"]))
 	Reglages.prendre_de_la_page(choix)
 	var jeu := String(choix.get("jeu", "carnage"))

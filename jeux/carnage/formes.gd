@@ -9,13 +9,45 @@ extends RefCounted
 ## des garages, la fabrique pesait plus lourd que la partie. Séparée, elle se
 ## relit sans traverser la simulation.
 
+## LES PEINTURES DU GARAGE (§1.3). Le garage effaçait le casier et rendait la
+## voiture telle quelle : GTA 2 la REPEINT, et c'est ce qui fait qu'une voiture
+## qui sort du garage n'est plus celle que la police cherchait — la mécanique
+## et l'image racontent enfin la même chose.
+##
+## ⚠ AUCUNE COULEUR DE GANG dans cette liste. Une voiture repeinte aux couleurs
+## des Braises serait prise pour une voiture des Braises — par les joueurs, qui
+## apprennent à les reconnaître, et bientôt par eux-mêmes qui se demanderaient
+## pourquoi on ne la vole pas. Les bannières sont réservées.
+const PEINTURES := [
+	Color("#e8e4d8"), Color("#2b2b2f"), Color("#b8322a"), Color("#274e8a"),
+	Color("#e2a72e"), Color("#5c8a3e"), Color("#7a4a8e"), Color("#d96a2a"),
+	Color("#3e9c8c"), Color("#8b6a4a"),
+]
+
+static func peinture_au_hasard(rng: RandomNumberGenerator, sauf: Color) -> Color:
+	# Jamais deux fois la même à la suite : un garage qui rend la voiture de
+	# la même couleur qu'à l'entrée, c'est un garage qui n'a rien fait.
+	for _essai in 8:
+		var c: Color = PEINTURES[rng.randi_range(0, PEINTURES.size() - 1)]
+		if not c.is_equal_approx(sauf):
+			return c
+	return PEINTURES[0]
+
 ## Le parc automobile : dix gabarits de voitures en voxels (`VoxelsCarnage`).
 ## L'indice est ce qui circule sur le réseau — un joueur qui vole un taxi doit
 ## être vu dans un taxi par les trois autres, pas dans une berline générique.
 const MODELES_VOITURES := ["berline", "berline sport", "compacte", "4x4", "4x4 de luxe",
 	"taxi", "fourgon", "camion de livraison", "camion", "police",
 	"coupé", "break", "pick-up", "bus", "limousine", "ambulance",
-	"moto", "moto de course", "camion de pompiers"]
+	"moto", "moto de course", "camion de pompiers",
+	# Le reste du Car Kit, longtemps resté dans le dossier faute d'indice : la
+	# voiture de course, le tracteur, la benne à ordures et le plateau. Quatre
+	# carrosseries dessinées qui ne roulaient nulle part.
+	"voiture de course", "tracteur", "benne à ordures", "plateau de livraison",
+	# LA FLOTTE. Un bateau est un véhicule comme un autre — même indice sur le
+	# réseau, même `E` pour monter, même identifiant de dormante — mais il ne
+	# roule que sur l'eau, et la ville ne l'amarre qu'au bord d'un quai.
+	"chaloupe", "vedette", "vedette rapide", "barque de pêche", "remorqueur"]
 ## Les deux-roues : ils accélèrent et tournent mieux, mais on n'a pas de tôle
 ## autour de soi — un choc, et on est à terre.
 const MODELES_MOTOS := [16, 17]
@@ -23,19 +55,24 @@ const MODELES_MOTOS := [16, 17]
 static func est_moto(indice: int) -> bool:
 	return indice in MODELES_MOTOS
 const MODELE_POLICE := 9
+## Le taxi. C'est LUI qui ouvre les courses (guide §4.3) : un métier attaché à
+## une carrosserie, pas un menu — on devient chauffeur en volant un taxi.
+const MODELE_TAXI := 5
 ## Ce que chaque quartier gare et fait rouler. Le centre roule en taxi, la zone
 ## industrielle en fourgon, la banlieue en break : c'est ce qui fait qu'on sait
 ## où l'on est en regardant ce qui passe.
 const VOITURES_PAR_QUARTIER := {
-	PlanVille.CENTRE: [0, 1, 4, 5, 5, 5, 1, 14, 13, 10, 16, 17],
-	PlanVille.AFFAIRES: [0, 1, 4, 4, 5, 1, 0, 14, 13, 10, 16],
-	PlanVille.COMMERCE: [0, 0, 1, 4, 5, 6, 2, 11, 13, 15, 16, 16],
-	PlanVille.VIEUX: [0, 2, 2, 0, 5, 3, 6, 10, 11, 16],
-	PlanVille.RESIDENCES: [0, 0, 2, 3, 6, 0, 2, 11, 12, 13, 16],
-	PlanVille.INDUSTRIE: [6, 6, 7, 7, 8, 8, 3, 12, 12, 16],
-	PlanVille.PORT: [7, 8, 8, 6, 3, 7, 6, 12, 17],
-	PlanVille.BANLIEUE: [0, 0, 3, 3, 2, 6, 4, 11, 11, 12, 10, 17],
-	PlanVille.PARC: [0, 2, 3, 13, 17],
+	PlanVille.CENTRE: [0, 1, 4, 5, 5, 5, 1, 14, 13, 10, 16, 17, 19],
+	PlanVille.AFFAIRES: [0, 1, 4, 4, 5, 1, 0, 14, 13, 10, 16, 19],
+	PlanVille.COMMERCE: [0, 0, 1, 4, 5, 6, 2, 11, 13, 15, 16, 16, 21],
+	PlanVille.VIEUX: [0, 2, 2, 0, 5, 3, 6, 10, 11, 16, 21],
+	PlanVille.RESIDENCES: [0, 0, 2, 3, 6, 0, 2, 11, 12, 13, 16, 21],
+	PlanVille.INDUSTRIE: [6, 6, 7, 7, 8, 8, 3, 12, 12, 16, 21, 22, 22],
+	PlanVille.PORT: [7, 8, 8, 6, 3, 7, 6, 12, 17, 22, 22],
+	PlanVille.BANLIEUE: [0, 0, 3, 3, 2, 6, 4, 11, 11, 12, 10, 17, 20, 21],
+	# Le tracteur ne se gare pas au centre-ville : il vit au parc et au bout de
+	# la banlieue, et c'est ce qui le rend drôle à trouver.
+	PlanVille.PARC: [0, 2, 3, 13, 17, 20, 20],
 	PlanVille.EAU: [0],
 }
 
@@ -47,10 +84,29 @@ const KENNEY_VOITURES := {
 	0: "sedan", 1: "sedan-sports", 2: "hatchback-sports", 3: "suv", 4: "suv-luxury",
 	5: "taxi", 6: "van", 7: "delivery", 8: "truck", 9: "police",
 	10: "sedan-sports", 11: "suv", 12: "truck-flat", 15: "ambulance", 18: "firetruck",
+	19: "race", 20: "tractor", 21: "garbage-truck", 22: "delivery-flat",
 }
 const CHEMIN_VOITURES := "res://modeles/kenney/voitures/"
 
+## Les coques du Watercraft Pack, dans le même espace d'indices que les
+## carrosseries : c'est ce qui fait qu'un bateau traverse le réseau, la nappe
+## du morceau et le vol de véhicule SANS UNE LIGNE de code en plus.
+const KENNEY_BATEAUX := {
+	23: "boat-row-large", 24: "boat-speed-a", 25: "boat-speed-c",
+	26: "boat-fishing-small", 27: "boat-tug-a",
+}
+const CHEMIN_BATEAUX := "res://modeles/kenney/bateaux/"
+## Ce qui s'amarre au bord d'un quai. La chaloupe et les vedettes partout, le
+## remorqueur et la barque plus rarement : un port où chaque anneau porte un
+## remorqueur ne ressemble pas à un port.
+const FLOTTE_AMARREE := [23, 24, 24, 25, 25, 26, 23, 27]
+
+static func est_bateau(indice: int) -> bool:
+	return KENNEY_BATEAUX.has(indice)
+
 static func modele_kenney_de(indice: int) -> String:
+	if KENNEY_BATEAUX.has(indice):
+		return CHEMIN_BATEAUX + String(KENNEY_BATEAUX[indice]) + ".glb"
 	if not KENNEY_VOITURES.has(indice):
 		return ""
 	return CHEMIN_VOITURES + String(KENNEY_VOITURES[indice]) + ".glb"
@@ -80,7 +136,8 @@ static func maillage_voiture(indice: int) -> Mesh:
 ## Vrai si ce gabarit est dessiné par un modèle Kenney (matière texturée) et
 ## non par nos voxels (matière à couleurs de sommet).
 static func est_kenney(indice: int) -> bool:
-	return KENNEY_VOITURES.has(clampi(indice, 0, MODELES_VOITURES.size() - 1))
+	var i := clampi(indice, 0, MODELES_VOITURES.size() - 1)
+	return KENNEY_VOITURES.has(i) or KENNEY_BATEAUX.has(i)
 
 ## Les phares d'une voiture conduite : deux flaques chaudes devant, une lueur
 ## rouge derrière. Au crépuscule, c'est ce qui dit dans quel sens on roule et
@@ -96,6 +153,46 @@ static func phares(racine: Node3D, avant: float, arriere: float) -> void:
 	noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	noeud.name = "Phares"
 	racine.add_child(noeud)
+	# LE FAISCEAU : un coin de lumière qui part des phares, à hauteur de
+	# calandre, et retombe vers le sol en s'élargissant. Il tient au même nœud
+	# que la tache au sol, pour s'éteindre avec elle quand la voiture est garée.
+	# ⚠ Enfant de « Phares » et pas frère : `_placer_les_autos` allume et
+	# éteint « Phares » par son nom, et un frère serait resté allumé au parking.
+	var fs := SurfaceTool.new()
+	fs.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var teinte := Color(1.0, 0.86, 0.6, 0.42)
+	var pres := [Vector3(avant + 0.2, 0.9, -1.7), Vector3(avant + 0.2, 0.9, 1.7)]
+	var loin := [Vector3(avant + 15.0, 0.15, -5.2), Vector3(avant + 15.0, 0.15, 5.2)]
+	var sommets := [pres[0], pres[1], loin[1], pres[0], loin[1], loin[0]]
+	var uvs := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 0), Vector2(1, 1), Vector2(0, 1)]
+	for k in sommets.size():
+		fs.set_color(teinte)
+		fs.set_uv(uvs[k])
+		fs.set_normal(Vector3.UP)
+		fs.add_vertex(sommets[k])
+	var faisceau := MeshInstance3D.new()
+	faisceau.mesh = fs.commit()
+	faisceau.material_override = MatieresCarnage.faisceau()
+	faisceau.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	faisceau.name = "Faisceau"
+	noeud.add_child(faisceau)
+
+## LE GYROPHARE TOURNE : bleu puis rouge, quatre fois par seconde, feu du toit
+## et lueur au sol ensemble. `allume` à faux (voiture garée) : les deux feux
+## restent allumés fixes et les lueurs s'éteignent — une patrouille au parking
+## n'est pas en poursuite.
+static func clignoter_gyrophare(racine: Node3D, temps: float, allume: bool) -> void:
+	var rampe := racine.get_node_or_null("Gyrophare") as Node3D
+	if rampe == null:
+		return
+	var bleu := fmod(temps, 0.5) < 0.25
+	for nom: String in ["Bleu", "Rouge", "LueurBleue", "LueurRouge"]:
+		var feu := rampe.get_node_or_null(nom) as Node3D
+		if feu == null:
+			continue
+		var est_bleu: bool = nom.contains("Bleu")
+		var lueur: bool = nom.begins_with("Lueur")
+		feu.visible = (est_bleu == bleu) if allume else not lueur
 
 ## Deux VRAIS phares — des projecteurs — pour la voiture du joueur seulement :
 ## le mode compatibilité n'admet que huit lumières par objet, deux suffisent à
@@ -383,7 +480,8 @@ static func matiere_kenney(chemin_modele: String) -> Material:
 		# fenêtres la nuit (seulement pour les bâtiments — une voiture dont les
 		# vitres brillent, ça fait un sapin de Noël).
 		m = MatieresCarnage.kenney(texture, chemin_modele.contains("/batiments/") \
-			or chemin_modele.contains("/pavillons/") or chemin_modele.contains("/industriel/"))
+			or chemin_modele.contains("/pavillons/") or chemin_modele.contains("/industriel/"),
+			chemin_modele.contains("/voitures/") or chemin_modele.contains("/bateaux/"))
 	else:
 		# Pas d'atlas (le Nature Kit) : la couleur de sommet porte tout.
 		var simple := StandardMaterial3D.new()
@@ -393,6 +491,44 @@ static func matiere_kenney(chemin_modele: String) -> Material:
 		m = simple
 	_matieres_kenney[chemin_modele] = m
 	return m
+
+## LA COULEUR D'UNE VOITURE, UNE FOIS POUR TOUTES. La nappe des dormantes, le
+## trafic qui roule, la voiture qu'on vole et celle qu'on rend passent tous
+## ici. La peinture du garage d'abord (elle voyage sur le réseau, `teinte`) ;
+## la bannière d'un gang ensuite ; sinon la couleur tirée de l'IDENTIFIANT —
+## la même que la nappe a peinte, pour que la voiture qu'on prend soit celle
+## qu'on regardait. Le blanc veut dire « livrée d'usine » (taxi, police).
+static func couleur_de_l_auto(carte: PlanVille, modele: int, id: int, de_gang: bool,
+		gang: int, teinte: int) -> Color:
+	if teinte != 0:
+		return Color.hex(teinte)
+	if de_gang:
+		return carte.couleur_du_gang(gang)
+	# La voiture de départ d'un joueur (modèle -1) n'a pas de couleur à elle :
+	# blanc, et c'est la couleur du joueur qui la peint (`_batir_voiture_de`).
+	if modele < 0:
+		return Color.WHITE
+	return VoxelsCarnage.peinture(modele, id)
+
+## Une matière par (modèle, peinture), partagée : dix peintures de trafic,
+## dix du garage, sept de gang — et pas un duplicata par voiture. Le blanc
+## rend la matière du kit telle quelle (couleur d'usine).
+static var _matieres_peintes: Dictionary = {}
+
+static func matiere_peinte(chemin_modele: String, couleur: Color) -> Material:
+	if couleur == Color.WHITE:
+		return matiere_kenney(chemin_modele)
+	var cle := "%s|%d" % [chemin_modele, couleur.to_rgba32()]
+	if _matieres_peintes.has(cle):
+		return _matieres_peintes[cle]
+	var matiere: Material = matiere_kenney(chemin_modele).duplicate()
+	if matiere is ShaderMaterial:
+		(matiere as ShaderMaterial).set_shader_parameter("teinte", couleur)
+		MatieresCarnage.suivre_kenney(matiere)
+	elif matiere is BaseMaterial3D:
+		(matiere as BaseMaterial3D).albedo_color = couleur
+	_matieres_peintes[cle] = matiere
+	return matiere
 
 ## LES IMMEUBLES viennent maintenant des City Kits : commercial pour le centre
 ## et les affaires, industriel pour les hangars, suburban pour les pavillons.
@@ -617,8 +753,7 @@ static func voiture_kit(indice: int, couleur: Color = Color.WHITE, halo_couleur:
 	var i: int = clamp(indice, 0, MODELES_VOITURES.size() - 1)
 
 	if halo:
-		var anneau := Decor.anneau(2.7, 0.22, halo_couleur, 0.95)
-		anneau.rotation_degrees = Vector3(90, 0, 0)
+		var anneau := racine_anneau(2.7, halo_couleur, 0.22)
 		anneau.position = Vector3(0, 0.04, 0)
 		anneau.name = "Halo"
 		racine.add_child(anneau)
@@ -626,18 +761,16 @@ static func voiture_kit(indice: int, couleur: Color = Color.WHITE, halo_couleur:
 	var coque := MeshInstance3D.new()
 	coque.name = "Coque"
 	coque.mesh = maillage_voiture(i)
+	# BLANC = COULEUR D'USINE. Un modèle Kenney porte son atlas : la peinture
+	# ne recouvre que sa TÔLE (voir `MatieresCarnage.KENNEY`), vitres, pneus et
+	# chromes gardent leur gris. Un modèle voxel garde la matière à couleurs de
+	# sommet. ⚠ Pour un modèle du kit, le blanc ne retombe plus sur l'orange
+	# `VoxelsCarnage.peinture(i, 7)` : c'est l'appelant qui choisit la couleur
+	# (`couleur_de_l_auto`), la même que la nappe des dormantes — sinon une
+	# berline garée rouge démarrait orange, et c'est arrivé.
 	var peinture := couleur if couleur != Color.WHITE else VoxelsCarnage.peinture(i, 7)
-	# Un modèle Kenney porte son atlas : la peinture le TEINTE (vitres et pneus
-	# sont sombres dans l'atlas, ils le restent en multipliant). Un modèle voxel
-	# garde la matière à couleurs de sommet.
 	if est_kenney(i):
-		var matiere: Material = matiere_kenney(modele_kenney_de(i)).duplicate()
-		var teinte_v := peinture if couleur != Color.WHITE else Color.WHITE
-		if matiere is ShaderMaterial:
-			(matiere as ShaderMaterial).set_shader_parameter("teinte", teinte_v)
-		elif matiere is BaseMaterial3D:
-			(matiere as BaseMaterial3D).albedo_color = teinte_v
-		coque.material_override = matiere
+		coque.material_override = matiere_peinte(modele_kenney_de(i), couleur)
 	else:
 		coque.material_override = MatieresCarnage.voxel_teinte(peinture)
 	coque.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
@@ -649,11 +782,43 @@ static func voiture_kit(indice: int, couleur: Color = Color.WHITE, halo_couleur:
 		var rampe := Node3D.new()
 		rampe.name = "Gyrophare"
 		for cote in [-1.0, 1.0]:
+			var teinte_feu: Color = Palette.SERIE if cote < 0.0 else Palette.CRITIQUE
 			var feu := Decor.boite(Vector3(0.5, 0.3, 0.5), Palette.SERIE, false)
-			feu.material_override = Decor.matiere_lumineuse(Palette.SERIE if cote < 0.0 else Palette.CRITIQUE, 1.5)
+			feu.material_override = Decor.matiere_lumineuse(teinte_feu, 1.5)
 			feu.position = Vector3(-0.2, 2.75, cote * 0.55)
+			feu.name = "Bleu" if cote < 0.0 else "Rouge"
 			rampe.add_child(feu)
+			# LA LUEUR AU SOL du gyrophare : une flaque additive bleue, une
+			# rouge, que `clignoter_gyrophare` allume à tour de rôle. Deux cubes
+			# émissifs sur un toit ne se voient pas de soixante unités de haut ;
+			# une rue qui passe au bleu puis au rouge, si. C'est ce qui fait
+			# lire « poursuite » avant d'avoir compté les voitures.
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			_flaque(st, Vector3(-0.2, 0.06, cote * 1.4), Vector3(8.0, 0, 0), Vector3(0, 0, 6.0), Color(teinte_feu, 0.85))
+			var lueur := MeshInstance3D.new()
+			lueur.mesh = st.commit()
+			lueur.material_override = MatieresCarnage.flaque()
+			lueur.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			lueur.name = "LueurBleue" if cote < 0.0 else "LueurRouge"
+			rampe.add_child(lueur)
 		racine.add_child(rampe)
+
+	# LA MITRAILLEUSE DE BORD, sur le toit. Elle est posée ÉTEINTE et le jeu
+	# la montre : voiture de gang (§1.3), ou atelier payé. C'est le seul signe
+	# extérieur d'une arme montée — jusqu'ici elle n'existait que dans une puce
+	# du tableau de bord, et deux voitures identiques n'en étaient pas.
+	#
+	# ⚠ LA HAUTEUR EST MESURÉE, PAS DEVINÉE. Vingt-huit carrosseries, d'un
+	# coupé à un camion de pompiers : un chiffre en dur plantait le canon dans
+	# le pare-brise de l'une et à un mètre au-dessus du toit de l'autre. C'est
+	# exactement la faute du char, qui est sorti du banc en pick-up vert parce
+	# que sa tourelle était à l'intérieur de la caisse.
+	var haut_du_toit: float = 1.8
+	if coque.mesh != null:
+		var boite_c := coque.mesh.get_aabb()
+		haut_du_toit = boite_c.position.y + boite_c.size.y
+	racine.add_child(_mitrailleuse(haut_du_toit))
 
 	# Le pare-buffle n'apparaît qu'avec l'éperon : il devient ainsi le signe
 	# visible du bonus, au lieu d'un accessoire permanent qui alourdit la
@@ -680,6 +845,44 @@ static func voiture_kit(indice: int, couleur: Color = Color.WHITE, halo_couleur:
 		racine.add_child(nom_j)
 	return racine
 
+## LA MITRAILLEUSE DE BORD sur son affût : un socle, un tube, un chargeur. Elle
+## se monte à `hauteur`, c'est-à-dire sur le toit de la carrosserie qui la
+## porte — mesuré par l'appelant, jamais écrit en dur.
+##
+## Elle regarde +X comme tout le reste du parc : le canon braqué vers l'arrière
+## serait drôle une seule fois.
+static func _mitrailleuse(hauteur: float) -> Node3D:
+	var racine := Node3D.new()
+	racine.name = "Mitrailleuse"
+	racine.visible = false
+	var socle := Decor.cylindre(0.32, 0.22, Color("#2a2d31"), false)
+	socle.position = Vector3(-0.3, hauteur + 0.11, 0)
+	racine.add_child(socle)
+	var bloc := Decor.boite(Vector3(0.7, 0.32, 0.34), Color("#3c4147"), false)
+	bloc.position = Vector3(-0.15, hauteur + 0.38, 0)
+	racine.add_child(bloc)
+	var tube := Decor.boite(Vector3(1.5, 0.16, 0.16), Color("#1b1d20"), false)
+	tube.position = Vector3(0.65, hauteur + 0.40, 0)
+	racine.add_child(tube)
+	# Le chargeur en travers : c'est lui qui fait lire « mitrailleuse » plutôt
+	# que « antenne » sur une image de deux cents pixels.
+	var chargeur := Decor.boite(Vector3(0.34, 0.26, 0.5), Palette.AVERTISSEMENT.darkened(0.3), false)
+	chargeur.position = Vector3(-0.15, hauteur + 0.34, 0.3)
+	racine.add_child(chargeur)
+	return racine
+
+## Montrer ou cacher la mitrailleuse d'une carrosserie. Une seule fonction
+## partagée : le joueur qui l'achète à l'atelier, la voiture de gang qui la
+## porte d'origine et le joueur distant qu'on voit passer doivent montrer la
+## même chose — sinon on apprend à la reconnaître et elle ment une fois sur
+## trois.
+static func armer_la_voiture(carrosserie: Node3D, montee: bool) -> void:
+	if carrosserie == null:
+		return
+	var arme := carrosserie.get_node_or_null("Mitrailleuse") as Node3D
+	if arme != null:
+		arme.visible = montee
+
 ## Le tag d'un repaire : la couleur du gang peinte au sol, son initiale, et une
 ## couronne. C'est le repère qu'on voit de loin — et ce qu'on vise quand on
 ## vient nettoyer.
@@ -695,9 +898,49 @@ static func tag_de_gang(couleur: Color, nom: String) -> Node3D:
 	initiale.position = Vector3(0, 0.12, 0)
 	racine.add_child(initiale)
 	var mot := Decor.etiquette("REPAIRE — " + nom.to_upper(), couleur, 30)
+	mot.name = "Mot"
 	mot.position = Vector3(0, 3.6, 0)
 	racine.add_child(mot)
+	dalle.name = "Dalle"
+	initiale.name = "Initiale"
 	return racine
+
+## REPEINDRE UN TAG. Un repaire PRIS (le raid, §3) passe aux couleurs de celui
+## qui l'a pris, et l'écriteau le dit. On repeint plutôt que de rebâtir : le
+## tag est enfant du morceau, et rebâtir un morceau pour trois nœuds, c'est
+## une seconde d'arrêt au moment précis où le joueur vient de gagner.
+##
+## ⚠ L'ANNEAU N'EST PAS NOMMÉ (il vient de `racine_anneau`) : on le retrouve
+## par son type. Le nommer aurait marché aussi, mais `racine_anneau` sert à
+## huit endroits et lui donner un nom ici l'aurait donné partout.
+static func repeindre_le_tag(tag: Node3D, couleur: Color, texte: String) -> void:
+	if tag == null:
+		return
+	for enfant in tag.get_children():
+		if enfant is MeshInstance3D and String(enfant.name) == "Dalle":
+			(enfant as MeshInstance3D).material_override = Decor.matiere_lumineuse(couleur, 0.55, 0.35)
+		elif enfant is Node3D and String(enfant.name) == "Mot":
+			_ecrire(enfant as Node3D, texte, couleur)
+		elif enfant is Node3D and String(enfant.name) == "Initiale":
+			_ecrire(enfant as Node3D, texte.substr(0, 1).to_upper(), couleur)
+		elif enfant is MeshInstance3D:
+			var m := (enfant as MeshInstance3D).material_override
+			if m is BaseMaterial3D:
+				var copie := (m as BaseMaterial3D).duplicate() as BaseMaterial3D
+				copie.albedo_color = couleur
+				copie.emission = couleur
+				(enfant as MeshInstance3D).material_override = copie
+
+## Récrire une étiquette posée par `Decor.etiquette` : c'est un `Label3D`, ou un
+## nœud qui en contient un.
+static func _ecrire(noeud: Node3D, texte: String, couleur: Color) -> void:
+	if noeud is Label3D:
+		(noeud as Label3D).text = texte
+		(noeud as Label3D).modulate = couleur
+		return
+	for enfant in noeud.get_children():
+		if enfant is Node3D:
+			_ecrire(enfant as Node3D, texte, couleur)
 
 ## Une épave : une berline noircie, penchée, avec de la braise. Elle reste au
 ## sol quelques secondes — une voiture qui disparaît d'un coup laisse croire à
@@ -854,6 +1097,40 @@ static func maillage_casquette() -> ArrayMesh:
 ## casting, la casquette porte la couleur, le fanion distingue un homme de main
 ## d'un passant : la couleur seule ne suffit pas, une silhouette de trois pixels
 ## dans une rue sombre ne se lit pas.
+## LES CINQ COULEURS DE L'HUMEUR D'UN GANG, du « il vous tire dessus » au
+## « il se bat à côté de vous ». Une seule table pour toute la ville :
+## l'enseigne d'une cabine et l'anneau sous un homme de main disent la même
+## chose, elles ne peuvent pas se contredire.
+##
+## Le rouge n'est pas « pas de contrat » mais « on vous tire dessus » ; entre
+## les deux, le brun dit qu'on vous parle encore mais qu'on ne vous confie
+## rien. Sans ce cran intermédiaire, le joueur passait du vert au rouge sans
+## avoir rien vu venir.
+const COULEURS_HUMEUR := [
+	Color("#d0402c"),   ## tire à vue
+	Color("#a05a2c"),   ## hostile — aucun contrat
+	Color("#e0b23a"),   ## neutre — contrats de base
+	Color("#4cc25a"),   ## amical — contrats moyens
+	Color("#7ef0a0"),   ## allié — contrats difficiles
+]
+
+## L'anneau posé sous un homme de gang quand son humeur n'est pas neutre.
+##
+## ⚠ À PLAT, ET SANS LE QUART DE TOUR. Le halo d'un joueur et celui d'une
+## cabine tournent de 90° sur X — un `TorusMesh` est DÉJÀ couché dans le plan
+## du sol, ce quart de tour le met donc DEBOUT, et l'anneau se lisait comme un
+## cerceau planté en travers du bonhomme (mesuré au banc, `outils/tableau.sh`).
+## Ici on le laisse au sol, où il fait ce qu'on lui demande : une pastille
+## sous les pieds.
+##
+## Rayon 0,8 : plus petit que le halo d'un joueur (1,5), sinon deux hommes de
+## main côte à côte ont des anneaux qui se chevauchent.
+static func anneau_humeur(couleur: Color) -> MeshInstance3D:
+	var anneau := Decor.anneau(0.8, 0.12, couleur, 1.6)
+	anneau.position = Vector3(0, 0.06, 0)
+	anneau.name = "Humeur"
+	return anneau
+
 static func pieton(couleur: Color, fanion: bool = false, pseudo: String = "",
 		halo: bool = false, peau: String = "") -> Node3D:
 	var racine := Node3D.new()
@@ -872,9 +1149,7 @@ static func pieton(couleur: Color, fanion: bool = false, pseudo: String = "",
 		racine.add_child(calotte)
 
 	if halo:
-		var anneau := Decor.anneau(1.5, 0.16, couleur, 0.95)
-		anneau.rotation_degrees = Vector3(90, 0, 0)
-		anneau.position = Vector3(0, 0.05, 0)
+		var anneau := racine_anneau(1.5, couleur, 0.16)
 		anneau.name = "Halo"
 		racine.add_child(anneau)
 
@@ -906,6 +1181,347 @@ static func pieton(couleur: Color, fanion: bool = false, pseudo: String = "",
 ## Le sol d'un garage de peinture : une dalle lumineuse sous la façade. Sans
 ## marque au sol, une porte de garage dans laquelle on peut entrer ressemble à
 ## un mur — et on ne l'essaie jamais.
+## L'ATELIER (guide §7.2). Ce n'est PAS un lieu de plus sur la carte : c'est un
+## garage de peinture sur deux qui vend aussi des modifications. Deux raisons.
+## D'abord GTA 2 fait pareil — on entre chez « Max Paynt » pour repeindre ET
+## pour s'équiper. Ensuite, un septième genre de lieu, c'est une pastille de
+## plus sur une carte qui en porte déjà six, et un joueur qui cherche un garage
+## en trouve un sur deux qui ne repeint pas.
+##
+## ⚠ LE CHOIX SE FAIT AU VOLANT, pas dans un menu. Cinq pastilles peintes en
+## couronne sur la dalle ; on se gare sur celle qu'on veut et `F` achète. À
+## trois touches en tout dans ce jeu, ouvrir un menu déroulant au milieu d'une
+## poursuite, c'est demander au joueur de mourir en lisant.
+const ATELIER := [
+	{"cle": "plaques", "nom": "PLAQUES", "prix": 450, "couleur": Color("#5aa0e0"),
+		"mot": "la police perd votre description"},
+	{"cle": "mitrailleuse", "nom": "MITRAILLEUSE", "prix": 950, "couleur": Color("#f2c53d"),
+		"mot": "tir avant depuis le volant"},
+	{"cle": "mines", "nom": "MINES", "prix": 750, "couleur": Color("#d0402c"),
+		"mot": "F largue une mine derrière soi"},
+	{"cle": "huile", "nom": "HUILE", "prix": 550, "couleur": Color("#6a5a7a"),
+		"mot": "F répand une flaque"},
+	{"cle": "bombe", "nom": "BOMBE", "prix": 650, "couleur": Color("#e07a3c"),
+		"mot": "la voiture saute après votre départ"},
+]
+
+## Un garage sur deux, tiré de son PÂTÉ : la carte est engendrée, la liste des
+## ateliers ne peut donc pas être écrite à la main — et elle doit tomber pareil
+## chez les quatre joueurs sans passer par le réseau.
+## L'ARMURERIE D'UN REPAIRE (§3) : ce que le gang vend à ceux qu'il couvre.
+##
+## Jusqu'ici le jeu n'avait AUCUN endroit où ACHETER une arme : elles ne
+## tombaient que des caisses et des corps, c'est-à-dire du hasard. C'est ce qui
+## rend le respect payant — à quatre-vingts, on ne se demande plus où trouver
+## des roquettes, on sait chez qui aller.
+##
+## Deux armes seulement, parce que le jeu n'en a que deux à vendre (le pistolet
+## ne s'épuise jamais, la mitrailleuse de bord se monte à l'atelier). Un gang
+## en tient une, et c'est ce qui donne une raison de choisir SON gang plutôt
+## qu'un autre.
+const ARMURERIE := [
+	{"arme": "mitraillette", "prix": 700, "mot": "chargeur plein"},
+	{"arme": "roquette", "prix": 1700, "mot": "six tubes"},
+]
+## Qui vend quoi. Le Consortium (6) vend des roquettes : c'est le gang commun
+## aux trois districts, celui qu'on peut fréquenter partout, et il vaut mieux
+## que la marchandise rare ne soit pas celle du gang qu'on croise le plus.
+const ARME_DU_GANG := [0, 1, 0, 1, 0, 1, 1]
+
+static func armurerie_du_gang(gang: int) -> Dictionary:
+	return ARMURERIE[int(ARME_DU_GANG[posmod(gang, ARME_DU_GANG.size())])]
+
+static func est_atelier(id: int) -> bool:
+	return posmod(hash(Vector2i(id, 7717)), 100) < 55
+
+## Le centre d'une baie, en PIXELS et relatif au centre du garage. Le premier
+## est au nord, puis on tourne dans le sens des aiguilles : c'est l'ordre du
+## catalogue, et celui des étiquettes.
+static func baie_atelier(indice: int) -> Vector2:
+	var angle := -PI * 0.5 + TAU * float(posmod(indice, ATELIER.size())) / float(ATELIER.size())
+	return Vector2.RIGHT.rotated(angle) * PlanVille.RAYON_GARAGE * 0.60
+
+## Sur quelle baie se tient ce point : la plus proche, sans seuil. Un seuil
+## laisserait le joueur au milieu de la dalle sans rien acheter et sans savoir
+## pourquoi — là, il y a toujours une réponse, et l'écran la nomme.
+static func baie_sous(point: Vector2, centre: Vector2) -> int:
+	var meilleure := 0
+	var distance := INF
+	for i in ATELIER.size():
+		var d: float = (centre + baie_atelier(i)).distance_to(point)
+		if d < distance:
+			distance = d
+			meilleure = i
+	return meilleure
+
+## LES QUATRE TENUES (guide §5). Le bleu reste à la police ordinaire ; le SWAT
+## est en bleu de nuit, l'agent spécial en noir, l'armée en olive. C'est ce qui
+## dit, à l'écran et sans un mot, que la rue vient de changer de catégorie.
+## L'ordre est celui de `VilleVivante.CORPS`.
+const TENUES_CORPS := [Color("#3987e5"), Color("#243a5e"), Color("#191920"), Color("#5e6b38")]
+
+## Un uniforme, tel que la rue le montre.
+##
+## ⚠ LA CASQUETTE NE SUFFIT PAS. Les quatre corps ont d'abord été distingués
+## par la seule couleur passée à `pieton` — qui ne teint que la calotte et le
+## fanion. Au banc, les quatre uniformes étaient RIGOUREUSEMENT identiques :
+## le corps du personnage vient de l'atlas Kenney, il ne se teinte pas. D'où
+## le GILET : une plaque de couleur sur le torse, large et haute, qui est
+## précisément ce qu'une caméra en plongée voit d'un homme debout.
+static func uniforme(corps: int) -> Node3D:
+	var couleur: Color = TENUES_CORPS[posmod(corps, TENUES_CORPS.size())]
+	var racine := pieton(couleur, true, "", false, PEAU_FLIC)
+	var gilet := Decor.boite(Vector3(0.92, 0.85, 0.66), couleur, false)
+	gilet.position = Vector3(0, 1.95, 0)
+	gilet.name = "Gilet"
+	racine.add_child(gilet)
+	return racine
+
+## LE CHAR (guide §5, niveau 6). Pas de modèle de char dans les kits : on
+## prend le camion, on l'habille en olive, on lui pose deux chenilles et un
+## CANON qui dépasse à l'avant. Vu de dessus — la seule vue du jeu — c'est
+## exactement ce qui manquait pour ne pas le confondre avec un poids lourd.
+##
+## ⚠ Le canon est le repère qui compte : sans lui, le joueur voyait un camion
+## vert, ne comprenait pas d'où venaient les obus, et cherchait un tireur sur
+## les toits.
+static func char_arme() -> Node3D:
+	var racine := voiture_kit(8, Color("#5e6b38"))
+	# ⚠ LES CHIFFRES SONT CEUX DE LA CAISSE, MESURÉS. Le camion du kit fait
+	# 6,25 × 2,75 × 3,18 une fois posé (`get_aabb`) : la tourelle a d'abord été
+	# plantée à 1,5 de haut, c'est-à-dire À L'INTÉRIEUR de la carrosserie, et
+	# le char sortait du banc en simple pick-up vert. On ne devine pas la
+	# taille d'un modèle importé, on la mesure.
+	var tourelle := Decor.boite(Vector3(2.0, 0.85, 2.0), Color("#4a5530"), false)
+	tourelle.position = Vector3(-0.2, 2.9, 0)
+	racine.add_child(tourelle)
+	# Le canon pointe vers +X : les carrosseries du kit regardent +X une fois
+	# posées par `voiture_kit`, et un canon braqué sur l'arrière serait drôle
+	# une seule fois. Il DÉPASSE du capot (3,125) — c'est à ça qu'on le
+	# reconnaît de dessus.
+	# ⚠ Il SORT DE LA TOURELLE. Posé trois unités devant, il flottait tout
+	# seul en l'air avec un trou au milieu — on voyait une poutre, pas un char.
+	var canon := Decor.boite(Vector3(3.6, 0.45, 0.45), Color("#3a4326"), false)
+	canon.position = Vector3(2.4, 2.85, 0)
+	racine.add_child(canon)
+	# Les chenilles longent la caisse SANS déborder : à 0,75 de large posées à
+	# 1,5 du milieu, elles dépassaient de la carrosserie (demi-largeur 1,59) et
+	# le char portait une jupe noire.
+	for cote in [-1.0, 1.0]:
+		var chenille := Decor.boite(Vector3(6.0, 0.7, 0.5), Color("#23231f"), false)
+		chenille.position = Vector3(0, 0.4, cote * 1.3)
+		racine.add_child(chenille)
+	return racine
+
+## UNE RAME DE TRAIN (§1.3) : une motrice et deux voitures, en boîtes. Pas de
+## modèle importé — le Car Kit n'a pas de train, et une rame est la seule chose
+## de la ville qu'on voit toujours de haut et jamais de près.
+##
+## ⚠ Les chiffres sont ceux de la VOIE. Le nuanceur du sol trace les deux rails
+## à ±0,75 unité de l'axe (`MatieresCarnage`) : une caisse plus large que ~2,6
+## flotte à côté de ses rails, et l'illusion tombe d'un coup vue de dessus.
+## La rame regarde +X, comme les carrosseries du kit — le jeu la tourne d'un
+## seul angle, celui de la voie.
+const LONG_WAGON_3D := 9.6        ## PlanVille.PAS en unités 3D : `VilleVivante.LONG_WAGON` / 10
+const ECART_WAGON_3D := 1.2
+const COULEUR_TRAIN := Color("#8f2f2a")
+const COULEUR_TOIT := Color("#2c2f36")
+## ⚠ Le quai doit connaître la longueur d'une rame, et `VilleVivante` connaît
+## déjà `WAGONS`. On ne le lui demande PAS : les formes sont chargées par des
+## bancs qui n'instancient pas la ville, et un `class_name` qui en appelle un
+## autre pour trois wagons crée un aller-retour qu'on paie à chaque relecture.
+const WAGONS_QUAI := 3
+
+static func rame_de_train(wagons: int) -> Node3D:
+	var racine := Node3D.new()
+	for k in wagons:
+		# La MOTRICE est en tête (k = 0) : c'est elle qui porte le phare et la
+		# calandre, et c'est à ça qu'on voit dans quel sens la rame arrive.
+		var motrice := k == 0
+		var x := -float(k) * (LONG_WAGON_3D + ECART_WAGON_3D)
+		var voiture := Node3D.new()
+		voiture.position = Vector3(x, 0, 0)
+		racine.add_child(voiture)
+		var caisse := Decor.boite(Vector3(LONG_WAGON_3D, 2.3, 2.6),
+			COULEUR_TRAIN if motrice else COULEUR_TRAIN.darkened(0.18))
+		caisse.position = Vector3(0, 1.5, 0)
+		voiture.add_child(caisse)
+		var toit := Decor.boite(Vector3(LONG_WAGON_3D * 0.94, 0.35, 2.75), COULEUR_TOIT)
+		toit.position = Vector3(0, 2.75, 0)
+		voiture.add_child(toit)
+		# Le bogie : une semelle sombre qui pose la caisse sur les rails. Sans
+		# elle la caisse flottait au-dessus du ballast, et de haut ça se voit —
+		# c'est l'ombre qui trahit, pas la caisse.
+		var bogie := Decor.boite(Vector3(LONG_WAGON_3D * 0.8, 0.5, 1.7), Color("#191a1d"))
+		bogie.position = Vector3(0, 0.3, 0)
+		voiture.add_child(bogie)
+		# Les FENÊTRES : deux bandes claires par flanc. C'est la seule chose qui
+		# distingue un wagon d'un conteneur, vu d'en haut à trois cents pixels.
+		for cote in [-1.0, 1.0]:
+			var bande := Decor.boite(Vector3(LONG_WAGON_3D * 0.72, 0.7, 0.1),
+				Palette.SERIE.lightened(0.25), false)
+			bande.material_override = Decor.matiere_lumineuse(Palette.SERIE.lightened(0.3), 0.5)
+			bande.position = Vector3(0, 1.95, cote * 1.32)
+			voiture.add_child(bande)
+		if motrice:
+			var phare := Decor.boite(Vector3(0.3, 0.5, 1.4), Color("#ffeaa0"), false)
+			phare.material_override = Decor.matiere_lumineuse(Color("#ffeaa0"), 2.2)
+			phare.position = Vector3(LONG_WAGON_3D * 0.5, 1.6, 0)
+			phare.name = "Phare"
+			voiture.add_child(phare)
+	return racine
+
+## LE QUAI : la dalle où le train marque l'arrêt. Elle est POSÉE PAR LE JEU à
+## l'abscisse que `VilleVivante.gares()` donne, pas dessinée dans la carte —
+## la voie change avec le code de la manche, un quai dessiné à la main
+## tomberait dans la rivière une manche sur deux.
+static func quai() -> Node3D:
+	var racine := Node3D.new()
+	# ⚠ Le quai s'est d'abord peint avec la palette de l'interface
+	# (`Palette.SURFACE`, `Palette.SERIE`) : une dalle NOIRE surmontée de deux
+	# auvents bleu vif. La palette sert à l'écran, pas au béton — le décor de
+	# la ville se peint avec les gris de la ville.
+	# ⚠ LE QUAI FAIT LA LONGUEUR D'UNE RAME, pas seize unités. Trop court, il
+	# ne passait que sous la motrice : le train s'arrêtait « à quai » avec ses
+	# deux voitures dans le vide, et l'on montait à côté d'un bout de béton de
+	# la taille d'un abribus. Une rame mesure trois wagons et deux écarts —
+	# le quai les couvre, plus une marge de chaque bout.
+	var long_quai: float = float(WAGONS_QUAI) * (LONG_WAGON_3D + ECART_WAGON_3D) + 6.0
+	var dalle := Decor.boite(Vector3(long_quai, 0.5, 3.0), Color("#9a9890"))
+	dalle.position = Vector3(0, 0.25, 3.4)
+	racine.add_child(dalle)
+	# La BANDE JAUNE au bord du quai : c'est le seul repère qui dise, de haut,
+	# de quel côté le train passe.
+	var bordure := Decor.boite(Vector3(long_quai, 0.16, 0.5), Palette.AVERTISSEMENT, false)
+	bordure.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 0.7)
+	bordure.position = Vector3(0, 0.55, 2.1)
+	racine.add_child(bordure)
+	for cote in [-1.0, 0.0, 1.0]:
+		var abri := Decor.boite(Vector3(3.6, 0.3, 2.6), Color("#3d4148"))
+		abri.position = Vector3(cote * long_quai * 0.33, 3.1, 4.0)
+		racine.add_child(abri)
+		for pied in [-1.5, 1.5]:
+			var poteau := Decor.boite(Vector3(0.26, 3.0, 0.26), Color("#5c5f66"))
+			poteau.position = Vector3(cote * long_quai * 0.33 + pied, 1.6, 4.9)
+			racine.add_child(poteau)
+	var mot := Decor.etiquette("GARE", Palette.AVERTISSEMENT, 34)
+	mot.position = Vector3(0, 5.0, 3.4)
+	racine.add_child(mot)
+	return racine
+
+## LE COMPACTEUR (§1.3) : une fosse de tôle entre deux mâchoires, au bord de la
+## voie ferrée. On y entre au volant, on en ressort à pied.
+##
+## Il se lit de haut à trois choses : la DALLE rouillée (on n'a ça nulle part
+## ailleurs en ville), les deux MÂCHOIRES qui l'encadrent, et le tapis jaune
+## rayé qui dit où se garer. Sans le tapis, on tourne autour en cherchant le
+## point exact — c'est la leçon des baies de l'atelier, qui ont mis trois
+## essais à devenir visibles.
+const COULEUR_CASSE := Color("#6b4a32")
+const COULEUR_MACHOIRE := Color("#3a3d42")
+
+static func compacteur() -> Node3D:
+	var racine := Node3D.new()
+	var rayon: float = VilleVivante.RAYON_CASSE * Decor.ECHELLE
+	var dalle := Decor.boite(Vector3(rayon * 2.0, 0.24, rayon * 2.0), COULEUR_CASSE)
+	dalle.position = Vector3(0, 0.12, 0)
+	racine.add_child(dalle)
+	# Le TAPIS : la place exacte, en jaune. Il est posé AU-DESSUS de la dalle
+	# (0,26 contre 0,24) — glissé dedans, il disparaissait sous elle, ce qui est
+	# arrivé aux pastilles de l'atelier avant qu'on ne les remonte.
+	var tapis := Decor.boite(Vector3(rayon * 1.15, 0.08, rayon * 0.9),
+		Palette.AVERTISSEMENT.darkened(0.15), false)
+	tapis.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 0.55)
+	tapis.position = Vector3(0, 0.28, 0)
+	tapis.name = "Tapis"
+	racine.add_child(tapis)
+	# Les deux MÂCHOIRES, de part et d'autre. Elles ne bougent pas : le jeu les
+	# abaisse au moment du broyage (`Machoire0` / `Machoire1`).
+	for k in 2:
+		var cote := -1.0 if k == 0 else 1.0
+		var machoire := Decor.boite(Vector3(0.9, 3.4, rayon * 1.9), COULEUR_MACHOIRE)
+		machoire.position = Vector3(cote * rayon * 0.72, 1.9, 0)
+		machoire.name = "Machoire%d" % k
+		racine.add_child(machoire)
+		var verin := Decor.boite(Vector3(0.4, 4.4, 0.4), Color("#8d9199"))
+		verin.position = Vector3(cote * rayon * 0.72, 2.4, rayon * 0.8)
+		racine.add_child(verin)
+	# Les carcasses déjà broyées, empilées au bord : c'est ce qui dit qu'on est
+	# à la casse et pas devant un portail d'usine.
+	for k in 4:
+		var galette := Decor.boite(Vector3(1.9, 0.5, 1.0),
+			Color("#7d6a55").darkened(0.08 * float(k)))
+		galette.position = Vector3(rayon * 1.25, 0.35 + float(k) * 0.5,
+			rayon * (-0.4 + 0.28 * float(k)))
+		galette.rotation.y = 0.2 * float(k)
+		racine.add_child(galette)
+	var mot := Decor.etiquette("CASSE", Palette.AVERTISSEMENT, 30)
+	mot.position = Vector3(0, 5.2, 0)
+	racine.add_child(mot)
+	return racine
+
+## UNE MINE POSÉE : un palet sombre, un œil rouge qui clignote (c'est le jeu
+## qui l'allume), et un anneau au sol. L'anneau n'est pas décoratif — sans lui
+## on ne voit pas une mine de trois pixels dans une rue de nuit, et une arme
+## qu'on ne voit pas n'est pas une arme, c'est un accident.
+static func mine() -> Node3D:
+	var racine := Node3D.new()
+	var palet := Decor.cylindre(0.42, 0.22, Color("#2a2a2e"), false)
+	palet.position = Vector3(0, 0.11, 0)
+	racine.add_child(palet)
+	var oeil := Decor.boite(Vector3(0.2, 0.12, 0.2), Palette.CRITIQUE, false)
+	oeil.material_override = Decor.matiere_lumineuse(Palette.CRITIQUE, 2.2)
+	oeil.position = Vector3(0, 0.28, 0)
+	oeil.name = "Oeil"
+	racine.add_child(oeil)
+	racine.add_child(racine_anneau(PlanVille.RAYON_MINE * Decor.ECHELLE, Palette.CRITIQUE, 0.07))
+	return racine
+
+## UNE FLAQUE D'HUILE : un disque noir irisé, à peine bombé. Elle ne brille pas
+## comme une mine — elle doit se voir sans crier au danger, puisqu'elle ne
+## blesse personne.
+static func flaque_huile() -> Node3D:
+	var racine := Node3D.new()
+	var flaque := Decor.cylindre(PlanVille.RAYON_HUILE * Decor.ECHELLE, 0.04, Color("#1a1620"), false)
+	flaque.material_override = Decor.matiere_lumineuse(Color("#3a2f4a"), 0.25, 0.75)
+	flaque.position = Vector3(0, 0.05, 0)
+	racine.add_child(flaque)
+	racine.add_child(racine_anneau(PlanVille.RAYON_HUILE * Decor.ECHELLE, Color("#6a5a7a"), 0.06))
+	return racine
+
+static func dalle_atelier() -> Node3D:
+	var racine := dalle_garage()
+	# L'enseigne du garage dit PEINTURE ; celle-ci dit ce qu'on trouve en plus.
+	var enseigne := Decor.etiquette("ATELIER", Color("#f2c53d"), 26)
+	enseigne.position = Vector3(0, 4.2, 0)
+	racine.add_child(enseigne)
+	for i in ATELIER.size():
+		var fiche: Dictionary = ATELIER[i]
+		var ou := baie_atelier(i) * Decor.ECHELLE
+		var pastille := Decor.cylindre(PlanVille.RAYON_GARAGE * 0.26 * Decor.ECHELLE, 0.06,
+			fiche["couleur"], false)
+		# OPAQUE. À 0,55 d'opacité, la pastille laissait passer le bleu de la
+		# dalle et le vert du sol : les cinq couleurs viraient toutes au même
+		# kaki, et le joueur ne pouvait plus reconnaître sa baie de loin.
+		pastille.material_override = Decor.matiere_lumineuse(fiche["couleur"], 0.85)
+		# ⚠ AU-DESSUS DE LA DALLE, pas dedans. La dalle du garage va de 0,06 à
+		# 0,16 : à 0,14 les pastilles étaient NOYÉES dans son bleu translucide
+		# et ressortaient toutes de la même couleur délavée. C'est la deuxième
+		# fois que ce piège se referme dans ce projet — la première, c'étaient
+		# les marques des repaires dans l'épaisseur du plancher.
+		pastille.position = Vector3(ou.x, 0.20, ou.y)
+		racine.add_child(pastille)
+		var anneau := racine_anneau(PlanVille.RAYON_GARAGE * 0.26 * Decor.ECHELLE,
+			fiche["couleur"], 0.08)
+		anneau.position = Vector3(ou.x, 0.23, ou.y)
+		racine.add_child(anneau)
+		# L'étiquette est BASSE : à trois mètres elle passait derrière
+		# l'enseigne du garage et on lisait « MINES » à travers « PEINTURE ».
+		var mot := Decor.etiquette(String(fiche["nom"]), fiche["couleur"], 15)
+		mot.position = Vector3(ou.x, 1.1, ou.y)
+		racine.add_child(mot)
+	return racine
+
 static func dalle_garage() -> Node3D:
 	var racine := Node3D.new()
 	var dalle := Decor.cylindre(PlanVille.RAYON_GARAGE * Decor.ECHELLE, 0.1, Palette.SERIE, false)
@@ -938,6 +1554,61 @@ static func dalle_hopital() -> Node3D:
 	racine.add_child(cubes(croix))
 	var mot := Decor.etiquette("HÔPITAL", Color("#f4a0a0"), 30)
 	mot.position = Vector3(0, 3.2, 0)
+	racine.add_child(mot)
+	return racine
+
+## LA SUPÉRETTE : la devanture de la boutique où l'on achète à manger et à
+## boire. Une dalle claire, un auvent vert d'eau, deux vitrines éclairées et
+## l'enseigne. C'est le seul commerce de la ville dans lequel on ENTRE.
+##
+## ⚠ La dalle déborde la tuile de la porte : `RAYON_SUPERETTE` fait 80 px, une
+## tuile en fait 100. Un pas de porte plus petit que la portée du `F` et l'on
+## se retrouve à acheter du pain debout au milieu de la rue, sans rien voir
+## sous ses pieds qui le justifie.
+## LE MODÈLE DU KIT (`ville/building-small-d`) : une boutique d'angle avec sa
+## vitrine, son auvent et son enseigne, déjà dessinée par Kenney.
+##
+## ⚠ ELLE ÉTAIT BÂTIE EN BOÎTES. Un auvent, deux poteaux, deux carrés jaunes
+## pour les vitrines : ça tenait de loin et ça ne tenait que de loin. Le kit de
+## ville en a une vraie, et la ville entière est déjà faite de ses modèles —
+## une façade à la main au milieu de deux cent trente-neuf modèles importés,
+## c'est la seule qui ne ressemble pas aux autres.
+const MODELE_SUPERETTE := "res://modeles/ville/building-small-d.glb"
+## Le modèle fait UNE unité de côté (mesuré : 1,0 × 1,0 × 1,05) et une tuile en
+## fait dix. À dix, il remplit exactement sa tuile ; à huit et demi, il laisse
+## le trottoir devant, ce qu'il faut pour que le pas de porte se voie.
+const ECHELLE_SUPERETTE := 8.5
+
+static func devanture_de_superette() -> Node3D:
+	var racine := Node3D.new()
+	var rayon := PlanVille.RAYON_SUPERETTE * Decor.ECHELLE
+	var couleur := PlanVille.COULEUR_SUPERETTE
+	# LE PAS DE PORTE reste peint : c'est lui qui dit où le menu s'ouvre, et
+	# c'est la même grammaire que le garage, l'hôpital et la planque. Un lieu
+	# du jeu se reconnaît à son disque au sol, pas à sa façade.
+	racine.add_child(racine_anneau(rayon, couleur, 0.18))
+	var dalle := Decor.cylindre(rayon, 0.1, couleur, false)
+	dalle.material_override = Decor.matiere_lumineuse(couleur, 0.3, 0.34)
+	dalle.position = Vector3(0, 0.05, 0)
+	racine.add_child(dalle)
+
+	var boutique := Decor.instance(MODELE_SUPERETTE)
+	boutique.scale = Vector3.ONE * ECHELLE_SUPERETTE
+	# ⚠ REPOUSSÉE VERS LE FOND DE SA TUILE. Centrée, elle couvrait le pas de
+	# porte : de dessus — et la caméra ne voit à peu près que ça — on n'avait
+	# plus qu'un toit, sans le disque qui dit qu'on peut y entrer.
+	boutique.position = Vector3(0, 0, -rayon * 0.42)
+	racine.add_child(boutique)
+
+	# Le CADDIE abandonné devant la porte, et l'enseigne au-dessus du toit : le
+	# modèle du kit n'a pas de nom écrit dessus, et un joueur qui a faim doit
+	# pouvoir lire « supérette » sans s'arrêter.
+	var caddie := Decor.boite(Vector3(0.7, 0.6, 0.5), Palette.ENCRE_FAIBLE)
+	caddie.position = Vector3(rayon * 0.6, 0.45, rayon * 0.5)
+	caddie.rotation.y = 0.4
+	racine.add_child(caddie)
+	var mot := Decor.etiquette("SUPÉRETTE", couleur, 30)
+	mot.position = Vector3(0, ECHELLE_SUPERETTE + 1.6, 0)
 	racine.add_child(mot)
 	return racine
 
@@ -982,6 +1653,39 @@ static func cercle_arene(numero: int) -> Node3D:
 ## Une cabine : un caisson, une antenne, un halo. Elle sonne quand un contrat
 ## attend — c'est le halo qui clignote, pas la cabine qui bouge : un objet qui
 ## se déplace en ville se prend pour une cible.
+## LES TROIS TÉLÉPHONES (guide §4.1) : vert facile, jaune moyen, rouge
+## difficile. La couleur d'une cabine est FIXE — elle tient à la cabine, pas à
+## l'humeur du moment — et c'est ce qui en fait un repère : « le rouge des
+## docks paie gros, mais il faut que Les Braises me tiennent en haute estime ».
+##
+## ⚠ La couleur ne dit plus ce que le gang pense de vous (c'était le cas
+## depuis la phase 4). Ce qu'elle dit maintenant, c'est CE QU'ON Y TROUVE ; ce
+## que le gang pense, l'anneau sous ses hommes et la ligne du tableau de bord
+## le disent déjà, et deux choses à la même place n'en disent qu'une.
+##
+## Le niveau se tire du PÂTÉ, comme l'atelier : la carte est engendrée, la
+## liste des cabines ne peut pas être écrite à la main, et elle doit tomber
+## pareil chez les quatre joueurs sans passer par le réseau. Un téléphone sur
+## deux est vert : c'est le seul qu'on puisse décrocher en arrivant.
+const CABINES := [
+	{"nom": "facile", "couleur": Color("#4cc25a"), "respect": 40.0},
+	{"nom": "moyenne", "couleur": Color("#f2c53d"), "respect": 62.0},
+	{"nom": "difficile", "couleur": Color("#d0402c"), "respect": 82.0},
+]
+
+## L'éclat de l'enseigne. C'est la SEULE chose qui bouge sur une cabine :
+## allumée, on peut décrocher ; éteinte, il manque du respect (ou on a déjà un
+## contrat en cours). La couleur, elle, ne change jamais — sinon on ne pourrait
+## plus repérer un téléphone rouge de loin et revenir plus tard.
+const CABINE_ETEINTE := 0.30
+const CABINE_ALLUMEE := 1.4
+
+static func niveau_de_cabine(id: int) -> int:
+	var tirage := posmod(hash(Vector2i(id, 4231)), 100)
+	if tirage < 50:
+		return 0
+	return 1 if tirage < 80 else 2
+
 static func cabine(numero: int) -> Node3D:
 	var racine := Node3D.new()
 	var caisson := Decor.boite(Vector3(1.1, 2.4, 1.1), Palette.SURFACE.lightened(0.1))
@@ -991,20 +1695,20 @@ static func cabine(numero: int) -> Node3D:
 	vitre.material_override = Decor.matiere_voile(Palette.SERIE, 0.4)
 	vitre.position = Vector3(0, 1.7, 0)
 	racine.add_child(vitre)
-	# L'ENSEIGNE dit d'un coup d'œil ce que le gang du quartier pense de vous :
-	# verte il vous embauche, jaune il tolère, rouge il vous tire dessus. C'est
-	# ce qui rend la jauge de respect lisible depuis la rue.
-	var enseigne := Decor.boite(Vector3(1.3, 0.34, 1.3), Palette.AVERTISSEMENT, false)
-	enseigne.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 1.4)
+	# L'ENSEIGNE porte la couleur du TÉLÉPHONE : verte, jaune ou rouge. Le jeu
+	# ne fait que l'allumer ou l'éteindre selon qu'on peut décrocher.
+	var teinte: Color = CABINES[niveau_de_cabine(numero)]["couleur"]
+	var enseigne := Decor.boite(Vector3(1.3, 0.34, 1.3), teinte, false)
+	enseigne.material_override = Decor.matiere_lumineuse(teinte, CABINE_ALLUMEE)
 	enseigne.position = Vector3(0, 2.6, 0)
 	enseigne.name = "Enseigne"
 	racine.add_child(enseigne)
-	var halo := Decor.anneau(PlanVille.RAYON_CABINE * Decor.ECHELLE, 0.14, Palette.AVERTISSEMENT, 1.0)
-	halo.rotation_degrees = Vector3(90, 0, 0)
+	var halo := racine_anneau(PlanVille.RAYON_CABINE * Decor.ECHELLE, teinte, 0.14)
 	halo.position = Vector3(0, 0.06, 0)
 	halo.name = "Halo"
 	racine.add_child(halo)
-	var mot := Decor.etiquette("CONTRAT %d" % (numero + 1), Palette.AVERTISSEMENT, 26)
+	var mot := Decor.etiquette(String(CABINES[niveau_de_cabine(numero)]["nom"]).to_upper(),
+		teinte, 26)
 	mot.name = "Mot"
 	mot.position = Vector3(0, 3.4, 0)
 	racine.add_child(mot)
@@ -1081,6 +1785,45 @@ static func helico() -> Node3D:
 ## Une caisse d'arme : un socle lumineux au sol, l'objet qui flotte au-dessus.
 ## C'est la grammaire habituelle du ramassage, et elle se repère de loin dans
 ## une rue encombrée là où une caisse posée se confond avec le mobilier.
+## LE COLIS CACHÉ (guide §4.3) : une malle dorée cerclée de sombre, sur un
+## anneau. Elle tourne et flotte comme une caisse d'arme — c'est le vocabulaire
+## du jeu pour « ramasse-moi », et en inventer un second pour la même chose
+## serait une leçon de plus à apprendre pour rien.
+const OR_COLIS := Color("#f0c04a")
+static func colis() -> Node3D:
+	var racine := Node3D.new()
+	racine.add_child(racine_anneau(1.7, OR_COLIS, 0.14))
+	var objet := cubes([
+		[Vector3.ZERO, 1.15, Color(OR_COLIS.darkened(0.4), VoxelsCarnage.MUR)],
+		[Vector3(0, 0.35, 0), 1.25, Color(OR_COLIS, VoxelsCarnage.LUMIERE)],
+		[Vector3(0, -0.3, 0), 1.25, Color(OR_COLIS.darkened(0.2), VoxelsCarnage.MUR)],
+	])
+	objet.name = "Objet"
+	objet.position = Vector3(0, 1.5, 0)
+	racine.add_child(objet)
+	return racine
+
+## L'ICÔNE DE KILL FRENZY : un crâne cubique sur un anneau rouge. Rouge et
+## anguleux là où le colis est rond et doré : de loin, on doit savoir si l'on
+## court vers de l'argent ou vers trente secondes de carnage.
+static func icone_frenzy() -> Node3D:
+	var racine := Node3D.new()
+	racine.add_child(racine_anneau(2.0, Palette.CRITIQUE, 0.18))
+	var socle := Decor.cylindre(1.8, 0.1, Palette.CRITIQUE, false)
+	socle.material_override = Decor.matiere_lumineuse(Palette.CRITIQUE, 0.7, 0.45)
+	socle.position = Vector3(0, 0.07, 0)
+	racine.add_child(socle)
+	var crane := cubes([
+		[Vector3.ZERO, 1.2, Color(Color("#f2efe4"), VoxelsCarnage.LUMIERE)],
+		[Vector3(-0.3, 0.1, 0.62), 0.34, Color(Color("#1a1a1a"), VoxelsCarnage.MUR)],
+		[Vector3(0.3, 0.1, 0.62), 0.34, Color(Color("#1a1a1a"), VoxelsCarnage.MUR)],
+		[Vector3(0, -0.62, 0.3), 0.55, Color(Color("#e2ded0"), VoxelsCarnage.MUR)],
+	])
+	crane.name = "Objet"
+	crane.position = Vector3(0, 1.8, 0)
+	racine.add_child(crane)
+	return racine
+
 static func caisse(arme: String, couleur: Color) -> Node3D:
 	var racine := Node3D.new()
 	var socle := Decor.cylindre(1.9, 0.12, couleur, false)
@@ -1319,10 +2062,18 @@ static func regler_brasier(brasier_noeud: Node3D, force: float, temps: float) ->
 		var echelle: float = (0.5 + 1.1 * f) * vacille
 		lueur.scale = Vector3(echelle, 1.0, echelle)
 
-## Un anneau posé à plat. Répété six fois dans ce fichier avant d'être extrait :
-## la rotation de 90° s'oublie une fois sur deux et l'anneau part debout.
+## Un anneau posé à plat.
+##
+## ⚠ SANS QUART DE TOUR. C'est l'inverse de ce que ce fichier a cru pendant
+## douze versions : un `TorusMesh` de Godot est DÉJÀ couché dans le plan du
+## sol, et le `rotation_degrees = Vector3(90, 0, 0)` qu'on lui collait le
+## mettait DEBOUT. Toutes les auréoles du jeu — garages, hôpitaux, arènes,
+## repaires, cabines, joueurs — étaient des arceaux plantés en travers de la
+## rue, hauts de six mètres et qui se croisaient d'un carrefour à l'autre.
+## Personne ne l'avait vu parce que les bancs les photographiaient de face,
+## où un arceau ressemble à un cercle. `outils/voir.sh d:atelier` les prend de
+## trois quarts, et le doute n'est plus permis.
 static func racine_anneau(rayon: float, couleur: Color, epaisseur: float) -> MeshInstance3D:
 	var anneau := Decor.anneau(rayon, epaisseur, couleur, 1.0)
-	anneau.rotation_degrees = Vector3(90, 0, 0)
 	anneau.position = Vector3(0, 0.05, 0)
 	return anneau

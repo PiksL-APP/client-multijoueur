@@ -108,6 +108,53 @@ garée dans la rue, la voiture du joueur (à l'achat comme au vol), et celle d'u
 ce dernier, on voyait une voiture de gang volée repasser désarmée, et l'on
 apprenait à se fier à une silhouette qui ment.
 
+## La peinture ne recouvre que la tôle
+
+Le shader des kits (`MatieresCarnage.KENNEY`) **multipliait** tout le modèle
+par la teinte : une voiture bleue avait les jantes bleues et les vitres bleues,
+la peinture sombre du garage noircissait le pare-brise, et la nappe des
+dormantes — colorée par instance, même multiplication — faisait pareil dans
+tout le parking.
+
+Dans l'atlas du Car Kit, la carrosserie est la **seule matière saturée** : les
+vitres, les pneus, les jantes, les chromes et les phares sont des gris
+(saturation de 0,05 à 0,21, mesurée sur les vingt modèles) quand la moindre
+tôle dépasse 0,53. Le shader, en mode `peinture` (posé pour `/voitures/` et
+`/bateaux/`), remplace donc la couleur là où la saturation dépasse un seuil
+(`smoothstep(0.30, 0.45)`) et laisse le reste intact ; il garde le dégradé de
+l'atlas en faisant varier la peinture avec la luminance d'origine, pour ne pas
+poser un aplat. La couleur d'instance des nappes passe par le même chemin, et
+le **blanc** veut dire « livrée d'usine » — le taxi reste jaune, la police
+blanche et bleue, l'ambulance et le camion de pompiers gardent leurs bandes.
+⚠ Avant, `VoxelsCarnage.peinture` donnait à la police un blanc cassé qui,
+multiplié, ne se voyait pas ; en remplacement, il aurait repeint la bande bleue
+en blanc. Les modèles à livrée rendent `Color.WHITE`.
+
+### Une voiture garde sa couleur
+
+Trois endroits décidaient chacun de la couleur d'une voiture : la nappe des
+dormantes (`VoxelsCarnage.peinture(modele, id)`), le trafic réveillé (blanc,
+donc l'orange `peinture(i, 7)` pour tout le monde) et la voiture volée (blanc
+aussi). Résultat : une berline **garée rouge démarrait orange**, et une
+voiture de gang volée perdait sa bannière en ouvrant la porte.
+
+`FormesCarnage.couleur_de_l_auto(carte, modele, id, de_gang, gang, teinte)` la
+tient pour tous : la peinture du garage d'abord (elle voyage), la bannière du
+gang ensuite, sinon la couleur tirée de l'identifiant — celle que la nappe a
+peinte. Le « pris » porte maintenant le gang de la voiture (`gg`), le voleur
+prend la couleur avec le volant, elle part dans son paquet de position (`tc`)
+et revient à l'hôte quand il descend (`sort`, `t`). Les matières peintes sont
+**partagées** par (modèle, couleur) (`matiere_peinte`) : dix peintures de
+trafic, dix du garage, sept de gang, et pas un duplicata par voiture.
+
+Les peintures du trafic (`VoxelsCarnage.PEINTURES`) ont été éclaircies d'un
+ton : pensées pour une multiplication, le rouge sombre et le violet ne
+donnaient plus qu'un bordeaux et un prune ternes en remplacement.
+
+Au banc : `outils/voir.sh v:peintures` (dix peintures sur le 4x4),
+`v:peintures:0-8` (les carrosseries de la ville, une peinture chacune) et
+`--banc-position=garage` dans une manche.
+
 ## Les bancs
 
 La ville et son parc n'avaient **aucun banc** : on ne les voyait qu'en jouant,

@@ -131,7 +131,8 @@ func demarrer() -> void:
 	_construire_hud()
 	preparer()
 
-	canal = Reseau.rejoindre("mj-jeu-%s-%s" % [jeu, code], {"pseudo": Session.pseudo, "id": Session.id})
+	canal = Reseau.rejoindre("mj-jeu-%s-%s" % [jeu, code], {"pseudo": Session.pseudo, "id": Session.id,
+		"personnage": Session.personnage_affiche(), "carton": Session.carton_affiche()})
 	canal.presences_changees.connect(_sur_presences)
 	canal.diffusion.connect(_sur_diffusion)
 
@@ -164,6 +165,9 @@ func _sur_presences(presences: Dictionary) -> void:
 			joueurs[cle] = {"pseudo": "?", "id": cle, "place": 0, "score": 0}
 		joueurs[cle]["pseudo"] = String(presences[cle].get("pseudo", "?"))
 		joueurs[cle]["id"] = String(presences[cle].get("id", joueurs[cle].get("id", cle)))
+		# La tête qu'il a choisie : sa peau et le logo de son carton.
+		joueurs[cle]["personnage"] = String(presences[cle].get("personnage", ""))
+		joueurs[cle]["carton"] = int(presences[cle].get("carton", -1))
 	for cle in joueurs:
 		var place := cles.find(cle)
 		if place >= 0:

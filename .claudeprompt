@@ -335,3 +335,18 @@ automatique cesse alors de couvrir ce jeu.
    avertissement : `config.cfg` absent du .pck, l'autoretour à la ligne qui
    affichait les étiquettes à la verticale, et un cache immuable sur un nom de
    fichier qui ne change jamais.
+- LE CARTON SUR LA TÊTE : tout personnage rendu par `Personnages.creer` porte
+  une boîte en kraft attachée à l'os `Head` (`coiffer(racine, indice)`,
+  `BoneAttachment3D` — dans l'espace de l'os, 1 unité = 100 unités du modèle
+  brut, le crâne va de 0 à 0,010 en Y, `CARTON_DEMI`/`CARTON_CENTRE` l'y
+  enferment au plus juste ; en Godot les faces avant tournent dans le sens
+  horaire vu de dehors). Les 55 logos sont sur UNE planche 8 × 8
+  (`modeles/cartons/planche.png`, tuiles 55/56/57 = carton nu / dessus
+  rubané / dessous), catalogue `cartons.json` — chaîne `outils/logos.py` →
+  `outils/logos_png.mjs` (Playwright) → `outils/cartons.py` (PIL), qui copie
+  aussi les PNG dans `web/kit/logos/`. L'indice du kit (`PK.entrer({personnage})`)
+  est un LOGO : `Session.definir_carton` + peau `LISTE[indice % 12]`. Il
+  voyage dans la présence de partie (`carton`, `personnage`) ; un passant
+  prend `carton_de_graine(id)`. La casquette se pose sur la boîte
+  (`SOMMET_CARTON`), pas dedans. `FormesCarnage.pieton(…, peau, carton)` et
+  `silhouette_kenney(peau, carton)` transmettent l'indice.

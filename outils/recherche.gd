@@ -1,6 +1,7 @@
 extends SceneTree
-## LE BANC DE LA RECHERCHE : six crans, quatre corps, un fourgon qui se vide et
-## un char qui canonne (guide §5).
+## LE BANC DE LA RECHERCHE : six crans, quatre corps, un fourgon qui se vide,
+## un char qui canonne, une voiture volée qui sème la police d'un cran et une
+## peinture qui voyage avec la carrosserie (guide §5 et §1.3).
 ##
 ## ⚠ Tout passe par `VilleVivante.simuler` ou par les fonctions qu'elle
 ## appelle. Fabriquer un flic à la main dans le banc pour vérifier qu'un flic
@@ -21,6 +22,8 @@ func _init() -> void:
 	_fourgon(carte)
 	_char(carte)
 	_reseau(carte)
+	_semer(carte)
+	_peinture(carte)
 	print("── %s" % ("TOUT PASSE" if _fautes == 0 else "%d FAUTE(S)" % _fautes))
 	quit(1 if _fautes > 0 else 0)
 
@@ -205,3 +208,110 @@ func _reseau(carte: PlanVille) -> void:
 		if int(personne.get("corps", -1)) == VilleVivante.CORPS_AGENT:
 			agent = true
 	_dire(agent, "et l'agent spécial avec la sienne")
+
+# ---------------------------------------------------- changer de voiture sème
+
+## Une dormante civile près du centre : c'est ce qu'on trouve sous la main
+## quand on descend d'une voiture repérée. Le banc la RÉVEILLE par la même
+## fonction que le jeu (`reveiller`), il ne la fabrique pas.
+func _dormante_civile(carte: PlanVille) -> Dictionary:
+	for rayon in [400.0, 900.0, 2000.0]:
+		for d in carte.dormantes_autour(carte.centre(), rayon):
+			if int(d.get("gang", -1)) < 0:
+				return d
+	return {}
+
+func _semer(carte: PlanVille) -> void:
+	print("\n6. CHANGER DE VOITURE SÈME LA POLICE D'UN CRAN")
+	var ville := _ville(carte, 31)
+	var moi := "essai"
+	var d := _dormante_civile(carte)
+	_dire(not d.is_empty(), "une berline civile garée près du centre")
+	if d.is_empty():
+		return
+	var auto := ville.reveiller(int(d["id"]))
+	ville.chaleur[moi] = ville.chaleur_pour(3)
+	ville.sortants.clear()
+	ville.accorder_vehicule(moi, int(auto["id"]), Vector2(auto["p"]))
+	_dire(String(auto["pilote"]) == moi, "on prend le volant")
+	_dire(ville.etoiles(moi) == 2, "trois étoiles -> %d : ils cherchent l'autre voiture" % ville.etoiles(moi))
+	# Un cran, pas une amnistie : la prochaine faute nous renvoie au troisième.
+	var seme := false
+	for e in ville.sortants:
+		if String(e["e"]) == "seme":
+			seme = true
+	_dire(seme, "et le client en est prévenu (événement « seme »)")
+	ville.crime(moi, "pieton")
+	_dire(ville.etoiles(moi) == 3, "le crime suivant nous y renvoie (%d)" % ville.etoiles(moi))
+
+	# Une étoile : on retombe à zéro — mais pas en dessous, et pas de miracle
+	# quand on n'était pas recherché.
+	ville.rendre_vehicule(moi, int(auto["id"]), Vector2(auto["p"]), 0.0, 100.0)
+	ville.chaleur[moi] = ville.chaleur_pour(1)
+	ville.accorder_vehicule(moi, int(auto["id"]), Vector2(auto["p"]))
+	_dire(ville.etoiles(moi) == 0, "une étoile -> %d" % ville.etoiles(moi))
+	ville.rendre_vehicule(moi, int(auto["id"]), Vector2(auto["p"]), 0.0, 100.0)
+	ville.chaleur[moi] = 0.0
+	ville.sortants.clear()
+	ville.accorder_vehicule(moi, int(auto["id"]), Vector2(auto["p"]))
+	var annonce := false
+	for e in ville.sortants:
+		if String(e["e"]) == "seme":
+			annonce = true
+	_dire(not annonce, "sans étoile, rien à semer : pas d'annonce")
+
+	# ⚠ Voler une PATROUILLE est un crime, pas une cachette : la recherche
+	# monte au lieu de descendre.
+	var joueurs := {moi: {"p": carte.centre(), "vie": 100.0, "pied": true, "d": Vector2.RIGHT}}
+	ville.chaleur[moi] = ville.chaleur_pour(3)
+	var avant := ville.autos.size()
+	ville._naitre_auto(joueurs, VilleVivante.PATROUILLE, moi)
+	_dire(ville.autos.size() == avant + 1, "une patrouille arrive")
+	if ville.autos.size() == avant + 1:
+		var flic: Dictionary = ville.autos[ville.autos.size() - 1]
+		flic["pilote"] = ""
+		var chaleur_avant: float = ville.chaleur[moi]
+		ville.accorder_vehicule(moi, int(flic["id"]), Vector2(flic["p"]))
+		_dire(String(flic["pilote"]) == moi and float(ville.chaleur[moi]) > chaleur_avant,
+			"la voler fait MONTER la chaleur (%d -> %d)" % [int(chaleur_avant), int(ville.chaleur[moi])])
+
+# ------------------------------------------------------- la peinture voyage
+
+func _peinture(carte: PlanVille) -> void:
+	print("\n7. LA PEINTURE RESTE SUR LA CARROSSERIE")
+	var hote := _ville(carte, 12)
+	var moi := "essai"
+	var d := _dormante_civile(carte)
+	if d.is_empty():
+		_dire(false, "pas de berline civile à repeindre")
+		return
+	var auto := hote.reveiller(int(d["id"]))
+	hote.accorder_vehicule(moi, int(auto["id"]), Vector2(auto["p"]))
+	# Le client repeint chez lui, puis rend la voiture AVEC sa teinte — c'est
+	# l'hôte qui la garde pour tout le monde.
+	var rose := Color("#ff4fa3")
+	var teinte := rose.to_rgba32()
+	hote.rendre_vehicule(moi, int(auto["id"]), Vector2(auto["p"]), 0.0, 100.0, 3, VilleVivante.CIVILE, teinte)
+	_dire(int(auto.get("teinte", 0)) == teinte, "l'hôte retient la teinte")
+	# ⚠ `Color(int)` n'existe pas en 4.5 : c'est `Color.hex` qui refait le
+	# chemin inverse de `to_rgba32`, et il doit retomber sur la même couleur.
+	_dire(Color.hex(teinte).is_equal_approx(rose), "et elle se relit à l'identique (Color.hex)")
+
+	# ⚠ L'instantané ne porte que ce qu'un joueur VOIT (`_regarde`) : sans
+	# personne à côté de la voiture, le client ne recevait rien du tout — et le
+	# banc croyait la teinte perdue en route.
+	var client := _ville(carte, 13)
+	var regard := {"autre": {"p": Vector2(auto["p"]), "vie": 100.0, "pied": true, "d": Vector2.RIGHT}}
+	client.appliquer_instantane(hote.instantane(regard))
+	var recue := client.auto_par_id(int(auto["id"]))
+	_dire(not recue.is_empty() and int(recue.get("teinte", 0)) == teinte,
+		"le client la reçoit dans l'instantané")
+	# Et si on la reprend, l'événement « pris » l'annonce : le voleur roule
+	# dans une voiture rose, pas dans une voiture repeinte en blanc d'usine.
+	hote.sortants.clear()
+	hote.accorder_vehicule("autre", int(auto["id"]), Vector2(auto["p"]))
+	var t_annonce := -1
+	for e in hote.sortants:
+		if String(e["e"]) == "pris":
+			t_annonce = int(e["c"].get("t", -1))
+	_dire(t_annonce == teinte, "et qui la reprend l'emporte avec sa peinture")

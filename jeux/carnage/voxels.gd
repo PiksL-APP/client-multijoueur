@@ -1376,19 +1376,23 @@ static func _quad_lisse(tableaux: Array, p: Vector3, a: Vector3, b: Vector3, nor
 
 ## Les peintures d'usine, par modèle : le taxi est jaune, la police blanche, le
 ## reste tiré parmi des teintes de carrosserie.
-const PEINTURES := [Color("#c8c8cc"), Color("#2b2f38"), Color("#8a1e1e"), Color("#1f4a8a"), Color("#3a6b3a"),
-	Color("#d9d9d4"), Color("#5a3a7a"), Color("#c96b1e"), Color("#7a7f88"), Color("#e0b23a")]
+## Les peintures du trafic. Elles REMPLACENT la tôle du modèle (shader
+## `MatieresCarnage.KENNEY`, mode peinture) au lieu de la multiplier : on peut
+## donc les choisir franches — le vieux rouge sombre, pensé pour une
+## multiplication, ne donnait plus qu'un bordeaux terne sur la berline.
+const PEINTURES := [Color("#c8c8cc"), Color("#2b2f38"), Color("#a83232"), Color("#2c5aa8"), Color("#4a8a4a"),
+	Color("#d9d9d4"), Color("#6a4a90"), Color("#c96b1e"), Color("#7a7f88"), Color("#e0b23a")]
 
+## La couleur d'une carrosserie d'après son identifiant. BLANC = la livrée du
+## kit : le taxi est jaune, la police blanche et bleue, l'ambulance et le
+## camion de pompiers portent leurs bandes — les repeindre par-dessus, c'était
+## une bande bleue qui devenait blanche sur la voiture de police.
 static func peinture(indice: int, graine: int) -> Color:
 	match indice:
-		5: return Color("#f2c21c")
-		9: return Color("#f0f0f2")
+		5, 7, 9, 15, 18: return Color.WHITE
 		6: return Color("#e8e8e4") if graine % 3 != 0 else Color("#4a4a52")
-		7: return Color("#d4d4d0")
 		13: return Color("#e6dcb0") if graine % 2 == 0 else Color("#3f7a5a")
 		14: return Color("#141418") if graine % 3 != 0 else Color("#f0f0f2")
-		15: return Color("#f4f4f2")
-		18: return Color("#c8261a")
 	return PEINTURES[posmod(graine, PEINTURES.size())]
 
 # ------------------------------------------------------------ les personnages

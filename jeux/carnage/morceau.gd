@@ -247,9 +247,10 @@ func _lire_les_fiches() -> void:
 				var modele := int(d["modele"])
 				if not _places.has(modele):
 					_places[modele] = []
-				var couleur := VoxelsCarnage.peinture(modele, int(d["id"]))
-				if int(d["gang"]) >= 0:
-					couleur = _plan.couleur_du_gang(int(d["gang"])).lerp(Color.WHITE, 0.3)
+				# La même couleur que la voiture aura une fois réveillée : c'est
+				# `FormesCarnage.couleur_de_l_auto` qui la tient pour tout le monde.
+				var couleur := FormesCarnage.couleur_de_l_auto(_plan, modele, int(d["id"]),
+					int(d["gang"]) >= 0, int(d["gang"]), 0)
 				var base_v := Basis(Vector3.UP, -float(d["a"]))
 				_places[modele].append({"t": Transform3D(base_v, Decor.vers3d(d["p"])), "c": couleur, "id": int(d["id"])})
 			for n in fiche["neons"]:

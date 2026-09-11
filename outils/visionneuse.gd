@@ -40,6 +40,44 @@ func _ready() -> void:
 		# bâtit (`FormesCarnage.voiture_kit`). Le parc n'avait aucun banc : c'est
 		# exactement pour ça que quatre carrosseries du Car Kit sont restées dans
 		# le dossier sans jamais rouler. `v:*` les sort toutes.
+		# `v:peintures[:<indice>]` sort la MÊME carrosserie dans chacune des
+		# peintures du garage (§1.3). La palette se juge sur un modèle du kit,
+		# atlas multiplié : une couleur qui va bien en aplat peut noircir les
+		# vitres ou griser la tôle une fois passée dans la teinte.
+		if String(nom).begins_with("v:peintures"):
+			# `v:peintures:*` : chaque carrosserie roulante dans une peinture à
+			# tour de rôle — c'est là qu'on voit si un modèle a une tôle que le
+			# seuil du shader ne reconnaît pas.
+			var reste := String(nom).substr("v:peintures".length()).trim_prefix(":")
+			var paires: Array = []
+			# `v:peintures:a-b` : les indices de a à b (les bateaux, à la fin du
+			# parc, écrasent le cadrage de tout le reste).
+			if reste == "*" or reste.contains("-"):
+				var de := 0
+				var a := FormesCarnage.MODELES_VOITURES.size() - 1
+				if reste.contains("-"):
+					de = int(reste.get_slice("-", 0))
+					a = int(reste.get_slice("-", 1))
+				for k2 in range(de, a + 1):
+					paires.append([k2, FormesCarnage.PEINTURES[k2 % FormesCarnage.PEINTURES.size()]])
+			else:
+				var indice := 3 if reste == "" else int(reste)
+				for peinture: Color in FormesCarnage.PEINTURES:
+					paires.append([indice, peinture])
+			for paire in paires:
+				var peinture: Color = paire[1]
+				var auto := FormesCarnage.voiture_kit(int(paire[0]), peinture)
+				auto.position = Vector3(x, 0, 0)
+				add_child(auto)
+				var etiquette := Label3D.new()
+				etiquette.text = "%d #%s" % [int(paire[0]), peinture.to_html(false)]
+				etiquette.font_size = 96
+				etiquette.pixel_size = 0.006
+				etiquette.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+				etiquette.position = Vector3(x, 3.2, 0)
+				add_child(etiquette)
+				x += ecart
+			continue
 		if String(nom).begins_with("v:"):
 			var quoi := String(nom).substr(2)
 			var indices: Array = []

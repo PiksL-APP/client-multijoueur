@@ -188,7 +188,7 @@ func _vitrine() -> SubViewportContainer:
 
 	_support = Node3D.new()
 	_scene.add_child(_support)
-	_modele = Personnages.creer(_cle)
+	_modele = Personnages.creer(_cle, Personnages.ECHELLE, Session.carton_affiche())
 	_support.add_child(_modele)
 
 	var camera := Camera3D.new()

@@ -34,7 +34,7 @@ VOIRIE = "#=O(/"
 ## `X` (dépôt) sont des lettres pour Python mais du sol pour le jeu : les
 ## compter comme des bâtiments faisait dire à l'audit qu'un tiers de la ville
 ## était sans accès alors qu'il s'agissait de places et de parkings.
-BATI = set("TBCMVHtbcmvh+FS$?*")
+BATI = set("TBCMVHtbcmvh+FS$?*EK")
 
 
 # ════════════════════════════════════════════════════════════ 1. LES ÎLES
@@ -861,6 +861,48 @@ def durcir_marches(plan, relief, part=2):
     return n
 
 
+## ⚠ LE RIVAGE SE DÉCIDE AVANT DE BÂTIR, PAS APRÈS. Les plages étaient
+## ajoutées en dernier, en arcs, sur ce qui restait de pelouse : là où le front
+## de mer était bâti — c'est-à-dire presque partout — il n'y avait plus rien à
+## ensabler, et la ville tombait dans l'eau à pic comme une maquette posée sur
+## un miroir. Le rivage est donc tracé AVANT les pâtés, et les pâtés se
+## calculent sur ce qui reste.
+##
+## Et il suit la logique d'une vraie côte — celle des GTA, où l'on fait le tour
+## d'une île en voiture en voyant la plage d'un côté et les façades de l'autre :
+##
+##   côte BASSE (palier 0-1), quartier d'habitation ou centre   →  la plage,
+##       trois cases de sable entre la corniche et l'eau ; en centre-ville, la
+##       case contre la corniche est une promenade pavée
+##   côte HAUTE (palier 2 et plus)                             →  la falaise :
+##       pas de sable, la ville bâtit jusqu'au bord et les rochers font le reste
+##   zone industrielle, ou à moins de cinq cases d'un poste à quai  →  le quai :
+##       pas de sable, la terre tombe dans l'eau, les conteneurs derrière
+def rivage(plan, relief, terre, dist, quartier):
+    n_sable = n_prom = 0
+    for j in range(H):
+        for i in range(W):
+            if not terre[j][i] or plan[j][i] != "," or dist[j][i] > 3:
+                continue
+            if int(relief[j][i]) >= 2:
+                continue                       # falaise : pas de plage
+            q = quartier[j][i]
+            district = q[1] if q else "residentiel"
+            if district == "industriel" and (i * 31 + j * 17) % 5:
+                continue                       # le quai, sauf une anse sur cinq
+            if any(plan[y][x] == "~"
+                   for x in range(max(0, i - 5), min(W, i + 6))
+                   for y in range(max(0, j - 5), min(H, j + 6))):
+                continue                       # le port a des quais, pas des plages
+            if district == "centre" and dist[j][i] == 3:
+                plan[j][i] = "o"
+                n_prom += 1
+            else:
+                plan[j][i] = ";"
+                n_sable += 1
+    return n_sable, n_prom
+
+
 # ═══════════════════════════════════════════════════════════ 6. LES DÉTAILS
 
 ## ⚠ UNE PLAGE EST UN ARC, PAS UNE PROBABILITÉ. Semée case par case à une
@@ -995,10 +1037,17 @@ def ronds_points(plan, relief, terre, alea, combien, ecart=34):
 
 ## LES BÂTIMENTS À INTERACTION. Ils remplacent un bâtiment existant, donc ils
 ## héritent de son accès à la rue : pas d'hôpital au fond d'un pré.
-INTERACTIONS = [("+", 8), ("F", 8), ("S", 14), ("$", 10), ("?", 40), ("*", 30)]
+## `E` l'église et `K` la casse automobile : les deux bâtiments Piks-l livrés le
+## 11 septembre. L'église va dans les quartiers d'habitation et le centre, la
+## casse dans la zone industrielle uniquement — une casse au milieu des
+## pavillons, ça ne se voit que dans les mauvais quartiers de GTA, et on n'en a
+## pas encore.
+INTERACTIONS = [("+", 8), ("F", 8), ("S", 14), ("$", 10), ("?", 40), ("*", 30),
+                ("E", 7), ("K", 4)]
+DISTRICT_DE = {"K": ("industriel",), "E": ("residentiel", "centre")}
 
 
-def interactions(plan, alea):
+def interactions(plan, alea, quartier=None):
     cases = [(i, j) for j in range(H) for i in range(W) if plan[j][i] in BATI]
     alea.shuffle(cases)
     poses = {}
@@ -1010,6 +1059,10 @@ def interactions(plan, alea):
             k += 1
             if plan[j][i] not in BATI:
                 continue
+            if quartier is not None and lettre in DISTRICT_DE:
+                q = quartier[j][i]
+                if not q or q[1] not in DISTRICT_DE[lettre]:
+                    continue
             if any(abs(i - x) + abs(j - y) < 26
                    for (x, y) in poses.get(lettre, [])):
                 continue
@@ -1196,6 +1249,12 @@ def construire(graine=7):
     relief = quantifier(terre, champ(terre, dist, alea, BOSSES))
     reparer_relief(plan, terre, relief)
 
+    # LE PORT D'ABORD — ses quais chassent la plage —, PUIS LE RIVAGE, avant
+    # les pâtés : les plages ne se bâtissent pas.
+    rapport["port"] = sum(port(plan, terre, ile, alea, 8 if len(ile) > 8000 else 2)
+                          for ile in iles if len(ile) > 900)
+    rapport["sable"], rapport["promenade"] = rivage(plan, relief, terre, dist, quartier)
+
     coins = []
     for bloc in composantes(plan, ","):
         i0, j0 = bloc[0]
@@ -1225,13 +1284,9 @@ def construire(graine=7):
     reparer_relief(plan, terre, relief)
 
     # LES DÉTAILS.
-    rapport["plages"] = sum(plages(plan, terre, dist, ile, alea,
-                                   3 if len(ile) > 8000 else 1)
-                            for ile in iles if len(ile) > 900)
+    rapport["plages"] = rapport["sable"]
     rapport["ronds"] = ronds_points(plan, relief, terre, alea, 22)
-    rapport["port"] = sum(port(plan, terre, ile, alea, 8 if len(ile) > 8000 else 2)
-                          for ile in iles if len(ile) > 900)
-    rapport["interactions"] = interactions(plan, alea)
+    rapport["interactions"] = interactions(plan, alea, quartier)
     return plan, relief, rapport
 
 
@@ -1346,8 +1401,9 @@ def main():
     print("îles : %d   diagonales : %d   dessertes : %d   raccrochages : %d   ébarbages : %d"
           % (rap["iles"], rap["diagonales"], rap["desservies"],
              rap["raccroches"], rap["ebarbes"]))
-    print("ronds-points : %d   places de coin : %d   jardins : %d   postes à quai : %d   plages : %d"
-          % (rap["ronds"], rap["places"], rap["jardins"], rap["port"], rap["plages"]))
+    print("ronds-points : %d   places de coin : %d   jardins : %d   postes à quai : %d"
+          % (rap["ronds"], rap["places"], rap["jardins"], rap["port"]))
+    print("rivage : %d cases de sable, %d de promenade" % (rap["sable"], rap["promenade"]))
     print("interactions : %s" % rap["interactions"])
     print("BÂTIMENTS : %d blocs, %d SANS ACCÈS, médiane %d cases, plus gros %d"
           % (a["blocs"], a["sans_acces"], a["mediane"], a["max_bloc"]))

@@ -1,20 +1,26 @@
 extends Control
-## L'affichage tête haute d'une manche, façon borne d'arcade : le chrono et les
-## scores en cartouche en haut à gauche, les étoiles de recherche en haut au
-## milieu, la fiche du joueur — jauges, arme, humeur du quartier — en bas à
-## gauche, l'alerte du moment (le contrat) en bas au milieu, et les touches
-## en cabochons sur la dernière ligne.
+## L'affichage tête haute d'une manche, dans la charte de l'AFFICHE — celle du
+## chargement et des écrans d'avant-partie : Archivo Black pour les chiffres,
+## capitales condensées espacées pour les libellés, voile nuit cerné d'un filet,
+## et le dégradé violet–rose–cyan qui coiffe chaque cartouche. Le chrono et
+## les fortunes en haut à gauche, les étoiles de recherche en haut au milieu,
+## la fiche du joueur — jauges, arme, argent, puces — en bas à gauche, le
+## contrat en bas au milieu, et les touches sur la dernière ligne.
+##
+## ⚠ Il a porté la borne d'arcade (`UI`) jusqu'à la phase 9. Le client a
+## tranché : « quelque chose comme le chargement et nos écrans d'accueil ». On
+## ne change pas de logiciel en passant du menu à la rue.
 ##
 ## Tout se peint dans `_draw` : une trentaine de rectangles et de chiffres qui
 ## changent à chaque image, c'est un dessin, pas un arbre de contrôles à
 ## recaler. Le socle (`Partie`) remplit les champs ; le jeu ne connaît que
-## la fiche qu'il renvoie. Ainsi l'énigme et Carnage ont le même HUD, chacun
-## avec ses propres rubriques.
+## la fiche qu'il renvoie.
 
-const MARGE := 12.0
+const MARGE := 14.0
 const LARGEUR_SCORES := 250.0
-const LARGEUR_FICHE := 262.0
-const HAUTEUR_JAUGE := 16.0
+const LARGEUR_FICHE := 264.0
+const HAUTEUR_JAUGE := 22.0
+const RETRAIT := 14.0                ## la marge intérieure d'un cartouche
 
 var chrono := 0.0                 ## secondes restantes — ou écoulées si `sans_limite`
 var sans_limite := false          ## le chrono monte au lieu de descendre
@@ -36,7 +42,7 @@ func _draw() -> void:
 	_peindre_le_reseau(taille)
 	if fiche.has("etoiles"):
 		_peindre_les_etoiles(taille)
-	var bas := taille.y - MARGE - 24.0     # au-dessus de la ligne d'aide
+	var bas := taille.y - MARGE - 26.0     # au-dessus de la ligne d'aide
 	if not fiche.is_empty():
 		bas = _peindre_la_fiche(bas)
 		if fiche.has("respect"):
@@ -47,218 +53,206 @@ func _draw() -> void:
 		_peindre_l_alerte(taille)
 	_peindre_l_aide(taille)
 	if message != "":
-		# Le décompte en très gros ; une phrase, en corps plus modeste, sinon
-		# « EN ATTENTE DES JOUEURS » déborde d'un écran de 960 pixels.
-		UI.inscription(self, taille * 0.5, message, 48 if message.length() <= 2 else 24, Palette.ENCRE)
+		# Le décompte en très gros ; une phrase en capitales, plus modeste,
+		# sinon « EN ATTENTE DES JOUEURS » déborde d'un écran de 960 pixels.
+		if message.length() <= 2:
+			Charte.inscription_titre(self, taille * 0.5, message, 96, Color.WHITE)
+		else:
+			Charte.inscription(self, taille * 0.5, message, 26, Color.WHITE, 0.30)
 
-## Chrono et scores : un cartouche, les joueurs dans l'ordre de la table, le
-## meneur souligné d'une barre à la longueur de son score — la course se lit
-## sans comparer des chiffres.
+## Chrono et fortunes : un cartouche, le chrono en Archivo Black, les joueurs
+## dans l'ordre de la table, chacun souligné d'une barre à la longueur de sa
+## fortune — la course se lit sans comparer des chiffres.
 func _peindre_les_scores() -> void:
 	var lignes := scores.size()
-	var hauteur := 14.0 + 28.0 + lignes * 22.0 + 6.0
+	var hauteur := 16.0 + 34.0 + lignes * 24.0 + 4.0
 	var rect := Rect2(Vector2(MARGE, MARGE), Vector2(LARGEUR_SCORES, hauteur))
-	UI.cartouche(self, rect, Palette.CRITIQUE if chrono_critique else Palette.SERIE)
-	var x := rect.position.x + UI.ACCENT + 12.0
-	var y := rect.position.y + 12.0
+	Charte.cartouche(self, rect, Charte.ROSE if chrono_critique else Color(0, 0, 0, 0))
+	var x := rect.position.x + RETRAIT
+	var y := rect.position.y + 14.0
 	var minutes := int(chrono) / 60
 	var secondes := int(chrono) % 60
 	var texte_chrono := "%d:%02d" % [minutes, secondes]
-	var couleur_chrono := Palette.CRITIQUE if chrono_critique and fmod(temps, 0.6) < 0.35 else Palette.ENCRE
-	draw_string(UI.TITRE_POLICE, Vector2(x, y + 22.0), texte_chrono, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, couleur_chrono)
+	var couleur_chrono := Charte.ROSE if chrono_critique and fmod(temps, 0.6) < 0.35 else Color.WHITE
+	Charte.titre_dessine(self, Vector2(x, y + 26.0), texte_chrono, 28, couleur_chrono, 0)
 	var libelle_chrono := "en ville" if sans_limite else "restant"
-	draw_string(UI.TEXTE_POLICE, Vector2(rect.end.x - 12.0 - UI.TEXTE_POLICE.get_string_size(libelle_chrono, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x,
-		y + 20.0), libelle_chrono, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_FAIBLE)
-	y += 34.0
+	var ll := Charte.largeur_capitales(libelle_chrono, 11)
+	Charte.capitales_dessinees(self, Vector2(rect.end.x - RETRAIT - ll, y + 24.0), libelle_chrono, 11, Charte.ENCRE_FAIBLE)
+	y += 42.0
 	var maximum := 1
 	for s in scores:
 		maximum = max(maximum, int(s.get("score", 0)))
 	for s in scores:
-		var couleur: Color = s.get("couleur", Palette.ENCRE)
+		var couleur: Color = s.get("couleur", Color.WHITE)
 		var moi: bool = s.get("moi", false)
-		draw_rect(Rect2(Vector2(x, y + 4.0), Vector2(10, 10)), couleur, true)
-		var pseudo := String(s.get("pseudo", "?")).to_upper().left(12)
-		draw_string(UI.TITRE_POLICE, Vector2(x + 18.0, y + 13.0), pseudo, HORIZONTAL_ALIGNMENT_LEFT, -1, 8,
-			Palette.ENCRE if moi else Palette.ENCRE_DOUCE)
+		draw_rect(Rect2(Vector2(x, y + 3.0), Vector2(8, 8)), couleur, true)
+		var pseudo := String(s.get("pseudo", "?")).left(14)
+		Charte.capitales_dessinees(self, Vector2(x + 16.0, y + 11.0), pseudo, 12,
+			Color.WHITE if moi else Charte.ENCRE_DOUCE, 0.16)
 		# La fortune, en dollars : c'est de l'argent, pas des points.
 		var points := "$" + str(int(s.get("score", 0)))
-		var largeur := UI.TITRE_POLICE.get_string_size(points, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-		draw_string(UI.TITRE_POLICE, Vector2(rect.end.x - 12.0 - largeur, y + 15.0), points,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Palette.ENCRE if moi else Palette.ENCRE_DOUCE)
+		var largeur := Charte.largeur_titre(points, 13)
+		Charte.titre_dessine(self, Vector2(rect.end.x - RETRAIT - largeur, y + 11.0), points, 13,
+			Color.WHITE if moi else Charte.ENCRE_DOUCE, 0)
 		# La barre de course, sous le nom : proportionnelle au meneur.
 		var part := float(s.get("score", 0)) / float(maximum)
-		var largeur_barre := rect.size.x - UI.ACCENT - 24.0 - 18.0 - largeur - 8.0
-		draw_rect(Rect2(Vector2(x + 18.0, y + 17.0), Vector2(largeur_barre, 2.0)), Color(couleur, 0.25), true)
+		var largeur_barre := rect.size.x - 2.0 * RETRAIT - 16.0
+		draw_rect(Rect2(Vector2(x + 16.0, y + 17.0), Vector2(largeur_barre, 2.0)), Color(couleur, 0.20), true)
 		if part > 0.0:
-			draw_rect(Rect2(Vector2(x + 18.0, y + 17.0), Vector2(largeur_barre * part, 2.0)), couleur, true)
-		y += 22.0
+			draw_rect(Rect2(Vector2(x + 16.0, y + 17.0), Vector2(largeur_barre * part, 2.0)), couleur, true)
+		y += 24.0
 
-## En haut à droite : l'état du réseau et du son, en petit. Le radar de
-## Carnage se pose juste en dessous.
+## En haut à droite : l'état du réseau et du son, en petites capitales. Le
+## radar de Carnage se pose juste en dessous.
 func _peindre_le_reseau(taille: Vector2) -> void:
-	var y := MARGE + 14.0
+	var y := MARGE + 12.0
 	var son := "son coupé  [M]" if not son_actif else "[M] son"
-	var largeur_son := UI.TEXTE_POLICE.get_string_size(son, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+	var largeur_son := Charte.largeur_capitales(son, 10, 0.16)
 	var x := taille.x - MARGE - largeur_son
-	draw_string(UI.TEXTE_POLICE, Vector2(x, y), son, HORIZONTAL_ALIGNMENT_LEFT, -1, 11,
-		Palette.ENCRE_FAIBLE if son_actif else Palette.AVERTISSEMENT)
-	var largeur_reseau := UI.TEXTE_POLICE.get_string_size(reseau_libelle, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-	x -= 18.0 + largeur_reseau
-	draw_string(UI.TEXTE_POLICE, Vector2(x, y), reseau_libelle, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, reseau_couleur)
-	draw_rect(Rect2(Vector2(x - 14.0, y - 9.0), Vector2(8, 8)), reseau_couleur, true)
+	Charte.capitales_dessinees(self, Vector2(x, y), son, 10,
+		Charte.ENCRE_FAIBLE if son_actif else Charte.ORANGE, 0.16, 3)
+	var largeur_reseau := Charte.largeur_capitales(reseau_libelle, 10, 0.16)
+	x -= 20.0 + largeur_reseau
+	Charte.capitales_dessinees(self, Vector2(x, y), reseau_libelle, 10, reseau_couleur, 0.16, 3)
+	draw_rect(Rect2(Vector2(x - 13.0, y - 8.0), Vector2(7, 7)), reseau_couleur, true)
 
-## Les étoiles de recherche : cinq emplacements, toujours visibles — une
-## étoile qui apparaît de nulle part n'annonce pas qu'il en reste quatre.
-## À cinq, elles clignotent : c'est l'hélicoptère.
+## Les étoiles de recherche : six emplacements, toujours visibles — une
+## étoile qui apparaît de nulle part n'annonce pas qu'il en reste cinq.
+## À cinq, elles clignotent : c'est l'hélicoptère. Elles sont ORANGE, la
+## couleur chaude de l'affiche ; le rose est réservé au danger immédiat.
 func _peindre_les_etoiles(taille: Vector2) -> void:
 	var niveau := int(fiche.get("etoiles", 0))
 	var centre_x := taille.x * 0.5
-	# SIX crans depuis la phase 8 : le sixième, c'est l'armée. Les étoiles se
-	# resserrent (26 au lieu de 30) pour que la rangée garde la même largeur
-	# qu'avant — elle est centrée sur le haut de l'écran, et une rangée qui
-	# s'élargit d'un cran décale tout le reste.
 	var pas := 26.0
 	for i in 6:
 		var centre := Vector2(centre_x + (float(i) - 2.5) * pas, MARGE + 18.0)
 		var allumee := i < niveau
-		var couleur := Color(1, 1, 1, 0.14)
+		var couleur := Color(1, 1, 1, 0.12)
 		if allumee:
-			couleur = Palette.AVERTISSEMENT
+			couleur = Charte.ORANGE
 			if niveau >= 5 and fmod(temps, 0.5) < 0.25:
-				couleur = Palette.CRITIQUE
-		UI.etoile(self, centre + Vector2(1, 2), 11.0, Color(0, 0, 0, 0.5 if allumee else 0.0))
-		UI.etoile(self, centre, 11.0, couleur)
+				couleur = Charte.ROSE
+		Charte.etoile(self, centre + Vector2(1, 2), 11.0, Color(0, 0, 0, 0.5 if allumee else 0.0))
+		Charte.etoile(self, centre, 11.0, couleur)
 	if niveau > 0:
-		UI.inscription(self, Vector2(centre_x, MARGE + 44.0), "RECHERCHE", 8, Palette.AVERTISSEMENT)
+		Charte.inscription(self, Vector2(centre_x, MARGE + 44.0), "recherche", 11, Charte.ORANGE, 0.34)
 
-## La fiche du joueur, en bas à gauche : jauges, arme, puces d'état. Renvoie
-## le bord haut du cartouche, pour qui voudrait poser autre chose au-dessus.
+## La fiche du joueur, en bas à gauche : jauges, arme, argent, puces d'état.
+## Renvoie le bord haut du cartouche, pour qui voudrait poser autre chose
+## au-dessus.
 func _peindre_la_fiche(bas: float) -> float:
 	var jauges: Array = fiche.get("jauges", [])
 	var puces: Array = fiche.get("puces", [])
 	var arme: Dictionary = fiche.get("arme", {})
 	var argent: Dictionary = fiche.get("argent", {})
-	var hauteur := 12.0 + jauges.size() * (HAUTEUR_JAUGE + 6.0)
+	var hauteur := 12.0 + jauges.size() * (HAUTEUR_JAUGE + 4.0)
 	if not arme.is_empty():
-		hauteur += 24.0
+		hauteur += 28.0
 	if not argent.is_empty():
-		hauteur += 22.0
+		hauteur += 26.0
 	if not puces.is_empty():
-		hauteur += 22.0
-	hauteur += 6.0
+		hauteur += 24.0
+	hauteur += 8.0
 	var rect := Rect2(Vector2(MARGE, bas - hauteur), Vector2(LARGEUR_FICHE, hauteur))
-	var accent: Color = fiche.get("accent", Palette.SERIE)
-	UI.cartouche(self, rect, accent)
-	var x := rect.position.x + UI.ACCENT + 12.0
+	Charte.cartouche(self, rect)
+	var x := rect.position.x + RETRAIT
 	var y := rect.position.y + 12.0
-	var largeur := rect.size.x - UI.ACCENT - 24.0
+	var largeur := rect.size.x - 2.0 * RETRAIT
 	for j in jauges:
-		UI.jauge(self, Rect2(Vector2(x, y), Vector2(largeur, HAUTEUR_JAUGE)), String(j.get("nom", "")),
-			float(j.get("part", 0.0)), j.get("couleur", Palette.BON), String(j.get("valeur", "")))
-		y += HAUTEUR_JAUGE + 6.0
+		Charte.jauge(self, Rect2(Vector2(x, y), Vector2(largeur, HAUTEUR_JAUGE)), String(j.get("nom", "")),
+			float(j.get("part", 0.0)), j.get("couleur", Charte.VERT), String(j.get("valeur", "")))
+		y += HAUTEUR_JAUGE + 4.0
 	if not arme.is_empty():
 		var nom := String(arme.get("nom", "")).to_upper()
-		draw_string(UI.TITRE_POLICE, Vector2(x, y + 16.0), nom, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Palette.ENCRE)
+		Charte.titre_dessine(self, Vector2(x, y + 20.0), nom, 18, Color.WHITE, 0)
 		var munitions := String(arme.get("munitions", ""))
 		if munitions != "":
-			var l := UI.TITRE_POLICE.get_string_size(munitions, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-			draw_string(UI.TITRE_POLICE, Vector2(rect.end.x - 12.0 - l, y + 16.0), munitions,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Palette.AVERTISSEMENT)
-		y += 24.0
+			var l := Charte.largeur_titre(munitions, 16)
+			Charte.titre_dessine(self, Vector2(rect.end.x - RETRAIT - l, y + 20.0), munitions, 16, Charte.CYAN, 0)
+		y += 28.0
 	if not argent.is_empty():
 		# Sur soi en gros — c'est ce qu'on perd — et le coffre à côté, en petit.
 		var sur_soi := "$%d" % int(argent.get("sur_soi", 0))
-		draw_string(UI.TITRE_POLICE, Vector2(x, y + 15.0), sur_soi, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Palette.AVERTISSEMENT)
+		Charte.titre_dessine(self, Vector2(x, y + 19.0), sur_soi, 18, Charte.ORANGE, 0)
 		if bool(argent.get("planque", false)):
 			var coffre := "coffre $%d" % int(argent.get("banque", 0))
-			var lc := UI.TEXTE_POLICE.get_string_size(coffre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-			draw_string(UI.TEXTE_POLICE, Vector2(rect.end.x - 12.0 - lc, y + 14.0), coffre,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.BON)
+			var lc := Charte.largeur_capitales(coffre, 11, 0.14)
+			Charte.capitales_dessinees(self, Vector2(rect.end.x - RETRAIT - lc, y + 18.0), coffre, 11, Charte.VERT, 0.14)
 		else:
 			var sans := "pas de planque"
-			var ls := UI.TEXTE_POLICE.get_string_size(sans, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-			draw_string(UI.TEXTE_POLICE, Vector2(rect.end.x - 12.0 - ls, y + 14.0), sans,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_FAIBLE)
-		y += 22.0
+			var ls := Charte.largeur_capitales(sans, 11, 0.14)
+			Charte.capitales_dessinees(self, Vector2(rect.end.x - RETRAIT - ls, y + 18.0), sans, 11, Charte.ENCRE_FAIBLE, 0.14)
+		y += 26.0
 	if not puces.is_empty():
 		var px := x
 		for p in puces:
 			var texte_puce := String(p.get("texte", ""))
-			var couleur: Color = p.get("couleur", Palette.ENCRE_DOUCE)
-			var l := UI.TEXTE_POLICE.get_string_size(texte_puce, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-			if px + l + 12.0 > rect.end.x - 8.0 and px > x:
+			var couleur: Color = p.get("couleur", Charte.ENCRE_DOUCE)
+			var l := Charte.largeur_texte(texte_puce, 13)
+			if px + l + 14.0 > rect.end.x - RETRAIT + 4.0 and px > x:
 				break     # une puce de trop ne déborde pas, elle attend
-			draw_rect(Rect2(Vector2(px, y + 1.0), Vector2(l + 10.0, 18.0)), Color(couleur, 0.18), true)
-			draw_rect(Rect2(Vector2(px, y + 1.0), Vector2(2.0, 18.0)), couleur, true)
-			draw_string(UI.TEXTE_POLICE, Vector2(px + 6.0, y + 15.0), texte_puce, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, couleur)
-			px += l + 16.0
-		y += 22.0
+			draw_rect(Rect2(Vector2(px, y + 1.0), Vector2(l + 12.0, 20.0)), Color(couleur, 0.14), true)
+			draw_rect(Rect2(Vector2(px, y + 1.0), Vector2(2.0, 20.0)), couleur, true)
+			Charte.texte_dessine(self, Vector2(px + 7.0, y + 15.5), texte_puce, 13, couleur, 0)
+			px += l + 18.0
+		y += 24.0
 	return rect.position.y
 
 ## LES TROIS BARRES DE RESPECT du district où l'on se trouve — pas les sept de
-## la ville. Sept barres, c'est un tableau de bord de simulateur : on ne les
-## lit plus, et cinq d'entre elles parlent de quartiers qu'on ne voit pas.
-## Trois, c'est la question du moment : qui, ICI, vous laisse passer.
-##
-## Elles se peignent AU-DESSUS de la fiche : posées dedans, elles doublaient la
-## hauteur du cartouche et mangeaient le bas de l'écran en voiture.
+## la ville. Trois, c'est la question du moment : qui, ICI, vous laisse
+## passer. Elles se peignent AU-DESSUS de la fiche.
 func _peindre_le_respect(bas: float) -> float:
 	var barres: Array = fiche.get("respect", [])
 	if barres.is_empty():
 		return bas
-	var hauteur := 16.0 + barres.size() * 17.0
+	var hauteur := 14.0 + barres.size() * 19.0
 	var rect := Rect2(Vector2(MARGE, bas - hauteur - 6.0), Vector2(LARGEUR_FICHE, hauteur))
-	UI.cartouche(self, rect, Palette.ENCRE_FAIBLE)
-	var x := rect.position.x + UI.ACCENT + 12.0
-	var largeur := rect.size.x - UI.ACCENT - 24.0
-	var y := rect.position.y + 8.0
+	Charte.cartouche(self, rect, Color(1, 1, 1, 0.22))
+	var x := rect.position.x + RETRAIT
+	var largeur := rect.size.x - 2.0 * RETRAIT
+	var y := rect.position.y + 10.0
 	for b in barres:
-		var couleur: Color = b.get("couleur", Palette.ENCRE_DOUCE)
+		var couleur: Color = b.get("couleur", Charte.ENCRE_DOUCE)
 		var teinte: Color = b.get("teinte", couleur)
 		var part: float = clamp(float(b.get("part", 0.0)), 0.0, 1.0)
 		# Le nom à gauche, l'humeur à droite, la barre par-dessous : le nom
 		# seul ne dit pas ce qu'il faut en penser, et l'humeur seule ne dit pas
 		# de qui l'on parle.
-		draw_string(UI.TEXTE_POLICE, Vector2(x, y + 8.0), String(b.get("nom", "")),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, couleur)
+		Charte.capitales_dessinees(self, Vector2(x, y + 9.0), String(b.get("nom", "")), 11, couleur, 0.16)
 		var mot := String(b.get("humeur", ""))
-		var lm := UI.TEXTE_POLICE.get_string_size(mot, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-		draw_string(UI.TEXTE_POLICE, Vector2(rect.end.x - 12.0 - lm, y + 8.0), mot,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, teinte)
-		# ⚠ La barre DEUX pixels plus bas qu'il n'y paraît : à dix, la jambe du
-		# « p » de « vous chasse » tombait dedans et les deux se brouillaient.
-		draw_rect(Rect2(Vector2(x, y + 12.0), Vector2(largeur, 3.0)), Color(couleur, 0.20), true)
-		draw_rect(Rect2(Vector2(x, y + 12.0), Vector2(largeur * part, 3.0)), teinte, true)
-		y += 17.0
+		var lm := Charte.largeur_capitales(mot, 10, 0.14)
+		Charte.capitales_dessinees(self, Vector2(rect.end.x - RETRAIT - lm, y + 9.0), mot, 10, teinte, 0.14)
+		draw_rect(Rect2(Vector2(x, y + 13.0), Vector2(largeur, 3.0)), Color(couleur, 0.18), true)
+		draw_rect(Rect2(Vector2(x, y + 13.0), Vector2(largeur * part, 3.0)), teinte, true)
+		y += 19.0
 	return rect.position.y
 
 ## La ligne d'état libre des jeux qui n'ont pas de fiche : un cartouche, une
 ## phrase.
 func _peindre_l_etat(bas: float) -> float:
-	var largeur := UI.TEXTE_POLICE.get_string_size(etat_texte, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
-	var rect := Rect2(Vector2(MARGE, bas - 40.0), Vector2(largeur + UI.ACCENT + 28.0, 40.0))
-	UI.cartouche(self, rect, Palette.SERIE)
-	draw_string(UI.TEXTE_POLICE, Vector2(rect.position.x + UI.ACCENT + 14.0, rect.position.y + 27.0), etat_texte,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Palette.ENCRE)
+	var largeur := Charte.largeur_texte(etat_texte, 17)
+	var rect := Rect2(Vector2(MARGE, bas - 42.0), Vector2(largeur + 2.0 * RETRAIT, 42.0))
+	Charte.cartouche(self, rect)
+	Charte.texte_dessine(self, Vector2(rect.position.x + RETRAIT, rect.position.y + 28.0), etat_texte, 17, Color.WHITE, 0)
 	return rect.position.y
 
 ## L'alerte : le contrat en cours, en bas au milieu, avec son sablier en barre.
+## Le cartouche prend la couleur du contrat sur son filet.
 func _peindre_l_alerte(taille: Vector2) -> void:
 	var alerte: Dictionary = fiche.get("alerte", {})
 	var texte_alerte := String(alerte.get("texte", ""))
 	if texte_alerte == "":
 		return
-	var couleur: Color = alerte.get("couleur", Palette.AVERTISSEMENT)
+	var couleur: Color = alerte.get("couleur", Charte.ORANGE)
 	var part := float(alerte.get("part", -1.0))
-	var largeur := UI.TITRE_POLICE.get_string_size(texte_alerte, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x + 40.0
-	var hauteur := 30.0 if part >= 0.0 else 26.0
-	var rect := Rect2(Vector2(taille.x * 0.5 - largeur * 0.5, taille.y - MARGE - 24.0 - 8.0 - hauteur), Vector2(largeur, hauteur))
-	UI.cartouche(self, rect, couleur)
-	draw_string(UI.TITRE_POLICE, Vector2(rect.position.x + UI.ACCENT + 16.0, rect.position.y + 17.0), texte_alerte,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Palette.ENCRE)
+	var largeur := Charte.largeur_capitales(texte_alerte, 12, 0.14) + 2.0 * RETRAIT + 4.0
+	var hauteur := 36.0 if part >= 0.0 else 30.0
+	var rect := Rect2(Vector2(taille.x * 0.5 - largeur * 0.5, taille.y - MARGE - 26.0 - 8.0 - hauteur), Vector2(largeur, hauteur))
+	Charte.cartouche(self, rect, couleur)
+	Charte.capitales_dessinees(self, Vector2(rect.position.x + RETRAIT + 2.0, rect.position.y + 21.0), texte_alerte, 12, Color.WHITE, 0.14)
 	if part >= 0.0:
-		var barre := Rect2(Vector2(rect.position.x + UI.ACCENT + 16.0, rect.end.y - 7.0), Vector2(largeur - UI.ACCENT - 32.0, 3.0))
-		draw_rect(barre, Color(couleur, 0.25), true)
+		var barre := Rect2(Vector2(rect.position.x + RETRAIT, rect.end.y - 8.0), Vector2(largeur - 2.0 * RETRAIT, 3.0))
+		draw_rect(barre, Color(couleur, 0.22), true)
 		draw_rect(Rect2(barre.position, Vector2(barre.size.x * clampf(part, 0.0, 1.0), 3.0)), couleur, true)
 
 ## Les touches, sur la dernière ligne. Elles s'estompent après le départ :
@@ -267,20 +261,11 @@ func _peindre_l_aide(taille: Vector2) -> void:
 	if aide.is_empty() or aide_visible <= 0.0:
 		return
 	var x := MARGE
-	var y := taille.y - MARGE - 18.0
+	var y := taille.y - MARGE - 20.0
 	var alpha := clampf(aide_visible, 0.0, 1.0)
 	for paire in aide:
-		var largeur_attendue := UI.TITRE_POLICE.get_string_size(String(paire[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x + 18.0 \
-			+ UI.TEXTE_POLICE.get_string_size(String(paire[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 18.0
+		var largeur_attendue := Charte.largeur_capitales(String(paire[0]), 11, 0.12) + 21.0 \
+			+ Charte.largeur_texte(String(paire[1]), 13) + 20.0
 		if x + largeur_attendue > taille.x - 240.0 and x > MARGE:
 			break    # les boutons tactiles vivent à droite ; on ne passe pas dessous
-		x += _cabochon_estompe(Vector2(x, y), String(paire[0]), String(paire[1]), alpha)
-
-func _cabochon_estompe(ou: Vector2, cle: String, action: String, alpha: float) -> float:
-	var largeur_cle := UI.TITRE_POLICE.get_string_size(cle, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-	var boite := Rect2(ou, Vector2(largeur_cle + 12.0, 18.0))
-	draw_rect(boite, Color(Palette.ENCRE_DOUCE, alpha), true)
-	draw_string(UI.TITRE_POLICE, ou + Vector2(6.0, 13.0), cle, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(Palette.FOND, alpha))
-	draw_string(UI.TEXTE_POLICE, ou + Vector2(boite.size.x + 6.0, 14.0), action,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(Palette.ENCRE_DOUCE, alpha))
-	return boite.size.x + 6.0 + UI.TEXTE_POLICE.get_string_size(action, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 18.0
+		x += Charte.cabochon(self, Vector2(x, y), String(paire[0]), String(paire[1]), alpha)
