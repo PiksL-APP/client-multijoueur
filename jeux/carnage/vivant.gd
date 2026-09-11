@@ -186,16 +186,23 @@ const DUREE_CONTRAT := {"nettoyage": 55.0, "livraison": 45.0, "chasse": 32.0}
 const PRIME_CONTRAT := {"nettoyage": 620, "livraison": 700, "chasse": 800}
 const RESPECT_CONTRAT := 13.0
 
-## Les trois téléphones du guide (§4.1) : un gang ne confie pas le même
-## travail à un inconnu et à quelqu'un qui s'est battu pour lui. La difficulté
-## n'est donc PAS tirée au sort, elle se mérite — c'est ce qui fait du respect
-## une progression et pas un thermomètre.
+## Les trois téléphones du guide (§4.1) : vert, jaune, rouge. La difficulté
+## appartient à la CABINE, pas au joueur — c'est `FormesCarnage.CABINES` qui
+## la tire du pâté, une fois pour toutes, et l'enseigne l'annonce de loin.
+##
+## ⚠ C'était l'humeur du gang qui choisissait le palier : le même téléphone
+## donnait « facile » puis « difficile » selon la jauge, donc rien à chercher
+## dans la ville — on décrochait où on passait et le jeu décidait. Le guide
+## demande l'inverse : le joueur REPÈRE un téléphone rouge et revient quand il
+## a de quoi. Le respect ne fixe plus la difficulté, il ouvre la serrure —
+## `CABINES[niveau]["respect"]` est le minimum qu'il faut avoir avec le gang
+## du quartier pour que ce téléphone-là décroche.
 ##   nom, multiplicateur de prime, travail en plus, respect gagné
-const PALIERS_CONTRAT := {
-	H_NEUTRE: {"nom": "facile", "prime": 1.0, "plus": 0, "respect": RESPECT_CONTRAT * 0.8},
-	H_AMICAL: {"nom": "moyenne", "prime": 1.6, "plus": 1, "respect": RESPECT_CONTRAT},
-	H_ALLIE: {"nom": "difficile", "prime": 2.4, "plus": 2, "respect": RESPECT_CONTRAT * 1.3},
-}
+const PALIERS_CONTRAT := [
+	{"nom": "facile", "prime": 1.0, "plus": 0, "respect": RESPECT_CONTRAT * 0.8},
+	{"nom": "moyenne", "prime": 1.6, "plus": 1, "respect": RESPECT_CONTRAT},
+	{"nom": "difficile", "prime": 2.4, "plus": 2, "respect": RESPECT_CONTRAT * 1.3},
+]
 
 const COMBO_FENETRE := 3.0
 const COMBO_MAX := 4              ## facteur maximum = COMBO_MAX + 1
@@ -416,6 +423,7 @@ func simuler(delta: float, temps: float, joueurs: Dictionary) -> void:
 	_arbitrer(delta, joueurs)
 	_depecher_la_police(delta, joueurs)
 	_animer_les_helicos(delta, joueurs)
+	_animer_les_trains(delta, joueurs)
 	_avancer_contrats(delta, joueurs)
 	_animer_les_pieges(delta, joueurs)
 	_animer_les_bombes(delta)
@@ -1954,6 +1962,345 @@ func _faire_glisser(piege: Dictionary, joueurs: Dictionary) -> void:
 			continue
 		emettre("glisse", {"j": String(cle)})
 
+# ------------------------------------------------------------ le train
+
+## LE TRAIN (§1.3). La ville a toujours eu sa voie ferrée — une droite en biais
+## d'un bord à l'autre, le seul trait qui ne suive pas la grille — mais rien
+## n'y roulait : c'était une texture peinte par le nuanceur du sol. Deux rames
+## y circulent maintenant, et elles font les deux choses que le guide demande.
+##
+##   — ON LE PREND. Il marque l'arrêt tous les `ECART_GARES` px. À quai,
+##     `E` fait monter comme dans une voiture ; il traverse alors la ville en
+##     ligne droite, plus vite qu'aucune carrosserie, sans un feu ni un
+##     barrage, et la police ne monte pas dedans.
+##   — ON SE FAIT ÉCRASER PAR LUI. Rien ne l'arrête : ni un piéton, ni une
+##     berline en travers, ni le char de l'armée. C'est le seul danger du jeu
+##     qui ne vise personne, ne se combat pas et ne se négocie pas — il passe,
+##     à l'heure. Une poursuite qui coupe la voie au mauvais moment se termine
+##     là, pour le poursuivi comme pour les six voitures derrière.
+##
+## Il vit chez l'hôte comme le reste de la ville et ne voyage que par son
+## ABSCISSE le long de la voie : la trajectoire est une droite connue des
+## quatre joueurs, il serait absurde d'en diffuser des coordonnées.
+const TRAINS := 2                 ## deux rames, lancées à l'opposé l'une de l'autre
+const VITESSE_TRAIN := 940.0      ## px/s — au-dessus de VITESSE_MAX d'une voiture
+const FREINAGE_TRAIN := 380.0     ## px/s² : un train ne pile pas, il glisse
+const ECART_GARES := 11000.0      ## px entre deux quais (~110 tuiles)
+const ARRET_EN_GARE := 7.0        ## s portes ouvertes — le temps d'y courir
+const WAGONS := 3                 ## motrice + deux voitures
+const LONG_WAGON := 96.0          ## px
+const ECART_WAGON := 12.0
+const LARGEUR_TRAIN := 30.0       ## px de part et d'autre de l'axe : ce qu'il balaie
+const QUAI := 150.0               ## px : d'où l'on peut monter, une fois à l'arrêt
+const DEGAT_TRAIN := 400.0        ## on ne survit pas à un train, ce n'est pas un réglage
+var trains: Array = []            ## {id, s, sens, v, arret}
+var _voie: Dictionary = {}
+
+## La voie ferrée sous forme PARAMÉTRÉE. `plan.rail()` la donne comme une
+## équation `n·p = c` en unités 3D — parfait pour un nuanceur qui teste « suis-je
+## sur le ballast ? », inutilisable pour un train, qui se repère par son
+## abscisse le long de la voie et pas par sa distance à un axe.
+##
+## ⚠ Le passage en pixels de jeu ne s'oublie pas : `rail()` travaille en unités
+## 3D (une tuile = 10), la simulation en pixels (une tuile = 100). Sans la
+## division par `Decor.ECHELLE`, les deux rames roulaient dans le coin
+## nord-ouest de la carte, sur une voie dix fois trop courte.
+func voie() -> Dictionary:
+	if not _voie.is_empty():
+		return _voie
+	var r := plan.rail()
+	var n := Vector2(r.x, r.y)
+	var origine := n * (r.z / Decor.ECHELLE)
+	var d := Vector2(-n.y, n.x)
+	# On coupe la droite aux bords de la carte : sans ça le terminus tombait
+	# à des kilomètres hors de la ville et le train mettait deux minutes à
+	# revenir d'un néant que personne ne voit.
+	var bornes := Vector2(float(PlanVille.COLONNES) * PlanVille.PAS,
+		float(PlanVille.LIGNES) * PlanVille.PAS)
+	var t0 := -1.0e12
+	var t1 := 1.0e12
+	for axe in 2:
+		var dd: float = d.x if axe == 0 else d.y
+		if absf(dd) < 0.0001:
+			continue
+		var o: float = origine.x if axe == 0 else origine.y
+		var borne: float = bornes.x if axe == 0 else bornes.y
+		var a := (0.0 - o) / dd
+		var b := (borne - o) / dd
+		t0 = maxf(t0, minf(a, b))
+		t1 = minf(t1, maxf(a, b))
+	_voie = {"o": origine, "d": d, "n": n, "t0": t0 + 200.0, "t1": t1 - 200.0}
+	return _voie
+
+## Le point de la voie à cette abscisse. C'est la seule fonction dont le client
+## a besoin pour poser une rame : l'hôte ne diffuse qu'un nombre.
+func point_de_voie(s: float) -> Vector2:
+	var v := voie()
+	return Vector2(v["o"]) + Vector2(v["d"]) * s
+
+func cap_de_voie() -> float:
+	return Vector2(voie()["d"]).angle()
+
+## Les quais, régulièrement espacés depuis le terminus sud. Ils ne sont pas
+## posés à la main : la voie change avec le code de la manche, une liste écrite
+## en dur planterait des gares dans la rivière une manche sur deux.
+func gares() -> Array:
+	var v := voie()
+	var liste: Array = []
+	var s: float = float(v["t0"]) + ECART_GARES * 0.5
+	while s < float(v["t1"]):
+		liste.append(s)
+		s += ECART_GARES
+	return liste
+
+## La prochaine gare DEVANT soi, ou le terminus s'il n'y en a plus. La marge de
+## dix pixels est ce qui empêche un train qui vient de repartir de considérer
+## le quai qu'il quitte comme son prochain arrêt et de rester planté là.
+func _prochaine_gare(s: float, sens: float) -> float:
+	var v := voie()
+	var mieux: float = float(v["t1"]) if sens > 0.0 else float(v["t0"])
+	for g in gares():
+		var g_f := float(g)
+		if sens > 0.0 and g_f > s + 10.0:
+			mieux = minf(mieux, g_f)
+		elif sens < 0.0 and g_f < s - 10.0:
+			mieux = maxf(mieux, g_f)
+	return mieux
+
+func _mettre_les_rames_en_ligne() -> void:
+	var v := voie()
+	var longueur: float = float(v["t1"]) - float(v["t0"])
+	for k in TRAINS:
+		# Réparties sur la ligne et lancées en sens contraires : deux rames qui
+		# partent du même bout dans le même sens, c'est une seule rame.
+		trains.append({"id": _id(), "sens": 1.0 if k % 2 == 0 else -1.0, "v": 0.0,
+			"arret": 0.0, "freine": false, "s": float(v["t0"]) + longueur * (float(k) + 0.5) / float(TRAINS)})
+
+static func longueur_de_rame() -> float:
+	return float(WAGONS) * LONG_WAGON + float(WAGONS - 1) * ECART_WAGON
+
+func _animer_les_trains(delta: float, joueurs: Dictionary) -> void:
+	if trains.is_empty():
+		_mettre_les_rames_en_ligne()
+	var v := voie()
+	for t in trains:
+		if float(t["arret"]) > 0.0:
+			t["v"] = 0.0
+			t["arret"] = float(t["arret"]) - delta
+			if float(t["arret"]) <= 0.0:
+				emettre("train", {"i": int(t["id"]), "e": "part"})
+			continue
+		var sens := float(t["sens"])
+		var s := float(t["s"])
+		var but := _prochaine_gare(s, sens)
+		var reste: float = absf(but - s)
+		var vitesse := float(t["v"])
+		# La distance qu'il faut pour s'arrêter à cette vitesse-là. Sans elle,
+		# le train pilait sur le premier pixel du quai : un arrêt instantané à
+		# neuf cents pixels par seconde se voit à l'image près.
+		var frein: float = vitesse * vitesse / (2.0 * FREINAGE_TRAIN)
+		# ⚠ LE FREINAGE SE VERROUILLE. Recalculé à chaque image, il se
+		# DÉBRANCHAIT tout seul : le train ralentissait, sa distance d'arrêt
+		# fondait avec le carré de sa vitesse, la condition redevenait fausse à
+		# soixante mètres du quai — et il RELANÇAIT. Le banc le voyait passer
+		# devant sept quais d'affilée sans s'arrêter une fois, à chaque fois en
+		# ralentissant juste assez pour donner l'illusion d'y penser.
+		var freine := bool(t.get("freine", false)) or reste <= frein + 30.0
+		t["freine"] = freine
+		vitesse = move_toward(vitesse, 0.0 if freine else VITESSE_TRAIN,
+			FREINAGE_TRAIN * delta)
+		# Deux façons d'être arrivé : le pas suivant dépasserait le quai, ou
+		# l'on n'avance plus assez pour que ça vaille encore le nom de rouler.
+		# Sans la seconde, une rame arrêtée à quatorze pixels du quai y restait.
+		if freine and (vitesse * delta >= reste - 2.0 or vitesse <= 40.0):
+			s = but
+			vitesse = 0.0
+			t["freine"] = false
+			t["arret"] = ARRET_EN_GARE
+			emettre("train", {"i": int(t["id"]), "e": "quai",
+				"x": int(point_de_voie(s).x), "y": int(point_de_voie(s).y)})
+			# ⚠ LE DEMI-TOUR SE FAIT ICI, À L'ARRÊT, et nulle part ailleurs.
+			# Testé à chaque image sur « suis-je au bout de la ligne ? », il
+			# s'appliquait AUSSI à la première image du départ — la rame était
+			# encore à un dixième de pixel du terminus, elle repartait, et se
+			# retournait aussitôt. Elle passait sa vie à faire des demi-tours
+			# sur place au bout du quai : cinquante-cinq en cinq minutes.
+			if s <= float(v["t0"]) + 1.0 or s >= float(v["t1"]) - 1.0:
+				t["sens"] = -sens
+		else:
+			s += sens * vitesse * delta
+		t["s"] = s
+		t["v"] = vitesse
+		_faucher(t, joueurs)
+
+## Ce que la rame balaie. On travaille dans le repère de la VOIE (abscisse le
+## long, écart de côté) plutôt qu'en distances point à point : une rame fait
+## trois cent trente pixels de long pour soixante de large, un simple rayon
+## autour de sa tête laisserait passer le quart arrière.
+##
+## ⚠ Un train À L'ARRÊT ne fauche personne — sinon la portière ouverte tuait
+## celui qui vient la prendre, et l'on ne pouvait tout simplement pas monter.
+func _faucher(t: Dictionary, joueurs: Dictionary) -> void:
+	if float(t["v"]) < 60.0:
+		return
+	var v := voie()
+	var o: Vector2 = v["o"]
+	var d: Vector2 = v["d"]
+	var n: Vector2 = v["n"]
+	var tete := float(t["s"])
+	var queue := tete - float(t["sens"]) * longueur_de_rame()
+	var bas: float = minf(tete, queue)
+	var haut: float = maxf(tete, queue)
+	var sous_la_rame := func(p: Vector2) -> bool:
+		var relatif := p - o
+		if absf(relatif.dot(n)) > LARGEUR_TRAIN:
+			return false
+		var le_long := relatif.dot(d)
+		return le_long >= bas and le_long <= haut
+	for personne in gens.duplicate():
+		if sous_la_rame.call(Vector2(personne["p"])):
+			# Personne ne marque ce point : le train n'appartient à aucun
+			# joueur. Passer `""` évite d'attribuer un meurtre à l'hôte.
+			_abattre(personne, "", true)
+	for auto in autos.duplicate():
+		if int(auto["genre"]) == EPAVE or String(auto["pilote"]) != "":
+			continue
+		if sous_la_rame.call(Vector2(auto["p"])):
+			detruire_auto(auto, "")
+	for cle in joueurs:
+		var j: Dictionary = joueurs[cle]
+		if float(j.get("vie", 100.0)) <= 0.0 or bool(j.get("train", false)):
+			continue
+		if sous_la_rame.call(Vector2(j["p"])):
+			emettre("deg", {"j": String(cle), "d": int(DEGAT_TRAIN), "k": "train"})
+
+## La rame à quai la plus proche d'un point, ou {} : c'est ce que le client
+## interroge avant d'ouvrir la portière. Elle vit ici et pas chez lui pour que
+## la règle de montée soit la même que celle du fauchage — un quai où l'on peut
+## monter et se faire écraser en même temps serait une farce.
+func rame_a_quai(point: Vector2) -> Dictionary:
+	var v := voie()
+	var o: Vector2 = v["o"]
+	var d: Vector2 = v["d"]
+	for t in trains:
+		if float(t["arret"]) <= 0.0:
+			continue
+		var tete := float(t["s"])
+		var queue := tete - float(t["sens"]) * longueur_de_rame()
+		var le_long := (point - o).dot(d)
+		if le_long < minf(tete, queue) - QUAI or le_long > maxf(tete, queue) + QUAI:
+			continue
+		if absf((point - o).dot(Vector2(v["n"]))) > QUAI:
+			continue
+		return t
+	return {}
+
+func train_par_id(id: int) -> Dictionary:
+	for t in trains:
+		if int(t["id"]) == id:
+			return t
+	return {}
+
+# ------------------------------------------------------------ le compacteur
+
+## LE COMPACTEUR (§1.3) : on y entre au volant, on en ressort à pied, plus
+## riche et armé. C'est la seule façon du jeu de FAIRE DISPARAÎTRE une voiture
+## — le garage la repeint, l'explosion en laisse une carcasse qui brûle, la
+## casse n'en laisse rien.
+##
+## Pourquoi il paie ce qu'il paie : une berline vaut peu, un camion vaut le
+## déplacement. Le tarif suit la LONGUEUR du gabarit (`VoxelsCarnage.GABARITS`)
+## parce que c'est la seule mesure qui existe déjà pour les vingt-huit modèles,
+## qu'elle est celle qu'on voit à l'écran, et qu'une table de prix écrite à la
+## main ligne par ligne aurait vieilli au premier véhicule ajouté.
+##
+## ⚠ LA CASSE EST AU BORD DE LA VOIE FERRÉE, et sa place n'est PAS un nouveau
+## genre de lieu dans `PlanVille`. Deux raisons : la bande du ballast est la
+## seule de la ville que personne n'habite (c'est là qu'on entasse des
+## carcasses), et le plan de la ville est retravaillé en parallèle — y ajouter
+## un septième genre de lieu, c'est se donner rendez-vous dans un conflit.
+## ⚠ CES DEUX CHIFFRES SONT CEUX DU BALLAST. La bande de la voie fait
+## `LARGEUR_RAIL` = 2,2 tuiles, soit 110 px de chaque côté de l'axe. Écartée de
+## 200 px avec une dalle de 190, la casse tombait ENTIÈREMENT hors du ballast :
+## elle se posait sur le pâté d'à côté, par-dessus les immeubles. Écartée de 68
+## avec une dalle de 110, elle va de 13 à 123 px de l'axe — dedans, sans
+## recouvrir les rails, et le convoi (`LARGEUR_TRAIN`, 30 px) passe à côté sans
+## toucher la voiture garée dessus.
+const ECART_CASSE := 68.0         ## px : de combien la casse s'écarte de l'axe
+const RAYON_CASSE := 55.0         ## px : la dalle sous laquelle on est broyé
+## ⚠ LA CASSE NE DOIT PAS ÊTRE LE MEILLEUR REVENU DU JEU. À 240 + 34 par
+## voxel, une citadine ramassée au coin de la rue valait 750 $ — plus qu'un
+## contrat de gang (620), sans risque et sans une étoile. On volait, on roulait
+## jusqu'au ballast, on recommençait : tout le reste du jeu devenait facultatif.
+## À 120 + 18, la citadine fait 390 et la benne 570 : de quoi tenir, jamais de
+## quoi s'enrichir. Ce qu'on vient chercher, c'est l'arme au sol.
+const PRIME_CASSE := 120          ## le minimum, pour une épave de citadine
+const PRIME_PAR_VOXEL := 18       ## par unité de longueur du gabarit
+
+## Une casse au milieu de chaque intervalle entre deux quais : on la croise en
+## suivant la voie, ce qui est exactement ce qu'on fait quand on cherche où se
+## débarrasser d'une voiture.
+## ⚠ MISE EN CACHE. `casse_de` est appelée à CHAQUE IMAGE par la ligne
+## d'action du tableau de bord ; sans le cache, on rebâtissait la liste des
+## quais et six dictionnaires soixante fois par seconde pour savoir si l'on est
+## garé sur une dalle.
+var _casses: Array = []
+
+func casses() -> Array:
+	if not _casses.is_empty():
+		return _casses
+	var liste: Array = []
+	var quais := gares()
+	var v := voie()
+	for k in range(quais.size() - 1):
+		var s := (float(quais[k]) + float(quais[k + 1])) * 0.5
+		# Alternées d'un côté et de l'autre de la voie : toutes du même bord,
+		# elles ne se distinguaient plus des quais en un coup d'œil sur la carte.
+		var cote := 1.0 if k % 2 == 0 else -1.0
+		liste.append({"i": k, "s": s, "cote": cote,
+			"p": point_de_voie(s) + Vector2(v["n"]) * cote * ECART_CASSE})
+	_casses = liste
+	return _casses
+
+func casse_de(point: Vector2) -> int:
+	for c in casses():
+		if Vector2(c["p"]).distance_to(point) <= RAYON_CASSE:
+			return int(c["i"])
+	return -1
+
+func prix_de_la_casse(modele: int) -> int:
+	var gabarit: Dictionary = VoxelsCarnage.GABARITS.get(modele, VoxelsCarnage.GABARITS[0])
+	return PRIME_CASSE + int(gabarit["l"]) * PRIME_PAR_VOXEL
+
+## Broyer. L'hôte tranche : il retire la voiture de la ville, annonce la somme,
+## et pose une caisse d'arme sur le tapis de sortie — c'est le « power-up » du
+## guide, servi par le ramassage qui existe déjà plutôt que par un troisième
+## système d'inventaire.
+##
+## ⚠ Ce n'est PAS `detruire_auto`. Celle-là compte un crime, marque des points,
+## allume un brasier et appelle les pompiers : brûler une voiture en pleine rue
+## et la déposer à la casse ne sont pas le même geste, et le second ne doit
+## rien coûter en étoiles — c'est même la seule chose qu'on puisse faire d'une
+## voiture volée sans que la police s'en mêle.
+func broyer(cle: String, id: int, ou: Vector2) -> void:
+	var modele := 0
+	for auto in autos:
+		if int(auto["id"]) == id:
+			modele = int(auto.get("modele", 0))
+			break
+	retirer(autos, id)
+	# Une dormante broyée ne doit pas repousser : `reveillees` est ce qui
+	# empêche le décor de la reposer au prochain passage du morceau.
+	reveillees[id] = true
+	var somme := prix_de_la_casse(modele)
+	var butin: String = ["mitraillette", "roquette", "vie", "argent"][posmod(hash(Vector2i(id, 907)), 4)]
+	_lacher(ou, butin)
+	# ⚠ L'événement s'appelle « broye » et PAS « casse » : « casse » est déjà
+	# l'impact d'une balle dans une façade, et deux sens sur le même nom, c'est
+	# un jour perdu à chercher pourquoi tirer sur un mur rend de l'argent.
+	emettre("broye", {"j": cle, "m": somme, "b": butin,
+		"x": int(ou.x), "y": int(ou.y), "v": modele})
+
 # ------------------------------------------------------------ les contrats
 
 ## Décrocher à une cabine. Le gang qui appelle est celui dont c'est le
@@ -1966,23 +2313,26 @@ func proposer_contrat(cle: String, cabine: int, position: Vector2) -> void:
 	# C'était `posmod(cabine, 3)` — l'indice d'un pâté modulo trois : une
 	# cabine plantée chez Le Lierre faisait travailler pour Les Braises deux
 	# fois sur trois, et son enseigne annonçait un employeur qui n'était pas
-	# celui qui décrochait.
-	var employeur := plan.territoire(position)
-	if employeur < 0:
-		# Terrain neutre — le centre d'affaires n'appartient à personne. C'est
-		# le trio du secteur qui s'y partage les téléphones, sinon les cabines
-		# du centre ne sonneraient jamais.
-		var trio: Array = plan.trio(position)
-		employeur = int(trio[posmod(cabine, trio.size())])
-	var etat := humeur(cle, employeur)
-	if etat <= H_HOSTILE:
-		# Sous quarante, personne ne vous confie rien : c'est la conséquence
-		# du palier « bas » du guide, et la seule qui se ressente AVANT d'être
-		# pris pour cible. Le joueur apprend là qu'il a une jauge à remonter.
+	# celui qui décrochait. Le calcul est chez `plan` : l'enseigne s'allume
+	# avec le même résultat, elle ne peut donc plus inviter à décrocher chez
+	# un gang qui refuse.
+	var employeur := plan.employeur_de_cabine(cabine, position)
+	# La couleur du téléphone dit ce qu'il faut avoir pour décrocher. Elle est
+	# tirée du numéro de cabine, donc identique chez les quatre joueurs sans
+	# rien faire passer par le réseau — c'est la même règle que les ateliers.
+	var rang := FormesCarnage.niveau_de_cabine(cabine)
+	var exige := float(FormesCarnage.CABINES[rang]["respect"])
+	var avoir := respect_pour(cle, employeur)
+	if avoir < exige:
+		# Le refus NOMME le manque. Sans le chiffre, un joueur qui tombe sur un
+		# téléphone rouge à quarante de respect croit le jeu cassé ; avec, il
+		# sait quoi faire — et il repasse.
 		emettre("ctr", {"j": cle, "e": "refuse", "n": 0, "a": 0, "r": 0, "g": employeur,
-			"t": "%s n'a rien pour vous" % plan.nom_du_gang(employeur)})
+			"t": "Cabine %s : %s exige %d de respect (vous en avez %d)" % [
+				String(FormesCarnage.CABINES[rang]["nom"]),
+				plan.nom_du_gang(employeur), int(exige), int(avoir)]})
 		return
-	var niveau: Dictionary = PALIERS_CONTRAT[etat]
+	var niveau: Dictionary = PALIERS_CONTRAT[rang]
 	# Le rival est tiré parmi les rivaux DE CE GANG ICI : envoyer nettoyer
 	# chez un gang de l'autre bout de la ville, c'est un contrat qu'on ne peut
 	# pas tenir dans le temps imparti.
@@ -2185,7 +2535,17 @@ func accorder_vehicule(cle: String, id: int, position: Vector2) -> void:
 		crime(cle, "pieton")
 	elif int(auto["genre"]) == VOITURE_GANG:
 		# Voler la voiture d'un gang aussi — moins qu'un mort, plus qu'un rien.
-		_repercuter(cle, int(auto.get("gang", 0)), Vector2(auto["p"]), RESPECT_PERDU * 0.4, 0.0)
+		# Et depuis qu'elle vient AVEC SA MITRAILLEUSE (§1.3), ce n'est plus
+		# une berline de couleur : c'est une prise, et elle a un prix.
+		#
+		# ⚠ Le gain au rival était à ZÉRO. Tout le reste du jeu fait bouger DEUX
+		# jauges — un mort, une voiture brûlée, un contrat rendu — parce que
+		# c'est ce qui tient le triangle de rivalité (§3.1) : sans le second
+		# mouvement, on peut fâcher tout le monde sans jamais devenir l'ami de
+		# personne. Un quart de gain : partir au volant de leur voiture sous
+		# leurs fenêtres se remarque, mais ça ne remplace pas un contrat.
+		_repercuter(cle, int(auto.get("gang", 0)), Vector2(auto["p"]),
+			RESPECT_PERDU * 0.4, RESPECT_GAGNE * 0.25)
 	emettre("pris", {"j": cle, "id": id, "g": int(auto["genre"]), "m": int(auto.get("modele", 0)),
 		"x": int(auto["p"].x), "y": int(auto["p"].y), "a": snapped(float(auto["a"]), 0.01),
 		"pv": int(auto["pv"])})
@@ -2307,8 +2667,16 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 	for piege in pieges:
 		vus_pieges.append([int(piege["id"]), int(piege["p"].x), int(piege["p"].y), int(piege["genre"])])
 
+	# LE TRAIN ne voyage que par son abscisse : la voie est une droite que les
+	# quatre joueurs savent tracer, en diffuser des coordonnées serait payer
+	# deux fois pour la même information.
+	var vus_trains: Array = []
+	for t in trains:
+		vus_trains.append([int(t["id"]), int(t["s"]), int(t["sens"]), int(t["v"]),
+			int(float(t["arret"]) * 10.0)])
+
 	return {"g": vus_gens, "a": vus_autos, "c": vues_caisses, "b": vus_barrages, "h": vus_helicos,
-		"f": vus_feux, "e": etats, "pg": vus_pieges, "ac": vus_a_cotes}
+		"f": vus_feux, "e": etats, "pg": vus_pieges, "ac": vus_a_cotes, "tr": vus_trains}
 
 func _regarde(point: Vector2, joueurs: Dictionary) -> bool:
 	for cle in joueurs:
@@ -2393,6 +2761,16 @@ func appliquer_instantane(charge: Dictionary) -> void:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
 			"cible": "", "recharge": 0.0, "cap": float(entree[3]) / 100.0 if entree.size() > 3 else 0.0})
 
+	# LE TRAIN : on reçoit son abscisse, pas sa position. `age` compte les
+	# secondes depuis l'instantané — le client extrapole avec, parce qu'une
+	# rame sur des rails est le seul objet de la ville dont on sait où il sera
+	# dans un dixième de seconde. Sans cette extrapolation, un train à neuf
+	# cents pixels par seconde avançait par bonds de cent vingt pixels.
+	trains = _fusionner(trains, charge.get("tr", []), func(entree: Array) -> Dictionary:
+		return {"id": int(entree[0]), "s": float(entree[1]), "sens": float(entree[2]),
+			"v": float(entree[3]), "arret": float(entree[4]) / 10.0, "age": 0.0,
+			"p": point_de_voie(float(entree[1]))})
+
 	feux = _fusionner(feux, charge.get("f", []), func(entree: Array) -> Dictionary:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
 			"force": float(entree[3]) / 100.0, "t": 0.0, "propage": PROPAGATION, "ronge": RONGE})
@@ -2434,7 +2812,8 @@ func _fusionner(existants: Array, recus, fabrique: Callable) -> Array:
 			# On garde le nœud 3D et on ne déplace que la CIBLE : la position
 			# affichée glisse vers elle image par image, sinon un instantané
 			# à huit par seconde donne une ville qui saute.
-			for champ in ["genre", "gang", "pv", "a", "arme", "garee", "cap", "corps", "canon"]:
+			for champ in ["genre", "gang", "pv", "a", "arme", "garee", "cap", "corps", "canon",
+					"s", "sens", "v", "arret", "age"]:
 				if neuf.has(champ):
 					objet[champ] = neuf[champ]
 			objet["cible"] = neuf["p"]

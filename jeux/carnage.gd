@@ -252,6 +252,24 @@ const PORTEE_PORTE := 0.9
 ## cogne partout. Deux tuiles par seconde (quatre mètres) se pilote.
 const PAS_DEDANS := 2.0
 
+# ------------------------------------------------------------ le train
+#
+## LE TRAIN (§1.3), côté joueur. La simulation vit chez l'hôte
+## (`VilleVivante._animer_les_trains`) ; ici on pose les rames, les quais, et
+## on gère le seul geste qu'il demande : `E` à quai.
+##
+## ⚠ Un passager reste À PIED. Il n'est pas « au volant » d'un train : il ne le
+## conduit pas, ne le tire pas, ne le rend pas. `_pied` reste vrai et c'est
+## `_train` qui dit qu'on voyage — ce qui évite d'apprendre à toute la
+## conduite, au klaxon, à la radio et au réseau ce qu'est une locomotive.
+var _train := -1                   ## l'identifiant de la rame où l'on voyage, ou -1
+var _place_train := 0.0            ## où l'on se tient dans la rame, en px depuis la tête
+var _quai_dit := 0.0               ## anti-répétition de l'annonce « train à quai »
+var _quais_poses := false
+var _compacteurs: Array = []       ## les casses posées le long de la voie
+var _depuis_roulement := 0.0       ## cadence du roulement entendu quand une rame passe
+const PORTEE_TRAIN := 130.0        ## px : d'où l'on peut sauter dedans, à quai
+
 var _dedans := ""                  ## l'identifiant de l'appartement où l'on est, ou ""
 var _dedans_p := Vector2.ZERO      ## où l'on s'y tient, EN TUILES
 var _dedans_noeud: Node3D
@@ -392,7 +410,7 @@ func duree_manche() -> float:
 	return DUREE
 
 func aide() -> String:
-	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · F : affaires (planque, hôpital) · H : klaxon · TAB : carte · caisse = arme, trousse ou billet · colis doré = à ramasser · crâne rouge = Kill Frenzy · au volant d'un taxi, F prend et dépose un client · garage bleu = étoiles effacées, et un sur deux est un ATELIER (F sur une pastille) · cabine jaune = contrat · maison violette = planque à acheter · croix blanche = hôpital"
+	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · F : affaires (planque, hôpital) · H : klaxon · TAB : carte · caisse = arme, trousse ou billet · colis doré = à ramasser · crâne rouge = Kill Frenzy · au volant d'un taxi, F prend et dépose un client · garage bleu = étoiles effacées, et un sur deux est un ATELIER (F sur une pastille) · cabine verte/jaune/rouge = contrat (la couleur dit ce qu'il faut de respect) · tag de gang au sol = son repaire, il ouvre à 80 de respect (armurerie) · maison violette = planque à acheter · croix blanche = hôpital · quai GARE = le train, E pour monter quand il est à l'arrêt · dalle CASSE au bord de la voie = F broie la voiture contre de l'argent et une arme"
 
 # ------------------------------------------------------- mise en place
 
@@ -439,6 +457,20 @@ func preparer() -> void:
 				elif String(argument).ends_with("pont"):
 					# `--banc-position=pont` : sur un tablier, l'eau des deux côtés.
 					_position = carte.un_pont()
+				elif String(argument).ends_with("rail"):
+					# `--banc-position=rail` : au quai le plus central. La voie
+					# dépend du code de la manche, qui est tiré au lancement —
+					# on ne peut donc PAS écrire la tuile d'une gare à la main,
+					# et sans cette option le train ne serait jamais photographié
+					# autrement que dans un banc de formes.
+					var milieu := Vector2(float(PlanVille.COLONNES) * PlanVille.PAS * 0.5,
+						float(PlanVille.LIGNES) * PlanVille.PAS * 0.5)
+					var court := 1.0e12
+					for g in ville.gares():
+						var p := ville.point_de_voie(float(g))
+						if p.distance_to(milieu) < court:
+							court = p.distance_to(milieu)
+							_position = p
 	_vehicule = ID_VOITURE_DEPART + place
 	_pied = false
 	# La manche commence AU VOLANT : la radio s'allume avec elle, sur la
@@ -595,6 +627,7 @@ func _rebatir_ma_voiture() -> void:
 	if _corps_auto != null:
 		_corps_auto.queue_free()
 	_corps_auto = _batir_voiture_de(_modele_vehicule, _ma_couleur(), Session.pseudo)
+	FormesCarnage.armer_la_voiture(_corps_auto, bool(_mods.get("mitrailleuse", false)))
 	FormesCarnage.projecteurs(_corps_auto, 2.2)
 	_corps_auto.add_child(FormesCarnage.echappement(-2.4 if _modele_vehicule < 0 else -2.2))
 	monde().add_child(_corps_auto)
@@ -850,12 +883,18 @@ func simuler_local(delta: float) -> void:
 		_affaires_dedans()
 		return
 
-	if _pied:
+	if _train >= 0:
+		# ⚠ NI MARCHE NI TIR EN VOYAGE. Un passager qui tire depuis une rame
+		# lancée viderait un quartier sans jamais être touché ; et la marche
+		# le ferait descendre du train sans ouvrir la portière.
+		_voyager(delta)
+	elif _pied:
 		_marcher(delta)
+		_tirer(delta)
 	else:
 		_conduire(delta)
 		_klaxonner(delta)
-	_tirer(delta)
+		_tirer(delta)
 	_surveiller_les_lieux(delta)
 
 	if _eperon > 0.0:
@@ -875,6 +914,8 @@ func simuler_local(delta: float) -> void:
 			"e": 2 if _hors_service > 0.0 else (0 if _pied else 1),
 			"w": _vehicule, "vg": _genre_vehicule, "vm": _modele_vehicule,
 			"ep": 1 if _eperon > 0.0 else 0,
+			"tr": 1 if _train >= 0 else 0,
+			"mg": 1 if bool(_mods.get("mitrailleuse", false)) else 0,
 		})
 
 	if not est_hote():
@@ -910,10 +951,21 @@ func _piloter_pour_le_banc() -> void:
 		for a in ville.autos:
 			if int(a["genre"]) in [VilleVivante.POMPIER, VilleVivante.AMBULANCE]:
 				secours += 1
-		print("[banc] t=%ds fps=%d gens=%d autos=%d feux=%d secours=%d morceaux=%d cubes=%d quads=%d maillage_max=%.1fms fiches=%d noeuds=%d %s" % [int(temps),
+		# LE TRAIN dans la ligne de diagnostic : la distance de la rame la plus
+		# proche. C'est la seule façon de savoir, en relisant un journal de
+		# banc, si le train a vraiment circulé pendant la manche ou s'il est
+		# resté à l'autre bout de la ligne — une rame invisible et une rame
+		# absente rendent exactement la même photo.
+		var train_le_plus_proche := -1
+		for t in ville.trains:
+			var d := int(ville.point_de_voie(float(t["s"])).distance_to(_position))
+			if train_le_plus_proche < 0 or d < train_le_plus_proche:
+				train_le_plus_proche = d
+		print("[banc] t=%ds fps=%d gens=%d autos=%d feux=%d secours=%d morceaux=%d cubes=%d quads=%d maillage_max=%.1fms fiches=%d noeuds=%d trains=%d/%dpx %s" % [int(temps),
 			Engine.get_frames_per_second(), ville.gens.size(), ville.autos.size(), ville.feux.size(), secours,
 			_morceaux.size(), cubes, MorceauVille.quads_total, MorceauVille.maillage_max_ms,
-			carte.fiches_en_cache(), get_tree().get_node_count(), "hôte" if est_hote() else "client"])
+			carte.fiches_en_cache(), get_tree().get_node_count(),
+			ville.trains.size(), train_le_plus_proche, "hôte" if est_hote() else "client"])
 	# ⚠ L'action se PULSE. Maintenue, elle ne produit qu'un seul front : le
 	# pilote descendait de voiture et ne remontait jamais, et la moitié du jeu
 	# passait le banc sans être exercée.
@@ -984,6 +1036,14 @@ func _viser(cible: Vector2) -> Vector2:
 ## tant qu'on ne peut pas sortir, la ville n'est qu'un circuit.
 func _basculer_portiere() -> void:
 	_depuis_portiere = DELAI_PORTIERE
+	# LE TRAIN PASSE AVANT LA PORTIÈRE. Un quai est presque toujours au bord
+	# d'une rue : testée après, la voiture garée à dix mètres gagnait à tous
+	# les coups et l'on ne montait jamais dans le train.
+	if _train >= 0:
+		_descendre_du_train()
+		return
+	if _pied and _monter_dans_le_train():
+		return
 	if _pied:
 		var auto := ville.vehicule_proche(_position, PORTEE_ENTREE)
 		if auto.is_empty():
@@ -1048,12 +1108,51 @@ func _basculer_portiere() -> void:
 	_position = descente
 	_modele_vehicule = -1
 
+## Livrer sa voiture à la casse. On en descend d'abord — mais SANS la rendre à
+## la ville : `_basculer_portiere` la remet en circulation, et une voiture
+## rendue puis broyée réapparaissait une seconde plus tard chez les autres
+## joueurs, garée sur la dalle, intouchable.
+func _broyer_ma_voiture() -> void:
+	var id := _vehicule
+	var ou := _position
+	canal.envoyer("broyer", {"id": id, "x": int(ou.x), "y": int(ou.y)})
+	if est_hote():
+		ville.broyer(Session.cle, id, ou)
+		_vider_les_evenements()
+	# À pied, à côté de la fosse. Les modifications payées partent avec la
+	# carrosserie, comme quand on descend : on ne récupère pas sa mitrailleuse
+	# en revendant le camion qui la porte.
+	_pied = true
+	_vitesse = 0.0
+	_vehicule = 0
+	_modele_vehicule = -1
+	_mods = {}
+	Tactile.mode = Tactile.MARCHE
+	Sons.arreter_moteur()
+	_eteindre_la_radio()
+	if not _course.is_empty():
+		_course = {}
+		_cible_contrat = {}
+	_position = carte.degager(ou + Vector2.RIGHT.rotated(ville.cap_de_voie()) \
+		* (VilleVivante.RAYON_CASSE + 30.0), RAYON_A_PIED)[0]
+
 func _prendre_le_volant(id: int, genre: int, position: Vector2, angle: float, pv: float,
 		modele: int = -1) -> void:
 	if PlanVille.est_dormante(id):
 		ville.reveillees[id] = true
 		_effacer_la_dormante(id)
 	_modele_vehicule = modele
+	# ⚠ AVANT `_rebatir_ma_voiture`, qui montre ou cache la mitrailleuse selon
+	# `_mods` : réglé après, on remontait dans une voiture de gang désarmée à
+	# l'écran et armée dans les faits.
+	#
+	# UNE VOITURE DE GANG VIENT AVEC SON ARME (§1.3). C'est ce qui en fait une
+	# prise et pas une berline de couleur : neuf cent cinquante dollars
+	# d'atelier, gratuits, en échange du respect qu'on perd à la voler (voir
+	# `VilleVivante.accorder_vehicule`). Elle repart avec la carrosserie quand
+	# on descend, comme tout le reste du matériel.
+	if genre == VilleVivante.VOITURE_GANG:
+		_mods["mitrailleuse"] = true
 	_rebatir_ma_voiture()
 	# Le banc raconte ce qu'il fait : sans cette ligne, un pilote qui ne
 	# remonterait jamais en voiture rendrait exactement le même journal qu'un
@@ -1461,6 +1560,13 @@ func _surveiller_les_affaires(_delta: float) -> void:
 				_dire_affaire(_resume_du_logement())
 	elif not _pied and _modele_vehicule == FormesCarnage.MODELE_TAXI and _taxi_en_service():
 		pass
+	elif not _pied and ville.casse_de(_position) >= 0:
+		# LA CASSE (§1.3). On est au volant, sur la dalle : `F` broie. C'est le
+		# seul endroit du jeu où une voiture DISPARAÎT — et le seul revenu qui
+		# ne coûte pas une étoile, ce qui en fait la sortie propre d'un vol.
+		_affaire = "F : broyer la voiture — $%d" % ville.prix_de_la_casse(_modele_vehicule)
+		if Commandes.affaire_declenchee():
+			_broyer_ma_voiture()
 	elif not _pied and _atelier_ici() >= 0:
 		# L'ATELIER. On est au volant, sur un garage qui vend : la baie sous les
 		# roues décide de la marchandise, `F` l'achète.
@@ -1470,6 +1576,26 @@ func _surveiller_les_affaires(_delta: float) -> void:
 		_affaire = "F : %s — $%d" % [String(article["nom"]).to_lower(), prix]
 		if Commandes.affaire_declenchee():
 			_acheter_a_l_atelier(baie, prix)
+	elif _pied and not carte.repaire_de(_position).is_empty():
+		# LE REPAIRE DU GANG (§3). Jusqu'ici c'était du décor : un tag au sol,
+		# des hommes autour, et rien à y faire. On y entre maintenant — mais
+		# seulement si le gang vous COUVRE, c'est-à-dire au palier allié.
+		# C'est la seule chose que le respect ouvre et qu'on ne peut pas
+		# obtenir autrement : le reste (les contrats, les alliés en combat)
+		# vient à vous, le repaire, il faut y aller.
+		var repaire: Dictionary = carte.repaire_de(_position)
+		var chez := int(repaire.get("gang", -1))
+		var du_gang := ville.respect_pour(Session.cle, chez)
+		if du_gang >= VilleVivante.SEUIL_ALLIE:
+			_affaire = "F : entrer chez %s" % carte.nom_du_gang(chez)
+			if Commandes.affaire_declenchee():
+				_entrer_dans_le_repaire(chez)
+		else:
+			# ⚠ LE REFUS DIT LE CHIFFRE. C'est la leçon des cabines : sans lui,
+			# une porte qui ne s'ouvre pas se lit comme une porte cassée, et
+			# le joueur n'y revient jamais.
+			_affaire = "%s n'ouvre qu'à %d de respect (vous : %d)" % [
+				carte.nom_du_gang(chez), int(VilleVivante.SEUIL_ALLIE), int(du_gang)]
 	elif hopital >= 0:
 		if _vie < VIE_MAX:
 			_affaire = "F : se faire recoudre — $%d" % SOIN
@@ -1606,6 +1732,9 @@ func _acheter_a_l_atelier(baie: int, prix: int) -> void:
 			_mods[quoi] = int(_mods.get(quoi, 0)) + MUNITIONS_PIEGE
 		_:
 			_mods[quoi] = true
+	# L'achat se VOIT tout de suite : une mitrailleuse payée qui n'apparaît
+	# qu'au prochain véhicule, c'est un achat dont on doute.
+	FormesCarnage.armer_la_voiture(_corps_auto, bool(_mods.get("mitrailleuse", false)))
 	_dire_affaire("%s — %s" % [String(article["nom"]).to_lower(), String(article["mot"])])
 	Sons.jouer("portail", 1.2, -7.0)
 
@@ -1652,7 +1781,59 @@ func _entrer_chez_soi(planque: int) -> void:
 	Sons.jouer("portail", 1.0, -8.0)
 	print("[carnage] entré chez soi : %s (planque %d)" % [_dedans, planque])
 
+## ENTRER DANS UN REPAIRE. Même mécanique que chez soi — l'intérieur est bâti
+## loin sous la ville, les deux façades côté caméra sont escamotées, les marques
+## au sol disent où `F` répond — avec un seul intérieur pour les sept gangs,
+## repeint à leur teinte (`Interieurs._repaire_du_gang`).
+##
+## ⚠ On ne diffuse RIEN. Les autres joueurs voient quelqu'un d'immobile sur le
+## tag, ce qui est exactement ce qui se passe : `_position` ne bouge pas de tout
+## le séjour. C'est la règle de la planque, et elle vaut ici pour la même
+## raison — un intérieur partagé demanderait de synchroniser une pièce que
+## personne d'autre ne regarde.
+func _entrer_dans_le_repaire(gang: int) -> void:
+	_dedans = Interieurs.repaire_de(gang)
+	_dedans_p = Interieurs.degager(_dedans, Interieurs.entree(_dedans))
+	_dedans_noeud = Interieurs.batir(_dedans)
+	_dedans_noeud.position = Interieurs.SOUS_SOL
+	Interieurs.degager_la_vue(_dedans_noeud, Vector2(0.0, 1.0))
+	Interieurs.poser_marques(_dedans_noeud, _dedans)
+	monde().add_child(_dedans_noeud)
+	_pied = true
+	_vitesse = 0.0
+	_dire_affaire("chez %s" % carte.nom_du_gang(gang))
+	Sons.jouer("portail", 0.9, -8.0)
+	print("[carnage] entré au repaire %s" % carte.nom_du_gang(gang))
+
+## L'ARMURERIE. Le seul comptoir d'armes du jeu : ailleurs, une arme se ramasse
+## sur un corps ou dans une caisse, donc au hasard. Ici on la choisit — à
+## condition d'avoir mérité la porte.
+func _acheter_a_l_armurerie(gang: int) -> void:
+	var etal := FormesCarnage.armurerie_du_gang(gang)
+	var prix := int(etal["prix"])
+	if _argent < prix:
+		_dire_affaire("il manque $%d" % (prix - _argent))
+		Sons.jouer("choc", 0.6, -14.0)
+		return
+	_encaisser_argent(-prix)
+	var quoi := String(etal["arme"])
+	# ⚠ ON RECHARGE si c'est déjà l'arme en main, on ne la remplace pas : payer
+	# sept cents pour repartir avec le même chargeur à moitié vide serait la
+	# meilleure façon de ne jamais revenir.
+	if _arme == quoi:
+		_munitions += int(ARMES[quoi]["munitions"])
+	else:
+		_arme = quoi
+		_munitions = int(ARMES[quoi]["munitions"])
+	_dire_affaire("%s — %s" % [String(ARMES[quoi]["nom"]).to_lower(), String(etal["mot"])])
+	Sons.jouer("depart", 0.9, -8.0)
+
 func _sortir_de_chez_soi() -> void:
+	# ⚠ ON NE SORT PAS SA VOITURE DU GARAGE D'UN AUTRE. La même fonction sert
+	# maintenant aux repaires de gang : sans ce drapeau, quitter le repaire des
+	# Braises faisait apparaître sous soi la voiture rangée chez soi, à l'autre
+	# bout de la ville.
+	var chez_un_gang := Interieurs.est_repaire(_dedans)
 	if _dedans_noeud != null:
 		_dedans_noeud.queue_free()
 		_dedans_noeud = null
@@ -1661,7 +1842,8 @@ func _sortir_de_chez_soi() -> void:
 	# le séjour, et c'est voulu — les autres joueurs voient quelqu'un d'immobile
 	# sur sa planque, ce qui est exactement ce qui se passe.
 	Sons.jouer("portail", 0.85, -8.0)
-	_sortir_du_garage(_position, _angle)
+	if not chez_un_gang:
+		_sortir_du_garage(_position, _angle)
 
 ## LE GARAGE. `_ranger_le_vehicule` gardait déjà ce qu'on ramène chez soi ; il
 ## manquait de le RESSORTIR. Se relever après une mort annonçait « votre
@@ -1708,6 +1890,13 @@ func _marcher_dedans(delta: float) -> void:
 ## arsenal. E ne fait rien d'autre à l'intérieur (pas de portière chez soi).
 func _affaires_dedans() -> void:
 	_affaire = ""
+	# ⚠ UN REPAIRE N'EST PAS UN APPARTEMENT. Il n'a ni coffre ni penderie, et
+	# la suite de `elif` ci-dessous serait tombée dans la branche « chez vous —
+	# le coffre est au fond » : une ligne de tableau de bord qui parle d'un
+	# meuble qui n'existe pas, dans une pièce qui ne vous appartient pas.
+	if Interieurs.est_repaire(_dedans):
+		_affaires_au_repaire()
+		return
 	# ⚠ On mesure la distance au POINT DE POSTE, pas au meuble : c'est le point
 	# que la marque au sol montre. Mesuré depuis le centre du meuble, le coffre
 	# répondait à travers le lit, et la marque était ailleurs que le bouton.
@@ -1749,6 +1938,29 @@ func _affaires_dedans() -> void:
 			_changer_de_tenue()
 	else:
 		_affaire = "chez vous — le coffre est au fond"
+
+## Ce que `F` fait dans un repaire : le râtelier, ou la porte. Deux gestes, et
+## la ligne du HUD dit toujours lequel — c'est la règle de tout le jeu.
+func _affaires_au_repaire() -> void:
+	var gang := Interieurs.gang_du_repaire(_dedans)
+	var au_ratelier := Interieurs.point_de_poste(_dedans, "armurerie")
+	var pres_du_ratelier: bool = au_ratelier != Vector2.ZERO \
+		and _dedans_p.distance_to(au_ratelier) < PORTEE_COFFRE
+	var pres_de_la_porte := _dedans_p.distance_to(Interieurs.entree(_dedans)) < PORTEE_PORTE
+	if pres_de_la_porte:
+		# LA PORTE PASSE AVANT LE RÂTELIER, comme chez soi : dans une pièce de
+		# six tuiles, un poste qu'on ne peut pas quitter est un piège.
+		_affaire = "F : ressortir"
+		if Commandes.affaire_declenchee():
+			_sortir_de_chez_soi()
+	elif pres_du_ratelier:
+		var etal := FormesCarnage.armurerie_du_gang(gang)
+		_affaire = "F : %s — $%d" % [String(ARMES[etal["arme"]]["nom"]).to_lower(),
+			int(etal["prix"])]
+		if Commandes.affaire_declenchee():
+			_acheter_a_l_armurerie(gang)
+	else:
+		_affaire = "chez %s — le râtelier est au fond" % carte.nom_du_gang(gang)
 
 ## RETIRER. Sans ça, le coffre était un puits : l'argent y entrait et n'en
 ## sortait plus, et on ne pouvait pas ressortir avec de quoi payer un hôpital
@@ -2302,6 +2514,9 @@ func _etats_des_joueurs() -> Dictionary:
 		etats[Session.cle] = {
 			"p": _position, "a": _angle, "v": _vitesse, "vie": _vie,
 			"pied": _pied, "seuil": seuil_ecrasement(),
+			# ⚠ Sans ce drapeau, la rame FAUCHE SON PROPRE PASSAGER : il est
+			# pile sous elle, c'est la définition d'un voyage.
+			"train": _train >= 0,
 			"arene": carte.arene_de(_position), "d": Vector2.RIGHT.rotated(_angle),
 		}
 	for cle in _autres:
@@ -2311,6 +2526,7 @@ func _etats_des_joueurs() -> Dictionary:
 		etats[cle] = {
 			"p": a["p"], "a": float(a["a"]), "v": float(a.get("v", 0.0)),
 			"vie": float(a.get("vie", VIE_MAX)), "pied": bool(a.get("pied", false)),
+			"train": bool(a.get("train", false)),
 			"seuil": VilleVivante.SEUIL_EPERON if bool(a.get("eperon", false)) \
 				else VilleVivante.SEUIL_ECRASEMENT,
 			"arene": carte.arene_de(a["p"]),
@@ -2379,6 +2595,24 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 					float(charge.get("a", 0.0)), float(charge.get("pv", PV_VOITURE)),
 					int(charge.get("m", -1)), int(charge.get("g", VilleVivante.CIVILE)))
 				_vider_les_evenements()
+		"broyer":
+			# LA CASSE. Le client dit « je broie celle-ci », l'hôte tranche : la
+			# voiture quitte la ville, la somme et le butin repartent dans un
+			# « broye ». On ne laisse PAS le client se payer tout seul, c'est la
+			# règle de tout le reste (les contrats, les caisses, les primes).
+			if est_hote():
+				ville.broyer(String(charge.get("cle", "")), int(charge.get("id", 0)),
+					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))))
+				_vider_les_evenements()
+		"broye":
+			var ou_casse := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
+			_effet_broyage(ou_casse)
+			if String(charge.get("j", "")) == Session.cle:
+				_argent += int(charge.get("m", 0))
+				_dire_affaire("broyée — $%d, et de quoi se servir par terre" % int(charge.get("m", 0)))
+				if Commandes.pilote_automatique:
+					print("[banc] broyage : $%d, butin %s" % [int(charge.get("m", 0)),
+						String(charge.get("b", ""))])
 		"cabine":
 			if est_hote():
 				ville.proposer_contrat(String(charge.get("cle", "")), int(charge.get("i", 0)),
@@ -2707,6 +2941,8 @@ func _recevoir_joueur(charge: Dictionary) -> void:
 	a["pied"] = int(charge.get("e", 1)) == 0
 	a["genre"] = int(charge.get("vg", VilleVivante.CIVILE))
 	a["eperon"] = int(charge.get("ep", 0)) == 1
+	a["train"] = int(charge.get("tr", 0)) == 1
+	a["mitrailleuse"] = int(charge.get("mg", 0)) == 1
 	# Arrivé en retard, on n'a pas vu le « pris » : la voiture qu'il conduit
 	# sort quand même de sa nappe.
 	var w := int(charge.get("w", 0))
@@ -2881,6 +3117,29 @@ func _effet_gain(position: Vector2, points: int, facteur: int, cle: String, quoi
 	monde().add_child(mention)
 	_eclats.append({"noeud": mention, "v": Vector3(0, 7.0, 0), "t": 1.1, "t0": 1.1, "texte": true})
 
+## LE BROYAGE, à l'écran : les deux mâchoires se referment, un coup sourd, une
+## secousse. Sans les mâchoires qui bougent, une voiture qui disparaît d'un coup
+## au milieu d'une dalle rouillée ressemble à un défaut d'affichage — et c'est
+## ce que le joueur croira, parce que c'est ce que ça a l'air d'être.
+func _effet_broyage(position: Vector2) -> void:
+	Sons.jouer("choc", 0.55, -4.0)
+	Sons.jouer("ecrasement", 0.7, -6.0)
+	_secousse = max(_secousse, 0.32)
+	for noeud in _compacteurs:
+		var machine: Node3D = noeud
+		if Decor.vers3d(position).distance_to(machine.position) > 40.0:
+			continue
+		for k in 2:
+			var machoire := machine.get_node_or_null("Machoire%d" % k) as Node3D
+			if machoire == null:
+				continue
+			var depart := machoire.position.x
+			var vers := depart * 0.18
+			var anim := create_tween()
+			anim.tween_property(machoire, "position:x", vers, 0.35)
+			anim.tween_interval(0.5)
+			anim.tween_property(machoire, "position:x", depart, 0.7)
+
 func _effet_explosion(position: Vector2) -> void:
 	Sons.jouer("explosion_grande", _rng.randf_range(0.92, 1.06), -4.0)
 	_secousse = max(_secousse, 0.4)
@@ -2972,6 +3231,7 @@ func rafraichir_scene(delta: float) -> void:
 	_placer_les_autos()
 	_placer_les_objets()
 	_placer_les_helicos(delta)
+	_placer_les_trains(delta)
 	_animer_effets(delta)
 	_placer_camera(delta)
 	_animer_les_feux(delta)
@@ -3089,34 +3349,47 @@ func _animer_les_feux(delta: float) -> void:
 			_secousse = max(_secousse, 0.18)
 			break
 
-## La cabine annonce sa couleur : ce que le gang du quartier pense de vous.
-## L'enseigne d'une cabine dit, de loin, ce que le gang du quartier pense de
-## vous. Les couleurs sont celles de `FormesCarnage.COULEURS_HUMEUR` — les
-## mêmes que l'anneau sous ses hommes, sinon la rue et le téléphone
-## raconteraient deux histoires différentes.
-
+## La cabine a DEUX choses à dire et une seule enseigne pour les dire.
+##
+## Sa couleur — verte, jaune, rouge — est celle du téléphone lui-même : la
+## difficulté du travail qu'on y trouve. Elle est peinte une fois pour toutes
+## dans `FormesCarnage.cabine()` et ne bouge plus : c'est ce qui permet de
+## repérer un téléphone rouge en passant et de revenir plus tard.
+##
+## ⚠ Cette enseigne repeignait l'humeur du gang, image par image. Deux
+## défauts : elle disait la même chose que l'anneau sous ses hommes et que la
+## ligne du tableau de bord, et surtout elle écrasait la couleur du palier —
+## on ne pouvait plus reconnaître un téléphone d'un autre. Ne reste donc ici
+## que l'ÉCLAT : allumé quand on peut décrocher, éteint sinon.
 func _animer_les_cabines() -> void:
 	var libre := _contrat.is_empty()
 	for cle in _morceaux:
 		for entree in (_morceaux[cle] as MorceauVille).cabines:
 			var poste: Node3D = entree["n"]
+			var rang := FormesCarnage.niveau_de_cabine(int(entree.get("id", 0)))
+			# Ouverte = ce gang-ci vous en confie assez pour ce téléphone-là.
+			# Même calcul que `VilleVivante.proposer_contrat`, sinon l'enseigne
+			# inviterait à décrocher pour se faire raccrocher au nez.
+			# `employeur` est figé à la pose du morceau (voir `morceau.gd`) :
+			# c'est le gang qui décrochera vraiment, terrain neutre compris.
+			var gang := int(entree.get("employeur", 0))
+			var ouverte := ville.respect_pour(Session.cle, gang) \
+				>= float(FormesCarnage.CABINES[rang]["respect"])
 			var halo := poste.get_node_or_null("Halo") as Node3D
 			if halo:
-				halo.visible = libre and fmod(temps, 1.0) > 0.42
+				halo.visible = libre and ouverte and fmod(temps, 1.0) > 0.42
 			var mot := poste.get_node_or_null("Mot") as Node3D
 			if mot:
 				mot.visible = libre
 			var enseigne := poste.get_node_or_null("Enseigne") as MeshInstance3D
 			if enseigne == null:
 				continue
-			var gang := int(entree.get("gang", -1))
-			var couleur: Color = FormesCarnage.COULEURS_HUMEUR[VilleVivante.H_NEUTRE]
-			if gang >= 0:
-				couleur = FormesCarnage.COULEURS_HUMEUR[clamp(ville.humeur(Session.cle, gang),
-					0, FormesCarnage.COULEURS_HUMEUR.size() - 1)]
-			if entree.get("teinte") != couleur:
-				entree["teinte"] = couleur
-				enseigne.material_override = Decor.matiere_lumineuse(couleur, 1.4)
+			var eclat: float = FormesCarnage.CABINE_ALLUMEE if (libre and ouverte) \
+				else FormesCarnage.CABINE_ETEINTE
+			if entree.get("eclat") != eclat:
+				entree["eclat"] = eclat
+				var teinte: Color = FormesCarnage.CABINES[rang]["couleur"]
+				enseigne.material_override = Decor.matiere_lumineuse(teinte, eclat)
 
 ## Une poursuite s'entend avant de se voir : c'est la sirène qui dit qu'il faut
 ## tourner tout de suite, pas la voiture aperçue trois rues plus loin.
@@ -3227,6 +3500,10 @@ func _placer_les_autres() -> void:
 			var buffle := auto.get_node_or_null("Buffle") as MeshInstance3D
 			if buffle:
 				buffle.visible = bool(a.get("eperon", false))
+			# ⚠ La mitrailleuse d'un AUTRE joueur voyage dans son paquet (`mg`).
+			# Sans elle, on voyait une voiture de gang volée repasser désarmée
+			# — et l'on apprenait à se fier à une silhouette qui ment.
+			FormesCarnage.armer_la_voiture(auto, bool(a.get("mitrailleuse", false)))
 			_regler_jauge(auto, float(a["vie"]) / VIE_MAX)
 		if a_pied:
 			pieton.position = Decor.vers3d(a["p"])
@@ -3339,6 +3616,11 @@ func _placer_les_autos() -> void:
 		corps.rotation.y = -float(auto["a"])
 		# Une voiture à l'arrêt a ses phares éteints : allumés, on la prend
 		# pour une voiture qui arrive.
+		# LES VOITURES DE GANG SONT ARMÉES (§1.3). Le guide le demandait et nos
+		# voitures de gang ne portaient que la couleur du gang : on les
+		# reconnaissait, elles ne valaient rien de plus qu'une berline. Celle-ci
+		# se voit de loin, et c'est ce qui en fait une PRISE.
+		FormesCarnage.armer_la_voiture(corps, genre == VilleVivante.VOITURE_GANG)
 		var phares := corps.get_node_or_null("Phares") as Node3D
 		if phares:
 			phares.visible = not bool(auto.get("garee", false))
@@ -3443,6 +3725,128 @@ func _placer_les_helicos(delta: float) -> void:
 		if _depuis_battement <= 0.0:
 			_depuis_battement = 0.36
 			Sons.jouer("battement", 1.0, -14.0)
+
+## LES RAMES ET LES QUAIS. Les quais ne sont posés QU'UNE FOIS : leur place
+## vient de `VilleVivante.gares()`, qui ne dépend que du code de la manche.
+## Les rames, elles, bougent à chaque image.
+##
+## ⚠ Le client EXTRAPOLE la position de la rame entre deux instantanés. À neuf
+## cents pixels par seconde et huit instantanés par seconde, une rame recopiée
+## telle quelle avançait par bonds de cent vingt pixels — un train qui clignote
+## d'une rue à l'autre. Un train est le seul objet de la ville dont on sait
+## exactement où il sera dans un dixième de seconde : autant s'en servir.
+func _placer_les_trains(delta: float) -> void:
+	if not _quais_poses:
+		_quais_poses = true
+		for abscisse in ville.gares():
+			var quai := FormesCarnage.quai()
+			quai.position = Decor.vers3d(ville.point_de_voie(float(abscisse)))
+			quai.rotation.y = -ville.cap_de_voie()
+			monde().add_child(quai)
+		# LES CASSES vivent au bord de la même voie : c'est la seule bande de
+		# la ville que personne n'habite, et c'est là qu'on entasse des
+		# carcasses. Elles se posent avec les quais parce qu'elles se calculent
+		# comme eux — une fois, à partir du code de la manche.
+		for c in ville.casses():
+			var machine := FormesCarnage.compacteur()
+			machine.position = Decor.vers3d(Vector2(c["p"]))
+			machine.rotation.y = -ville.cap_de_voie()
+			monde().add_child(machine)
+			_compacteurs.append(machine)
+	var cap := ville.cap_de_voie()
+	for t in ville.trains:
+		var noeud = t.get("noeud")
+		if noeud == null:
+			noeud = FormesCarnage.rame_de_train(VilleVivante.WAGONS)
+			monde().add_child(noeud)
+			t["noeud"] = noeud
+		t["age"] = float(t.get("age", 0.0)) + delta
+		var s_vue := float(t["s"]) + float(t["sens"]) * float(t["v"]) * float(t["age"])
+		var tete := ville.point_de_voie(s_vue)
+		var rame: Node3D = noeud
+		rame.position = Decor.vers3d(tete)
+		# La rame est bâtie vers -X depuis sa tête : tournée du cap de la voie
+		# elle recule, tournée du cap opposé elle avance. C'est `sens` qui
+		# tranche — et sans lui la motrice poussait le convoi une fois sur deux.
+		rame.rotation.y = -(cap if float(t["sens"]) > 0.0 else cap + PI)
+	_sentir_le_train(delta)
+
+## Ce que le joueur entend et lit du train : le roulement quand il passe, et
+## l'annonce quand une rame s'arrête à portée. Sans l'annonce, un train à quai
+## ressemble exactement à un train en panne — on ne devine pas qu'`E` y fait
+## quelque chose.
+func _sentir_le_train(delta: float) -> void:
+	_quai_dit = max(0.0, _quai_dit - delta)
+	if _train >= 0:
+		return
+	for t in ville.trains:
+		var ou: Vector2 = ville.point_de_voie(float(t["s"]))
+		var d := ou.distance_to(_position)
+		if float(t["v"]) > 300.0 and d < 900.0:
+			_depuis_roulement -= delta
+			if _depuis_roulement <= 0.0:
+				_depuis_roulement = 0.42
+				Sons.jouer("roulement", _rng.randf_range(0.93, 1.07), -16.0 - 12.0 * (d / 900.0))
+	if not _pied or _quai_dit > 0.0:
+		return
+	var quai := ville.rame_a_quai(_position)
+	if not quai.is_empty() and ville.point_de_voie(float(quai["s"])).distance_to(_position) \
+			< PORTEE_TRAIN + VilleVivante.longueur_de_rame():
+		_quai_dit = 4.0
+		_annoncer("train à quai — E pour monter", Palette.AVERTISSEMENT, 2.6)
+
+## VOYAGER. Le passager n'a rien à piloter : il se tient dans la rame et
+## regarde la ville défiler. `E` le fait descendre — mais seulement à l'arrêt,
+## sinon on saute d'un train lancé à neuf cents pixels par seconde, ce qui
+## dans ce jeu veut dire « on apparaît dans un mur ».
+func _voyager(delta: float) -> void:
+	var t := ville.train_par_id(_train)
+	if t.is_empty():
+		# La rame a disparu (changement d'hôte, instantané perdu) : on remet le
+		# joueur sur ses pieds là où il est plutôt que de le laisser voyager
+		# dans un train qui n'existe plus.
+		_train = -1
+		return
+	var s_vue := float(t["s"]) + float(t["sens"]) * float(t["v"]) * float(t.get("age", 0.0))
+	_position = ville.point_de_voie(s_vue - float(t["sens"]) * _place_train)
+	_angle = ville.cap_de_voie() if float(t["sens"]) > 0.0 else ville.cap_de_voie() + PI
+	_vitesse = float(t["v"])
+	_regenerer(delta)
+	if float(t["arret"]) > 0.0:
+		_affaire = ""
+		if _quai_dit <= 0.0:
+			_quai_dit = 3.0
+			_annoncer("à quai — E pour descendre", Palette.AVERTISSEMENT, 2.4)
+
+func _monter_dans_le_train() -> bool:
+	var t := ville.rame_a_quai(_position)
+	if t.is_empty():
+		return false
+	if ville.point_de_voie(float(t["s"])).distance_to(_position) \
+			> PORTEE_TRAIN + VilleVivante.longueur_de_rame():
+		return false
+	_train = int(t["id"])
+	# On se tient au milieu de la rame : monté en tête, on dépassait de la
+	# motrice dès le premier virage de caméra.
+	_place_train = VilleVivante.longueur_de_rame() * 0.5
+	_vitesse = 0.0
+	_eteindre_la_radio()
+	Sons.jouer("portail", 1.0, -9.0)
+	_annoncer("en route", Palette.BON, 2.0)
+	return true
+
+func _descendre_du_train() -> void:
+	var t := ville.train_par_id(_train)
+	if not t.is_empty() and float(t["arret"]) <= 0.0:
+		_annoncer("attendez le prochain quai", Palette.SERIEUX, 2.0)
+		return
+	_train = -1
+	# On descend DU CÔTÉ DU QUAI. La dalle est posée à +Z du repère de la voie
+	# (voir `FormesCarnage.quai`) : descendre de l'autre côté, c'est atterrir
+	# sur le ballast, hors de portée de tout.
+	var cote := Vector2.RIGHT.rotated(ville.cap_de_voie() + PI * 0.5) * 34.0
+	_position = carte.degager(_position + cote, RAYON_A_PIED)[0]
+	Sons.jouer("portail", 0.85, -9.0)
 
 ## La jauge est fille de son porteur : sans compenser la rotation, elle
 ## tournerait avec lui et deviendrait illisible dès le premier virage.

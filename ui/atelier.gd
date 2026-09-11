@@ -146,6 +146,45 @@ static func champ(indication: String = "") -> LineEdit:
 ## boutons : il faut une liste qui défile, qui se cherche et qui garde une
 ## sélection — c'est exactement ce que l'`ItemList` du moteur sait faire, et
 ## c'est le widget que Blender emploie pour ses navigateurs.
+## UNE GLISSIÈRE AVEC SON CHIFFRE. Une pastille dit « à peu près là » ; un
+## réglage se relit et se dicte, donc il lui faut sa valeur en clair. Rend
+## [rangée, glissière] — le libellé et le chiffre sont déjà dedans, et le
+## chiffre se met à jour tout seul.
+static func regle(libelle: String, mini_v: float, maxi_v: float, pas: float,
+		valeur: float, decimales := 0) -> Array:
+	var r := HBoxContainer.new()
+	r.add_theme_constant_override("separation", 6)
+	r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var l := texte(libelle, CORPS_PETIT, ENCRE_FAIBLE)
+	l.custom_minimum_size = Vector2(52, 0)
+	r.add_child(l)
+	var g := glissiere(mini_v, maxi_v, pas, valeur)
+	r.add_child(g)
+	var v := texte(String.num(valeur, decimales), CORPS_PETIT, ENCRE)
+	v.custom_minimum_size = Vector2(40, 0)
+	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	r.add_child(v)
+	# ⚠ LA PLACE DE L'ASCENSEUR. La colonne de l'atelier vit dans un
+	# ScrollContainer : sa barre mange une dizaine de pixels À DROITE, et le
+	# chiffre du réglage — le dernier élément de la rangée — passait dessous.
+	# Une cale au bout de la rangée, et il se relit.
+	var cale := Control.new()
+	cale.custom_minimum_size = Vector2(10, 0)
+	r.add_child(cale)
+	g.value_changed.connect(func(x): v.text = String.num(x, decimales))
+	# Remettre la glissière par le code doit bouger le chiffre aussi, sans quoi
+	# choisir un objet affiche la valeur du précédent.
+	g.set_meta("chiffre", v)
+	g.set_meta("decimales", decimales)
+	return [r, g]
+
+## Pose une valeur SANS déclencher le signal — et met le chiffre à jour.
+static func poser_regle(g: HSlider, valeur: float) -> void:
+	g.set_value_no_signal(valeur)
+	if g.has_meta("chiffre"):
+		var v: Label = g.get_meta("chiffre")
+		v.text = String.num(valeur, int(g.get_meta("decimales")))
+
 static func liste() -> ItemList:
 	var l := ItemList.new()
 	l.add_theme_font_override("font", police())
@@ -170,9 +209,13 @@ static func glissiere(mini_v: float, maxi_v: float, pas: float, valeur: float) -
 	g.custom_minimum_size = Vector2(0, 20)
 	g.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	g.focus_mode = Control.FOCUS_NONE
+	# ⚠ UNE GLISSIÈRE SANS RAINURE N'EST PAS UNE GLISSIÈRE. Les marges à zéro
+	# donnaient une boîte de HAUTEUR NULLE : à l'écran il ne restait que la
+	# pastille, une bille blanche posée sur du vide, qu'on ne pensait même pas à
+	# tirer. La rainure est ce qui dit qu'il y a une course, et où l'on en est.
 	var fond := boite(CHAMP_ENFONCE, Color(0, 0, 0, 0), RAYON, 0)
-	fond.content_margin_top = 0
-	fond.content_margin_bottom = 0
+	fond.content_margin_top = 3
+	fond.content_margin_bottom = 3
 	g.add_theme_stylebox_override("slider", fond)
 	var prise := StyleBoxFlat.new()
 	prise.bg_color = ACCENT

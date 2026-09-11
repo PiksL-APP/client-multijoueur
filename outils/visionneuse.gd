@@ -43,13 +43,20 @@ func _ready() -> void:
 		if String(nom).begins_with("v:"):
 			var quoi := String(nom).substr(2)
 			var indices: Array = []
-			if quoi == "*":
+			if quoi.begins_with("*"):
 				for k2 in FormesCarnage.MODELES_VOITURES.size():
 					indices.append(k2)
 			else:
-				indices.append(int(quoi))
+				indices.append(int(quoi.rstrip("+")))
+			# `v:<indice>+` sort la carrosserie AVEC sa mitrailleuse de toit.
+			# Elle se juge sur plusieurs gabarits ou pas du tout : sa hauteur
+			# est mesurée sur la coque, et c'est exactement le genre de calcul
+			# qui tombe juste sur une berline et plante le canon dans le
+			# pare-brise d'un bus.
+			var armee := quoi.ends_with("+")
 			for indice in indices:
 				var auto := FormesCarnage.voiture_kit(int(indice))
+				FormesCarnage.armer_la_voiture(auto, armee)
 				auto.position = Vector3(x, 0, 0)
 				add_child(auto)
 				var etiquette := Label3D.new()
@@ -77,6 +84,49 @@ func _ready() -> void:
 				"frenzy": piece = FormesCarnage.icone_frenzy()
 			piece.position = Vector3(x, 0, 0)
 			add_child(piece)
+			x += ecart
+			continue
+		# `c:<niveau>` sort une CABINE de ce palier — `c:2-` la sort éteinte,
+		# comme le jeu l'éteint quand il manque du respect. Le banc ne peint
+		# rien lui-même : il prend un vrai numéro de cabine de ce palier et
+		# laisse `FormesCarnage.cabine()` faire, sinon la photo prouverait
+		# seulement que le banc sait choisir une couleur.
+		if String(nom).begins_with("c:"):
+			var arg := String(nom).substr(2)
+			var eteinte := arg.ends_with("-")
+			var palier := int(arg.rstrip("-"))
+			var id := 0
+			while FormesCarnage.niveau_de_cabine(id) != palier and id < 4000:
+				id += 1
+			var poste := FormesCarnage.cabine(id)
+			poste.position = Vector3(x, 0, 0)
+			add_child(poste)
+			if eteinte:
+				var ens := poste.get_node_or_null("Enseigne") as MeshInstance3D
+				var t: Color = FormesCarnage.CABINES[palier]["couleur"]
+				ens.material_override = Decor.matiere_lumineuse(t,
+					FormesCarnage.CABINE_ETEINTE)
+				var h := poste.get_node_or_null("Halo") as Node3D
+				if h: h.visible = false
+			var sous := Decor.etiquette(
+				"n°%d — %s" % [id, "fermée" if eteinte else "ouverte"],
+				Palette.ENCRE_DOUCE, 18)
+			sous.position = Vector3(x, 0.6, 1.2)
+			add_child(sous)
+			x += ecart
+			continue
+		# `t:` sort la RAME DE TRAIN, `t:quai` le quai. Le train n'est visible
+		# en partie qu'au moment où il passe, à neuf cents pixels par seconde :
+		# sans ce banc on ne le jugerait jamais autrement qu'en photo floue.
+		if String(nom).begins_with("t:"):
+			var quoi_t := String(nom).substr(2)
+			var piece_t: Node3D = FormesCarnage.rame_de_train(VilleVivante.WAGONS)
+			if quoi_t == "quai":
+				piece_t = FormesCarnage.quai()
+			elif quoi_t == "casse":
+				piece_t = FormesCarnage.compacteur()
+			piece_t.position = Vector3(x, 0, 0)
+			add_child(piece_t)
 			x += ecart
 			continue
 		# `u:<corps>` sort un UNIFORME : police, SWAT, agent, armée.

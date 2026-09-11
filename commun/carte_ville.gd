@@ -86,6 +86,25 @@ func poser_route(c: Vector2i, oui: bool) -> void:
 static func taille_de(p: Dictionary) -> Vector2i:
 	return Vector2i(int(p["w"]), int(p.get("h", p["w"])))
 
+## La grosse pièce qui couvre cette case, ou un dictionnaire vide.
+func piece_sur(c: Vector2i) -> Dictionary:
+	for p in pieces:
+		var t := taille_de(p)
+		if c.x >= int(p["i"]) and c.x < int(p["i"]) + t.x \
+				and c.y >= int(p["j"]) and c.y < int(p["j"]) + t.y:
+			return p
+	return {}
+
+## ⚠ LA CASE EST-ELLE DÉJÀ COUVERTE PAR SA PIÈCE ? Une pièce AJOURÉE ne remplit
+## pas son emprise : ses cases sans chaussée gardent le sol du dessin. Une pièce
+## PLEINE — la courbe large « -pavement », qui apporte son propre trottoir — la
+## remplit : lui poser en plus la pelouse de la case, c'est deux surfaces au même
+## niveau, et le rendu choisissait au hasard laquelle montrer. Vu de la rue, la
+## bretelle sortait avec un carré d'herbe posé en travers de son trottoir.
+func case_couverte(c: Vector2i) -> bool:
+	var p := piece_sur(c)
+	return not p.is_empty() and not AJOUREES.has(String(p["t"]))
+
 func case_prise(c: Vector2i) -> bool:
 	for p in pieces:
 		var t := taille_de(p)

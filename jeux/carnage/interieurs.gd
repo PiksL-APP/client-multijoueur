@@ -31,6 +31,10 @@ const MAISON := "res://modeles/interieur/%s.glb"
 ## repaire en a exactement un, et `batir()` le signale par un méta sur la
 ## racine — le jeu n'a pas à fouiller la scène pour le retrouver.
 const COFFRE := "c:coffre"
+## LE meuble des repaires de gang : c'est là qu'on achète l'arme du gang, et
+## c'est la seule raison d'en franchir la porte. Fabriqué par
+## `outils/ratelier.py` — Kenney est un kit de meubles, il n'a pas d'arme.
+const RATELIER := "c:ratelier"
 ## Hauteur d'un mur du kit, en unités de modèle : tout ce qui se suspend s'y
 ## rapporte (plafonnier, ventilateur).
 const HAUT := 1.29
@@ -180,6 +184,7 @@ static func cadre(id: String, proportion: float = 16.0 / 9.0,
 const MARQUES := {
 	"coffre": Color("#fab219"),          ## l'argent — Palette.AVERTISSEMENT
 	"garde-robe": Color("#3987e5"),      ## la tenue — Palette.SERIE
+	"armurerie": Color("#d03b3b"),       ## les armes du gang — Palette.CRITIQUE
 	"porte": Color("#0ca30c"),           ## la sortie — Palette.BON
 }
 ## En tuiles : 44 cm. Essayé à 68 — trois flaques de couleur au milieu du
@@ -285,6 +290,10 @@ static func degager_la_vue(racine: Node3D, vers: Vector2) -> void:
 ## qu'un appartement où l'on ne peut pas se changer.
 const POSTES := {
 	"coffre": ["c:coffre"],
+	## Le râtelier des repaires de gang (`outils/ratelier.py`). Il n'existe que
+	## là : un appartement n'en a pas, et `poser_marques` saute sans broncher
+	## un poste que le plan ne contient pas.
+	"armurerie": [RATELIER],
 	"garde-robe": ["coatRackStanding", "coatRack", "bedDouble", "bedSingle", "bedBunk"],
 }
 
@@ -604,6 +613,10 @@ static func batir(id: String) -> Node3D:
 			noeud.name = "Coffre"
 			racine.set_meta("coffre", noeud.position)
 		racine.add_child(noeud)
+	# LES OCCUPANTS, s'il y en a. Un intérieur qui déclare `gens` est peuplé
+	# par `batir()` lui-même : le jeu et le banc de photo montrent alors la
+	# même pièce, ce qui est tout l'intérêt d'avoir un banc.
+	_peupler(racine, fiche, id)
 	for f in fiche.get("lumieres", []):
 		var l := OmniLight3D.new()
 		l.position = Vector3(float(f[0]), HAUT * 0.82, float(f[1]))
@@ -613,6 +626,56 @@ static func batir(id: String) -> Node3D:
 		l.shadow_enabled = false
 		racine.add_child(l)
 	return racine
+
+## Poser les occupants déclarés par le plan. Ils portent la couleur du gang
+## (casquette et anneau, comme dans la rue) et jouent l'animation de repos —
+## un pantin figé en T sur une photo, c'est un mannequin de vitrine.
+##
+## ⚠ Le PANTIN EST TAILLÉ POUR LA VILLE, pas pour une pièce : `poser_pantin`
+## le ramène à sa taille en mètres. Posé tel quel, il dépasse le plafond.
+static func _peupler(racine: Node3D, fiche: Dictionary, id: String) -> void:
+	var gens: Array = fiche.get("gens", [])
+	if gens.is_empty():
+		return
+	var gang := gang_du_repaire(id)
+	var couleur: Color = PlanVille.GANGS[posmod(max(gang, 0), PlanVille.GANGS.size())]["couleur"]
+	for k in gens.size():
+		var g: Array = gens[k]
+		# Des visages différents : trois fois la même peau dans six tuiles, on
+		# ne voit plus des hommes, on voit trois copies.
+		var peau := String(FormesCarnage.PEAUX_GANG[posmod(k, FormesCarnage.PEAUX_GANG.size())])
+		var homme := FormesCarnage.pieton(couleur, false, "", true, peau)
+		# ⚠ L'ANNEAU D'HUMEUR N'A RIEN À FAIRE ICI. Dans la rue il dit ce que
+		# le gang pense de vous ; chez lui, la réponse est connue — on n'entre
+		# qu'au palier allié — et trois disques verts au sol d'une pièce de six
+		# tuiles éclairent le plancher comme une piste de danse.
+		var halo := homme.get_node_or_null("Halo")
+		if halo != null:
+			homme.remove_child(halo)
+			halo.queue_free()
+		# ⚠ LA CASQUETTE EST TAILLÉE POUR UNE VUE DE DESSUS. Dehors, la caméra
+		# ne voit à peu près que ça : elle est volontairement trop grande, et
+		# c'est ce qui rend un homme de gang repérable dans une rue. Ici la
+		# caméra est à trois mètres — la même calotte devient un béret qui
+		# déborde des épaules. On la ramène à une vraie casquette.
+		var calotte := homme.get_node_or_null("Casquette") as Node3D
+		if calotte != null:
+			calotte.scale = Vector3(0.5, 0.62, 0.5)
+		# ⚠ ON N'UTILISE PAS `poser_pantin` ICI. Elle multiplie la position par
+		# `ECHELLE` parce qu'elle sert à des appelants dont la racine n'est PAS
+		# mise à l'échelle (le banc de vitrine). Ici le pantin est enfant de la
+		# coque, qui porte déjà `scale = ECHELLE` : les trois hommes se sont
+		# donc retrouvés au double de leur place, deux dehors sur le bitume et
+		# le troisième à travers une cloison. On pose en TUILES, comme les
+		# meubles, et on divise la taille par la même échelle.
+		homme.position = Vector3(float(g[0]), 0.0, float(g[1]))
+		homme.scale = Vector3.ONE * (echelle_du_pantin(homme, "repaire") / ECHELLE)
+		homme.rotation.y = float(g[2]) * PI * 0.5
+		var jauge := homme.get_node_or_null("Vie") as Node3D
+		if jauge != null:
+			jauge.visible = false
+		FormesCarnage.animer_kenney(homme.get_node_or_null("Silhouette") as Node3D, false)
+		racine.add_child(homme)
 
 ## Le dessin devient des murs. Une arête vaut un modèle du kit ; un point de
 ## grille où deux murs se rencontrent reçoit un poteau, sans quoi chaque angle
@@ -776,7 +839,12 @@ static func coffre(id: String) -> Dictionary:
 	for m in plan(id).get("meubles", []):
 		if String(m[0]) == COFFRE:
 			return {"p": Vector2(float(m[1]), float(m[2])), "r": int(m[3])}
-	push_error("Pas de coffre dans l'intérieur " + id)
+	# ⚠ UN REPAIRE DE GANG N'A PAS DE COFFRE, et ce n'est pas une faute : on n'y
+	# range pas son argent, on y achète une arme. Le cri était celui des bancs
+	# (vitrine, marche, vider) qui cherchent tous le coffre pour cadrer ou pour
+	# commencer leur inondation — ils se rabattent sur l'entrée.
+	if not est_repaire(id):
+		push_error("Pas de coffre dans l'intérieur " + id)
 	return {}
 
 ## QUEL APPARTEMENT DANS QUEL QUARTIER. C'est le quartier de la planque qui
@@ -833,10 +901,147 @@ static func liste() -> Array:
 	ids.sort_custom(func(a, b): return int(CATALOGUE[a]["prix"]) < int(CATALOGUE[b]["prix"]))
 	return ids
 
+# ------------------------------------------------------- les repaires de gang
+
+## LES REPAIRES DE GANG (§3). Sept gangs, UN SEUL DESSIN.
+##
+## Pourquoi pas sept plans : un repaire de gang n'est pas un appartement qu'on
+## achète et qu'on habite — c'est une arrière-salle où l'on entre, où l'on
+## achète, et d'où l'on ressort. Le joueur y passe dix secondes. Sept dessins,
+## c'est sept fois le travail des huit appartements pour un lieu qu'on traverse ;
+## ce qui doit changer d'un gang à l'autre, c'est ce qu'on RECONNAÎT tout de
+## suite — la couleur au mur, au sol, sur les caisses — et ça, une table de
+## teintes le fait.
+##
+## ⚠ L'identifiant porte le NUMÉRO DU GANG : `repaire3`. `plan(id)` est appelé
+## de partout avec l'identifiant seul (les collisions, l'entrée, les postes, le
+## banc de photo) ; lui passer le gang à côté aurait voulu dire ajouter un
+## paramètre à huit fonctions pour un seul cas.
+const REPAIRE := "repaire"
+
+static func repaire_de(gang: int) -> String:
+	return REPAIRE + str(posmod(gang, PlanVille.GANGS.size()))
+
+static func est_repaire(id: String) -> bool:
+	return id.begins_with(REPAIRE)
+
+static func gang_du_repaire(id: String) -> int:
+	return int(id.substr(REPAIRE.length())) if est_repaire(id) else -1
+
+## L'arrière-salle : une pièce commune, un couloir d'entrée, et la réserve où
+## l'on tient les armes. Cinq tuiles sur quatre — assez pour que la caméra ait
+## de quoi cadrer, assez peu pour qu'on traverse en deux secondes.
+static func _repaire_du_gang(gang: int) -> Dictionary:
+	var couleur: Color = PlanVille.GANGS[posmod(gang, PlanVille.GANGS.size())]["couleur"]
+	# ⚠ ON GARDE LA TEINTE, PAS LA SATURATION. Premier essai : `darkened()` et
+	# un mélange vers le gris sur la bannière du gang — Le Lierre a rendu une
+	# BOÎTE VERTE, murs, sol et plafond de la même couleur franche, où plus
+	# rien ne se distinguait. Un repaire est une arrière-salle sombre : on
+	# reprend la TEINTE du gang (`h`) et on impose la saturation et la
+	# luminosité, si bien que les sept repaires sont également sombres et
+	# également lisibles, et que seule la nuance change.
+	var mur := Color.from_hsv(couleur.h, 0.22, 0.27)
+	var sol := Color.from_hsv(couleur.h, 0.16, 0.19)
+	var sol2 := Color.from_hsv(couleur.h, 0.13, 0.15)
+	# L'ACCENT, lui, reste franc : le tapis, la lumière du plafond. C'est ce
+	# qui dit chez qui l'on est — un mur désaturé tout seul ne le dit pas.
+	var accent := Color.from_hsv(couleur.h, 0.62, 0.42)
+	return {
+		"plan": [
+			"---F-------F-",
+			"|. . . .|1 1|",
+			"|           |",
+			"|. . . .|1 1|",
+			"|           |",
+			"|. . . . . .|",
+			"-----D-------",
+		],
+		"teintes": {"_defaultMat": mur, "wood": Color.from_hsv(couleur.h, 0.30, 0.30),
+			"metalDark": Color("#26282b")},
+		"sols": [sol, sol2],
+		"teintes_meubles": {"carpet": accent, "carpetDarker": accent.darkened(0.35),
+			"carpetBlue": accent.darkened(0.2),
+			"wood": Color("#6a5a44"), "woodDark": Color("#463a2c"),
+			# ⚠ LE RÂTELIER GARDE SES MÉTAUX. Repeint aux couleurs du gang, il
+			# devenait une planche unie et les trois fusils disparaissaient
+			# dedans — c'est précisément la silhouette qui fait le meuble.
+			"metal": Color("#3a3f44"), "metalDark": Color("#191b1d"),
+			"laiton": Color("#8a6a20")},
+		"lumieres": [
+			[1.5, 1.0, accent.lightened(0.35), 5.2, 1.5],
+			[3.2, 0.9, Color("#ffd8a8"), 4.2, 1.1],
+			[5.0, 1.0, Color("#ffb090"), 4.4, 1.3],
+			[2.6, 2.6, Color("#cfd8e0"), 4.2, 0.9],
+		],
+		"meubles": [
+			# LA TABLE : c'est là qu'on partage ce qu'on a pris. Elle tient le
+			# milieu de la salle commune, tout le reste s'organise autour.
+			pose("tableCross", 1.50, 1.00, 2),
+			pose("chair", 0.85, 1.00, 1),
+			pose("chair", 2.15, 1.00, 3),
+			pose("chair", 1.50, 0.55, 0),
+			pose("chair", 1.50, 1.50, 2),
+			pose("n:pizza-box", 1.35, 0.90, 2, 0.35),
+			pose("n:soda-can", 1.72, 0.88, 2, 0.35),
+			pose("n:soda-can-crushed", 1.78, 1.15, 3, 0.35),
+			pose("n:bottle-oil", 1.28, 1.18, 2, 0.35),
+			pose("lampSquareCeiling", 1.50, 1.00, 2, HAUT - 0.23),
+			# LE COIN OÙ L'ON ATTEND : un canapé fatigué, une table basse, une
+			# radio. Le tapis porte l'accent du gang — c'est la seule couleur
+			# franche de la pièce, et elle est au sol, là où on la voit d'une
+			# caméra de trois quarts.
+			contre("loungeSofa", "N", 3.25, 0),
+			pose("tableCoffee", 3.25, 0.95, 2),
+			pose("n:can-open", 3.10, 0.95, 2, 0.28),
+			pose("rugRectangle", 3.25, 1.30, 2),
+			pose("lampSquareFloor", 3.80, 0.45, 2),
+			pose("radio", 0.32, 0.35, 3),
+			contre("bookcaseClosed", "O", 1.45, 0),
+			# LA RÉSERVE, derrière la cloison : le râtelier, et ce qui traîne
+			# autour. C'est le SEUL endroit du jeu où l'on achète une arme.
+			contre(RATELIER, "N", 5.00, 0),
+			pose("n:barrel", 4.35, 1.55, 2, 0.0, 2.4),
+			pose("cardboardBoxClosed", 5.60, 0.40, 2),
+			pose("cardboardBoxClosed", 5.60, 0.75, 3),
+			pose("cardboardBoxClosed", 5.62, 0.57, 2, 0.281),
+			pose("cardboardBoxOpen", 5.25, 1.62, 0),
+			pose("bookcaseOpenLow", 4.30, 0.90, 3),
+			pose("lampSquareCeiling", 5.00, 1.00, 2, HAUT - 0.23),
+			# LE COULOIR D'ENTRÉE, en bas : paillasson, portemanteau, et ce
+			# qu'on n'a pas rangé. On le traverse dans les deux sens.
+			pose("rugDoormat", 2.50, 2.82, 2),
+			pose("coatRackStanding", 1.60, 2.65, 0),
+			pose("cardboardBoxClosed", 0.40, 2.60, 2),
+			pose("cardboardBoxOpen", 0.75, 2.68, 0),
+			pose("trashcan", 5.62, 2.62, 2),
+			pose("lampSquareCeiling", 2.60, 2.60, 2, HAUT - 0.23),
+		],
+		# LES HOMMES DU GANG. Sans eux on entrait chez des gens qui n'y sont
+		# pas : une pièce meublée, éclairée, avec un râtelier plein, et
+		# personne — ce qui se lit moins comme un repaire que comme un
+		# appartement témoin.
+		#
+		# ⚠ Ils sont DÉCORATIFS et ne bloquent pas le passage : `libre()` ne
+		# connaît que les meubles du dessin. C'est voulu — trois silhouettes
+		# qui bougent dans six tuiles et l'on se coince en allant au râtelier.
+		# Ils sont donc posés là où l'on ne passe pas : derrière la table,
+		# contre la cloison, et à côté du comptoir.
+		#
+		# `r` est un quart de tour comme pour les meubles : à 0 on regarde +Z,
+		# c'est-à-dire vers la caméra.
+		"gens": [
+			[2.55, 1.45, 0],     ## celui qui tient la table
+			[4.60, 0.62, 0],     ## l'armurier, à côté de son râtelier
+			[0.50, 2.35, 3],     ## celui qui surveille l'entrée, dos au mur ouest
+		],
+	}
+
 ## Le plan complet d'un intérieur — dessin, teintes, meubles, lumières.
 ## Séparé du catalogue parce qu'il MESURE les modèles pour adosser les meubles :
 ## l'appeler, c'est charger le kit.
 static func plan(id: String) -> Dictionary:
+	if est_repaire(id):
+		return _repaire_du_gang(gang_du_repaire(id))
 	match id:
 		"taudis": return _taudis()
 		"ouvrier": return _ouvrier()

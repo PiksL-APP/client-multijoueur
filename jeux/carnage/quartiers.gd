@@ -640,7 +640,7 @@ static func _poser_sols(racine: Node3D, carte: CarteVille, dessin: Array, fiche:
 		# revanche, sous une bretelle en l'air, cette même pelouse flotterait.
 		var prise := carte.case_prise(c)
 		var flotte := prise and _en_lair(carte, c, PILES)
-		if not carte.route(c) and not flotte:
+		if not carte.route(c) and not flotte and not carte.case_couverte(c):
 			# TOUT CE QUI PORTE UN BÂTIMENT EST PAVÉ. C'était le défaut le plus
 			# criant des maquettes : des immeubles posés sur une pelouse. Dans
 			# une ville, l'herbe est l'exception, pas le fond.

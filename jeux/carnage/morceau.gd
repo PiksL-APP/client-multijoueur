@@ -607,8 +607,12 @@ func _poser_les_lieux(plan: PlanVille, c0: int, l0: int) -> void:
 		var poste := FormesCarnage.cabine(int(c["id"]))
 		poste.position = Decor.vers3d(c["p"])
 		add_child(poste)
+		# L'employeur se fige à la pose : la géographie ne bouge pas, et le
+		# calcul fouille la carte — le refaire soixante fois par seconde pour
+		# allumer une enseigne se voyait sur les images.
 		cabines.append({"n": poste, "id": int(c["id"]),
-			"gang": _plan.territoire(Vector2(c["p"]))})
+			"gang": _plan.territoire(Vector2(c["p"])),
+			"employeur": _plan.employeur_de_cabine(int(c["id"]), Vector2(c["p"]))})
 	for h in lieux["hopitaux"]:
 		var coin_h := PlanVille.coin_pate(h["pate"])
 		if not rect.has_point(PlanVille.centre_tuile(coin_h.x, coin_h.y)):

@@ -117,9 +117,10 @@ courant traverser deux avenues pour un flic qu'il ne rejoindra jamais.
   neutre. Pas la couleur du personnage, comme le suggère le guide (§3.4) : sa
   couleur à lui dit de quel gang il est, et sept gangs qui changeraient tous de
   teinte selon l'humeur, on ne saurait plus qui l'on abat ;
-- l'**enseigne des cabines**, une couleur par palier — la même table
-  (`FormesCarnage.COULEURS_HUMEUR`) que l'anneau, sinon la rue et le téléphone
-  raconteraient deux histoires différentes ;
+- l'**enseigne des cabines** ne dit plus l'humeur, elle dit la **difficulté du
+  téléphone** (voir plus bas). Elle la disait : mais l'anneau et la barre le
+  disaient déjà, et deux choses à la même place n'en disent qu'une — pendant ce
+  temps on ne pouvait plus distinguer un téléphone d'un autre ;
 - la **carte** (TAB) teinte chaque pâté de son gang. La teinte est passée de
   0,25 à 0,45 : à sept bannières, on ne distinguait plus les territoires du
   fond de quartier.
@@ -133,8 +134,38 @@ employeur qui n'était pas celui qui décrochait. Sur terrain neutre (le centre
 d'affaires n'appartient à personne), c'est le trio du secteur qui se partage
 les téléphones — sinon les cabines du centre ne sonneraient jamais.
 
-La difficulté n'est pas tirée au sort, elle se **mérite** : c'est ce qui fait
-du respect une progression et pas un thermomètre. Et rendre service à un gang
+### Les trois téléphones (§4.1)
+
+La difficulté appartient à la **cabine**, pas au joueur. Chaque téléphone tire
+sa couleur de son pâté (`FormesCarnage.niveau_de_cabine`, un hachage — donc la
+même chez les quatre joueurs sans rien faire passer par le réseau) et ne la
+change plus jamais :
+
+| enseigne | travail | respect exigé | prime | part de la ville |
+|---|---|---|---|---|
+| **verte** | facile | 40 | ×1,0 | ~51 % |
+| **jaune** | moyenne | 62 | ×1,6 | ~29 % |
+| **rouge** | difficile | 82 | ×2,4 | ~19 % |
+
+⚠ C'était l'**humeur** qui choisissait le palier. Le même téléphone rendait
+« facile » puis « difficile » selon la jauge : il n'y avait donc rien à
+chercher dans la ville, on décrochait où l'on passait et le jeu décidait. Le
+guide demande l'inverse — on **repère** un téléphone rouge en traversant un
+quartier et l'on revient quand on a de quoi. Le respect ne fixe plus la
+difficulté, il **ouvre la serrure**.
+
+L'enseigne, elle, garde une seule chose à raconter : son **éclat**. Allumée,
+ce gang-ci vous en confie assez pour ce téléphone-là ; éteinte, il manque du
+respect — ou un contrat tourne déjà. Et le refus **nomme le chiffre qui
+manque** (« Les Braises exige 82 de respect (vous en avez 50) ») : sans lui, un
+joueur qui tombe sur un rouge à cinquante croit la cabine cassée et n'y revient
+jamais.
+
+`PlanVille.employeur_de_cabine()` est désormais le seul endroit qui dit qui
+décroche — la simulation ET l'enseigne l'appellent. Séparés, le tableau de bord
+annonçait « personne » au centre-ville pendant qu'un gang décrochait.
+
+Rendre service à un gang
 fâche celui contre qui on l'a servi, moitié moins fort — sans ce second
 mouvement, on enchaînait les contrats des deux camps et on finissait ami avec
 tout le monde ; le triangle de rivalité (§3.1) ne tenait plus.
@@ -145,6 +176,9 @@ tout le monde ; le triangle de rivalité (§3.1) ne tenait plus.
 godot --headless --path . -s outils/respect.gd        # les quatre chapitres ci-dessus
 godot --headless --path . -s outils/territoires.gd    # la carte des territoires en PNG
 ./outils/tableau.sh                                   # les barres et les cinq humeurs
+./outils/voir.sh "c:0,c:1,c:2,c:2-" 7                 # les trois enseignes, dont une éteinte
+./outils/vitrine.sh repaire2 "" "" "" pantin          # l'intérieur d'un repaire
+godot --headless --path . -s outils/marche.gd         # les 15 intérieurs sont-ils praticables ?
 ./outils/compiler.sh                                  # tout le jeu se compile-t-il ?
 ```
 
@@ -152,7 +186,9 @@ godot --headless --path . -s outils/territoires.gd    # la carte des territoires
 copies : qu'aucun pâté n'est tenu hors de son trio (13 936 pâtés balayés), que
 les trois paliers tombent aux bons chiffres, que les rivaux du secteur gagnent
 et que les gangs d'ailleurs n'en savent rien, qu'une cabine refuse sous
-quarante, qu'un contrat rendu déplace deux jauges, et qu'un allié abat pour de
+quarante, que les trois couleurs de téléphone décrochent aux bons chiffres et
+que le refus dise lequel, qu'un contrat rendu déplace deux jauges, qu'un repaire trouve son gang et
+n'ouvre qu'à quatre-vingts, et qu'un allié abat pour de
 vrai un flic qu'un neutre laisse tranquille.
 
 ⚠ Deux pièges déjà tombés dedans, gardés ici pour ne pas y retomber :
@@ -165,13 +201,15 @@ vrai un flic qu'un neutre laisse tranquille.
 
 Un banc qui simplifie ce qu'il regarde ne prouve rien.
 
+## Les repaires
+
+Ils s'ouvrent au **palier allié** (80). C'est la seule chose que le respect
+ouvre et qu'on ne peut pas obtenir autrement : le reste vient à vous, le repaire
+il faut y aller. Derrière la porte, le **râtelier** — le seul comptoir d'armes
+du jeu. Détail : `CONCEPTION-REPAIRES-DE-GANG.md`.
+
 ## Ce qui reste
 
-- les **repaires** ne sont toujours que décor et territoire : y entrer, ou y
-  déclencher une mission de gang, est un contenu à part entière ;
-- les **téléphones de trois couleurs** (§4.1) : la difficulté existe et se
-  mérite, mais une seule cabine la porte — le guide en veut trois, plantées à
-  des endroits différents ;
 - le **triangle de rivalité** est vérifié par les chiffres, pas par une
   contrainte : rien n'interdit formellement d'être à 100 chez les trois gangs
   d'un district, il faut simplement des contrats qui ne se fâchent jamais.

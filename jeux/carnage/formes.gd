@@ -619,6 +619,22 @@ static func voiture_kit(indice: int, couleur: Color = Color.WHITE, halo_couleur:
 			rampe.add_child(feu)
 		racine.add_child(rampe)
 
+	# LA MITRAILLEUSE DE BORD, sur le toit. Elle est posée ÉTEINTE et le jeu
+	# la montre : voiture de gang (§1.3), ou atelier payé. C'est le seul signe
+	# extérieur d'une arme montée — jusqu'ici elle n'existait que dans une puce
+	# du tableau de bord, et deux voitures identiques n'en étaient pas.
+	#
+	# ⚠ LA HAUTEUR EST MESURÉE, PAS DEVINÉE. Vingt-huit carrosseries, d'un
+	# coupé à un camion de pompiers : un chiffre en dur plantait le canon dans
+	# le pare-brise de l'une et à un mètre au-dessus du toit de l'autre. C'est
+	# exactement la faute du char, qui est sorti du banc en pick-up vert parce
+	# que sa tourelle était à l'intérieur de la caisse.
+	var haut_du_toit: float = 1.8
+	if coque.mesh != null:
+		var boite_c := coque.mesh.get_aabb()
+		haut_du_toit = boite_c.position.y + boite_c.size.y
+	racine.add_child(_mitrailleuse(haut_du_toit))
+
 	# Le pare-buffle n'apparaît qu'avec l'éperon : il devient ainsi le signe
 	# visible du bonus, au lieu d'un accessoire permanent qui alourdit la
 	# silhouette d'une berline.
@@ -643,6 +659,44 @@ static func voiture_kit(indice: int, couleur: Color = Color.WHITE, halo_couleur:
 		nom_j.position = Vector3(0, 4.4, 0)
 		racine.add_child(nom_j)
 	return racine
+
+## LA MITRAILLEUSE DE BORD sur son affût : un socle, un tube, un chargeur. Elle
+## se monte à `hauteur`, c'est-à-dire sur le toit de la carrosserie qui la
+## porte — mesuré par l'appelant, jamais écrit en dur.
+##
+## Elle regarde +X comme tout le reste du parc : le canon braqué vers l'arrière
+## serait drôle une seule fois.
+static func _mitrailleuse(hauteur: float) -> Node3D:
+	var racine := Node3D.new()
+	racine.name = "Mitrailleuse"
+	racine.visible = false
+	var socle := Decor.cylindre(0.32, 0.22, Color("#2a2d31"), false)
+	socle.position = Vector3(-0.3, hauteur + 0.11, 0)
+	racine.add_child(socle)
+	var bloc := Decor.boite(Vector3(0.7, 0.32, 0.34), Color("#3c4147"), false)
+	bloc.position = Vector3(-0.15, hauteur + 0.38, 0)
+	racine.add_child(bloc)
+	var tube := Decor.boite(Vector3(1.5, 0.16, 0.16), Color("#1b1d20"), false)
+	tube.position = Vector3(0.65, hauteur + 0.40, 0)
+	racine.add_child(tube)
+	# Le chargeur en travers : c'est lui qui fait lire « mitrailleuse » plutôt
+	# que « antenne » sur une image de deux cents pixels.
+	var chargeur := Decor.boite(Vector3(0.34, 0.26, 0.5), Palette.AVERTISSEMENT.darkened(0.3), false)
+	chargeur.position = Vector3(-0.15, hauteur + 0.34, 0.3)
+	racine.add_child(chargeur)
+	return racine
+
+## Montrer ou cacher la mitrailleuse d'une carrosserie. Une seule fonction
+## partagée : le joueur qui l'achète à l'atelier, la voiture de gang qui la
+## porte d'origine et le joueur distant qu'on voit passer doivent montrer la
+## même chose — sinon on apprend à la reconnaître et elle ment une fois sur
+## trois.
+static func armer_la_voiture(carrosserie: Node3D, montee: bool) -> void:
+	if carrosserie == null:
+		return
+	var arme := carrosserie.get_node_or_null("Mitrailleuse") as Node3D
+	if arme != null:
+		arme.visible = montee
 
 ## Le tag d'un repaire : la couleur du gang peinte au sol, son initiale, et une
 ## couronne. C'est le repère qu'on voit de loin — et ce qu'on vise quand on
@@ -929,6 +983,29 @@ const ATELIER := [
 ## Un garage sur deux, tiré de son PÂTÉ : la carte est engendrée, la liste des
 ## ateliers ne peut donc pas être écrite à la main — et elle doit tomber pareil
 ## chez les quatre joueurs sans passer par le réseau.
+## L'ARMURERIE D'UN REPAIRE (§3) : ce que le gang vend à ceux qu'il couvre.
+##
+## Jusqu'ici le jeu n'avait AUCUN endroit où ACHETER une arme : elles ne
+## tombaient que des caisses et des corps, c'est-à-dire du hasard. C'est ce qui
+## rend le respect payant — à quatre-vingts, on ne se demande plus où trouver
+## des roquettes, on sait chez qui aller.
+##
+## Deux armes seulement, parce que le jeu n'en a que deux à vendre (le pistolet
+## ne s'épuise jamais, la mitrailleuse de bord se monte à l'atelier). Un gang
+## en tient une, et c'est ce qui donne une raison de choisir SON gang plutôt
+## qu'un autre.
+const ARMURERIE := [
+	{"arme": "mitraillette", "prix": 700, "mot": "chargeur plein"},
+	{"arme": "roquette", "prix": 1700, "mot": "six tubes"},
+]
+## Qui vend quoi. Le Consortium (6) vend des roquettes : c'est le gang commun
+## aux trois districts, celui qu'on peut fréquenter partout, et il vaut mieux
+## que la marchandise rare ne soit pas celle du gang qu'on croise le plus.
+const ARME_DU_GANG := [0, 1, 0, 1, 0, 1, 1]
+
+static func armurerie_du_gang(gang: int) -> Dictionary:
+	return ARMURERIE[int(ARME_DU_GANG[posmod(gang, ARME_DU_GANG.size())])]
+
 static func est_atelier(id: int) -> bool:
 	return posmod(hash(Vector2i(id, 7717)), 100) < 55
 
@@ -1009,6 +1086,153 @@ static func char_arme() -> Node3D:
 		var chenille := Decor.boite(Vector3(6.0, 0.7, 0.5), Color("#23231f"), false)
 		chenille.position = Vector3(0, 0.4, cote * 1.3)
 		racine.add_child(chenille)
+	return racine
+
+## UNE RAME DE TRAIN (§1.3) : une motrice et deux voitures, en boîtes. Pas de
+## modèle importé — le Car Kit n'a pas de train, et une rame est la seule chose
+## de la ville qu'on voit toujours de haut et jamais de près.
+##
+## ⚠ Les chiffres sont ceux de la VOIE. Le nuanceur du sol trace les deux rails
+## à ±0,75 unité de l'axe (`MatieresCarnage`) : une caisse plus large que ~2,6
+## flotte à côté de ses rails, et l'illusion tombe d'un coup vue de dessus.
+## La rame regarde +X, comme les carrosseries du kit — le jeu la tourne d'un
+## seul angle, celui de la voie.
+const LONG_WAGON_3D := 9.6        ## PlanVille.PAS en unités 3D : `VilleVivante.LONG_WAGON` / 10
+const ECART_WAGON_3D := 1.2
+const COULEUR_TRAIN := Color("#8f2f2a")
+const COULEUR_TOIT := Color("#2c2f36")
+## ⚠ Le quai doit connaître la longueur d'une rame, et `VilleVivante` connaît
+## déjà `WAGONS`. On ne le lui demande PAS : les formes sont chargées par des
+## bancs qui n'instancient pas la ville, et un `class_name` qui en appelle un
+## autre pour trois wagons crée un aller-retour qu'on paie à chaque relecture.
+const WAGONS_QUAI := 3
+
+static func rame_de_train(wagons: int) -> Node3D:
+	var racine := Node3D.new()
+	for k in wagons:
+		# La MOTRICE est en tête (k = 0) : c'est elle qui porte le phare et la
+		# calandre, et c'est à ça qu'on voit dans quel sens la rame arrive.
+		var motrice := k == 0
+		var x := -float(k) * (LONG_WAGON_3D + ECART_WAGON_3D)
+		var voiture := Node3D.new()
+		voiture.position = Vector3(x, 0, 0)
+		racine.add_child(voiture)
+		var caisse := Decor.boite(Vector3(LONG_WAGON_3D, 2.3, 2.6),
+			COULEUR_TRAIN if motrice else COULEUR_TRAIN.darkened(0.18))
+		caisse.position = Vector3(0, 1.5, 0)
+		voiture.add_child(caisse)
+		var toit := Decor.boite(Vector3(LONG_WAGON_3D * 0.94, 0.35, 2.75), COULEUR_TOIT)
+		toit.position = Vector3(0, 2.75, 0)
+		voiture.add_child(toit)
+		# Le bogie : une semelle sombre qui pose la caisse sur les rails. Sans
+		# elle la caisse flottait au-dessus du ballast, et de haut ça se voit —
+		# c'est l'ombre qui trahit, pas la caisse.
+		var bogie := Decor.boite(Vector3(LONG_WAGON_3D * 0.8, 0.5, 1.7), Color("#191a1d"))
+		bogie.position = Vector3(0, 0.3, 0)
+		voiture.add_child(bogie)
+		# Les FENÊTRES : deux bandes claires par flanc. C'est la seule chose qui
+		# distingue un wagon d'un conteneur, vu d'en haut à trois cents pixels.
+		for cote in [-1.0, 1.0]:
+			var bande := Decor.boite(Vector3(LONG_WAGON_3D * 0.72, 0.7, 0.1),
+				Palette.SERIE.lightened(0.25), false)
+			bande.material_override = Decor.matiere_lumineuse(Palette.SERIE.lightened(0.3), 0.5)
+			bande.position = Vector3(0, 1.95, cote * 1.32)
+			voiture.add_child(bande)
+		if motrice:
+			var phare := Decor.boite(Vector3(0.3, 0.5, 1.4), Color("#ffeaa0"), false)
+			phare.material_override = Decor.matiere_lumineuse(Color("#ffeaa0"), 2.2)
+			phare.position = Vector3(LONG_WAGON_3D * 0.5, 1.6, 0)
+			phare.name = "Phare"
+			voiture.add_child(phare)
+	return racine
+
+## LE QUAI : la dalle où le train marque l'arrêt. Elle est POSÉE PAR LE JEU à
+## l'abscisse que `VilleVivante.gares()` donne, pas dessinée dans la carte —
+## la voie change avec le code de la manche, un quai dessiné à la main
+## tomberait dans la rivière une manche sur deux.
+static func quai() -> Node3D:
+	var racine := Node3D.new()
+	# ⚠ Le quai s'est d'abord peint avec la palette de l'interface
+	# (`Palette.SURFACE`, `Palette.SERIE`) : une dalle NOIRE surmontée de deux
+	# auvents bleu vif. La palette sert à l'écran, pas au béton — le décor de
+	# la ville se peint avec les gris de la ville.
+	# ⚠ LE QUAI FAIT LA LONGUEUR D'UNE RAME, pas seize unités. Trop court, il
+	# ne passait que sous la motrice : le train s'arrêtait « à quai » avec ses
+	# deux voitures dans le vide, et l'on montait à côté d'un bout de béton de
+	# la taille d'un abribus. Une rame mesure trois wagons et deux écarts —
+	# le quai les couvre, plus une marge de chaque bout.
+	var long_quai: float = float(WAGONS_QUAI) * (LONG_WAGON_3D + ECART_WAGON_3D) + 6.0
+	var dalle := Decor.boite(Vector3(long_quai, 0.5, 3.0), Color("#9a9890"))
+	dalle.position = Vector3(0, 0.25, 3.4)
+	racine.add_child(dalle)
+	# La BANDE JAUNE au bord du quai : c'est le seul repère qui dise, de haut,
+	# de quel côté le train passe.
+	var bordure := Decor.boite(Vector3(long_quai, 0.16, 0.5), Palette.AVERTISSEMENT, false)
+	bordure.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 0.7)
+	bordure.position = Vector3(0, 0.55, 2.1)
+	racine.add_child(bordure)
+	for cote in [-1.0, 0.0, 1.0]:
+		var abri := Decor.boite(Vector3(3.6, 0.3, 2.6), Color("#3d4148"))
+		abri.position = Vector3(cote * long_quai * 0.33, 3.1, 4.0)
+		racine.add_child(abri)
+		for pied in [-1.5, 1.5]:
+			var poteau := Decor.boite(Vector3(0.26, 3.0, 0.26), Color("#5c5f66"))
+			poteau.position = Vector3(cote * long_quai * 0.33 + pied, 1.6, 4.9)
+			racine.add_child(poteau)
+	var mot := Decor.etiquette("GARE", Palette.AVERTISSEMENT, 34)
+	mot.position = Vector3(0, 5.0, 3.4)
+	racine.add_child(mot)
+	return racine
+
+## LE COMPACTEUR (§1.3) : une fosse de tôle entre deux mâchoires, au bord de la
+## voie ferrée. On y entre au volant, on en ressort à pied.
+##
+## Il se lit de haut à trois choses : la DALLE rouillée (on n'a ça nulle part
+## ailleurs en ville), les deux MÂCHOIRES qui l'encadrent, et le tapis jaune
+## rayé qui dit où se garer. Sans le tapis, on tourne autour en cherchant le
+## point exact — c'est la leçon des baies de l'atelier, qui ont mis trois
+## essais à devenir visibles.
+const COULEUR_CASSE := Color("#6b4a32")
+const COULEUR_MACHOIRE := Color("#3a3d42")
+
+static func compacteur() -> Node3D:
+	var racine := Node3D.new()
+	var rayon: float = VilleVivante.RAYON_CASSE * Decor.ECHELLE
+	var dalle := Decor.boite(Vector3(rayon * 2.0, 0.24, rayon * 2.0), COULEUR_CASSE)
+	dalle.position = Vector3(0, 0.12, 0)
+	racine.add_child(dalle)
+	# Le TAPIS : la place exacte, en jaune. Il est posé AU-DESSUS de la dalle
+	# (0,26 contre 0,24) — glissé dedans, il disparaissait sous elle, ce qui est
+	# arrivé aux pastilles de l'atelier avant qu'on ne les remonte.
+	var tapis := Decor.boite(Vector3(rayon * 1.15, 0.08, rayon * 0.9),
+		Palette.AVERTISSEMENT.darkened(0.15), false)
+	tapis.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 0.55)
+	tapis.position = Vector3(0, 0.28, 0)
+	tapis.name = "Tapis"
+	racine.add_child(tapis)
+	# Les deux MÂCHOIRES, de part et d'autre. Elles ne bougent pas : le jeu les
+	# abaisse au moment du broyage (`Machoire0` / `Machoire1`).
+	for k in 2:
+		var cote := -1.0 if k == 0 else 1.0
+		var machoire := Decor.boite(Vector3(0.9, 3.4, rayon * 1.9), COULEUR_MACHOIRE)
+		machoire.position = Vector3(cote * rayon * 0.72, 1.9, 0)
+		machoire.name = "Machoire%d" % k
+		racine.add_child(machoire)
+		var verin := Decor.boite(Vector3(0.4, 4.4, 0.4), Color("#8d9199"))
+		verin.position = Vector3(cote * rayon * 0.72, 2.4, rayon * 0.8)
+		racine.add_child(verin)
+	# Les carcasses déjà broyées, empilées au bord : c'est ce qui dit qu'on est
+	# à la casse et pas devant un portail d'usine.
+	for k in 4:
+		var galette := Decor.boite(Vector3(1.9, 0.5, 1.0),
+			Color("#7d6a55").darkened(0.08 * float(k)))
+		galette.position = Vector3(rayon * 1.25, 0.35 + float(k) * 0.5,
+			rayon * (-0.4 + 0.28 * float(k)))
+		galette.rotation.y = 0.2 * float(k)
+		racine.add_child(galette)
+	var mot := Decor.etiquette("CASSE", Palette.AVERTISSEMENT, 30)
+	mot.position = Vector3(0, 5.2, 0)
+	racine.add_child(mot)
 	return racine
 
 ## UNE MINE POSÉE : un palet sombre, un œil rouge qui clignote (c'est le jeu
@@ -1149,6 +1373,39 @@ static func cercle_arene(numero: int) -> Node3D:
 ## Une cabine : un caisson, une antenne, un halo. Elle sonne quand un contrat
 ## attend — c'est le halo qui clignote, pas la cabine qui bouge : un objet qui
 ## se déplace en ville se prend pour une cible.
+## LES TROIS TÉLÉPHONES (guide §4.1) : vert facile, jaune moyen, rouge
+## difficile. La couleur d'une cabine est FIXE — elle tient à la cabine, pas à
+## l'humeur du moment — et c'est ce qui en fait un repère : « le rouge des
+## docks paie gros, mais il faut que Les Braises me tiennent en haute estime ».
+##
+## ⚠ La couleur ne dit plus ce que le gang pense de vous (c'était le cas
+## depuis la phase 4). Ce qu'elle dit maintenant, c'est CE QU'ON Y TROUVE ; ce
+## que le gang pense, l'anneau sous ses hommes et la ligne du tableau de bord
+## le disent déjà, et deux choses à la même place n'en disent qu'une.
+##
+## Le niveau se tire du PÂTÉ, comme l'atelier : la carte est engendrée, la
+## liste des cabines ne peut pas être écrite à la main, et elle doit tomber
+## pareil chez les quatre joueurs sans passer par le réseau. Un téléphone sur
+## deux est vert : c'est le seul qu'on puisse décrocher en arrivant.
+const CABINES := [
+	{"nom": "facile", "couleur": Color("#4cc25a"), "respect": 40.0},
+	{"nom": "moyenne", "couleur": Color("#f2c53d"), "respect": 62.0},
+	{"nom": "difficile", "couleur": Color("#d0402c"), "respect": 82.0},
+]
+
+## L'éclat de l'enseigne. C'est la SEULE chose qui bouge sur une cabine :
+## allumée, on peut décrocher ; éteinte, il manque du respect (ou on a déjà un
+## contrat en cours). La couleur, elle, ne change jamais — sinon on ne pourrait
+## plus repérer un téléphone rouge de loin et revenir plus tard.
+const CABINE_ETEINTE := 0.30
+const CABINE_ALLUMEE := 1.4
+
+static func niveau_de_cabine(id: int) -> int:
+	var tirage := posmod(hash(Vector2i(id, 4231)), 100)
+	if tirage < 50:
+		return 0
+	return 1 if tirage < 80 else 2
+
 static func cabine(numero: int) -> Node3D:
 	var racine := Node3D.new()
 	var caisson := Decor.boite(Vector3(1.1, 2.4, 1.1), Palette.SURFACE.lightened(0.1))
@@ -1158,19 +1415,20 @@ static func cabine(numero: int) -> Node3D:
 	vitre.material_override = Decor.matiere_voile(Palette.SERIE, 0.4)
 	vitre.position = Vector3(0, 1.7, 0)
 	racine.add_child(vitre)
-	# L'ENSEIGNE dit d'un coup d'œil ce que le gang du quartier pense de vous :
-	# verte il vous embauche, jaune il tolère, rouge il vous tire dessus. C'est
-	# ce qui rend la jauge de respect lisible depuis la rue.
-	var enseigne := Decor.boite(Vector3(1.3, 0.34, 1.3), Palette.AVERTISSEMENT, false)
-	enseigne.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 1.4)
+	# L'ENSEIGNE porte la couleur du TÉLÉPHONE : verte, jaune ou rouge. Le jeu
+	# ne fait que l'allumer ou l'éteindre selon qu'on peut décrocher.
+	var teinte: Color = CABINES[niveau_de_cabine(numero)]["couleur"]
+	var enseigne := Decor.boite(Vector3(1.3, 0.34, 1.3), teinte, false)
+	enseigne.material_override = Decor.matiere_lumineuse(teinte, CABINE_ALLUMEE)
 	enseigne.position = Vector3(0, 2.6, 0)
 	enseigne.name = "Enseigne"
 	racine.add_child(enseigne)
-	var halo := racine_anneau(PlanVille.RAYON_CABINE * Decor.ECHELLE, Palette.AVERTISSEMENT, 0.14)
+	var halo := racine_anneau(PlanVille.RAYON_CABINE * Decor.ECHELLE, teinte, 0.14)
 	halo.position = Vector3(0, 0.06, 0)
 	halo.name = "Halo"
 	racine.add_child(halo)
-	var mot := Decor.etiquette("CONTRAT %d" % (numero + 1), Palette.AVERTISSEMENT, 26)
+	var mot := Decor.etiquette(String(CABINES[niveau_de_cabine(numero)]["nom"]).to_upper(),
+		teinte, 26)
 	mot.name = "Mot"
 	mot.position = Vector3(0, 3.4, 0)
 	racine.add_child(mot)

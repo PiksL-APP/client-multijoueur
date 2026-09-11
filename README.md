@@ -756,6 +756,14 @@ godot --headless --path . -s outils/respect.gd         # gangs, paliers, contrat
 godot --headless --path . -s outils/atelier.gd         # baies, mines, huile, bombe, plaques
 godot --headless --path . -s outils/recherche.gd       # les six crans, les quatre corps, le char
 godot --headless --path . -s outils/missions.gd        # colis, Kill Frenzy, taxi
+godot --headless --path . -s outils/train.gd           # la voie, les rames, les quais, le fauchage, la casse
+./outils/apercu.sh TRAIN /tmp/rail.png rail 95         # une rame à quai, dans la ville
+./outils/voir.sh "t:,t:quai,t:casse" 24                # la rame, le quai, le compacteur
+./outils/apercu.sh TRAIN /tmp/casse.png casse 70       # une casse au bord du ballast
+godot --headless --path . -s outils/marche.gd          # les 15 intérieurs sont-ils praticables ?
+./outils/vitrine.sh repaire2 "" "" "" pantin           # l'intérieur d'un repaire de gang
+./outils/voir.sh "v:0+,v:13+,v:16+,v:18+" 11           # la mitrailleuse de toit sur quatre gabarits
+./outils/voir.sh "c:0,c:1,c:2,c:2-" 7                  # les trois cabines, dont une éteinte
 godot --headless --path . res://outils/konami.tscn     # la suite ↑↑↓↓←→←→BA
 godot --headless --path . res://outils/radio.tscn      # les stations et leurs pistes
 ./outils/tableau.sh /tmp/triche.png oui                # le menu de triche en image

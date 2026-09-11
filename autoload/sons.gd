@@ -413,6 +413,13 @@ func _fabriquer_banque() -> void:
 	_banque["klaxon"] = _rendre(_accord([349.0, 440.0], 0.28, 0.42), 0.28)
 	_banque["cri"] = _rendre(_glissando(980.0, 420.0, 0.34, 0.30), 0.34)
 	_banque["battement"] = _rendre(_impact(62.0, 0.12, 0.75), 0.12)
+	# LE TRAIN (§1.3). Le « roulement » est le joint de rail sous un bogie :
+	# un coup sourd, plus grave et plus court que la pale d'hélicoptère, que le
+	# jeu répète tant qu'une rame passe à portée. La « corne » est le départ :
+	# deux notes basses tenues, une quinte — un klaxon de voiture transposé
+	# sonnait comme un camion en colère, pas comme un train qui s'annonce.
+	_banque["roulement"] = _rendre(_impact(44.0, 0.09, 0.62), 0.09)
+	_banque["corne"] = _rendre(_accord([98.0, 146.8], 1.1, 0.42), 1.1)
 	_banque["moteur"] = _rendre_boucle(_moteur_echantillon(), 0.5)
 	# Le pas : un coup sourd très court. Joué grave dehors, plus sec dedans.
 	_banque["pas"] = _rendre(_impact(210.0, 0.05, 0.35), 0.05)

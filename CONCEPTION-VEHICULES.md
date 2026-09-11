@@ -71,6 +71,43 @@ fait la taille d'une vedette. Les longueurs de la flotte sont donc celles qu'on
 veut dans le jeu, à une unité par mètre : chaloupe 5 m, vedette 7 m, barque 9 m,
 remorqueur 18 m.
 
+## Les voitures de gang sont armées (§1.3)
+
+Elles ne portaient que **la couleur du gang** : on les reconnaissait, elles ne
+valaient rien de plus qu'une berline. Elles viennent maintenant avec leur
+**mitrailleuse de toit** — neuf cent cinquante dollars d'atelier, gratuits.
+
+Le prix se paie en **respect** : voler la voiture d'un gang lui coûte
+`RESPECT_PERDU × 0,4`, et depuis cette tâche un rival du secteur y gagne un
+quart de `RESPECT_GAGNE`.
+
+⚠ Le gain au rival était à **zéro**. Tout le reste du jeu fait bouger DEUX
+jauges — un mort, une voiture brûlée, un contrat rendu — parce que c'est ce qui
+tient le triangle de rivalité (§3.1) : sans le second mouvement, on peut fâcher
+tout le monde sans jamais devenir l'ami de personne. Un quart de gain : partir
+au volant de leur voiture sous leurs fenêtres se remarque, mais ça ne remplace
+pas un contrat.
+
+### La mitrailleuse se VOIT
+
+Jusqu'ici elle n'existait que dans une puce du tableau de bord, et deux voitures
+identiques n'en étaient pas. `FormesCarnage._mitrailleuse()` pose un socle, un
+bloc, un tube et un chargeur en travers sur le toit — le chargeur est ce qui
+fait lire « mitrailleuse » plutôt que « antenne » sur une image de deux cents
+pixels. Elle est **cachée par défaut** et `armer_la_voiture()` la montre.
+
+⚠ **La hauteur est MESURÉE, pas devinée** (`coque.mesh.get_aabb()`). Vingt-huit
+carrosseries, d'un coupé à un camion de pompiers : un chiffre en dur plantait le
+canon dans le pare-brise de l'une et à un mètre au-dessus du toit de l'autre.
+C'est exactement la faute du char, sorti du banc en pick-up vert parce que sa
+tourelle était à l'intérieur de la caisse.
+
+Elle apparaît aux **trois** endroits, par la même fonction : la voiture de gang
+garée dans la rue, la voiture du joueur (à l'achat comme au vol), et celle d'un
+**autre joueur** — son drapeau voyage dans le paquet de position (`mg`). Sans
+ce dernier, on voyait une voiture de gang volée repasser désarmée, et l'on
+apprenait à se fier à une silhouette qui ment.
+
 ## Les bancs
 
 La ville et son parc n'avaient **aucun banc** : on ne les voyait qu'en jouant,
@@ -81,6 +118,8 @@ choqué personne.
 ```bash
 ./outils/voir.sh "etalon,v:*" 8 /tmp/parc.png     # tout le parc, sur une pelouse
 ./outils/voir.sh "v:19,v:20,v:21,v:22" 9          # quatre véhicules, lisibles
+./outils/voir.sh "v:0+,v:13+,v:16+,v:18+" 11     # la mitrailleuse sur quatre gabarits
+godot --headless -s outils/respect.gd            # chapitre 6 : voler une voiture de gang
 godot --headless -s outils/flotte.gd              # les mouillages et la navigation
 ./outils/apercu.sh FLOTTE /tmp/port.png port 120  # un morceau de ville, au port
 ```
@@ -102,8 +141,6 @@ godot --headless -s outils/flotte.gd              # les mouillages et la navigat
   (services publics), **tank et Pacifier** (militaires), **tow truck, hot dog
   van, ice-cream van** (utilitaires). Le bus et la limousine existent en voxels,
   pas dans le kit.
-- Les **véhicules de gang déjà armés** (§1.3) : nos voitures de gang portent la
-  couleur du gang, pas son armement.
 - Le **lance-flammes monté** et le **canon à eau orientable** du camion de
   pompiers (§6.2) : nos pompiers éteignent tout seuls, le joueur ne tient jamais
   la lance.

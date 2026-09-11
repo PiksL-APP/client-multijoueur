@@ -297,6 +297,10 @@ func demarrer() -> void:
 		_essai_geste()
 	if "--essai-reparer" in OS.get_cmdline_args():
 		_essai_reparer()
+	if "--essai-reseau" in OS.get_cmdline_args():
+		_essai_reseau()
+	if "--essai-semis" in OS.get_cmdline_args():
+		_essai_semis()
 	if "--essai-objets" in OS.get_cmdline_args():
 		_essai_objets()
 	if "--essai-editeur" in OS.get_cmdline_args():
@@ -321,6 +325,100 @@ func demarrer() -> void:
 			if a.begins_with("--modeles="):
 				_choisir_modele(a.trim_prefix("--modeles="))
 				_remplir_liste()
+		# Le banc doit pouvoir photographier l'INVENTAIRE, c'est-à-dire l'état
+		# où il y a des objets posés ET un objet choisi : la colonne vide ne dit
+		# rien de ce qu'on vient d'ajouter.
+		if a == "--inventaire":
+			_choisir_outil(OUTIL_OBJET)
+			_ouvrir_bloc("MODÈLES", false)
+			_ouvrir_bloc("OBJETS POSÉS", true)
+			var c0 := Vector2i(_large() / 2, _haut() / 2)
+			for k in 6:
+				_modele = ModelesDuKit.TOUS[(k * 97) % ModelesDuKit.TOUS.size()]
+				_hauteur_objet = 8.0 + float(k) * 3.0
+				_case = c0 + Vector2i(k % 3, k / 3)
+				_impact = Vector3((float(_case.x) + 0.4) * CASE, 0.0,
+					(float(_case.y) + 0.6) * CASE)
+				_poser_objet(_case)
+			_choisir_objet(2)
+			_viser_objet()
+			_remplir_objets()
+		# Le banc doit pouvoir photographier le RECENSEMENT — et le vérifier :
+		# un tableau de chiffres se relit, mais seul un banc dit s'ils sont
+		# justes.
+		# Le banc doit pouvoir PHOTOGRAPHIER un semis : « vingt et un objets »
+		# ne dit pas si la haie a l'air d'une haie ou d'un rang d'oignons.
+		if a == "--semis":
+			_choisir_outil(OUTIL_OBJET)
+			_semer = true
+			_pas_semis = 0.8
+			_dispersion = 0.5
+			_variation = 0.3
+			_angle_libre = true
+			# ⚠ UN MODÈLE QUI SE DISTINGUE DU DÉCOR. Semé en chênes, le banc
+			# sortait une photo où l'on ne savait pas dire ce qui venait du
+			# semis et ce que la ville avait déjà planté.
+			_choisir_modele("kenney/nature/tree_palm")
+			_hauteur_objet = 16.0
+			var j0 := _haut() / 2
+			var i1 := _large() / 2
+			_case = Vector2i(i1, j0)
+			_empiler()
+			_peint = true
+			_semes = 0
+			_vise = true
+			_gauche = true
+			# Une courbe, pas une droite : c'est là qu'on voit si le pas suit le
+			# trait ou seulement l'axe des X.
+			_impact = Vector3((float(i1) + 0.5) * CASE, 0.0, (float(j0) + 0.5) * CASE)
+			_dernier_semis = _impact
+			_semer_un(_impact)
+			for k in range(1, 120):
+				var t := float(k) * 0.14
+				_impact = Vector3((float(i1) + 0.5 + t) * CASE, 0.0,
+					(float(j0) + 0.5 + sin(t * 0.55) * 1.6) * CASE)
+				_case = Vector2i(floori(_impact.x / CASE), floori(_impact.z / CASE))
+				_semer_le_long()
+			_relacher()
+			# On cadre APRÈS avoir semé : le milieu de la courbe, de près.
+			_pivot = Vector3((float(i1) + 8.0) * CASE, 0.0, (float(j0) + 1.0) * CASE)
+			_distance = CASE * 11.0
+			_inclinaison = 0.72
+			_azimut = 0.9
+			_poser_camera()
+			if _ville != null: _ville.suivre(_pivot)
+		if a == "--recensement":
+			for titre in ["PINCEAU", "MODÈLES", "OBJETS POSÉS", "PLAN",
+					"FORME DU GESTE", "GESTE", "ATELIER"]:
+				_ouvrir_bloc(titre, false)
+			_ouvrir_bloc("RECENSEMENT", true)
+			_recenser()
+			var attendus := {"+": 0, "(": 0, "/": 0}
+			for l in _lignes("plan"):
+				for c in attendus.keys():
+					attendus[c] = int(attendus[c]) + String(l).count(String(c))
+			var bon := true
+			for c in attendus.keys():
+				var vu := int(_compte_reperes.get(c, 0))
+				if vu != int(attendus[c]): bon = false
+				print("--- « %s » : recensé %d, compté à part %d" % [c, vu, attendus[c]])
+			print("--- %s" % _resume_reperes.text)
+			var lignes_liste := _liste_reperes.item_count
+			print("--- la liste montre %d caractère(s) présent(s)" % lignes_liste)
+			# Sauter d'une occurrence à l'autre doit BOUGER la vue.
+			var rang := _chars_recenses.find("+")
+			if rang >= 0:
+				_liste_reperes.select(rang)
+				_rang_repere = -1
+				var ou := _pivot
+				_sauter_repere(1)
+				var un := _pivot
+				_sauter_repere(1)
+				var deux := _pivot
+				var bouge := un != ou and deux != un
+				print("--- saut d'un hôpital à l'autre : %s" % ("oui" if bouge else "NON"))
+				bon = bon and bouge
+			print("--- BANC DU RECENSEMENT : %s" % ("RÉUSSI" if bon and lignes_liste > 10 else "ÉCHOUÉ"))
 		if a == "--gacher":
 			for j in range(78, 92):
 				for i in range(96, 112):
@@ -405,13 +503,168 @@ func _essai_objets() -> void:
 	for l in t.split("\n"):
 		if l.begins_with("\t{\"m\":"): lignes += 1
 	print("--- l'export écrit %d ligne(s) d'objet" % lignes)
-	_empiler()
-	_oter_objet(c)
-	print("--- après un retrait : %d objet(s)" % _objets().size())
+	# ─── L'INVENTAIRE : choisir, régler, supprimer ───
+	# ⚠ ON VISE LE PREMIER DES TROIS, PAS LE DERNIER. Les trois sont sur la même
+	# case ; si `_objet_ici` rendait simplement le dernier posé, le banc
+	# passerait sans rien prouver. On remet donc le point d'impact là où on a
+	# posé le PREMIER, et on exige que ce soit lui qui sorte.
+	_impact.x -= CASE * 0.6
+	var vise := _objet_ici(c)
+	_choisir_objet(vise)
+	var bon_choix := vise == 0 and _objet_choisi == 0 and _halo != null and _halo.visible
+	print("--- choix au curseur : indice %d (attendu 0), mire allumée : %s" % [
+		vise, "oui" if (_halo != null and _halo.visible) else "non"])
+	_remplir_objets()
+	print("--- l'inventaire montre %d ligne(s)" % _liste_objets.item_count)
+	_regler_objet("h", 41.0)
+	_regler_objet("r", 90.0)
+	var o0: Dictionary = _objets()[0]
+	var bon_reglage := is_equal_approx(float(o0["h"]), 41.0) \
+		and is_equal_approx(float(o0["r"]), 90.0)
+	print("--- après réglage : hauteur %s, angle %s" % [o0["h"], o0["r"]])
+	_regler_objet("m", "kenney/nature/tree_palm")
+	var bon_modele := String(_objets()[0]["m"]).ends_with("tree_palm")
+	print("--- après remplacement du modèle : %s" % _objets()[0]["m"])
+	_supprimer_objet()
+	var apres_suppr := _objets().size()
+	print("--- après Suppr : %d objet(s), rien de choisi : %s" % [
+		apres_suppr, "oui" if _objet_choisi < 0 else "non"])
 	_annuler()
 	print("--- après Ctrl+Z : %d objet(s)" % _objets().size())
-	var bon := _objets().size() == 3 and lignes == 3 and apres > avant
+	var bon := _objets().size() == 3 and lignes == 3 and apres > avant \
+		and bon_choix and bon_reglage and bon_modele and apres_suppr == 2 \
+		and _objet_choisi < 0 and _liste_objets.item_count == 3
 	print("--- BANC DU MOBILIER : %s" % ("RÉUSSI" if bon else "ÉCHOUÉ"))
+	get_tree().quit()
+
+## LE BANC DU SEMIS. Il traîne une ligne droite de vingt cases et vérifie les
+## trois choses qui font qu'un semis est utile plutôt qu'agaçant : le NOMBRE
+## (le pas est-il respecté ?), la DISPERSION (une haie parfaitement alignée est
+## une haie de cimetière) et l'ANNULATION (un glissé = UN Ctrl+Z, pas quarante).
+func _essai_semis() -> void:
+	_choisir_modele("kenney/nature/tree_oak")
+	_hauteur_objet = 12.0
+	_semer = true
+	_pas_semis = 1.0
+	_dispersion = 0.6
+	_variation = 0.25
+	_angle_libre = true
+	# ⚠ LA MESURE DU PAS SE FAIT SANS LE FILTRE DE VOIRIE. Un trait de vingt
+	# cases en pleine ville en traverse trois ou quatre : compter les grains
+	# avec le filtre allumé, c'est mesurer le tracé du banc, pas le pas.
+	_semis_hors_voirie = false
+	var j := 150
+	var i0 := 150
+	var longueur := 20
+	var m := Vector2i(i0 / VilleMorcelee.COTE, j / VilleMorcelee.COTE)
+	for dy in [-1, 0, 1]:
+		for dx in [-1, 0, 1]:
+			_ville._batir(m + Vector2i(dx, dy))
+	var avant_pile := _pile.size()
+	var avant := _objets().size()
+	# Le geste : on clique au début, on traîne case par demi-case, on relâche.
+	# ⚠ ON N'APPELLE PAS `_commencer` : sa première ligne est `_viser()`, qui
+	# relit la VRAIE souris — à (0,0) dans un banc sans écran — et écrase le
+	# point d'impact qu'on vient de poser. On refait donc ce que fait
+	# `_commencer` pour un semis, moins la visée.
+	_case = Vector2i(i0, j)
+	_impact = Vector3((float(i0) + 0.5) * CASE, 0.0, (float(j) + 0.5) * CASE)
+	_vise = true
+	_gauche = true
+	_empiler()
+	_peint = true
+	_semes = 0
+	_dernier_semis = _impact
+	_semer_un(_impact)
+	for k in range(1, longueur * 2 + 1):
+		_impact = Vector3((float(i0) + 0.5 + float(k) * 0.5) * CASE, 0.0,
+			(float(j) + 0.5) * CASE)
+		_case = Vector2i(floori(_impact.x / CASE), j)
+		_semer_le_long()
+	_relacher()
+	var poses := _objets().size() - avant
+	print("\n--- SEMIS : %d objet(s) sur %d cases, pas demandé %s" % [
+		poses, longueur, _nombre(_pas_semis)])
+	# ⚠ ON RETIENT LE COMPTE AVANT D'ANNULER : `_annuler()` DÉPILE, et le
+	# vérifier après l'annulation faisait échouer un banc qui passait.
+	var empiles := _pile.size() - avant_pile
+	print("--- états d'annulation ajoutés : %d (attendu 1)" % empiles)
+	# Dispersion et variété : les grains ne doivent pas être tous identiques.
+	var zs: Array[float] = []
+	var hs: Array[float] = []
+	var rs: Array[float] = []
+	for k in range(avant, _objets().size()):
+		var o: Dictionary = _objets()[k]
+		zs.append(float(o.get("z", 0.5)))
+		hs.append(float(o.get("h", 0.0)))
+		rs.append(float(o.get("r", 0.0)))
+	var z_min: float = zs.min() if not zs.is_empty() else 0.0
+	var z_max: float = zs.max() if not zs.is_empty() else 0.0
+	var h_min: float = hs.min() if not hs.is_empty() else 0.0
+	var h_max: float = hs.max() if not hs.is_empty() else 0.0
+	var angles := {}
+	for r in rs: angles[r] = true
+	print("--- écart de côté : z de %.2f à %.2f — hauteurs de %s à %s — %d angle(s) distinct(s)" % [
+		z_min, z_max, _nombre(h_min), _nombre(h_max), angles.size()])
+	_annuler()
+	print("--- après UN Ctrl+Z : %d objet(s) (attendu %d)" % [_objets().size(), avant])
+	# ─── LE FILTRE DE VOIRIE, sur le MÊME trait ───
+	_semis_hors_voirie = true
+	var rues := 0
+	for k in range(0, longueur):
+		if CHAUSSEE.contains(_lire("plan", i0 + k, j)): rues += 1
+	_empiler()
+	_peint = true
+	_semes = 0
+	_impact = Vector3((float(i0) + 0.5) * CASE, 0.0, (float(j) + 0.5) * CASE)
+	_dernier_semis = _impact
+	_semer_un(_impact)
+	for k in range(1, longueur * 2 + 1):
+		_impact = Vector3((float(i0) + 0.5 + float(k) * 0.5) * CASE, 0.0,
+			(float(j) + 0.5) * CASE)
+		_case = Vector2i(floori(_impact.x / CASE), j)
+		_semer_le_long()
+	_relacher()
+	var filtres := _objets().size() - avant
+	print("--- même trait, voirie évitée : %d objet(s) — %d case(s) de rue sur le trajet" % [
+		filtres, rues])
+	var bon_filtre: bool = rues == 0 or filtres < poses
+	_annuler()
+	var bon: bool = poses >= longueur - 2 and poses <= longueur + 2 \
+		and empiles == 1 \
+		and z_max - z_min > 0.1 and h_max - h_min > 1.0 and angles.size() > longueur / 2 \
+		and _objets().size() == avant and bon_filtre
+	print("--- BANC DU SEMIS : %s" % ("RÉUSSI" if bon else "ÉCHOUÉ"))
+	get_tree().quit()
+
+## LE BANC DU RÉSEAU. Un contrôle qui ne dit jamais « c'est cassé » n'est pas un
+## contrôle : le banc COUPE un pont exprès, vérifie qu'on le voit, recolle, et
+## vérifie qu'on ne le voit plus.
+func _essai_reseau() -> void:
+	_ouvrir_bloc("RECENSEMENT", true)
+	_verifier_reseau()
+	var propre := _orphelins.is_empty()
+	print("\n--- réseau tel quel : %d morceau(x) coupé(s)" % _orphelins.size())
+	# ⚠ ON COUPE LE PONT D'UNE ÎLE, pas n'importe lequel. Les grands bras de
+	# mer ont plusieurs traversées : en effacer une ne coupe rien, et le banc
+	# passait au vert sur un contrôle qui n'avait rien vu. Le pont de la
+	# colonne 284 est le SEUL accès à son île — deux cases de tablier.
+	_empiler()
+	var coupees := 0
+	for j in range(126, 128):
+		if _lire("plan", 284, j) == "=":
+			_ecrire("plan", 284, j, ".")
+			coupees += 1
+	_verifier_reseau()
+	var casse := _orphelins.size()
+	print("--- %d case(s) de tablier effacée(s) → %d morceau(x) coupé(s) vus" % [
+		coupees, casse])
+	_annuler()
+	_verifier_reseau()
+	var recolle := _orphelins.is_empty()
+	print("--- après Ctrl+Z : %s" % ("d'un seul tenant" if recolle else "TOUJOURS COUPÉ"))
+	var bon := propre and coupees == 2 and casse == 1 and recolle
+	print("--- BANC DU RÉSEAU : %s" % ("RÉUSSI" if bon else "ÉCHOUÉ"))
 	get_tree().quit()
 
 func _compter_noeuds(n: Node) -> int:
@@ -539,6 +792,7 @@ func _charger(id: String) -> void:
 	# jusqu'au premier coup de pinceau — c'est-à-dire jusqu'à ce qu'on ait
 	# renoncé à s'en servir pour se repérer.
 	_redessiner_carte()
+	_remplir_objets()
 	if repris:
 		_dire("Brouillon repris — il était gardé dans ce navigateur. « Recharger » revient au catalogue.")
 	else:
@@ -577,6 +831,23 @@ func _rebatir() -> void:
 	mc.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_curseur.material_override = mc
 	_quartier.add_child(_curseur)
+	# ⚠ LE HALO VIT DANS `_quartier`, PAS DANS LA VILLE. Reconstruire un morceau
+	# efface tout ce qu'il contient : accroché à la ville, le repère de l'objet
+	# choisi disparaissait au premier réglage — c'est-à-dire exactement quand on
+	# le regarde.
+	_halo = MeshInstance3D.new()
+	_halo.mesh = _mire()
+	var mh := StandardMaterial3D.new()
+	# ⚠ ORANGE VIF, PAS LE BLEU DU PANNEAU. La mire se lit PAR-DESSUS la ville :
+	# sur des toits bleus et gris, le bleu d'accent de l'atelier disparaissait.
+	# L'orange ne se confond avec rien dans cette ville — et le curseur de case,
+	# lui, reste jaune : deux repères, deux couleurs.
+	mh.albedo_color = Color("#ff7a1a")
+	mh.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mh.no_depth_test = true
+	_halo.material_override = mh
+	_halo.visible = false
+	_quartier.add_child(_halo)
 	_apercu = Node3D.new()
 	_quartier.add_child(_apercu)
 	_marques = Node3D.new()
@@ -595,6 +866,27 @@ func _rebatir() -> void:
 func _rayon_utile() -> int:
 	var cases := _distance / CASE
 	return clampi(int(cases / float(VilleMorcelee.COTE)) + 1, 2, 6)
+
+## LA MIRE DE L'OBJET CHOISI : un carré au sol, un mât, un carré en haut. Une
+## boîte pleine cacherait le modèle qu'on est en train de régler ; trois traits
+## disent où il est et jusqu'où il monte sans rien masquer. Le maillage est en
+## unités : le nœud l'étire à la hauteur de l'objet.
+func _mire() -> ArrayMesh:
+	var im := ImmediateMesh.new()
+	im.surface_begin(Mesh.PRIMITIVE_LINES)
+	for y in [0.0, 1.0]:
+		var coins := [Vector3(-0.5, y, -0.5), Vector3(0.5, y, -0.5),
+			Vector3(0.5, y, 0.5), Vector3(-0.5, y, 0.5)]
+		for k in 4:
+			im.surface_add_vertex(coins[k])
+			im.surface_add_vertex(coins[(k + 1) % 4])
+	im.surface_add_vertex(Vector3(0, 0, 0))
+	im.surface_add_vertex(Vector3(0, 1.15, 0))
+	im.surface_end()
+	var m := ArrayMesh.new()
+	for si in im.get_surface_count():
+		m.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, im.surface_get_arrays(si))
+	return m
 
 func _cadre() -> ArrayMesh:
 	var im := ImmediateMesh.new()
@@ -702,6 +994,7 @@ func _haut() -> int:
 ## valeur qui ne peut que MONTER quand on peint. `_poser` la tient donc à jour
 ## case par case, et cette fonction-ci ne sert plus qu'aux changements de forme.
 func _remesurer() -> void:
+	_recense_a_jour = false
 	_large_cache = 0
 	for ligne in _lignes("plan"):
 		_large_cache = maxi(_large_cache, String(ligne).length())
@@ -732,6 +1025,9 @@ func _ecrire(cle: String, i: int, j: int, c: String) -> void:
 	while ligne.length() <= i:
 		ligne += bouche
 	lignes[j] = ligne.substr(0, i) + c + ligne.substr(i + 1)
+	# Un caractère écrit, et le recensement ne vaut plus. Un booléen par case
+	# peinte, c'est le prix qu'on accepte ; recompter, non (voir `_recenser`).
+	_recense_a_jour = false
 
 func _palier_de(i: int, j: int) -> int:
 	var c := _lire("relief", i, j)
@@ -790,7 +1086,9 @@ func _input(evenement: InputEvent) -> void:
 			_apercu_collage()
 			return
 		if _peint:
-			if _forme == FORME_LIBRE:
+			if _outil == OUTIL_OBJET:
+				_semer_le_long()
+			elif _forme == FORME_LIBRE:
 				_appliquer(_gauche)
 			else:
 				_apercu_forme()
@@ -840,6 +1138,15 @@ func _commencer(gauche: bool, alt: bool) -> void:
 	# retirer un par un coûterait plus cher que de les avoir posés.
 	if _outil == OUTIL_OBJET:
 		_empiler()
+		if gauche and _semer:
+			_peint = true
+			_semes = 0
+			# ⚠ LE PREMIER GRAIN TOMBE AU CLIC, pas au premier pas. Sans lui,
+			# un clic sans traîner ne posait RIEN et le mode semis avait l'air
+			# cassé pour qui l'essaie d'abord d'un clic.
+			_dernier_semis = _impact
+			_semer_un(_impact)
+			return
 		if gauche:
 			_poser_objet(_case)
 		else:
@@ -867,6 +1174,15 @@ func _relacher() -> void:
 	if not _peint:
 		return
 	_peint = false
+	# ⚠ LE SEMIS N'EST PAS UNE FORME. Sans cette sortie, relâcher après avoir
+	# semé appliquait EN PLUS la forme du geste avec le pinceau courant : on
+	# semait des arbres et l'on repeignait une bande de rue par-dessus.
+	if _outil == OUTIL_OBJET:
+		_finir_geste()
+		if _semes > 0:
+			_dire("%d objet(s) semé(s) — %s, pas %s case(s)." % [
+				_semes, _modele.get_file(), _nombre(_pas_semis)])
+		return
 	if _forme == FORME_SELECTION:
 		_selection = _rectangle(_depart, _case)
 		_dire("Sélection %d × %d — Ctrl+C pour copier." % [_selection.size.x, _selection.size.y])
@@ -916,6 +1232,7 @@ func _touche(k: InputEventKey) -> void:
 		KEY_J: _choisir_forme(FORME_PLEIN)
 		KEY_G: _choisir_forme(FORME_GODET)
 		KEY_I: _choisir_forme(FORME_PIPETTE)
+		KEY_DELETE: _supprimer_objet()
 		KEY_X: _basculer_grille()
 		KEY_V: _vue_dessus()
 		KEY_R:
@@ -1189,21 +1506,117 @@ func _poser_objet(c: Vector2i) -> void:
 		"x": snappedf(p.x, 0.01), "z": snappedf(p.y, 0.01),
 		"r": snappedf(_angle_objet, 1.0), "h": snappedf(_hauteur_objet, 0.5)})
 	_fiche["objets"] = objets
+	# Le dernier posé devient le CHOISI : neuf fois sur dix, le réglage qu'on
+	# veut faire ensuite porte sur celui qu'on vient de poser.
+	_objet_choisi = objets.size() - 1
 	_apres_objets(c, "%s posé (%d en tout)" % [_modele.get_file(), objets.size()])
+	_choisir_objet(_objet_choisi)
 
-## Ôte le DERNIER objet posé sur cette case : le dernier posé est celui qu'on
-## vient de rater, et c'est celui qu'on veut reprendre.
+## ⚠ LE CLIC DROIT CHOISIT AVANT DE SUPPRIMER. La première version ôtait le
+## DERNIER objet posé sur la case : sur une case qui en porte cinq, on ne
+## savait pas lequel partait avant qu'il soit parti, et Ctrl+Z était la seule
+## façon de voir ce qu'on avait fait. Maintenant le premier clic droit CHOISIT
+## le plus proche du curseur — il s'allume, et le panneau montre son modèle,
+## sa hauteur, son angle — et le clic droit suivant, sur le même, le supprime.
+## Deux clics au lieu d'un, mais on sait ce qu'on supprime.
 func _oter_objet(c: Vector2i) -> void:
+	var k := _objet_ici(c)
+	if k < 0:
+		_choisir_objet(-1)
+		_dire("Aucun objet sur cette case.")
+		return
+	if k != _objet_choisi:
+		_choisir_objet(k)
+		_dire("%s choisi — clic droit à nouveau pour le supprimer." % _nom_objet(k))
+		return
+	_supprimer_objet()
+
+## L'objet de cette case le plus proche du point visé, ou -1. Le plus proche et
+## non le dernier : sur une pelouse à dix arbres, c'est celui qu'on montre du
+## doigt qu'on veut.
+func _objet_ici(c: Vector2i) -> int:
 	var objets: Array = _objets()
-	for k in range(objets.size() - 1, -1, -1):
+	var p := _point_dans_case()
+	var mieux := -1
+	var court := INF
+	for k in objets.size():
 		var o: Dictionary = objets[k]
-		if int(o["i"]) == c.x and int(o["j"]) == c.y:
-			var nom := String(o["m"]).get_file()
-			objets.remove_at(k)
-			_fiche["objets"] = objets
-			_apres_objets(c, "%s ôté (%d restants)" % [nom, objets.size()])
-			return
-	_dire("Aucun objet sur cette case.")
+		if int(o["i"]) != c.x or int(o["j"]) != c.y: continue
+		var d := Vector2(float(o.get("x", 0.5)), float(o.get("z", 0.5))).distance_to(p)
+		if d < court:
+			court = d
+			mieux = k
+	return mieux
+
+func _nom_objet(k: int) -> String:
+	var objets: Array = _objets()
+	if k < 0 or k >= objets.size(): return "?"
+	return String(objets[k]["m"]).get_file()
+
+## Choisit un objet posé : la mire va dessus, la liste s'aligne, les deux
+## glissières prennent SES valeurs — sans quoi bouger la hauteur écrirait la
+## valeur du pinceau sur l'objet qu'on vient de choisir.
+func _choisir_objet(k: int) -> void:
+	var objets: Array = _objets()
+	_objet_choisi = k if (k >= 0 and k < objets.size()) else -1
+	_montrer_halo()
+	if _objet_choisi >= 0:
+		var o: Dictionary = objets[_objet_choisi]
+		if _gliss_h_objet != null:
+			Atelier.poser_regle(_gliss_h_objet, float(o.get("h", 10.0)))
+		if _gliss_r_objet != null:
+			Atelier.poser_regle(_gliss_r_objet, float(o.get("r", 0.0)))
+	if _liste_objets != null:
+		var rang := _rangs_objets.find(_objet_choisi)
+		if rang >= 0:
+			_liste_objets.select(rang)
+			_liste_objets.ensure_current_is_visible()
+		else:
+			_liste_objets.deselect_all()
+	_etat()
+
+func _montrer_halo() -> void:
+	if _halo == null: return
+	var objets: Array = _objets()
+	_halo.visible = _objet_choisi >= 0 and _objet_choisi < objets.size()
+	if not _halo.visible: return
+	var o: Dictionary = objets[_objet_choisi]
+	var c := Vector2i(int(o["i"]), int(o["j"]))
+	var h := maxf(float(o.get("h", 10.0)), 2.0)
+	var large := maxf(h * 0.55, 4.0)
+	_halo.transform = Transform3D(
+		Basis().scaled(Vector3(large, h, large)),
+		Vector3((float(c.x) + float(o.get("x", 0.5))) * CASE,
+			float(_palier_de(c.x, c.y)) * PALIER + 0.3,
+			(float(c.y) + float(o.get("z", 0.5))) * CASE))
+
+func _supprimer_objet() -> void:
+	var objets: Array = _objets()
+	if _objet_choisi < 0 or _objet_choisi >= objets.size():
+		_dire("Aucun objet choisi.")
+		return
+	_empiler()
+	var o: Dictionary = objets[_objet_choisi]
+	var c := Vector2i(int(o["i"]), int(o["j"]))
+	var nom := _nom_objet(_objet_choisi)
+	objets.remove_at(_objet_choisi)
+	_fiche["objets"] = objets
+	_choisir_objet(-1)
+	_apres_objets(c, "%s ôté (%d restants)" % [nom, objets.size()])
+
+## Change une valeur de l'objet choisi et rebâtit sa case. `empiler` est faux
+## pendant qu'on TIRE une glissière : empiler à chaque cran donnerait cinquante
+## états d'annulation pour un seul réglage.
+func _regler_objet(cle: String, valeur, empiler := true) -> void:
+	var objets: Array = _objets()
+	if _objet_choisi < 0 or _objet_choisi >= objets.size(): return
+	if empiler: _empiler()
+	var o: Dictionary = objets[_objet_choisi]
+	o[cle] = valeur
+	_fiche["objets"] = objets
+	_montrer_halo()
+	_remplir_objets()
+	_apres_objets(Vector2i(int(o["i"]), int(o["j"])), "")
 
 func _objets() -> Array:
 	if not _fiche.has("objets"): _fiche["objets"] = []
@@ -1212,7 +1625,8 @@ func _objets() -> Array:
 func _apres_objets(c: Vector2i, message: String) -> void:
 	if _ville != null: _ville.refaire([c])
 	else: _rebatir()
-	_dire(message)
+	_remplir_objets()
+	if message != "": _dire(message)
 	_sauver_brouillon()
 	_etat()
 
@@ -1360,7 +1774,13 @@ func _restaurer(etat: Dictionary) -> void:
 	_fiche["plan"] = etat["plan"]
 	_fiche["relief"] = etat["relief"]
 	_fiche["objets"] = etat.get("objets", [])
+	# ⚠ L'OBJET CHOISI EST UN INDICE : après une annulation, le tableau n'est
+	# plus le même et l'indice ne désigne plus rien. On le lâche plutôt que de
+	# laisser la mire allumée sur un objet qui n'existe plus.
+	if _objet_choisi >= _objets().size(): _objet_choisi = -1
 	_rebatir()
+	_choisir_objet(_objet_choisi)
+	_remplir_objets()
 	_sauver_brouillon()
 
 # ---------------------------------------------------------------- caméra
@@ -1869,7 +2289,20 @@ func _sauver_brouillon() -> void:
 	f.store_string(JSON.stringify(d))
 	f.close()
 
+## ⚠ UN BANC NE REPREND JAMAIS UN BROUILLON. L'éditeur garde le travail en
+## cours dans `user://` — ce qu'on veut en séance, et ce qu'on ne veut SURTOUT
+## pas dans un banc : le banc du réseau tournait sur le dessin gribouillé par
+## le banc du rabot de la veille, trouvait onze morceaux coupés dans une ville
+## qui n'en a qu'un, et accusait le code. Un banc part du CATALOGUE.
+static func _sous_banc() -> bool:
+	for a in OS.get_cmdline_args():
+		if a.begins_with("--essai") or a == "--gacher" or a == "--recensement" \
+				or a == "--inventaire" or a == "--semis":
+			return true
+	return false
+
 func _reprendre_brouillon() -> bool:
+	if _sous_banc(): return false
 	var chemin := _chemin_brouillon(_id)
 	if not FileAccess.file_exists(chemin): return false
 	var f := FileAccess.open(chemin, FileAccess.READ)
@@ -2022,6 +2455,38 @@ var _reglette: Control
 var _modele := "kenney/nature/tree_oak"
 var _hauteur_objet := 12.0
 var _angle_objet := 0.0
+## ⚠ L'OBJET CHOISI EST UN INDICE DANS `_objets()`, pas une copie. Une copie
+## aurait été plus commode à lire et se serait désynchronisée au premier
+## Ctrl+Z : l'annulation remplace le tableau entier.
+## ─────────────────────────────── LE SEMIS ───────────────────────────────
+## ⚠ « L'objet se pose au clic » RESTE VRAI — pour un objet. Mais une allée de
+## quarante platanes ou une rangée de lampadaires posée un clic à la fois, ce
+## n'est pas du placement à la main, c'est de la saisie. Le semis est donc un
+## MODE EXPLICITE, avec son pas et sa dispersion : on ne l'attrape pas par
+## accident en traînant la souris, on l'allume quand on veut une haie.
+var _semer := false
+var _pas_semis := 1.0                    ## en cases, d'un objet au suivant
+var _dispersion := 0.6                   ## écart au trait, en cases
+var _variation := 0.25                   ## variation de taille, en part de 1
+var _angle_libre := true                 ## chaque objet tourné au hasard
+## ⚠ ET ON NE SÈME PAS SUR LA CHAUSSÉE. Le trait qu'on tire longe presque
+## toujours une rue ; un pas sur trois tombait dessus, et l'on passait ensuite
+## plus de temps à ôter les arbres du milieu du boulevard qu'on n'en avait
+## gagné à les semer. Le semis saute donc les cases de voirie — sauf si on le
+## veut vraiment, pour une rangée de plots ou de cônes de chantier.
+var _semis_hors_voirie := true
+var _dernier_semis := Vector3.ZERO
+var _semes := 0
+var _alea_semis := RandomNumberGenerator.new()
+
+var _objet_choisi := -1
+var _halo: MeshInstance3D
+var _liste_objets: ItemList
+var _filtre_objets: LineEdit
+var _compte_objets: Label
+var _rangs_objets: Array[int] = []       ## ligne de la liste -> indice réel
+var _gliss_h_objet: HSlider
+var _gliss_r_objet: HSlider
 var _liste_modeles: ItemList
 var _filtre_modeles: LineEdit
 var _choix_dossier: OptionButton
@@ -2395,6 +2860,8 @@ func _interface() -> void:
 
 	# ── MODÈLES ──────────────────────────────────────────────────────────────
 	_bloc_modeles(_bloc(boite, "MODÈLES", false))
+	_bloc_objets(_bloc(boite, "OBJETS POSÉS", false))
+	_bloc_reperes(_bloc(boite, "RECENSEMENT", false))
 
 	# ── FORME ────────────────────────────────────────────────────────────────
 	var cF := _bloc(boite, "FORME DU GESTE")
@@ -2570,22 +3037,55 @@ func _bloc_modeles(corps: VBoxContainer) -> void:
 
 	# LES DEUX RÉGLAGES QUI COMPTENT : la taille et l'angle. Le reste — le point
 	# dans la case — vient du curseur, et c'est mieux ainsi.
-	var rH := _rang(corps)
-	rH.add_child(Atelier.texte("Hauteur", Atelier.CORPS_PETIT, Atelier.ENCRE_FAIBLE))
-	var gH := Atelier.glissiere(1.0, 60.0, 0.5, _hauteur_objet)
-	gH.value_changed.connect(func(v):
+	var pH: Array = Atelier.regle("Hauteur", 1.0, 60.0, 0.5, _hauteur_objet, 1)
+	corps.add_child(pH[0])
+	(pH[1] as HSlider).value_changed.connect(func(v):
 		_hauteur_objet = v
 		_cadrer_apercu()
 		_dire_modele())
-	rH.add_child(gH)
-	var rR := _rang(corps)
-	rR.add_child(Atelier.texte("Angle", Atelier.CORPS_PETIT, Atelier.ENCRE_FAIBLE))
-	var gR := Atelier.glissiere(0.0, 355.0, 5.0, _angle_objet)
-	gR.value_changed.connect(func(v):
+	var pR: Array = Atelier.regle("Angle", 0.0, 355.0, 5.0, _angle_objet)
+	corps.add_child(pR[0])
+	(pR[1] as HSlider).value_changed.connect(func(v):
 		_angle_objet = v
 		if _apercu_pivot != null: _apercu_pivot.rotation.y = deg_to_rad(v)
 		_dire_modele())
-	rR.add_child(gR)
+	# ─── LE SEMIS ───
+	var rS := _rang(corps)
+	var bsem := Atelier.bouton("Semer en traînant")
+	bsem.tooltip_text = "Poser une rangée d'objets le long du glissé, au lieu d'un par clic"
+	bsem.pressed.connect(func():
+		_semer = not _semer
+		Atelier.peindre(bsem, _semer)
+		_dire("Semis %s — le clic gauche traîné pose une rangée." % \
+			("allumé" if _semer else "éteint"))
+		_etat())
+	Atelier.peindre(bsem, _semer)
+	rS.add_child(bsem)
+	var bvoie := Atelier.bouton("Éviter la voirie")
+	bvoie.tooltip_text = "Ne rien semer sur les rues, ponts, ronds-points et bretelles"
+	bvoie.pressed.connect(func():
+		_semis_hors_voirie = not _semis_hors_voirie
+		Atelier.peindre(bvoie, _semis_hors_voirie))
+	Atelier.peindre(bvoie, _semis_hors_voirie)
+	rS.add_child(bvoie)
+	var rS2 := _rang(corps)
+	var bang := Atelier.bouton("Angle au hasard")
+	bang.tooltip_text = "Chaque objet semé prend son propre angle"
+	bang.pressed.connect(func():
+		_angle_libre = not _angle_libre
+		Atelier.peindre(bang, _angle_libre))
+	Atelier.peindre(bang, _angle_libre)
+	rS2.add_child(bang)
+	var pP: Array = Atelier.regle("Pas", 0.2, 4.0, 0.1, _pas_semis, 1)
+	corps.add_child(pP[0])
+	(pP[1] as HSlider).value_changed.connect(func(v): _pas_semis = v)
+	var pD: Array = Atelier.regle("Écart", 0.0, 1.0, 0.05, _dispersion, 2)
+	corps.add_child(pD[0])
+	(pD[1] as HSlider).value_changed.connect(func(v): _dispersion = v)
+	var pV: Array = Atelier.regle("Variété", 0.0, 0.6, 0.05, _variation, 2)
+	corps.add_child(pV[0])
+	(pV[1] as HSlider).value_changed.connect(func(v): _variation = v)
+
 	var rT := _rang(corps)
 	var bt := Atelier.bouton("Tourne tout seul")
 	bt.pressed.connect(func():
@@ -2596,6 +3096,397 @@ func _bloc_modeles(corps: VBoxContainer) -> void:
 	var bp := Atelier.bouton("Poser  →  outil Objet")
 	bp.pressed.connect(func(): _choisir_outil(OUTIL_OBJET))
 	rT.add_child(bp)
+
+## ─────────────────────────── LE RECENSEMENT ───────────────────────────
+##
+## ⚠ UNE CARTE DE 96 000 CASES NE SE RELIT PAS À L'ŒIL. « Combien d'hôpitaux
+## ai-je posés ? », « où est la deuxième caserne ? », « est-ce que mes
+## bretelles sont réparties ou toutes dans le nord ? » — trois questions qu'on
+## se pose vingt fois par séance et auxquelles l'éditeur ne savait pas
+## répondre. On les comptait à la main sur une capture d'écran, ce qui est le
+## contraire d'un éditeur.
+##
+## Le bloc compte CHAQUE caractère du dessin, dit le total, et sait SAUTER
+## d'une occurrence à l'autre. Pour les lettres, une occurrence est un
+## BÂTIMENT (le bloc de lettres), pas une case : sauter case par case dans une
+## tour de 3 × 3 n'apprend rien.
+##
+## ⚠ LES CARACTÈRES FRÉQUENTS SONT REGROUPÉS EN AMAS. La pelouse compte vingt
+## mille cases : « suivant » qui avance d'une case serait un bouton inutile. On
+## ne garde donc qu'une occurrence par carré de PAS_AMAS cases — on saute d'un
+## coin de la ville à l'autre, ce qui est la question qu'on pose vraiment.
+const PAS_AMAS := 10
+const AMAS_MAX := 600
+
+var _liste_reperes: ItemList
+var _resume_reperes: Label
+var _chars_recenses: Array[String] = []
+var _compte_reperes: Dictionary = {}     ## caractère -> nombre de cases
+var _lieux_reperes: Dictionary = {}      ## caractère -> Array[Vector2i]
+var _rang_repere := 0
+var _recense_a_jour := false
+
+func _bloc_reperes(corps: VBoxContainer) -> void:
+	_resume_reperes = Atelier.texte("", Atelier.CORPS_PETIT, Atelier.ENCRE_DOUCE, true)
+	corps.add_child(_resume_reperes)
+	_liste_reperes = Atelier.liste()
+	_liste_reperes.custom_minimum_size = Vector2(0, 150)
+	_liste_reperes.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_liste_reperes.item_selected.connect(func(k):
+		if k < 0 or k >= _chars_recenses.size(): return
+		_rang_repere = -1
+		_sauter_repere(1))
+	corps.add_child(_liste_reperes)
+	var r := _rang(corps)
+	var bp := Atelier.bouton("◀")
+	bp.tooltip_text = "Occurrence précédente"
+	bp.pressed.connect(func(): _sauter_repere(-1))
+	r.add_child(bp)
+	var bs := Atelier.bouton("suivant ▶")
+	bs.tooltip_text = "Occurrence suivante du caractère choisi"
+	bs.pressed.connect(func(): _sauter_repere(1))
+	r.add_child(bs)
+	var bres := Atelier.bouton("Réseau")
+	bres.tooltip_text = "Le réseau de rues est-il d'un seul tenant ? Rappuyer visite les morceaux coupés"
+	bres.pressed.connect(_verifier_reseau)
+	r.add_child(bres)
+	var br := Atelier.bouton("Recenser")
+	br.tooltip_text = "Recompter le dessin"
+	br.pressed.connect(func():
+		_recense_a_jour = false
+		_recenser())
+	r.add_child(br)
+	# ⚠ LE COMPTE SE FAIT QUAND ON OUVRE LE BLOC, pas au démarrage. Ouvrir
+	# l'éditeur ne doit pas coûter un balayage de 96 000 caractères pour un
+	# panneau que l'on ne déroulera peut-être jamais ; et le dérouler doit
+	# montrer des chiffres justes, pas ceux d'il y a vingt coups de pinceau.
+	corps.visibility_changed.connect(func():
+		if corps.visible: _recenser())
+
+## ⚠ ON NE RECENSE PAS À CHAQUE COUP DE PINCEAU. Un balayage de 96 000
+## caractères plus la liste des bâtiments coûte le prix d'un geste entier ;
+## payé à chaque case peinte, il rendrait le pinceau poisseux. Le compte est
+## donc marqué PÉRIMÉ par l'édition et refait quand on le regarde.
+func _recenser() -> void:
+	if _recense_a_jour or _liste_reperes == null: return
+	_recense_a_jour = true
+	_compte_reperes.clear()
+	_lieux_reperes.clear()
+	var lignes: Array = _lignes("plan")
+	var terre := 0
+	var eau := 0
+	var rues := 0
+	for j in lignes.size():
+		var t: String = lignes[j]
+		for i in t.length():
+			var c := t[i]
+			_compte_reperes[c] = int(_compte_reperes.get(c, 0)) + 1
+			if EAUX.contains(c): eau += 1
+			else: terre += 1
+			if CHAUSSEE.contains(c): rues += 1
+			# Les lettres passent par les BÂTIMENTS, plus bas.
+			if _lettre_de_famille(c): continue
+			var amas: Array = _lieux_reperes.get(c, [])
+			if amas.size() >= AMAS_MAX: continue
+			var dernier: Vector2i = amas[amas.size() - 1] if not amas.is_empty() \
+				else Vector2i(-999, -999)
+			if absi(dernier.x - i) < PAS_AMAS and absi(dernier.y - j) < PAS_AMAS: continue
+			amas.append(Vector2i(i, j))
+			_lieux_reperes[c] = amas
+	var blocs: Array = Quartiers.batiments(lignes)
+	var batis: Dictionary = {}
+	for b in blocs:
+		var l := String(b["lettre"])
+		batis[l] = int(batis.get(l, 0)) + 1
+		var amas2: Array = _lieux_reperes.get(l, [])
+		if amas2.size() < AMAS_MAX:
+			amas2.append(Vector2i(int(b["i"]), int(b["j"])))
+			_lieux_reperes[l] = amas2
+
+	# LA LISTE SUIT L'ORDRE DES PINCEAUX, pas l'ordre alphabétique : c'est
+	# l'ordre qu'on a déjà dans les doigts, et il range le sol avec le sol.
+	_chars_recenses.clear()
+	_liste_reperes.clear()
+	for p in PINCEAUX:
+		var c := String(p[0])
+		var n := int(_compte_reperes.get(c, 0)) + int(_compte_reperes.get(c.to_lower(), 0)) \
+			if _lettre_de_famille(c) else int(_compte_reperes.get(c, 0))
+		if n == 0: continue
+		var suffixe := ""
+		if _lettre_de_famille(c):
+			var nb := int(batis.get(c, 0)) + int(batis.get(c.to_lower(), 0))
+			suffixe = "  ·  %d bâtiment(s)" % nb
+		_chars_recenses.append(c)
+		_liste_reperes.add_item("%s  %s  —  %d case(s)%s" % [c, String(p[1]), n, suffixe])
+	# ⚠ ET LA SURFACE EN KILOMÈTRES CARRÉS. Le client raisonne en « cinq fois la
+	# map de GTA 2 », pas en cases : un nombre de cases ne lui dit rien, six
+	# kilomètres carrés lui disent tout de suite si la ville a la bonne taille.
+	# Une case = 20 unités = 10 m de côté, donc 100 m² par case.
+	var km2 := float(terre) * 100.0 / 1_000_000.0
+	_resume_reperes.text = "%d cases de terre (%.2f km²) · %d d'eau · %d de voirie · %d bâtiments · %d grosses pièces · %d objets · paliers 0 à %d" % [
+		terre, km2, eau, rues, blocs.size(), _pieces_du_plan(), _objets().size(), _plus_haut]
+
+func _lettre_de_famille(c: String) -> bool:
+	return c.length() == 1 and FAMILLES.contains(c.to_upper()) and c.to_upper() != c.to_lower()
+
+## Les grosses pièces DEMANDÉES par le dessin. On les compte sur les
+## caractères et non sur la carte bâtie : recalculer une `CarteVille` de
+## Pikstown pour afficher un nombre coûterait deux secondes.
+func _pieces_du_plan() -> int:
+	var n := 0
+	for l in _lignes("plan"):
+		var t := String(l)
+		n += t.count("O") + t.count("(") + t.count("/")
+	return n
+
+## Saute à l'occurrence suivante (ou précédente) du caractère choisi. La vue s'y
+## rend et la case visée devient celle-là : on peut enchaîner « suivant » et
+## corriger au passage.
+func _sauter_repere(sens: int) -> void:
+	if _liste_reperes == null: return
+	var k := _liste_reperes.get_selected_items()
+	if k.is_empty():
+		_dire("Choisissez d'abord une ligne du recensement.")
+		return
+	var c: String = _chars_recenses[k[0]]
+	var lieux: Array = _lieux_reperes.get(c, [])
+	# Les minuscules d'une famille sont le MÊME sujet que leur majuscule : on
+	# saute d'un immeuble à l'autre, pas d'une casse à l'autre.
+	if _lettre_de_famille(c):
+		lieux = lieux + Array(_lieux_reperes.get(c.to_lower(), []))
+	if lieux.is_empty():
+		_dire("Rien à viser pour « %s »." % c)
+		return
+	_rang_repere = posmod(_rang_repere + sens, lieux.size())
+	var cc: Vector2i = lieux[_rang_repere]
+	_case = cc
+	_pivot = Vector3((float(cc.x) + 0.5) * CASE,
+		float(_palier_de(cc.x, cc.y)) * PALIER, (float(cc.y) + 0.5) * CASE)
+	_distance = minf(_distance, CASE * 26.0)
+	_poser_camera()
+	if _ville != null: _ville.suivre(_pivot)
+	_montrer_curseur()
+	_dire("« %s » — %d sur %d, en (%d, %d)." % [c, _rang_repere + 1, lieux.size(), cc.x, cc.y])
+
+## Sème un grain si le curseur s'est assez éloigné du dernier. On mesure sur le
+## POINT D'IMPACT et non sur la case : à un pas d'une demi-case, raisonner en
+## cases ne saurait pas où poser le deuxième grain.
+func _semer_le_long() -> void:
+	if not _vise or not _semer or not _gauche: return
+	var pas := maxf(_pas_semis, 0.15) * CASE
+	# ⚠ UN SAUT DU CURSEUR NE SE SÈME PAS. Le point d'impact peut bondir de
+	# cent cases — la souris passe derrière un immeuble, la vue tourne, le
+	# rayon accroche une autre terrasse. Combler le trajet remplissait alors la
+	# moitié d'un quartier d'arbres en une image. Au-delà de SAUT_SEMIS pas,
+	# on considère qu'il n'y a pas eu de trait : on se replace, sans semer.
+	const SAUT_SEMIS := 8
+	if _impact.distance_to(_dernier_semis) > pas * float(SAUT_SEMIS):
+		_dernier_semis = _impact
+		return
+	while _impact.distance_to(_dernier_semis) >= pas:
+		var d := (_impact - _dernier_semis).normalized()
+		_dernier_semis += d * pas
+		_semer_un(_dernier_semis)
+
+## ⚠ UN GRAIN N'EST PAS UN OBJET POSÉ : il ne rebâtit PAS son morceau. Une haie
+## de quarante arbres reconstruirait quarante fois le même bout de ville — deux
+## secondes par arbre. On note la case dans `_touchees` et `_finir_geste` refait
+## tout d'un coup au relâchement, exactement comme un coup de pinceau.
+func _semer_un(ou: Vector3) -> void:
+	var c := Vector2i(floori(ou.x / CASE), floori(ou.z / CASE))
+	if not _dans_grille(c.x, c.y) or not _terre(c.x, c.y): return
+	if _semis_hors_voirie and CHAUSSEE.contains(_lire("plan", c.x, c.y)): return
+	_alea_semis.seed = hash(Vector3i(c.x, c.y, _objets().size() * 7919))
+	# La dispersion s'ajoute AU POINT, pas à la case : une haie parfaitement
+	# alignée est une haie de cimetière, et une dispersion par case ferait
+	# sauter les grains d'un carré à l'autre.
+	var p := Vector2(ou.x / CASE, ou.z / CASE) - Vector2(c)
+	p += Vector2(_alea_semis.randf_range(-1.0, 1.0),
+		_alea_semis.randf_range(-1.0, 1.0)) * _dispersion * 0.5
+	p = p.clamp(Vector2(0.02, 0.02), Vector2(0.98, 0.98))
+	var h := _hauteur_objet * (1.0 + _alea_semis.randf_range(-_variation, _variation))
+	var r := _alea_semis.randf_range(0.0, 355.0) if _angle_libre else _angle_objet
+	var objets: Array = _objets()
+	objets.append({"m": _modele, "i": c.x, "j": c.y,
+		"x": snappedf(p.x, 0.01), "z": snappedf(p.y, 0.01),
+		"r": snappedf(r, 1.0), "h": snappedf(maxf(h, 0.5), 0.5)})
+	_fiche["objets"] = objets
+	_touchees[c] = true
+	_semes += 1
+	_recense_a_jour = false
+
+## ─────────────────────── LE RÉSEAU D'UN SEUL TENANT ───────────────────────
+##
+## ⚠ IL N'Y A AUCUNE RECHERCHE DE CHEMIN DANS CE JEU. Une voiture qui bute sur
+## l'eau tourne au hasard, une patrouille reste plaquée contre la berge. Un
+## morceau de voirie qui ne touche pas le reste, c'est un quartier entier —
+## immeubles, hôpital, cabines — où personne n'ira jamais, et ça ne se voit sur
+## AUCUNE photo : le pont a l'air fini, il s'arrête juste deux cases avant la
+## rue.
+##
+## Mesuré le 11/09 sur Pikstown : le réseau était en ONZE morceaux, le plus
+## grand à 48 % — trois gros, tous sur la même île. Le dessinateur ne pouvait
+## pas le savoir. L'éditeur le dit maintenant en une seconde, et emmène voir.
+var _orphelins: Array[Vector2i] = []
+var _rang_orphelin := 0
+
+func _verifier_reseau() -> void:
+	var lignes: Array = _lignes("plan")
+	var h := lignes.size()
+	var vu: Array = []
+	for j in h:
+		var l: Array[bool] = []
+		l.resize(String(lignes[j]).length())
+		vu.append(l)
+	var morceaux: Array = []          # [taille, case de tête]
+	var total := 0
+	for j in h:
+		var t: String = lignes[j]
+		for i in t.length():
+			if vu[j][i] or not CHAUSSEE.contains(t[i]): continue
+			# Un parcours en largeur sur un tableau de booléens : sur 96 000
+			# cases, un dictionnaire de Vector2i coûterait dix fois le prix.
+			var file: Array[Vector2i] = [Vector2i(i, j)]
+			vu[j][i] = true
+			var n := 0
+			var tete := Vector2i(i, j)
+			while not file.is_empty():
+				var c: Vector2i = file.pop_back()
+				n += 1
+				for d in CarteVille.COTES:
+					var v: Vector2i = c + d
+					if v.y < 0 or v.y >= h or v.x < 0: continue
+					var tv: String = lignes[v.y]
+					if v.x >= tv.length() or vu[v.y][v.x]: continue
+					if not CHAUSSEE.contains(tv[v.x]): continue
+					vu[v.y][v.x] = true
+					file.append(v)
+			total += n
+			morceaux.append([n, tete])
+	morceaux.sort_custom(func(a, b): return int(a[0]) > int(b[0]))
+	if morceaux.is_empty():
+		_dire("Aucune rue dans ce dessin.")
+		return
+	if morceaux.size() == 1:
+		_dire("Réseau d'un seul tenant : %d cases de rue, toutes reliées." % total)
+		_orphelins.clear()
+		return
+	_orphelins.clear()
+	for k in range(1, morceaux.size()):
+		_orphelins.append(morceaux[k][1])
+	var gros: int = int(morceaux[0][0])
+	_dire("%d morceaux de voirie — le plus grand fait %d cases sur %d (%.1f %%). Rappuyez sur « Réseau » pour visiter les %d coupés." % [
+		morceaux.size(), gros, total, 100.0 * float(gros) / float(total), _orphelins.size()])
+	_visiter_orphelin()
+
+## Emmène la vue sur le morceau coupé suivant. Un nombre ne suffit pas : ce
+## qu'on veut savoir, c'est OÙ ça casse, et il n'y a qu'un endroit pour le voir.
+func _visiter_orphelin() -> void:
+	if _orphelins.is_empty(): return
+	_rang_orphelin = posmod(_rang_orphelin, _orphelins.size())
+	var c: Vector2i = _orphelins[_rang_orphelin]
+	_rang_orphelin += 1
+	_case = c
+	_pivot = Vector3((float(c.x) + 0.5) * CASE,
+		float(_palier_de(c.x, c.y)) * PALIER, (float(c.y) + 0.5) * CASE)
+	_distance = minf(_distance, CASE * 34.0)
+	_poser_camera()
+	if _ville != null: _ville.suivre(_pivot)
+	_montrer_curseur()
+
+## L'INVENTAIRE DES OBJETS POSÉS. Un éditeur qui pose sans savoir montrer ce
+## qui est posé n'est pas un éditeur : on retrouvait un arbre mal placé en
+## tournant autour à la souris. La liste dit le modèle, la case et la hauteur ;
+## la choisir allume la mire, et les deux glissières deviennent celles de CET
+## objet-là.
+const OBJETS_MONTRES := 400
+
+func _bloc_objets(corps: VBoxContainer) -> void:
+	_filtre_objets = Atelier.champ("filtrer par nom ou par case (i,j)")
+	_filtre_objets.text_changed.connect(func(_t): _remplir_objets())
+	corps.add_child(_filtre_objets)
+
+	_liste_objets = Atelier.liste()
+	_liste_objets.custom_minimum_size = Vector2(0, 120)
+	_liste_objets.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_liste_objets.item_selected.connect(func(rang):
+		if rang >= 0 and rang < _rangs_objets.size():
+			_choisir_objet(_rangs_objets[rang]))
+	corps.add_child(_liste_objets)
+
+	_compte_objets = Atelier.texte("", Atelier.CORPS_PETIT, Atelier.ENCRE_FAIBLE, true)
+	corps.add_child(_compte_objets)
+
+	var pH: Array = Atelier.regle("Hauteur", 1.0, 60.0, 0.5, _hauteur_objet, 1)
+	corps.add_child(pH[0])
+	_gliss_h_objet = pH[1]
+	_gliss_h_objet.value_changed.connect(func(v): _regler_objet("h", v, false))
+	_gliss_h_objet.drag_started.connect(func(): _empiler())
+	var pR: Array = Atelier.regle("Angle", 0.0, 355.0, 5.0, _angle_objet)
+	corps.add_child(pR[0])
+	_gliss_r_objet = pR[1]
+	_gliss_r_objet.value_changed.connect(func(v): _regler_objet("r", v, false))
+	_gliss_r_objet.drag_started.connect(func(): _empiler())
+
+	# ⚠ TROIS BOUTONS COURTS SUR UNE LIGNE. « Remplacer par le modèle choisi »
+	# tenait toute la largeur de la colonne et sortait quand même du cadre :
+	# dans un panneau de 300 pixels, un libellé de trente caractères est un
+	# libellé tronqué. Ce que fait chaque bouton est dit dans l'infobulle.
+	var r1 := _rang(corps)
+	var bv := Atelier.bouton("Viser")
+	bv.tooltip_text = "Amener la vue sur l'objet choisi"
+	bv.pressed.connect(_viser_objet)
+	r1.add_child(bv)
+	var br := Atelier.bouton("Remplacer")
+	br.tooltip_text = "Donner à l'objet choisi le modèle sélectionné dans MODÈLES"
+	br.pressed.connect(func(): _regler_objet("m", _modele))
+	r1.add_child(br)
+	var bs := Atelier.bouton("Supprimer")
+	bs.tooltip_text = "Ôter l'objet choisi (touche Suppr)"
+	bs.pressed.connect(_supprimer_objet)
+	r1.add_child(bs)
+
+func _remplir_objets() -> void:
+	if _liste_objets == null: return
+	var filtre := _filtre_objets.text.strip_edges().to_lower()
+	var objets: Array = _objets()
+	_rangs_objets.clear()
+	_liste_objets.clear()
+	var caches := 0
+	for k in objets.size():
+		var o: Dictionary = objets[k]
+		var etiquette := "%s   (%d,%d)  h%.0f" % [String(o["m"]).get_file(),
+			int(o["i"]), int(o["j"]), float(o.get("h", 10.0))]
+		if filtre != "" and not etiquette.to_lower().contains(filtre): continue
+		if _rangs_objets.size() >= OBJETS_MONTRES:
+			caches += 1
+			continue
+		_rangs_objets.append(k)
+		_liste_objets.add_item(etiquette)
+	_compte_objets.text = "%d objet(s) dans le quartier" % objets.size()
+	if caches > 0:
+		_compte_objets.text += " — %d de plus au-delà des %d premiers : filtrez." % [
+			caches, OBJETS_MONTRES]
+	var rang := _rangs_objets.find(_objet_choisi)
+	if rang >= 0:
+		_liste_objets.select(rang)
+
+## Amène la vue sur l'objet choisi. Chercher à la main un arbre dans une ville
+## de 320 cases, c'est ce qui rend une liste inutile.
+func _viser_objet() -> void:
+	var objets: Array = _objets()
+	if _objet_choisi < 0 or _objet_choisi >= objets.size():
+		_dire("Aucun objet choisi.")
+		return
+	var o: Dictionary = objets[_objet_choisi]
+	_case = Vector2i(int(o["i"]), int(o["j"]))
+	_pivot = Vector3((float(_case.x) + 0.5) * CASE,
+		float(_palier_de(_case.x, _case.y)) * PALIER, (float(_case.y) + 0.5) * CASE)
+	_distance = minf(_distance, CASE * 9.0)
+	_poser_camera()
+	if _ville != null: _ville.suivre(_pivot)
+	_montrer_curseur()
+	_dire("%s en (%d,%d)." % [_nom_objet(_objet_choisi), _case.x, _case.y])
 
 func _remplir_liste() -> void:
 	if _liste_modeles == null: return
@@ -2670,7 +3561,7 @@ func _apercu_souris(e: InputEvent) -> void:
 ## comme des touches, on les repère du coin de l'œil — et derrière H, ils ne
 ## mangent plus le bas de l'écran en permanence.
 const RACCOURCIS := [
-	["Clic G", "peindre / poser"], ["Clic D", "effacer / ôter"],
+	["Clic G", "peindre / poser"], ["Clic D", "effacer / choisir un objet"],
 	["Alt + clic", "pipette"], ["Clic M", "tourner la vue"],
 	["Molette", "zoom"], ["ZQSD", "déplacer la vue"],
 	["Tab", "dessin / relief / objet"], ["Pg↑ Pg↓", "palier"],
@@ -2680,7 +3571,8 @@ const RACCOURCIS := [
 	["Ctrl+Z  Ctrl+Y", "annuler / refaire"], ["Échap", "annuler le geste"],
 	["F", "recadrer"], ["V", "vue de dessus"],
 	["X", "quadrillage"], ["E", "exporter"],
-	["P", "raboter le relief"], ["H", "fermer cette aide"],
+	["P", "raboter le relief"], ["Suppr", "supprimer l'objet choisi"],
+	["H", "fermer cette aide"],
 ]
 
 func _batir_aide(couche: Node) -> void:
@@ -2790,7 +3682,8 @@ const AIDE := "clic gauche peindre · clic droit effacer · molette zoom · clic
 
 func _etat() -> void:
 	if _etiquette == null: return
-	var quoi := "OBJET « %s »" % _modele.get_file() if _outil == OUTIL_OBJET \
+	var quoi := ("SEMIS « %s »" % _modele.get_file() if _semer \
+		else "OBJET « %s »" % _modele.get_file()) if _outil == OUTIL_OBJET \
 		else (("RELIEF ±1" if _relief_relatif else "RELIEF palier %d" % _palier) \
 			if _outil == OUTIL_RELIEF else "DESSIN « %s »" % _caractere())
 	var nom_forme := "Libre"
@@ -2804,6 +3697,13 @@ func _etat() -> void:
 		_nombre(float(_fiche.get("angle", 0.0))),
 		_nombre((_fiche.get("origine", Vector2.ZERO) as Vector2).x),
 		_nombre((_fiche.get("origine", Vector2.ZERO) as Vector2).y)]
+	# L'OBJET CHOISI PASSE DEVANT LE RESTE : tant qu'il y en a un, c'est lui
+	# qu'on règle, et la ligne d'état doit dire lequel.
+	if _objet_choisi >= 0 and _objet_choisi < _objets().size():
+		var oc: Dictionary = _objets()[_objet_choisi]
+		_etiquette.text = "OBJET CHOISI « %s » en (%d, %d) · hauteur %s · angle %s° · Suppr pour l'ôter" % [
+			_nom_objet(_objet_choisi), int(oc["i"]), int(oc["j"]),
+			_nombre(float(oc.get("h", 10.0))), _nombre(float(oc.get("r", 0.0)))]
 	if _aide != null: _aide.text = AIDE
 	if _collage and not _presse.is_empty():
 		_etiquette.text = "COLLAGE %d × %d en (%d, %d) — clic gauche pose, clic droit ou Échap annule" % [

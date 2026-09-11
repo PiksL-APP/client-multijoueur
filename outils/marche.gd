@@ -25,6 +25,14 @@ func _init() -> void:
 	var fautes := 0
 	for id in Interieurs.liste():
 		fautes += _un(String(id), dessiner)
+	# LES REPAIRES DE GANG. Ils n'étaient pas dans la boucle parce que
+	# `Interieurs.liste()` ne rend que le CATALOGUE — les huit appartements
+	# qu'on achète. Un repaire est un intérieur comme un autre : il a un
+	# dessin, des meubles, une porte, et exactement les mêmes façons de se
+	# rendre impraticable. Sept dessins de plus à surveiller pour zéro ligne
+	# de test en plus, il n'y avait aucune raison de s'en priver.
+	for gang in PlanVille.GANGS.size():
+		fautes += _un(Interieurs.repaire_de(gang), dessiner)
 	print("")
 	if fautes == 0:
 		print("REPAIRES PRATICABLES.")
@@ -57,7 +65,7 @@ func _places_de_coffre(id: String) -> void:
 	var porte := Interieurs.entree(id)
 	# Le coffre actuel ne se bloque pas lui-même : sans ça, la meilleure place
 	# est toujours « ailleurs que là où il est ».
-	var c0: Dictionary = Interieurs.coffre(id)
+	var c0: Dictionary = _but_du_lieu(id)
 	var sauf: Vector2 = c0["p"] if not c0.is_empty() else Vector2(-99, -99)
 	var bonnes: Array = []
 	for j in haut * FIN:
@@ -245,7 +253,8 @@ func _un(id: String, dessiner: bool) -> int:
 	var murs := Interieurs.murs(id)
 	var large := int(murs["large"])
 	var haut := int(murs["haut"])
-	var nom := String(Interieurs.CATALOGUE[id]["nom"])
+	var nom := String(Interieurs.CATALOGUE[id]["nom"]) if Interieurs.CATALOGUE.has(id) \
+		else "repaire " + String(PlanVille.GANGS[Interieurs.gang_du_repaire(id)]["nom"])
 	print("\n── %s (%s, %d × %d tuiles)" % [id, nom, large, haut])
 
 	var lx := large * FIN
@@ -285,7 +294,15 @@ func _un(id: String, dessiner: bool) -> int:
 
 	# TOUS les postes, pas seulement le coffre : une garde-robe hors d'atteinte
 	# est un bouton qui n'existe pas, et rien dans l'image ne le dirait.
-	for genre in Interieurs.POSTES:
+	# ⚠ TOUS LES POSTES NE SONT PAS ATTENDUS PARTOUT. Un appartement n'a pas de
+	# râtelier, un repaire de gang n'a pas de coffre : c'est le sujet du lieu,
+	# pas un oubli de décoration. Le banc parcourait `Interieurs.POSTES` en
+	# entier et criait donc « PAS DE ARMURERIE » dans les huit appartements le
+	# jour où le râtelier est devenu un poste — quinze fautes d'un coup, aucune
+	# vraie, et un banc qui crie pour rien n'est plus lu.
+	var attendus: Array = ["armurerie"] if Interieurs.est_repaire(id) \
+		else ["coffre", "garde-robe"]
+	for genre in attendus:
 		var g := String(genre)
 		var poste: Dictionary = Interieurs.poste(id, g)
 		if poste.is_empty():
@@ -375,8 +392,15 @@ const PAS_DEDANS := 2.0                ## tuiles/s — la valeur de `Carnage.PAS
 const PORTEE_COFFRE := 0.9
 const IMAGE := 1.0 / 60.0
 
-func _traverser(id: String, depart: Vector2, libre: Dictionary, atteints: Dictionary) -> void:
+## ⚠ LE BUT N'EST PAS TOUJOURS LE COFFRE. Dans un repaire de gang, c'est le
+## RÂTELIER : il n'y a pas de coffre, et le meuble qui doit être atteignable
+## est celui qui donne une raison d'entrer.
+func _but_du_lieu(id: String) -> Dictionary:
 	var c: Dictionary = Interieurs.coffre(id)
+	return c if not c.is_empty() else Interieurs.poste(id, "armurerie")
+
+func _traverser(id: String, depart: Vector2, libre: Dictionary, atteints: Dictionary) -> void:
+	var c: Dictionary = _but_du_lieu(id)
 	if c.is_empty():
 		return
 	var but := Vector2(c["p"])
@@ -388,7 +412,7 @@ func _traverser(id: String, depart: Vector2, libre: Dictionary, atteints: Dictio
 		cible = _plus_proche(atteints, cible)
 	var chemin := _remonter(libre, atteints, Vector2i(int(depart.x * FIN), int(depart.y * FIN)), cible)
 	if chemin.is_empty():
-		print("  ⚠ pas de chemin de la porte au coffre")
+		print("  ⚠ pas de chemin de la porte au %s" % String(c.get("nom", "?")))
 		return
 	var p := Interieurs.degager(id, depart)
 	var t := 0.0
@@ -406,7 +430,7 @@ func _traverser(id: String, depart: Vector2, libre: Dictionary, atteints: Dictio
 		if p.distance_to(avant) < PAS_DEDANS * IMAGE * 0.4:
 			cogne += 1
 			if cogne > 90:
-				print("  ⚠ COINCÉ en route vers le coffre, vers (%.1f, %.1f)" % [p.x, p.y])
+				print("  ⚠ COINCÉ en route vers %s, vers (%.1f, %.1f)" % [String(c.get("nom", "?")), p.x, p.y])
 				return
 		else:
 			cogne = 0

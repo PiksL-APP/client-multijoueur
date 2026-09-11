@@ -53,6 +53,31 @@ func _ready() -> void:
 			add_child(m)
 			m.batir(carte, cle + Vector2i(di, dj), {})
 
+	# LE TRAIN. Il n'apparaît qu'en `--ou=rail` : partout ailleurs il n'y a pas
+	# de voie sous les roues, et une rame posée au milieu d'une avenue ne
+	# prouverait rien. La rame et le quai sortent des fonctions DU JEU, posés à
+	# l'abscisse que `VilleVivante.gares()` donne — pas replacés à la main.
+	if ou == "rail" or ou == "casse":
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 1
+		var ville := VilleVivante.new(carte, rng)
+		var abscisse := _gare_proche(ville, PlanVille.centre_tuile(tuile.x, tuile.y))
+		var cap := ville.cap_de_voie()
+		var quai := FormesCarnage.quai()
+		quai.position = Decor.vers3d(ville.point_de_voie(abscisse))
+		quai.rotation.y = -cap
+		add_child(quai)
+		var rame := FormesCarnage.rame_de_train(VilleVivante.WAGONS)
+		rame.position = Decor.vers3d(ville.point_de_voie(abscisse))
+		rame.rotation.y = -cap
+		add_child(rame)
+		for c in ville.casses():
+			var machine := FormesCarnage.compacteur()
+			machine.position = Decor.vers3d(Vector2(c["p"]))
+			machine.rotation.y = -cap
+			add_child(machine)
+		print("[aperçu] rame à quai, abscisse %d, %d casse(s)" % [int(abscisse), ville.casses().size()])
+
 	var cam := Decor.camera(INCLINAISON, 1.0, 52.0)
 	add_child(cam)
 	cam.far = 4000.0
@@ -65,7 +90,38 @@ func _ready() -> void:
 ## `port` : la première case d'eau qui porte un bateau amarré — c'est ce qu'on
 ## veut voir, et le chercher à la main sur six cent quatre-vingts tuiles n'est
 ## pas une façon de travailler.
+func _gare_proche(ville: VilleVivante, point: Vector2) -> float:
+	var mieux := 0.0
+	var court := 1.0e12
+	for g in ville.gares():
+		var d: float = ville.point_de_voie(float(g)).distance_to(point)
+		if d < court:
+			court = d
+			mieux = float(g)
+	return mieux
+
 func _viser(carte: PlanVille, ou: String) -> Vector2i:
+	# `rail` : la gare la plus centrale de la ligne. Chercher à la main la
+	# tuile où passe une droite en biais sur six cent quatre-vingts colonnes
+	# n'est pas une façon de travailler — et la voie change avec le code.
+	if ou == "rail" or ou == "casse":
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 1
+		var ville := VilleVivante.new(carte, rng)
+		var centre := Vector2(float(PlanVille.COLONNES) * PlanVille.PAS * 0.5,
+			float(PlanVille.LIGNES) * PlanVille.PAS * 0.5)
+		var p := ville.point_de_voie(_gare_proche(ville, centre))
+		# `casse` vise la casse la plus proche du centre : elles sont à
+		# mi-chemin entre deux quais, donc à cinq mille pixels de la gare — un
+		# morceau de ville photographié à la gare n'en montre jamais aucune.
+		if ou == "casse":
+			var court := 1.0e12
+			for c in ville.casses():
+				var d: float = Vector2(c["p"]).distance_to(centre)
+				if d < court:
+					court = d
+					p = Vector2(c["p"])
+		return Vector2i(int(p.x / PlanVille.PAS), int(p.y / PlanVille.PAS))
 	if ou != "port":
 		var xy := ou.split(",")
 		if xy.size() == 2:

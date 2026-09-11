@@ -1057,6 +1057,20 @@ func _lieu_de(point: Vector2, genre: String, rayon: float) -> int:
 		return int(lieu["id"])
 	return -1
 
+## LE REPAIRE SOUS LES PIEDS, avec son gang — pas seulement son identifiant.
+## `_lieu_de` ne rend qu'un numéro, et le repaire est le seul lieu de la ville
+## dont l'intéressant est À QUI il est : sans le gang, il faudrait le rechercher
+## une seconde fois pour savoir chez qui l'on frappe.
+##
+## ⚠ Le rayon est celui du TAG au sol (`RAYON_REPAIRE`), pas celui du pâté :
+## c'est le disque peint qu'on voit, et une porte qui répond ailleurs que là où
+## la peinture est, ça se cherche longtemps.
+func repaire_de(point: Vector2) -> Dictionary:
+	for r in lieux_autour(point, RAYON_REPAIRE)["repaires"]:
+		if Vector2(r["p"]).distance_to(point) <= RAYON_REPAIRE:
+			return r
+	return {}
+
 func repaire_le_plus_proche(point: Vector2, gang: int) -> Dictionary:
 	var meilleur := {}
 	var distance := INF
@@ -2330,6 +2344,20 @@ func rivaux(gang: int, point: Vector2) -> Array:
 		if int(autre) != g:
 			liste.append(int(autre))
 	return liste
+
+## Qui décroche à une cabine. Le gang du territoire, et sur le terrain neutre
+## (le centre d'affaires n'appartient à personne) un des trois du secteur,
+## choisi par le numéro de la cabine — donc pareil chez les quatre joueurs.
+##
+## ⚠ Ce calcul vivait dans `VilleVivante.proposer_contrat` seulement. Le
+## tableau de bord et l'enseigne, eux, prenaient `territoire(point)` tout nu :
+## au centre-ville ils annonçaient « personne » pendant qu'un gang décrochait.
+func employeur_de_cabine(cabine: int, point: Vector2) -> int:
+	var chez := territoire(point)
+	if chez >= 0:
+		return chez
+	var groupe: Array = trio(point)
+	return int(groupe[posmod(cabine, groupe.size())])
 
 func nom_du_gang(indice: int) -> String:
 	return String(GANGS[posmod(indice, GANGS.size())]["nom"])
