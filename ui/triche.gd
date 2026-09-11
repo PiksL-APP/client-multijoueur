@@ -35,6 +35,17 @@ const CODES := [
 	{"cle": "ennemi", "nom": "ENNEMI PUBLIC — respect à zéro", "unique": true},
 	{"cle": "char", "nom": "L'ARMÉE ARRIVE — un char pour vous", "unique": true},
 	{"cle": "nuit", "nom": "NUIT NOIRE — l'heure s'arrête", "unique": false},
+	# La seconde fournée. Chacun sert à VOIR quelque chose qui demande sinon
+	# vingt minutes de jeu : les provisions pleines pour regarder les jauges
+	# remonter, un repaire pris pour voir le tag changer de camp, le train
+	# pour ne pas l'attendre au bord de la voie.
+	{"cle": "garde_manger", "nom": "GARDE-MANGER — poches et frigo pleins", "unique": true},
+	{"cle": "festin", "nom": "FESTIN — faim et soif au maximum", "unique": true},
+	{"cle": "flotte", "nom": "LA FLOTTE — une voiture de gang armée sous soi", "unique": true},
+	{"cle": "clefs", "nom": "LES CLEFS DE LA VILLE — tous les repaires à vous", "unique": true},
+	{"cle": "express", "nom": "L'EXPRESS — le train s'arrête ici", "unique": true},
+	{"cle": "immobilier", "nom": "L'IMMOBILIER — la planque et ses trois améliorations", "unique": true},
+	{"cle": "fantome", "nom": "FANTÔME — la police vous oublie", "unique": false},
 ]
 
 ## Une copie de travail : le menu y coche ce qui est allumé, sans toucher au

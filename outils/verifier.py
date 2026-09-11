@@ -187,6 +187,17 @@ def piece(ids, x, z):
     return ids[l][c]
 
 
+def separes(ms, a, b):
+    """Une cloison dure coupe-t-elle le segment entre les centres de a et b ?"""
+    n = 24
+    for k in range(n + 1):
+        x = a['x'] + (b['x'] - a['x']) * k / n
+        z = a['z'] + (b['z'] - a['z']) * k / n
+        if dans(ms, x, z):
+            return True
+    return False
+
+
 def controler(id):
     f = cat[id]
     ms = murs(f['plan'])
@@ -298,6 +309,9 @@ def controler(id):
         proches = set()
         for j, q in enumerate(meubles):
             if j == i or PLAT.match(q['m']) or q['m'].startswith('n:'):
+                continue
+            # de l'autre côté d'une cloison, un meuble ne « colle » pas
+            if separes(ms, m, q):
                 continue
             proches |= set(grilles[j].keys())
         trop = False

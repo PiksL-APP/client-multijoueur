@@ -122,6 +122,25 @@ func _viser(carte: PlanVille, ou: String) -> Vector2i:
 					court = d
 					p = Vector2(c["p"])
 		return Vector2i(int(p.x / PlanVille.PAS), int(p.y / PlanVille.PAS))
+	# `superette` : la boutique la plus proche du centre. Elles sont une par
+	# secteur de huit pâtés — les chercher à la main sur six cent quatre-vingts
+	# colonnes n'est pas une façon de travailler.
+	if ou == "superette":
+		var centre_s := Vector2(float(PlanVille.COLONNES) * PlanVille.PAS * 0.5,
+			float(PlanVille.LIGNES) * PlanVille.PAS * 0.5)
+		var court_s := 1.0e12
+		var vise_s := Vector2i(340, 260)
+		for sy in range(0, PlanVille.LIGNES / PlanVille.SECTEUR):
+			for sx in range(0, PlanVille.COLONNES / PlanVille.SECTEUR):
+				var c := Vector2((float(sx) + 0.5) * PlanVille.SECTEUR * PlanVille.PAS,
+					(float(sy) + 0.5) * PlanVille.SECTEUR * PlanVille.PAS)
+				for sp in carte.lieux_autour(c, PlanVille.SECTEUR * PlanVille.PAS)["superettes"]:
+					var d: float = Vector2(sp["p"]).distance_to(centre_s)
+					if d < court_s:
+						court_s = d
+						vise_s = Vector2i(int(Vector2(sp["p"]).x / PlanVille.PAS),
+							int(Vector2(sp["p"]).y / PlanVille.PAS))
+		return vise_s
 	if ou != "port":
 		var xy := ou.split(",")
 		if xy.size() == 2:

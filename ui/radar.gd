@@ -89,7 +89,7 @@ func _draw() -> void:
 			draw_line(Vector2(clamp(x0, cadre.position.x, cadre.end.x), y), Vector2(clamp(x1, cadre.position.x, cadre.end.x), y),
 				avenue if posmod(kl, PlanVille.AVENUE) == 0 else bitume, largeur_rue)
 
-	# Les lieux à portée : repaires, arènes, garages, cabines.
+	# Les lieux à portée : repaires, arènes, garages, cabines, supérettes.
 	var lieux := carte.lieux_autour(moi, rayon_vue * 1.5)
 	for r in lieux["repaires"]:
 		var ou := _vers_radar(r["p"], centre)
@@ -117,6 +117,14 @@ func _draw() -> void:
 		var ou := _vers_radar(pl["p"], centre)
 		if cadre.has_point(ou):
 			_pastille(ou, 4.0, Color("#b070d0"))
+
+	# LA SUPÉRETTE : un carré vert d'eau, pas un rond. À quatre pastilles rondes
+	# dans un cadre de cent pixels, la cinquième couleur ne se distingue plus —
+	# c'est la forme qui fait la différence, pas la teinte.
+	for sp in lieux["superettes"]:
+		var ou := _vers_radar(sp["p"], centre)
+		if cadre.has_point(ou):
+			draw_rect(Rect2(ou - Vector2(3.5, 3.5), Vector2(7, 7)), PlanVille.COULEUR_SUPERETTE, true)
 
 	# La cible du contrat : le repaire du gang à nettoyer ou le garage où livrer.
 	# Dans le cadre, elle clignote ; hors du cadre, une flèche au bord dit où
@@ -181,7 +189,8 @@ func _draw() -> void:
 	var x := MARGE + 4.0
 	var y := MARGE + COTE + 14.0
 	for entree in [["garage", Palette.SERIE], ["cabine", Palette.AVERTISSEMENT],
-			["arène", Palette.CRITIQUE], ["repaire", Palette.ENCRE]]:
+			["arène", Palette.CRITIQUE], ["repaire", Palette.ENCRE],
+			["supérette", PlanVille.COULEUR_SUPERETTE]]:
 		draw_circle(Vector2(x, y - 4.0), 3.0, entree[1])
 		draw_string(police, Vector2(x + 7.0, y), String(entree[0]),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_DOUCE)

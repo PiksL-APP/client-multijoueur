@@ -219,16 +219,17 @@ func demarrer() -> void:
 	env.fog_density *= 0.12
 	(amb[1] as DirectionalLight3D).directional_shadow_max_distance = 2600.0
 
+	# ⚠ LE LARGE ET LE RIVAGE NE SONT PAS LA MÊME EAU. Le rivage est bâti par
+	# la passe `P_EAU` du quartier : une nappe découpée en facettes qui ondule.
+	# Le large garde un aplat — personne n'y va — mais AVEC LA MÊME MATIÈRE,
+	# sinon la couture se voit à l'horizon. Il se pose un poil plus bas pour
+	# que la houle du rivage passe par-dessus au lieu de batailler avec lui.
 	var mer := MeshInstance3D.new()
 	var plan := PlaneMesh.new()
 	plan.size = Vector2(600.0 * CASE, 600.0 * CASE)
 	mer.mesh = plan
-	var eau := StandardMaterial3D.new()
-	eau.albedo_color = Color("#2b5f7a")
-	eau.roughness = 0.15
-	eau.metallic = 0.25
-	mer.material_override = eau
-	mer.position = Vector3(0, -2.4, 0)
+	mer.material_override = MatieresCarnage.eau()
+	mer.position = Vector3(0, -2.85, 0)
 	monde().add_child(mer)
 
 	_camera = Camera3D.new()

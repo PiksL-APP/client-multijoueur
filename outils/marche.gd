@@ -129,7 +129,12 @@ const PORTE_LE_LONG := 0.25
 
 func _pres_d_un_passage(murs: Dictionary, c: Vector2i, p: Vector2) -> bool:
 	for k in 4:
-		if Interieurs._ferme(murs, c, k):
+		# ⚠ Une PORTE, pas une arête ouverte. Entre deux tuiles d'une même
+		# pièce il n'y a rien, et « rien » n'est pas un passage à dégager :
+		# testé sur toute arête non fermée, ce contrôle condamnait le milieu
+		# de chaque pièce, et il ne restait que les tuiles closes sur trois
+		# côtés — d'où « aucune place » dans le Pavillon.
+		if not _porte(murs, c, k):
 			continue
 		var voisine: Vector2i = c + [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)][k]
 		if not (murs["tuiles"] as Dictionary).has(voisine):
@@ -142,6 +147,17 @@ func _pres_d_un_passage(murs: Dictionary, c: Vector2i, p: Vector2) -> bool:
 		if travers < PORTE_EN_TRAVERS + DEMI_COFFRE and long < PORTE_LE_LONG + DEMI_COFFRE:
 			return true
 	return false
+
+## L'arête k de la tuile c porte-t-elle une porte ou une arche ?
+func _porte(murs: Dictionary, c: Vector2i, k: int) -> bool:
+	var dessin: Array = murs["dessin"]
+	var car := ""
+	match k:
+		0: car = Interieurs._car(dessin, 2 * c.y, 2 * c.x + 1)
+		1: car = Interieurs._car(dessin, 2 * c.y + 2, 2 * c.x + 1)
+		2: car = Interieurs._car(dessin, 2 * c.y + 1, 2 * c.x)
+		_: car = Interieurs._car(dessin, 2 * c.y + 1, 2 * c.x + 2)
+	return car in Interieurs.PASSAGES
 
 ## Le coffre tient-il là, sans entrer dans les murs perpendiculaires ?
 func _rentre(murs: Dictionary, c: Vector2i, p: Vector2) -> bool:
@@ -164,14 +180,41 @@ func _degage(id: String, p: Vector2, sauf: Vector2) -> bool:
 ## sans le nom on ne sait pas lequel déplacer — on tourne alors autour du
 ## coffre pendant une heure au lieu de bouger le buffet.
 func _gene_par(id: String, p: Vector2, sauf: Vector2) -> String:
+	var murs := Interieurs.murs(id)
 	for o in Interieurs.obstacles(id):
 		var fiche: Dictionary = o
 		var rect: Rect2 = fiche["r"]
 		if rect.has_point(sauf):
 			continue
-		if rect.grow(VIDE_COFFRE).has_point(p):
-			return String(fiche["nom"])
+		if not rect.grow(VIDE_COFFRE).has_point(p):
+			continue
+		# ⚠ Un meuble DE L'AUTRE CÔTÉ D'UNE CLOISON ne gêne pas : la table à
+		# manger du Pavillon, dos au mur nord de la chambre, interdisait tout
+		# le mur de la chambre — et l'outil concluait qu'il n'y avait aucune
+		# place, alors qu'il y en avait une derrière un mur de dix centimètres.
+		if _separes(murs, p, rect.get_center()):
+			continue
+		return String(fiche["nom"])
 	return ""
+
+## Une cloison coupe-t-elle le segment [a, b] ? On avance par petits pas et
+## l'on demande à `_ferme` si l'arête franchie est un mur — une porte y compte
+## déjà comme ouverte.
+func _separes(murs: Dictionary, a: Vector2, b: Vector2) -> bool:
+	var n := int(ceil(a.distance_to(b) / 0.05)) + 1
+	var avant := Vector2i(floori(a.x), floori(a.y))
+	for k in range(1, n + 1):
+		var q := a.lerp(b, float(k) / float(n))
+		var c := Vector2i(floori(q.x), floori(q.y))
+		if c == avant:
+			continue
+		# à ce pas on ne franchit qu'une arête à la fois
+		var d := c - avant
+		var k4: int = 0 if d.y < 0 else (1 if d.y > 0 else (2 if d.x < 0 else 3))
+		if Interieurs._ferme(murs, avant, k4):
+			return true
+		avant = c
+	return false
 
 ## Les places NON adossées, en dernier recours.
 func _libres(id: String, murs: Dictionary, porte: Vector2, sauf: Vector2) -> void:
@@ -301,7 +344,7 @@ func _un(id: String, dessiner: bool) -> int:
 	# jour où le râtelier est devenu un poste — quinze fautes d'un coup, aucune
 	# vraie, et un banc qui crie pour rien n'est plus lu.
 	var attendus: Array = ["armurerie"] if Interieurs.est_repaire(id) \
-		else ["coffre", "garde-robe"]
+		else ["coffre", "garde-robe", "frigo"]
 	for genre in attendus:
 		var g := String(genre)
 		var poste: Dictionary = Interieurs.poste(id, g)

@@ -424,6 +424,7 @@ func simuler(delta: float, temps: float, joueurs: Dictionary) -> void:
 	_depecher_la_police(delta, joueurs)
 	_animer_les_helicos(delta, joueurs)
 	_animer_les_trains(delta, joueurs)
+	_animer_les_raids(delta)
 	_avancer_contrats(delta, joueurs)
 	_animer_les_pieges(delta, joueurs)
 	_animer_les_bombes(delta)
@@ -570,6 +571,11 @@ func _peupler_les_repaires(joueurs: Dictionary) -> void:
 		for r in plan.lieux_autour(joueurs[cle]["p"], PORTEE_VUE)["repaires"]:
 			vus[int(r["id"])] = r
 	for id in vus:
+		# ⚠ UN REPAIRE PRIS NE SE REPEUPLE PLUS. Sans ça, le gang renaissait
+		# sur le tag qu'on venait de lui prendre, et la prise ne voulait rien
+		# dire : on rejouait le même raid en boucle sur le même terrain.
+		if repaires_pris.has(int(id)):
+			continue
 		var r: Dictionary = vus[id]
 		var presents := 0
 		for personne in gens:
@@ -1459,6 +1465,7 @@ func _abattre(personne: Dictionary, cle: String, ecrase: bool) -> void:
 	if genre == GANG:
 		_repercuter(cle, int(personne["gang"]), Vector2(personne["p"]), RESPECT_PERDU, RESPECT_GAGNE)
 		_avancer_nettoyage(cle, int(personne["gang"]))
+		_compter_pour_le_raid(cle, personne)
 	_compter(cle, Vector2(personne["p"]), int(POINTS[quoi]), quoi, ecrase)
 	_avancer_frenzy(cle, Vector2(personne["p"]))
 	# Ce qu'il laisse par terre. Un gang armé lâche son arme une fois sur
@@ -2201,6 +2208,104 @@ func train_par_id(id: int) -> Dictionary:
 			return t
 	return {}
 
+# ------------------------------------------------------------- le raid
+
+## PRENDRE LE REPAIRE D'UN GANG HOSTILE (§3).
+##
+## Le repaire s'ouvrait au palier ALLIÉ — on y entre quand le gang vous couvre.
+## Restait l'autre bout de la jauge : ce qu'on fait d'un gang qui vous tire à
+## vue. Rien, jusqu'ici. On évitait son quartier, et c'était tout ce que le
+## palier « vous chasse » valait.
+##
+## LE RAID est la réponse. Il ne se déclenche pas : il COMMENCE quand on se
+## tient sur le tag d'un gang hostile. C'est le geste, pas une touche — on est
+## chez eux, ils tirent, et le compteur descend à chaque homme tombé.
+##
+## ⚠ IL FAUT ÊTRE HOSTILE. Nettoyer le repaire d'un gang neutre, ce serait le
+## contrat de la cabine avec un autre nom, et sans l'aller-retour de respect qui
+## le rend intéressant. Le raid est réservé à ceux qui vous chassent déjà : on
+## ne perd rien qu'on n'ait déjà perdu.
+const RAID_HOMMES := PAR_REPAIRE       ## tout le monde, pas une partie
+const RAID_DELAI := 22.0               ## s : le temps qu'on a pour finir après le premier
+const PRIME_RAID := 2600               ## ce que le quartier rapporte une fois pris
+
+## repaire -> {j, gang} : qui l'a pris. Diffusé, parce que la ville entière
+## change — le tag, l'armurerie, et les hommes qui n'y renaissent plus.
+var repaires_pris: Dictionary = {}
+## cle de joueur -> {id, p, gang, restants, reste}
+var raids: Dictionary = {}
+
+func repaire_pris_par(id: int) -> String:
+	return String(repaires_pris.get(id, {}).get("j", ""))
+
+## Le joueur est-il en train de prendre ce repaire ? Appelé par le tableau de
+## bord à chaque image : c'est une lecture de dictionnaire, pas une fouille.
+func raid_de(cle: String) -> Dictionary:
+	return raids.get(cle, {})
+
+## Ouvrir (ou rafraîchir) un raid. Le client annonce qu'il se tient sur un tag ;
+## l'hôte décide si ça compte.
+func tenir_le_terrain(cle: String, id: int, ou: Vector2, gang: int) -> void:
+	if cle == "" or repaires_pris.has(id):
+		return
+	if humeur(cle, gang) != H_VUE:
+		return
+	if raids.has(cle) and int(raids[cle]["id"]) == id:
+		# On est resté : le compte à rebours repart. Sortir du tag ne l'annule
+		# pas tout de suite — un raid qu'on perd parce qu'on s'est mis à
+		# couvert derrière un mur serait un raid qu'on ne gagne qu'en restant
+		# planté au milieu, c'est-à-dire en mourant.
+		raids[cle]["reste"] = RAID_DELAI
+		return
+	raids[cle] = {"id": id, "p": ou, "gang": gang, "restants": RAID_HOMMES, "reste": RAID_DELAI}
+	emettre("raid", {"j": cle, "e": "ouvre", "g": gang, "n": RAID_HOMMES,
+		"x": int(ou.x), "y": int(ou.y)})
+
+## Un homme du gang est tombé. Appelée depuis `_abattre`, pour tous les morts —
+## c'est elle qui décide si celui-là comptait.
+##
+## ⚠ ON COMPTE LES HOMMES DU REPAIRE, pas ceux du gang. Un raid qu'on avance en
+## abattant des passants de la même bannière trois rues plus loin, ce n'est plus
+## un raid, c'est une chasse — et on le finirait sans jamais s'approcher du tag.
+func _compter_pour_le_raid(cle: String, personne: Dictionary) -> void:
+	if cle == "" or not raids.has(cle) or int(personne["genre"]) != GANG:
+		return
+	var raid: Dictionary = raids[cle]
+	if int(personne["gang"]) != int(raid["gang"]):
+		return
+	if Vector2(personne["p"]).distance_to(Vector2(raid["p"])) > PlanVille.RAYON_REPAIRE * 1.25:
+		return
+	raid["restants"] = max(0, int(raid["restants"]) - 1)
+	raid["reste"] = RAID_DELAI
+	if int(raid["restants"]) > 0:
+		emettre("raid", {"j": cle, "e": "avance", "g": int(raid["gang"]),
+			"n": int(raid["restants"])})
+		return
+	_prendre_le_repaire(cle, raid)
+
+func _prendre_le_repaire(cle: String, raid: Dictionary) -> void:
+	var id := int(raid["id"])
+	repaires_pris[id] = {"j": cle, "gang": int(raid["gang"])}
+	raids.erase(cle)
+	# ⚠ LA PRIME PASSE PAR `payer`, comme les à-côtés : c'est l'hôte qui la
+	# décide et le client qui l'encaisse. Un client qui se paierait tout seul
+	# au vu d'un compteur local, c'est une prime par joueur au lieu d'une par
+	# repaire.
+	payer(cle, Vector2(raid["p"]), PRIME_RAID, "repaire pris")
+	emettre("raid", {"j": cle, "e": "pris", "g": int(raid["gang"]), "i": id, "n": 0,
+		"x": int(raid["p"].x), "y": int(raid["p"].y)})
+
+## Le tour d'horloge des raids : un raid qu'on abandonne s'éteint.
+func _animer_les_raids(delta: float) -> void:
+	for cle in raids.keys():
+		var raid: Dictionary = raids[cle]
+		raid["reste"] = float(raid["reste"]) - delta
+		if float(raid["reste"]) > 0.0:
+			continue
+		raids.erase(cle)
+		emettre("raid", {"j": String(cle), "e": "perdu", "g": int(raid["gang"]),
+			"n": int(raid["restants"])})
+
 # ------------------------------------------------------------ le compacteur
 
 ## LE COMPACTEUR (§1.3) : on y entre au volant, on en ressort à pied, plus
@@ -2675,7 +2780,16 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 		vus_trains.append([int(t["id"]), int(t["s"]), int(t["sens"]), int(t["v"]),
 			int(float(t["arret"]) * 10.0)])
 
-	return {"g": vus_gens, "a": vus_autos, "c": vues_caisses, "b": vus_barrages, "h": vus_helicos,
+	# LES REPAIRES PRIS : deux entiers par repaire, et il n'y en a qu'une
+	# poignée par manche. Ils voyagent parce que la VILLE change — le tag, les
+	# hommes qui n'y renaissent plus, l'armurerie qui s'ouvre à son preneur.
+	var vus_repaires: Array = []
+	for id_r in repaires_pris:
+		vus_repaires.append([int(id_r), String(repaires_pris[id_r]["j"]),
+			int(repaires_pris[id_r]["gang"])])
+
+	return {"rp": vus_repaires,
+		"g": vus_gens, "a": vus_autos, "c": vues_caisses, "b": vus_barrages, "h": vus_helicos,
 		"f": vus_feux, "e": etats, "pg": vus_pieges, "ac": vus_a_cotes, "tr": vus_trains}
 
 func _regarde(point: Vector2, joueurs: Dictionary) -> bool:
@@ -2774,6 +2888,10 @@ func appliquer_instantane(charge: Dictionary) -> void:
 	feux = _fusionner(feux, charge.get("f", []), func(entree: Array) -> Dictionary:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
 			"force": float(entree[3]) / 100.0, "t": 0.0, "propage": PROPAGATION, "ronge": RONGE})
+
+	for entree in charge.get("rp", []):
+		if typeof(entree) == TYPE_ARRAY and (entree as Array).size() >= 3:
+			repaires_pris[int(entree[0])] = {"j": String(entree[1]), "gang": int(entree[2])}
 
 	var etats = charge.get("e", {})
 	if typeof(etats) == TYPE_DICTIONARY:

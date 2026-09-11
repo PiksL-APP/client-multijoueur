@@ -93,6 +93,12 @@ static func _brut(nom: String) -> AABB:
 	_gabarits[nom] = boite[0]
 	return boite[0]
 
+## ⚠ `t` est la transformation du PARENT, pas celle du nœud : la fonction
+## applique elle-même celle du nœud. `echelle_du_pantin` lui passait
+## `e.transform` — donc la transformation de l'enfant DEUX FOIS. La casquette,
+## posée à y = 3, était mesurée à y = 6 : le pantin rentrait sous un plafond
+## deux fois trop haut et sortait à MOITIÉ de sa taille. C'est ce qui faisait
+## que les hommes d'un repaire étaient plus petits que le joueur debout à côté.
 static func _cumuler(noeud: Node, t: Transform3D, boite: Array) -> void:
 	var t2 := t
 	if noeud is Node3D:
@@ -185,6 +191,7 @@ const MARQUES := {
 	"coffre": Color("#fab219"),          ## l'argent — Palette.AVERTISSEMENT
 	"garde-robe": Color("#3987e5"),      ## la tenue — Palette.SERIE
 	"armurerie": Color("#d03b3b"),       ## les armes du gang — Palette.CRITIQUE
+	"frigo": Color("#5ad6a8"),           ## les provisions — PlanVille.COULEUR_SUPERETTE
 	"porte": Color("#0ca30c"),           ## la sortie — Palette.BON
 }
 ## En tuiles : 44 cm. Essayé à 68 — trois flaques de couleur au milieu du
@@ -221,9 +228,19 @@ static func point_de_poste(id: String, genre: String) -> Vector2:
 	var p: Dictionary = poste(id, genre)
 	if p.is_empty():
 		return Vector2.ZERO
-	# Un cheveu de dégagement suffit : on veut le bord du meuble, pas le milieu
-	# de la pièce — au-delà, on sortirait de la portée d'interaction.
-	return degager(id, p["p"], 0.05)
+	# ⚠ DEVANT, c'est du côté de la FAÇADE — pas « par la sortie la plus
+	# courte du gabarit », qui est ce que `degager` seul faisait : pour le lit
+	# de l'Atelier, la sortie la plus courte était les dix-huit centimètres
+	# entre le lit et sa table de chevet. La marque y était invisible, et le
+	# joueur ne pouvait pas s'y tenir. La façade regarde +Z à r = 0 (la
+	# convention du kit, cf. `contre`), et tourne d'un quart de tour par r.
+	var n: Vector2 = [Vector2(0, 1), Vector2(1, 0), Vector2(0, -1), Vector2(-1, 0)][int(p["r"]) % 4]
+	var b := gabarit(String(p["nom"]))
+	var prof: float = (b.size.z if int(p["r"]) % 2 == 0 else b.size.x) * float(p["t"]) * 0.5
+	var devant: Vector2 = p["p"] + n * (prof + RAYON_MARCHE + 0.02)
+	# Au rayon du JOUEUR : un point où l'on ne peut pas se tenir n'est pas un
+	# poste. Si une chaise occupe le devant, on glisse au plus près.
+	return devant if libre(id, devant) else degager(id, devant)
 
 ## Un disque plat, posé À RAS DU SOL et non éclairé : une marque qui prend
 ## l'ombre d'un meuble ne se voit plus, et c'est justement contre les meubles
@@ -294,6 +311,12 @@ const POSTES := {
 	## là : un appartement n'en a pas, et `poser_marques` saute sans broncher
 	## un poste que le plan ne contient pas.
 	"armurerie": [RATELIER],
+	## LE FRIGO : le garde-manger de la planque. Il n'a demandé AUCUN modèle
+	## neuf — les huit appartements en avaient déjà un, posé là par décoration
+	## il y a des semaines. C'est tout l'intérêt de reconnaître un poste à son
+	## MODÈLE : le meuble existe, il suffit de lui donner un sens.
+	"frigo": ["kitchenFridge", "kitchenFridgeLarge", "kitchenFridgeSmall",
+		"kitchenFridgeBuiltIn"],
 	"garde-robe": ["coatRackStanding", "coatRack", "bedDouble", "bedSingle", "bedBunk"],
 }
 
@@ -303,7 +326,8 @@ static func poste(id: String, genre: String) -> Dictionary:
 	for modele in POSTES.get(genre, []):
 		for m in meubles:
 			if String(m[0]) == String(modele):
-				return {"p": Vector2(float(m[1]), float(m[2])), "nom": String(m[0])}
+				return {"p": Vector2(float(m[1]), float(m[2])), "nom": String(m[0]),
+					"r": int(m[3]), "t": float(m[5]) if m.size() > 5 else 1.0}
 	return {}
 
 # ------------------------------------------------------------ le joueur dedans
@@ -340,11 +364,20 @@ static func echelle_du_pantin(pantin: Node3D, cle: String = "") -> float:
 	if _echelles.has(k):
 		return _echelles[k]
 	var boite := [AABB(), false]
-	# La jauge de vie flotte au-dessus de la tête : la compter reviendrait à
-	# mesurer le pantin plus son étiquette, et il rentrerait à croupetons.
-	for e in pantin.get_children():
-		if e is Node3D and String((e as Node).name) != "Vie":
-			_cumuler(e, (e as Node3D).transform, boite)
+	# ⚠ ON MESURE LE CORPS, PAS LES ACCESSOIRES. Un homme de gang porte une
+	# casquette perchée à trois unités au-dessus du sol ; la compter, c'est
+	# mesurer un chapeau et rentrer l'homme dessous. La `Silhouette` est le
+	# maillage Kenney, et c'est elle qui fait la taille de quelqu'un — les
+	# cinq peaux du casting mesurent d'ailleurs exactement la même chose.
+	var corps := pantin.get_node_or_null("Silhouette")
+	if corps != null:
+		_cumuler(corps, Transform3D(), boite)
+	else:
+		# La jauge de vie flotte au-dessus de la tête : la compter reviendrait
+		# à mesurer le pantin plus son étiquette.
+		for e in pantin.get_children():
+			if e is Node3D and String((e as Node).name) != "Vie":
+				_cumuler(e, Transform3D(), boite)
 	var haut: float = maxf(0.01, (boite[0] as AABB).size.y) / MARGE_BOITE
 	_echelles[k] = TAILLE_JOUEUR / haut
 	return _echelles[k]
@@ -1110,7 +1143,12 @@ static func _taudis() -> Dictionary:
 			# l'entrée, avec l'évier au nord et les cartons à l'est — on entrait
 			# dans un sas de deux pas. Aucune photo ne le montrait ;
 			# `outils/marche.gd` a déclaré 97 % du sol inatteignable.
-			pose("coatRackStanding", 0.92, 2.35, 3),
+			# Puis à (0,92 ; 2,35), à deux pas du paillasson : sa marque BLEUE
+			# se superposait à la VERTE de la porte, et le joueur ne savait plus
+			# laquelle des deux `F` allait servir. Il est contre le mur est du
+			# séjour, entre le coffre et le canapé — assez loin du coffre pour
+			# que les deux marques ne se touchent pas.
+			pose("coatRackStanding", 2.86, 1.68, 3),
 			pose("rugDoormat", 0.5, 2.86, 2),
 			pose("lampSquareCeiling", 1.2, 0.7, 2, 1.06),
 			pose("lampSquareCeiling", 2.4, 1.6, 2, 1.06),
@@ -1332,6 +1370,18 @@ static func _atelier() -> Dictionary:
 			contre("desk", "N", 1.30, 0),
 			contre("bookcaseOpen", "N", 2.00, 0),
 			contre("bookcaseOpenLow", "N", 2.60, 0),
+			# ⚠ LE FRIGO A QUITTÉ LE COIN NUIT. Il y était dans l'angle, coincé
+			# entre le lit et l'évier : tant qu'il n'était qu'un meuble ça ne
+			# gênait personne, mais depuis qu'on y range ses provisions il faut
+			# pouvoir s'en approcher — et `outils/marche.gd` l'a déclaré
+			# INATTEIGNABLE deux fois de suite. Dans l'atelier d'un garagiste,
+			# le frigo est au fond de l'atelier ; c'est même plus juste.
+			# ⚠ Posé d'abord à 3,40 : c'est-à-dire SUR le coffre (3,50), que
+			# `outils/verifier.py` a vu chevaucher. Le mur nord n'a qu'un mètre
+			# vingt de libre après la bibliothèque basse : le frigo prend le
+			# début, le coffre l'angle, et les soixante centimètres entre les
+			# deux sont exactement ce qu'exige la règle du coffre.
+			contre("kitchenFridgeSmall", "N", 3.10, 0),
 			pose("computerScreen", 1.30, 0.24, 0, 0.384),
 			pose("kitchenBlender", 0.40, 0.24, 0, 0.384),
 			pose("radio", 2.60, 0.30, 0, 0.40),
@@ -1359,7 +1409,7 @@ static func _atelier() -> Dictionary:
 			contre("bedDouble", "N", 5.05, 0),
 			contre("cabinetBedDrawer", "N", 4.35, 0),
 			pose("lampSquareTable", 4.35, 0.13, 2, 0.263),
-			contre("kitchenFridgeSmall", "E", 0.60, 6),
+			contre("kitchenCabinet", "E", 0.60, 6),
 			contre("kitchenSink", "E", 1.10, 6),
 			contre("kitchenCabinet", "E", 1.55, 6),
 			pose("kitchenMicrowave", 5.75, 1.55, 3, 0.45),
@@ -1383,7 +1433,7 @@ static func _atelier() -> Dictionary:
 			# LE COFFRE : un par repaire, un seul, et JAMAIS dans une file de
 			# meubles — adossé à côté d'un placard, il se lit comme un placard.
 			# `outils/verifier.py` lui impose soixante centimètres de vide.
-			pose("c:coffre", 3.50, 0.19, 0),
+			pose("c:coffre", 3.80, 0.19, 0),
 		],
 	}
 
@@ -1475,18 +1525,14 @@ static func _pavillon() -> Dictionary:
 			# LE COFFRE : un par repaire, un seul, et JAMAIS dans une file de
 			# meubles — adossé à côté d'un placard, il se lit comme un placard.
 			# `outils/verifier.py` lui impose soixante centimètres de vide.
-			# ⚠ À UN PAS DE LA PORTE (1,0 tuile) : on ouvre son coffre depuis le
-			# seuil, sans entrer chez soi. C'EST ASSUMÉ, faute de mieux.
-			# `marche.gd --coffre` ne trouve dans ce plan AUCUNE place — ni
-			# adossée, ni même au milieu d'une pièce — qui laisse au coffre les
-			# soixante centimètres de vide qu'exige le catalogue. Essayés : le
-			# mur est de la cuisine (devant la porte de la chambre), le nord de
-			# la chambre (collé à la table à manger de l'autre côté de la
-			# cloison), l'angle nord-ouest du séjour (collé à l'enceinte, puis
-			# à la bibliothèque). Le pavillon est simplement le plan le plus
-			# meublé des huit : c'est un MEUBLE à retirer, pas le coffre à
-			# déplacer, et l'outil dit lequel.
-			pose("c:coffre", 3.45, 3.81, 2),
+			# Dans la CHAMBRE, contre la cloison de la cuisine, à 2,3 tuiles de
+			# la porte : là où l'on met un coffre dans une maison. Il a passé
+			# des jours à un pas du seuil parce que `marche.gd --coffre` jurait
+			# qu'aucune place n'existait — deux aveuglements de l'outil, pas du
+			# plan : il comptait la table à manger DE L'AUTRE CÔTÉ de la cloison
+			# comme un meuble collé, et il prenait toute arête ouverte entre
+			# deux tuiles d'une même pièce pour un passage à dégager.
+			contre("c:coffre", "N", 4.25, 2),
 		],
 	}
 
@@ -1533,7 +1579,7 @@ static func _poste() -> Dictionary:
 			contre("bookcaseOpen", "S", 1.95, 4),
 			pose("cardboardBoxClosed", 2.10, 3.65, 2),
 			pose("cardboardBoxClosed", 2.45, 3.65, 3),
-			pose("trashcan", 2.65, 0.35, 2),
+			pose("trashcan", 1.10, 0.22, 2),
 			pose("pottedPlant", 0.35, 3.30, 2),
 			pose("coatRackStanding", 0.35, 2.15, 2),
 			pose("table", 1.60, 2.30, 3),
@@ -1542,6 +1588,15 @@ static func _poste() -> Dictionary:
 			pose("n:cup-coffee", 1.55, 2.20, 2, 0.33),
 			pose("n:donut", 1.72, 2.42, 2, 0.33),
 			pose("radio", 2.55, 2.30, 3),
+			# LE FRIGO du coin café — un commissariat en a un, et depuis que
+			# les provisions se rangent chez soi il en FAUT un : `_poste` était
+			# le seul des huit appartements à ne pas en avoir, et l'on ne
+			# pouvait donc rien y stocker. Le banc l'a dit avant nous.
+			# ⚠ Posé d'abord au milieu de la pièce, FACE À LA PORTE de la
+			# cellule et dans son dégagement — c'est l'écueil de `pose()` sans
+			# photo. Il prend l'angle nord-est, contre le mur est ; la poubelle
+			# qui y était file de l'autre côté du bureau d'angle.
+			contre("kitchenFridgeSmall", "E", 0.55, 3),
 			pose("lampSquareCeiling", 1.40, 1.00, 2, HAUT - 0.23),
 			pose("lampSquareCeiling", 1.40, 3.00, 2, HAUT - 0.23),
 			pose("rugRectangle", 1.45, 3.20, 3),

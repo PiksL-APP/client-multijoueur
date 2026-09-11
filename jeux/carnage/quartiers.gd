@@ -533,9 +533,9 @@ static func _compter_depots(carte: CarteVille, dessin: Array) -> int:
 ## on veut qu'ils paraissent si on regarde.
 enum {
 	P_SOLS = 1, P_CHAUSSEES = 2, P_BATIMENTS = 4, P_VERDURE = 8,
-	P_MOBILIER = 16, P_BATEAUX = 32, P_OBJETS = 64,
+	P_MOBILIER = 16, P_BATEAUX = 32, P_OBJETS = 64, P_EAU = 128,
 }
-const P_TOUT := 127
+const P_TOUT := 255
 
 static func batir_fiche(fiche: Dictionary, id: String = "atelier",
 		zone: Rect2i = Rect2i(), prete: Dictionary = {}, passes: int = P_TOUT,
@@ -556,14 +556,272 @@ static func batir_fiche(fiche: Dictionary, id: String = "atelier",
 	var alea := RandomNumberGenerator.new()
 	alea.seed = int(fiche.get("graine", 1))
 
+	if passes & P_EAU: _poser_eau(racine, carte, dessin, zone)
 	if passes & P_SOLS: _poser_sols(racine, carte, dessin, fiche, zone)
 	if passes & P_CHAUSSEES: _poser_chaussees(racine, carte, dessin, zone)
 	if passes & P_BATIMENTS: _poser_batiments(racine, carte, dessin, fiche, alea, zone, listes, seaux)
 	if passes & P_VERDURE: _poser_verdure(racine, carte, dessin, alea, zone)
-	if passes & P_MOBILIER: _poser_mobilier(racine, carte, dessin, alea, zone)
+	if passes & P_MOBILIER:
+		_poser_mobilier(racine, carte, dessin, alea, zone)
+		_poser_panneaux(racine, carte, dessin, alea, zone)
 	if passes & P_BATEAUX: _poser_bateaux(racine, dessin, alea, zone)
 	if passes & P_OBJETS: _poser_objets(racine, carte, fiche, zone)
 	return racine
+
+
+# ─────────────────────────── LES PANNEAUX PUBLICITAIRES ───────────────────────
+#
+## ⚠ LE DOSSIER FAIT LA LISTE, PAS LE CODE. Les affiches vivent dans
+## `images/panneaux/` et s'appellent `pub01.jpg`, `pub02.jpg`, et ainsi de
+## suite. On les cherche en comptant : le client dépose un fichier de plus et il
+## est en ville à la partie suivante, sans qu'on ait une ligne à écrire. On
+## s'arrête après trois numéros manquants d'affilée — de quoi survivre à un
+## trou dans la numérotation sans balayer cent fichiers pour rien.
+##
+## ⚠ `DirAccess` NE SERT À RIEN ICI. Dans un export, une image importée n'est
+## plus un `.jpg` dans le paquet mais une texture compilée : lister le dossier
+## rendrait des noms qu'on ne peut pas charger. `ResourceLoader.exists` sur le
+## chemin d'ORIGINE, lui, suit la table de remappage et marche partout.
+const PUB_DOSSIER := "res://images/panneaux/"
+const PUB_LARGE := 1.7 * CASE              ## 34 unités, soit 17 m de large
+const PUB_HAUT := PUB_LARGE * 9.0 / 16.0   ## le format 16:9 d'une miniature
+## ⚠ UN PANNEAU SE VOIT DE LOIN OU NE SERT À RIEN. À treize unités de pied, il
+## arrivait à mi-hauteur du premier étage : depuis la rue d'en face, le moindre
+## immeuble le cachait. À vingt-six — treize mètres — il passe au-dessus des
+## pavillons et se lit d'un bout de l'avenue à l'autre, ce qui est exactement
+## le métier d'un panneau d'affichage.
+const PUB_PIED := 26.0                     ## la hauteur des poteaux
+const PUB_ECART := 34                      ## le côté du pavé : un panneau par pavé
+
+static var _affiches: Array[String] = []
+static var _pub_matieres: Dictionary = {}
+static var _pub_cadre: StandardMaterial3D = null
+
+static func affiches() -> Array[String]:
+	if not _affiches.is_empty():
+		return _affiches
+	var trous := 0
+	var n := 1
+	while trous < 3 and n < 200:
+		var chemin := PUB_DOSSIER + "pub%02d.jpg" % n
+		if ResourceLoader.exists(chemin):
+			_affiches.append(chemin)
+			trous = 0
+		else:
+			trous += 1
+		n += 1
+	return _affiches
+
+## ⚠ UNE MATIÈRE PAR AFFICHE, PARTAGÉE. Quarante panneaux par morceau de ville
+## et une `StandardMaterial3D` neuve à chaque fois, c'est quarante appels de
+## rendu de plus là où il en faut un par image.
+static func _matiere_pub(chemin: String) -> StandardMaterial3D:
+	if _pub_matieres.has(chemin):
+		return _pub_matieres[chemin]
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = load(chemin)
+	m.roughness = 0.62
+	m.metallic = 0.0
+	# Un panneau d'affichage est ÉCLAIRÉ : la nuit, il reste lisible, et c'est
+	# la moitié de ce qui fait une ville de nuit. On passe donc par l'émission,
+	# faible de jour (elle se noie dans le soleil) et seule source la nuit.
+	m.emission_enabled = true
+	m.emission_texture = m.albedo_texture
+	m.emission = Color(1, 1, 1)
+	# ⚠ UNE ÉMISSION FORTE BRÛLE L'AFFICHE EN PLEIN JOUR. À 0,55 elle s'ajoutait
+	# au soleil et le visuel sortait blanc : illisible le jour, correct la nuit.
+	# À 0,18 l'albédo mène de jour, et l'émission suffit à garder le panneau
+	# lisible une fois la nuit tombée.
+	m.emission_energy_multiplier = 0.18
+	m.cull_mode = BaseMaterial3D.CULL_BACK
+	_pub_matieres[chemin] = m
+	return m
+
+## LE PANNEAU : deux poteaux, un cadre, une affiche. Rien de plus — un panneau
+## d'affichage EST cette silhouette-là, et lui ajouter des passerelles et des
+## projecteurs le ferait lire comme un échafaudage.
+static func _panneau(racine: Node3D, centre: Vector3, tour: float, chemin: String) -> void:
+	if _cube == null:
+		_cube = BoxMesh.new()
+		_cube.size = Vector3.ONE
+	if _pub_cadre == null:
+		_pub_cadre = StandardMaterial3D.new()
+		_pub_cadre.albedo_color = Color("#2f3338")
+		_pub_cadre.roughness = 0.8
+	var base := Basis(Vector3.UP, tour)
+	var mi_h := PUB_PIED + PUB_HAUT * 0.5
+	for s in [-1.0, 1.0]:
+		var n := MeshInstance3D.new()
+		n.mesh = _cube
+		n.material_override = _pub_cadre
+		n.transform = Transform3D(base.scaled(Vector3(1.5, PUB_PIED, 1.5)),
+			centre + base * Vector3(s * PUB_LARGE * 0.31, PUB_PIED * 0.5, 0.0))
+		racine.add_child(n)
+	var cadre := MeshInstance3D.new()
+	cadre.mesh = _cube
+	cadre.material_override = _pub_cadre
+	cadre.transform = Transform3D(
+		base.scaled(Vector3(PUB_LARGE + 1.6, PUB_HAUT + 1.6, 1.4)),
+		centre + Vector3(0.0, mi_h, 0.0))
+	racine.add_child(cadre)
+	var toile := MeshInstance3D.new()
+	var q := QuadMesh.new()
+	q.size = Vector2(PUB_LARGE, PUB_HAUT)
+	toile.mesh = q
+	toile.material_override = _matiere_pub(chemin)
+	# ⚠ L'AFFICHE VA DU CÔTÉ DE LA RUE, ET `QuadMesh` REGARDE DÉJÀ +Z. Décalée
+	# en −Z puis retournée d'un demi-tour, elle se retrouvait DERRIÈRE le cadre
+	# et tournée vers les jardins : de la rue, on ne voyait qu'un rectangle
+	# noir. Un poil devant en +Z, et pas de demi-tour.
+	toile.transform = Transform3D(base, centre + Vector3(0.0, mi_h, 0.0)
+		+ base * Vector3(0.0, 0.0, 0.75))
+	racine.add_child(toile)
+
+## ⚠ UN PANNEAU REGARDE LA ROUTE. Posé n'importe où il ne sert à rien : on le
+## met sur une case LIBRE qui touche une rue DROITE, et on le tourne vers elle.
+static func _site_panneau(carte: CarteVille, dessin: Array, c: Vector2i) -> Vector2i:
+	if not carte.cases.has(c) or carte.route(c) or carte.case_prise(c):
+		return Vector2i.ZERO
+	if not ",;o^P".contains(_car(dessin, c.x, c.y)):
+		return Vector2i.ZERO
+	if not pente_ici(carte, dessin, c).is_empty():
+		return Vector2i.ZERO
+	var vers := _vers(dessin, c, CHAUSSEE)
+	if vers == Vector2i.ZERO:
+		return Vector2i.ZERO
+	var v: Vector2i = c + vers
+	if not carte.route(v) or carte.case_prise(v):
+		return Vector2i.ZERO
+	if String(carte.tuile(v)[0]) != "road-straight":
+		return Vector2i.ZERO
+	return vers
+
+## ⚠ UN PANNEAU PAR PAVÉ, ET LE CHOIX NE DOIT DÉPENDRE QUE DE LA POSITION. La
+## ville se bâtit par morceaux : une règle qui compterait les panneaux déjà
+## posés en sortirait un nombre différent selon l'ordre d'affichage, et le même
+## panneau paraîtrait deux fois au passage d'une frontière.
+##
+## Premier essai : deux modulos sur les coordonnées. Sur trente-six mille cases,
+## ça donnait QUATRE emplacements — un tirage indépendant du terrain ne tombe
+## presque jamais sur une case qui convient, et les mille cinquante cases
+## valables du dessin n'y pouvaient rien.
+##
+## La règle qui marche : on découpe la ville en pavés de `PUB_ECART` cases, on
+## tire dans chaque pavé un POINT DE MIRE d'après ses seules coordonnées, et le
+## panneau va à la case valable la plus proche de ce point. Le terrain choisit,
+## le hasard place — et deux morceaux voisins trouvent la même réponse.
+static func _panneau_du_pave(carte: CarteVille, dessin: Array, c: Vector2i) -> bool:
+	var b := Vector2i(floori(float(c.x) / PUB_ECART) * PUB_ECART,
+		floori(float(c.y) / PUB_ECART) * PUB_ECART)
+	var h := posmod(b.x * 73856093 ^ b.y * 19349663, PUB_ECART * PUB_ECART)
+	var mire := b + Vector2i(h % PUB_ECART, (h / PUB_ECART) % PUB_ECART)
+	var elu := Vector2i(-999, -999)
+	var dmin := 99999
+	for j in PUB_ECART:
+		for i in PUB_ECART:
+			var v := b + Vector2i(i, j)
+			if _site_panneau(carte, dessin, v) == Vector2i.ZERO: continue
+			var d: int = absi(v.x - mire.x) + absi(v.y - mire.y)
+			# ⚠ LE TERRAIN DÉGAGÉ PASSE DEVANT. Un panneau au fond d'un jardin
+			# entre deux immeubles est un panneau qu'on ne voit pas. Sur un
+			# parking ou une esplanade, il a le recul qu'il lui faut — on
+			# compte donc ces cases comme dix cases plus près de la mire.
+			if "Po;".contains(_car(dessin, v.x, v.y)): d = maxi(0, d - 10)
+			# À égalité, la case la plus au nord-ouest : il faut UNE réponse,
+			# pas une réponse qui dépend de l'ordre du balayage.
+			if d < dmin or (d == dmin and (v.y < elu.y or (v.y == elu.y and v.x < elu.x))):
+				dmin = d
+				elu = v
+	return elu == c
+
+static func _poser_panneaux(racine: Node3D, carte: CarteVille, dessin: Array,
+		alea: RandomNumberGenerator, zone: Rect2i = Rect2i()) -> void:
+	var liste := affiches()
+	if liste.is_empty(): return
+	for c in _cases_de(carte, zone):
+		var vers := _site_panneau(carte, dessin, c)
+		if vers == Vector2i.ZERO: continue
+		if not _panneau_du_pave(carte, dessin, c): continue
+		var centre := carte.centre(c)
+		var k := posmod(c.x * 73856093 ^ c.y * 19349663, liste.size())
+		_panneau(racine, Vector3(centre.x, carte.hauteur(c), centre.z),
+			atan2(float(vers.x), float(vers.y)), String(liste[k]))
+
+## ─────────────────────────────── LA MER ───────────────────────────────
+##
+## ⚠ LA CARTE DESSINÉE N'AVAIT PAS DE MER. Le shader d'eau existe depuis
+## longtemps — `MatieresCarnage.EAU`, une nappe low poly dont chaque sommet est
+## levé par une fonction de sa position, normale reprise à la dérivée de la
+## face, d'où le papier plié qui va avec les voxels — mais il n'était branché
+## que sur la ville PROCÉDURALE (`MorceauVille`). Autour de Pikstown, il n'y
+## avait rien du tout : chaque banc et l'éditeur posaient leur propre
+## `PlaneMesh` bleu, plat et mort, et le jeu n'en posait aucun.
+##
+## ⚠ IL FAUT DE LA GÉOMÉTRIE POUR QU'UNE VAGUE EXISTE. Le déplacement se fait
+## au SOMMET : une nappe d'un seul quad n'a que quatre sommets et reste plate
+## quoi qu'on fasse. On découpe donc chaque case en `EAU_DECOUPE²` carreaux —
+## quatre par côté, soit cinq unités de large, la taille d'une facette.
+##
+## ⚠ ET ON NE PAVE QUE LE BORD. Pikstown compte près de cinquante mille cases
+## d'eau : toutes découpées, c'est un million et demi de triangles pour une
+## houle qu'on ne voit qu'au rivage. Au-delà de `EAU_LARGEUR` cases de la
+## terre, le large redevient un aplat — même matière, même teinte, mais deux
+## triangles.
+const EAU_DECOUPE := 4
+const EAU_LARGEUR := 14
+
+static func _poser_eau(racine: Node3D, carte: CarteVille, dessin: Array,
+		zone: Rect2i = Rect2i()) -> void:
+	var haut := dessin.size()
+	var large := 0
+	for l in dessin:
+		large = maxi(large, String(l).length())
+	var i0 := 0
+	var i1 := large - 1
+	var j0 := 0
+	var j1 := haut - 1
+	if zone.size != Vector2i.ZERO:
+		i0 = zone.position.x
+		i1 = zone.position.x + zone.size.x - 1
+		j0 = zone.position.y
+		j1 = zone.position.y + zone.size.y - 1
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var pas := CASE / float(EAU_DECOUPE)
+	var quelque := false
+	for j in range(j0, j1 + 1):
+		for i in range(i0, i1 + 1):
+			var c := Vector2i(i, j)
+			if carte.terre(c): continue
+			if not _pres_du_bord(carte, c): continue
+			quelque = true
+			var x0 := float(i) * CASE
+			var z0 := float(j) * CASE
+			for a in EAU_DECOUPE:
+				for b in EAU_DECOUPE:
+					var p1 := Vector3(x0 + float(a) * pas, NIVEAU_MER, z0 + float(b) * pas)
+					var p2 := p1 + Vector3(pas, 0.0, 0.0)
+					var p3 := p1 + Vector3(pas, 0.0, pas)
+					var p4 := p1 + Vector3(0.0, 0.0, pas)
+					for p in [p1, p2, p3, p1, p3, p4]:
+						st.set_normal(Vector3.UP)
+						st.add_vertex(p)
+	if not quelque: return
+	var n := MeshInstance3D.new()
+	n.mesh = st.commit()
+	n.material_override = MatieresCarnage.eau()
+	n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	racine.add_child(n)
+
+## Vrai si la case d'eau est à moins de `EAU_LARGEUR` cases d'une terre.
+static func _pres_du_bord(carte: CarteVille, c: Vector2i) -> bool:
+	for r in range(2, EAU_LARGEUR + 1, 3):
+		for d in CarteVille.COTES:
+			if carte.terre(c + d * r): return true
+		if carte.terre(c + Vector2i(r, r)) or carte.terre(c + Vector2i(-r, r)) \
+				or carte.terre(c + Vector2i(r, -r)) or carte.terre(c + Vector2i(-r, -r)):
+			return true
+	return false
 
 ## LE MOBILIER LIBRE — ce que l'éditeur pose À LA MAIN.
 ##
@@ -699,8 +957,20 @@ static func _poser_sols(racine: Node3D, carte: CarteVille, dessin: Array, fiche:
 				and plate and not (socle > 0 and not carte.route(c)):
 			var fond := -2.6 if sur_mer else float(plus_bas) * PALIER
 			# ⚠ UNE ROUTE EN L'AIR SE POSE SUR DES PILES, PAS SUR UN REMBLAI.
-			if (carte.route(c) or prise) and (car == "=" or flotte or _en_lair(carte, c, PILES)):
-				_pilotis(racine, centre, y, fond)
+			# ⚠ ET SOUS UN PONT, ON NE DESSINE RIEN DU TOUT — ni remblai, ni
+			# poteau de notre fabrication. Le remblai faisait franchir le chenal
+			# sur un mur de roche aussi long que le pont : le terre-plein que le
+			# client avait déjà refusé une fois. Et le poteau faisait double
+			# emploi : `road-bridge` porte les siens, deux fûts par travée, et
+			# une fois la pièce enfoncée de neuf unités ils descendent du
+			# tablier jusqu'au plan d'eau — c'est-à-dire exactement la pile
+			# qu'il faut, celle de la planche Kenney. Y ajouter la nôtre sortait
+			# trois pieds côte à côte.
+			if car == "=":
+				pass
+			elif (carte.route(c) or prise) \
+					and (flotte or _en_lair(carte, c, PILES)):
+				_pilotis(racine, centre, y, fond, c)
 			else:
 				_falaise(racine, centre, y, roche, fond)
 
@@ -773,8 +1043,29 @@ static func _socle_dun_cran(carte: CarteVille, c: Vector2i) -> int:
 ## sud, ou à l'est ET à l'ouest ; le reste est du remblai, et le remblai a bien
 ## le droit d'exister.
 const PILES := 2                       ## le dénivelé, en paliers, qui fait passer aux piles
-const COTE_PILE := 0.13                ## la section d'une pile, en cases
-const ECART_PILE := 0.29               ## son écart au centre, en cases
+## ⚠ UN POTEAU CENTRAL PAR TRAVÉE. La première version plantait QUATRE pieds de
+## treize centièmes de case sous CHAQUE case de tablier : vu de biais, un pont
+## de six cases sortait vingt-quatre bâtons et ressemblait à une rangée de
+## tables de pique-nique. Le kit, lui, porte ses voies sur un seul fût au milieu
+## — c'est la planche du City Kit: Roads, et c'est ce que le client a montré du
+## doigt. Un tablier qui PORTE entre deux appuis espacés, voilà ce qui le fait
+## lire comme un ouvrage ; une forêt de pieds, non.
+const PAS_PILE := 3                    ## un poteau toutes les N cases
+const COTE_PILE := 0.19                ## la section du fût, en cases
+
+## ⚠ `road-bridge` N'EST PAS UN TABLIER, C'EST UN PASSAGE SUPÉRIEUR. Mesuré
+## plateau par plateau : le modèle porte DEUX routes pleines — celle du dessous
+## à Y = 0, et la voie surélevée à Y = +0,45, soit **+9 unités** à l'échelle de
+## la case — reliées par ses propres poteaux. C'est la pièce du kit pour une
+## voie qui enjambe une rue, et c'est exactement celle qu'on voit sur les
+## planches de Kenney.
+##
+## Posée à plat sur une case d'eau, elle sortait donc « une route au-dessus et
+## une en dessous », la seconde flottant sur le chenal. Posée NEUF UNITÉS PLUS
+## BAS, sa voie tombe au niveau de la rue, sa route du dessous passe sous le
+## plan d'eau — invisible — et ses poteaux deviennent les piles du pont. Aucune
+## boîte grise à fabriquer : le kit avait déjà tout.
+const PONT_TABLIER := 0.45 * CASE      ## la hauteur du tablier dans le modèle
 
 static func _en_lair(carte: CarteVille, c: Vector2i, seuil: int) -> bool:
 	var n := carte.palier(c)
@@ -784,30 +1075,35 @@ static func _en_lair(carte: CarteVille, c: Vector2i, seuil: int) -> bool:
 		vide.append(not carte.cases.has(v) or carte.palier(v) <= n - seuil)
 	return (vide[0] and vide[2]) or (vide[1] and vide[3])
 
-static var _pile: BoxMesh = null
+static var _cube: BoxMesh = null
 static var _beton: StandardMaterial3D = null
 
-static func _pilotis(racine: Node3D, centre: Vector3, y: float, fond: float) -> void:
-	if _pile == null:
-		_pile = BoxMesh.new()
-		_pile.size = Vector3(COTE_PILE * CASE, 1.0, COTE_PILE * CASE)
+static func _boite(racine: Node3D, taille: Vector3, ou: Vector3) -> void:
+	if _cube == null:
+		_cube = BoxMesh.new()
+		_cube.size = Vector3.ONE
+	var n := MeshInstance3D.new()
+	n.mesh = _cube
+	n.material_override = _beton
+	n.transform = Transform3D(Basis().scaled(taille), ou)
+	racine.add_child(n)
+
+## LE POTEAU D'UNE TRAVÉE : un fût, au milieu, sous le tablier. Rien d'autre.
+static func _pilotis(racine: Node3D, centre: Vector3, y: float, fond: float,
+		c: Vector2i) -> void:
+	if posmod(c.x + c.y, PAS_PILE) != 0: return
 	if _beton == null:
 		_beton = StandardMaterial3D.new()
-		_beton.albedo_color = Color("#9c9992")
+		# Le gris du tablier, un ton plus clair : un poteau de la couleur de la
+		# route disparaît dans son ombre, un poteau blanc saute aux yeux.
+		_beton.albedo_color = Color("#9aa0aa")
 		_beton.roughness = 1.0
-	# La pile part SOUS le tablier : la chaussée fait déjà son épaisseur, et une
-	# pile qui monte jusqu'au ras de la route lui mange le trottoir.
+	# Le fût s'arrête SOUS le tablier : la chaussée fait déjà son épaisseur, et
+	# un poteau qui monte au ras de la route lui mange le trottoir.
 	var haut := y - PALIER * 0.16
 	if haut - fond < 1.0: return
-	for a in [-1.0, 1.0]:
-		for b in [-1.0, 1.0]:
-			var n := MeshInstance3D.new()
-			n.mesh = _pile
-			n.material_override = _beton
-			n.transform = Transform3D(Basis().scaled(Vector3(1.0, haut - fond, 1.0)),
-				centre + Vector3(a * ECART_PILE * CASE,
-					(haut + fond) * 0.5 - y, b * ECART_PILE * CASE))
-			racine.add_child(n)
+	_boite(racine, Vector3(COTE_PILE * CASE, haut - fond, COTE_PILE * CASE),
+		centre + Vector3(0, (haut + fond) * 0.5 - y, 0))
 
 ## LA FALAISE. Un seul bloc du sol jusqu'à la mer donnait un mur de plâtre de
 ## quarante unités : la ville avait l'air posée sur un socle de maquette. On la
@@ -899,9 +1195,14 @@ const SOUS_DALLE := EPAISSEUR_TUILE + 0.05
 static func _droit_special(dessin: Array, c: Vector2i, quarts: int) -> Array:
 	var car := _car(dessin, c.x, c.y)
 	if car == "=":
-		# LE PONT : le kit a son tablier à parapets, autrement plus lisible
-		# qu'une chaussée posée en l'air.
-		return ["road-bridge", quarts]
+		# LE PONT. ⚠ UN QUART DE TOUR DE PLUS QUE LES AUTRES DROITS. `road-bridge`
+		# est un PASSAGE SUPÉRIEUR : ses deux voies se croisent à angle droit, et
+		# c'est celle du DESSOUS qui suit l'axe de `road-straight`. Mesuré sur le
+		# maillage (bitume du plateau haut touchant chaque bord : nord 36, sud 36,
+		# est 7, ouest 17) : la voie qu'on emprunte va NORD-SUD sans rotation.
+		# Posé avec les quarts du droit, le tablier sortait EN TRAVERS du pont —
+		# une pile de traverses au lieu d'une chaussée.
+		return ["road-bridge", posmod(quarts + 1, 4)]
 	var selon_x := quarts % 2 == 0
 	# Le « côté » d'une rue : ses deux voisines perpendiculaires à la voie.
 	var d: Vector2i = CarteVille.S if selon_x else CarteVille.E
@@ -944,9 +1245,15 @@ static func _poser_chaussees(racine: Node3D, carte: CarteVille, dessin: Array,
 		var nom := String(fiche[0])
 		var ou_bas := 0
 		if nom == "road-straight":
+			# ⚠ LE PASSAGE PIÉTON PASSE AVANT L'ENTRÉE DE GARAGE. Testé après
+			# `_droit_special`, il ne sortait que sur une rue droite SANS
+			# bâtiment de part et d'autre — c'est-à-dire presque jamais dans
+			# une ville dont chaque façade donne sur la rue : cinq zébras pour
+			# douze mille cases de voirie. Une case de rue qui touche un
+			# carrefour est un passage d'abord, une entrée de garage ensuite.
 			var sp: Array = _droit_special(dessin, c, int(fiche[1]))
-			if not sp.is_empty(): fiche = sp
-			elif CarteVille.passage_ici(carte, c): fiche = ["road-crossing", int(fiche[1])]
+			if CarteVille.passage_ici(carte, c): fiche = ["road-crossing", int(fiche[1])]
+			elif not sp.is_empty(): fiche = sp
 			# ⚠ `road-slant-flat` N'EST PAS UNE RAMPE : c'est un tronçon droit
 			# PORTÉ d'un palier (0,27 × 20 ≈ 5 unités), sa version `-high` de
 			# deux. Posé au niveau du BAS, il fait à lui seul la chaussée et son
@@ -960,6 +1267,8 @@ static func _poser_chaussees(racine: Node3D, carte: CarteVille, dessin: Array,
 			nom = String(fiche[0])
 		var ou := carte.centre(c)
 		if ou_bas > 0: ou -= Vector3(0, PALIER * float(ou_bas), 0)
+		# Le passage supérieur se pose par SA VOIE, pas par sa base.
+		if nom == "road-bridge": ou -= Vector3(0, PONT_TABLIER, 0)
 		if CarteVille.AJOUREES.has(nom):
 			_tuile(racine, "tile-low", ou - Vector3(0, SOUS_DALLE, 0), 0, TEINTE_PAVE)
 		_tuile(racine, nom, ou, int(fiche[1]), TEINTE_ROUTE)
@@ -1148,6 +1457,48 @@ static func _poser_batiments(racine: Node3D, carte: CarteVille, dessin: Array,
 
 const ARBRES := ["nature/tree_default", "nature/tree_oak", "nature/tree_fat",
 	"nature/tree_detailed", "nature/tree_cone"]
+
+## ⚠ QUARANTE-NEUF MODÈLES DORMAIENT DANS `modeles/voxel/`. Ce sont les arbres,
+## pins, rochers, fleurs et buissons du hub — dessinés en voxel, à l'échelle du
+## hub (un arbre fait quatre unités) — et la ville n'en posait AUCUN : elle ne
+## connaissait que les quatorze modèles de `kenney/nature`. Or le jeu est un
+## VOXEL / low poly : mêler les deux est le parti pris, pas une entorse.
+##
+## Ils se posent LÀ OÙ LE RELIEF LES APPELLE. Un pin ne pousse pas sur un
+## boulevard : il pousse sur la crête. Un rocher ne traîne pas sur un parking :
+## il affleure au bord d'une falaise. C'est ce qui fait lire le relief de
+## loin — la silhouette d'une colline, c'est sa ligne de pins.
+const VOX := "res://modeles/voxel/"
+const PINS := [VOX + "grand_pin_0.glb", VOX + "grand_pin_1.glb", VOX + "grand_pin_2.glb",
+	VOX + "pin_0.glb", VOX + "pin_1.glb", VOX + "pin_2.glb"]
+const FEUILLUS := [VOX + "arbre_0.glb", VOX + "arbre_1.glb", VOX + "arbre_2.glb",
+	VOX + "arbre_3.glb", VOX + "grand_arbre_0.glb", VOX + "grand_arbre_1.glb",
+	VOX + "grand_arbre_2.glb", VOX + "grand_arbre_3.glb"]
+const PETITS_ARBRES := [VOX + "petit_arbre_0.glb", VOX + "petit_arbre_1.glb",
+	VOX + "petit_arbre_2.glb", VOX + "petit_arbre_3.glb"]
+const ROCHERS := [VOX + "rocher_grand.glb", VOX + "rocher_moyen.glb", VOX + "rocher_petit.glb"]
+## ⚠ LE ROCHER VOXEL SORT BLANC SANS TEINTE : sa palette est claire, et rien
+## dans sa matière ne dit « pierre ». On lui donne la roche des falaises.
+const TEINTE_ROCHER := Color("#8f8a80")
+const SOUS_BOIS := [VOX + "buisson_0.glb", VOX + "buisson_1.glb", VOX + "buisson_2.glb",
+	VOX + "buisson_3.glb", VOX + "buisson_petit_0.glb", VOX + "buisson_petit_1.glb",
+	VOX + "buisson_petit_2.glb", VOX + "buisson_petit_3.glb", VOX + "touffe.glb"]
+const FLEURS := [VOX + "fleur_0.glb", VOX + "fleur_1.glb", VOX + "fleur_2.glb",
+	VOX + "fleur_3.glb"]
+
+## Le palier à partir duquel on est « en hauteur » : les pins remplacent les
+## chênes, les rochers sortent de terre.
+const PALIER_HAUT := 4
+
+## Vrai si la case domine une voisine d'au moins deux paliers : c'est le bord
+## d'une falaise, et c'est là que les rochers affleurent.
+static func _bord_de_falaise(carte: CarteVille, c: Vector2i) -> Vector2i:
+	var n := carte.palier(c)
+	for d in CarteVille.COTES:
+		var v: Vector2i = c + d
+		if carte.cases.has(v) and carte.palier(v) <= n - 2:
+			return d
+	return Vector2i.ZERO
 ## ⚠ LE PALMIER NE POUSSE PAS N'IMPORTE OÙ. Il est réservé au sable : semé avec
 ## les autres, il donnait des cocotiers devant les tours de bureaux.
 const PALMIERS := ["nature/tree_palm", "nature/tree_palm", "nature/tree_cone"]
@@ -1267,11 +1618,51 @@ static func _poser_verdure(racine: Node3D, carte: CarteVille, dessin: Array,
 		_resemer(alea, 7717, c)
 		var car := _car(dessin, c.x, c.y)
 		var y := carte.hauteur(c)
+		# ⚠ LA FALAISE A SES ROCHERS, QUELLE QUE SOIT LA CASE. Une terrasse qui
+		# domine sa voisine de deux paliers sort un mur de roche ; sans rien
+		# dessus, c'est un mur de plâtre. Un ou deux rochers voxel au bord, du
+		# côté du vide, et le mur devient un affleurement. Pas sur la rue ni
+		# sur un bâtiment — sur le trottoir de la falaise seulement.
+		if ",;^'o".contains(car) and not carte.route(c) and not carte.case_prise(c):
+			var vide := _bord_de_falaise(carte, c)
+			if vide != Vector2i.ZERO and pente_ici(carte, dessin, c).is_empty():
+				for k in (2 if alea.randf() < 0.4 else 1):
+					_objet(racine, ROCHERS[alea.randi() % ROCHERS.size()],
+						centre_de(c, y) + Vector3(vide.x, 0, vide.y) * (CASE * 0.36)
+							+ Vector3(alea.randf_range(-4.0, 4.0), 0, alea.randf_range(-4.0, 4.0)),
+						alea.randf_range(2.4, 5.5), alea.randf() * TAU, TEINTE_ROCHER)
+				# Sur une crête haute, un pin isolé au bord du vide : c'est la
+				# silhouette qu'on voit depuis la mer.
+				if carte.palier(c) >= PALIER_HAUT and car == "," and alea.randf() < 0.45:
+					_objet(racine, PINS[alea.randi() % PINS.size()], _dans(c, y, alea),
+						alea.randf_range(10.0, 15.0), alea.randf() * TAU)
 		match car:
 			"^":
+				# ⚠ L'ESSENCE SUIT L'ALTITUDE. En bas, les chênes du kit ; à
+				# mi-pente, les feuillus voxel s'y mêlent ; sur les hauteurs,
+				# des pins et rien d'autre. C'est ce qui fait qu'une colline se
+				# LIT comme une colline, même de l'autre bout de la ville.
+				var haut := carte.palier(c)
 				for k in 3:
-					_objet(racine, ARBRES[alea.randi() % ARBRES.size()], _dans(c, y, alea),
+					var essence: String
+					if haut >= PALIER_HAUT:
+						essence = PINS[alea.randi() % PINS.size()]
+					elif haut >= 2 and alea.randf() < 0.55:
+						essence = FEUILLUS[alea.randi() % FEUILLUS.size()]
+					elif alea.randf() < 0.25:
+						essence = FEUILLUS[alea.randi() % FEUILLUS.size()]
+					else:
+						essence = ARBRES[alea.randi() % ARBRES.size()]
+					_objet(racine, essence, _dans(c, y, alea),
 						alea.randf_range(9.0, 15.0), alea.randf() * TAU)
+				# LE SOUS-BOIS : un bosquet sans buisson ni fleur est trois
+				# troncs sur une pelouse. Deux touffes et une fleur suffisent.
+				for k in 2:
+					_objet(racine, SOUS_BOIS[alea.randi() % SOUS_BOIS.size()], _dans(c, y, alea),
+						alea.randf_range(1.8, 3.4), alea.randf() * TAU)
+				if alea.randf() < 0.5:
+					_objet(racine, FLEURS[alea.randi() % FLEURS.size()], _dans(c, y, alea),
+						alea.randf_range(1.2, 1.8), alea.randf() * TAU)
 			"\'":
 				for k in 5:
 					_objet(racine, "nature/plant_bushLarge", _dans(c, y, alea),
@@ -1334,6 +1725,12 @@ static func _poser_verdure(racine: Node3D, carte: CarteVille, dessin: Array,
 				if alea.randf() < 0.22:
 					_objet(racine, "nature/rock_smallA", _dans(c, y, alea),
 						alea.randf_range(1.6, 3.0), alea.randf() * TAU)
+				if alea.randf() < 0.28:
+					_objet(racine, ROCHERS[alea.randi() % ROCHERS.size()], _dans(c, y, alea),
+						alea.randf_range(2.0, 4.6), alea.randf() * TAU, TEINTE_ROCHER)
+				if alea.randf() < 0.30:
+					_objet(racine, VOX + "touffe.glb", _dans(c, y, alea),
+						alea.randf_range(1.4, 2.2), alea.randf() * TAU)
 			",":
 				# UNE PELOUSE CONTRE UN PAVILLON EST UN JARDIN, pas un terrain
 				# vague : allée vers la rue, clôture sur la limite, jardinière,
@@ -1353,6 +1750,12 @@ static func _poser_verdure(racine: Node3D, carte: CarteVille, dessin: Array,
 						_objet(racine, String(k[0]),
 							centre_de(c, y) + Vector3(vers_rue.x, 0, vers_rue.y) * (CASE * 0.42),
 							float(k[1]), atan2(float(vers_rue.x), float(vers_rue.y)))
+				elif alea.randf() < 0.14:
+					_objet(racine, FLEURS[alea.randi() % FLEURS.size()], _dans(c, y, alea),
+						alea.randf_range(1.2, 1.9), alea.randf() * TAU)
+					if alea.randf() < 0.5:
+						_objet(racine, SOUS_BOIS[alea.randi() % SOUS_BOIS.size()],
+							_dans(c, y, alea), alea.randf_range(1.6, 2.8), alea.randf() * TAU)
 				elif alea.randf() < 0.17:
 					var f: Array = FRICHE[alea.randi() % FRICHE.size()]
 					_objet(racine, String(f[0]), _dans(c, y, alea),
@@ -1463,7 +1866,11 @@ static func _poser_mobilier(racine: Node3D, carte: CarteVille, dessin: Array,
 				# qui avait montré la ville sans un seul lampadaire.
 				_objet(racine, lampe, centre + d, 9.5, t, Color("#6e737c"))
 				_objet(racine, lampe, centre - d, 9.5, t + PI, Color("#6e737c"))
-			if alea.randf() < 0.30:
+			# ⚠ ON NE PLANTE PAS D'ARBRE SUR UN PONT. L'arbre d'alignement se
+			# pose du côté où la case voisine est LIBRE — et sur un tablier,
+			# les deux côtés sont libres : c'est le chenal. On voyait donc des
+			# chênes debout au milieu de l'eau, sous le tablier.
+			if alea.randf() < 0.30 and _car(dessin, c.x, c.y) != "=":
 				var libres: Array = []
 				if _lettre(_car(dessin, c.x + vers.x, c.y + vers.y)) == "": libres.append(d)
 				if _lettre(_car(dessin, c.x - vers.x, c.y - vers.y)) == "": libres.append(-d)
@@ -1474,7 +1881,8 @@ static func _poser_mobilier(racine: Node3D, carte: CarteVille, dessin: Array,
 			# LE POTEAU ÉLECTRIQUE EST UN SIGNE DE ZONE, pas une décoration : il
 			# ne sort que le long de l'industrie et des dépôts. Une ligne
 			# électrique au pied d'une tour de bureaux ne se voit nulle part.
-			if alea.randf() < 0.16 and _industriel(dessin, c, vers):
+			if alea.randf() < 0.16 and _car(dessin, c.x, c.y) != "=" \
+					and _industriel(dessin, c, vers):
 				_objet(racine, "urbain/electricity-pole", centre + d, 17.0, t)
 			if alea.randf() < 0.28:
 				_voiture(racine, centre, selon_x, alea)
@@ -1673,11 +2081,17 @@ static func _poser_bateaux(racine: Node3D, dessin: Array, alea: RandomNumberGene
 				_amarrer(racine, Vector2(float(i) + 0.5, float(j) + float(n) * 0.5), n, false, alea)
 			j += n
 
+static var _tour_flotte: Dictionary = {}
+
 static func _amarrer(racine: Node3D, centre: Vector2, longueur: int, selon_x: bool,
 		alea: RandomNumberGenerator) -> void:
 	for fiche in FLOTTE:
 		if longueur < int(fiche[0]): continue
-		var choix: Array = fiche[1 + alea.randi() % (fiche.size() - 1)]
+		# Tour de rôle par catégorie : les quatre gros navires se relaient au
+		# lieu de se tirer au sort, et aucun ne reste au hangar.
+		var t: int = _tour_flotte.get(int(fiche[0]), 0)
+		_tour_flotte[int(fiche[0])] = t + 1
+		var choix: Array = fiche[1 + t % (fiche.size() - 1)]
 		var chemin := "res://modeles/kenney/" + String(choix[0]) + ".glb"
 		if not ResourceLoader.exists(chemin): return
 		if inventaire: _noter(chemin)
@@ -1705,12 +2119,20 @@ const MENUS := [
 	["bateaux/boat-row-large", 12.0], ["bateaux/ship-small", 140.0],
 ]
 
+## ⚠ UN TIRAGE AU SORT NE COUVRE PAS UNE LISTE. Huit menues embarcations, une
+## trentaine de postes d'amarrage, un dé à huit faces : `boat-speed-c` n'est
+## jamais sortie — pas un défaut de code, la loi des petits nombres. Le tour de
+## rôle, lui, les épuise toutes avant d'en reprendre une, et à l'œil c'est PLUS
+## varié qu'un tirage, pas moins : le hasard fait des doublons, pas la variété.
+static var _tour_menus := 0
+
 static func _annexes(racine: Node3D, centre: Vector2, longueur: int, selon_x: bool,
 		alea: RandomNumberGenerator) -> void:
 	var demi := float(longueur) * 0.5
 	for k in 2:
 		if longueur < 3 or alea.randf() < 0.45: continue
-		var m: Array = MENUS[alea.randi() % MENUS.size()]
+		var m: Array = MENUS[_tour_menus % MENUS.size()]
+		_tour_menus += 1
 		var le_long := alea.randf_range(-demi + 0.6, demi - 0.6)
 		var ecart := (0.9 if k == 0 else -0.9)
 		var ou := centre + (Vector2(le_long, ecart) if selon_x else Vector2(ecart, le_long))

@@ -50,10 +50,88 @@ fait tirer dessus.
 | **Medicar** | — | — | Il arrive quand des corps traînent : le joueur à terre est **relevé à moitié soigné**. | §6.3, phase 6 — **fait** |
 | **Feux** | — | — | Se propagent de véhicule en véhicule, brûlent le joueur, explosent. | §6.1, phase 3 — **fait** |
 | **Train** | rame rouge sur la voie ferrée, quai gris à bande jaune | 150 px à quai | Deux rames sur la seule droite en biais de la ville. À quai (7 s toutes les ~11 000 px), `E` fait monter : il traverse la ville à 940 px/s, plus vite qu'aucune voiture, sans feu ni barrage. En marche, **rien ne l'arrête** — piéton, berline en travers, char. Détail : `claude/le-train.md`. | §1.3 — **fait** |
+| **Supérette** | boutique du kit, auvent turquoise, **pas de porte vert d'eau** | 80 px | Une par secteur. On entre sur la dalle et **le menu s'ouvre tout seul** : huit articles de 40 à 320 $, chacun avec son prix et ses effets. Six places en poche, trente au **frigo de la planque** (F range, E reprend). `G` mange ou boit ce qui manque le plus. Détail : `claude/faim-et-soif.md`. | §4 — **fait** |
 | **Casse (compacteur)** | dalle rouillée à tapis jaune, deux mâchoires, au bord de la voie ferrée | 55 px | Six, une entre chaque paire de quais. Au volant, sur la dalle, `F` **broie** : la voiture disparaît pour de bon, on repart à pied avec 390 à 570 $ selon le gabarit et une caisse d'arme au sol. **Aucune étoile** — c'est la seule sortie propre d'un vol. Détail : `claude/le-train.md`. | §1.3 — **fait** |
-| **Repaires de gang** | tag de la couleur du gang peint au sol, trois hommes dedans | 230 px | À pied sur le tag, `F` **entre** — mais seulement au palier **allié** (80 de respect avec ce gang-là), et le refus dit le chiffre qui manque. Dedans : le **râtelier**, seul comptoir d'armes du jeu (mitraillette 700 $ ou roquettes 1 700 $ selon le gang). Un seul dessin, sept teintes. Détail : `claude/repaires-de-gang.md`. | §3 — **fait** |
+| **Repaires de gang** | tag de la couleur du gang peint au sol, trois hommes dedans | 230 px | Chez un gang **hostile**, s'y tenir ouvre un **RAID** (cinq hommes, et il change de camp). Sinon, à pied sur le tag, `F` **entre** — mais seulement au palier **allié** (80 de respect avec ce gang-là), et le refus dit le chiffre qui manque. Dedans : le **râtelier**, seul comptoir d'armes du jeu (mitraillette 700 $ ou roquettes 1 700 $ selon le gang). Un seul dessin, sept teintes. Détail : `claude/repaires-de-gang.md`. | §3 — **fait** |
 | **Voitures de gang** | carrosserie aux couleurs du gang, **mitrailleuse sur le toit** | — | Garées autour des repaires. Elles viennent **armées** (§1.3) : en voler une, c'est la mitrailleuse de bord gratuite — et `RESPECT_PERDU × 0,4` chez ce gang-là, pendant qu'un rival du secteur y gagne. Détail : `claude/vehicules.md`. | §1.3 — **fait** |
 | **Hommes de gang** | casquette aux couleurs du gang, **anneau au sol** | — | Ils réagissent au **respect** : sous 20 ils tirent à vue, au-dessus de 80 ils tirent sur ce qui vous attaque (flic en chasse, gang hostile). L'anneau dit lequel des cinq paliers — c'est le seul endroit qui peint l'humeur, l'enseigne des cabines ayant repris sa vraie couleur. | §3.3 / §3.4, phase 4 — **fait** |
+
+## La vue subjective
+
+`V` bascule entre la vue du jeu (de haut, 72°) et la **première personne**, à
+hauteur d'homme — debout comme au volant.
+
+Elle ne remplace pas la vue du jeu, elle s'y ajoute : une partie entière à
+hauteur d'homme serait injouable (on ne voit pas la voiture qui arrive par la
+droite, et toutes les portées du jeu sont réglées pour une caméra haute). Mais
+c'est la seule façon de **regarder** la ville qu'on a bâtie — deux cent
+trente-neuf modèles de kit, des néons, des vitrines, des enseignes que personne
+n'avait jamais vus autrement qu'en plan.
+
+⚠ **Son propre corps disparaît.** L'œil est posé dans la tête du pantin : sans
+ça l'écran devient une texture de peau. Les autres joueurs, eux, restent
+visibles — c'est même tout l'intérêt.
+
+⚠ **La caméra saute au lieu de glisser.** Interpolée depuis quarante unités de
+haut, elle traverse les immeubles pendant une seconde et demie.
+
+⚠ **`look_at` refuse deux points confondus**, et ça arrive : à l'arrêt, à la
+première image, la caméra n'a pas encore rejoint l'œil.
+
+## Le raid d'un repaire
+
+Se tenir sur le tag d'un gang qui vous **tire à vue** ouvre un raid : cinq
+hommes du repaire à abattre, et il tombe — 2 600 $, le tag passe à vos couleurs,
+l'armurerie s'ouvre à vous, et le gang n'y renaît plus. Détail :
+`claude/repaires-de-gang.md`.
+
+## Comment une manche se termine
+
+Carnage n'a **pas de chrono** : on reste en ville tant qu'on veut. Depuis que le
+hub et l'écran de résultats ont disparu, `Partie.terminer()` n'était plus appelé
+de nulle part — une manche ne finissait donc **jamais** : ni retour au salon, ni
+classement, ni dépôt du score en base.
+
+**ÉCHAP** ouvre la pause : REPRENDRE, ou **QUITTER LA VILLE**. Le sous-titre dit
+ce qu'on emporte (l'argent sur soi et celui du coffre) — c'est la dernière chose
+qu'on veut vérifier avant de rentrer.
+
+⚠ **ÉCHAP a une précédence**, et elle ne se devine pas : il **ferme** d'abord ce
+qui est ouvert (la triche, la supérette) et n'ouvre la pause que s'il n'y avait
+rien. Sans cet ordre, ÉCHAP devant la caisse d'une supérette proposait de
+quitter la ville.
+
+⚠ **Seul l'hôte conclut.** `terminer()` diffuse le classement ET le dépose en
+base, une fois : quatre clients qui déposent, c'est quatre parties en base pour
+une seule jouée. Un joueur ordinaire demande donc à l'hôte de conclure
+(événement `rentrer`), et l'hôte lui répond par le « fin » que tout le monde
+reçoit.
+
+⚠ **La manche s'arrête pour la table**, et le menu le dit *avant* qu'on appuie.
+On aurait pu ne faire sortir que le partant — mais son score resterait alors
+dans un classement que personne ne dépose, et il faudrait décider quoi faire du
+dernier joueur resté seul en ville. Une manche commence ensemble et finit
+ensemble.
+
+⚠ **Trois menus peuvent se superposer** (la pause, la triche, la boutique) et
+chacun écrivait `Commandes.saisie = <le mien>` : en fermer un rendait les
+commandes alors qu'un autre était encore ouvert, et l'on conduisait à travers
+l'écran. Un seul endroit fait la somme (`_regler_la_saisie`). La roue des
+stations, qui se *tient* au lieu de se déclencher, ne s'ouvre plus par-dessus un
+menu pour la même raison.
+
+Le banc de partie **rentre par la vraie porte** : il s'arrêtait sur le chrono de
+`duree_forcee`, donc la sortie du joueur n'était jamais exercée. Le pilote
+quitte maintenant par le menu à neuf dixièmes du temps ; le chrono reste le
+filet si le menu se coince.
+
+## La faim et la soif
+
+Deux jauges de plus au tableau de bord, sous la vie et la tôle. Elles se vident
+en 260 s (faim) et 200 s (soif), un tiers plus vite à pied, et **à zéro elles
+rongent la vie** : deux points par seconde et par jauge, soit cinquante secondes
+à pleine vie. C'est la pendule qui manquait à une manche sans chrono — mais une
+pendule qu'on remonte, pas un compte à rebours. Détail : `claude/faim-et-soif.md`.
 
 ## Ce que les phases restantes ouvrent
 

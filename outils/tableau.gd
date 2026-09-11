@@ -15,6 +15,8 @@ extends Node3D
 var _sortie := "/tmp/tableau/respect.png"
 var _triche := false
 var _roue := false
+var _superette := false
+var _pause := false
 
 func _ready() -> void:
 	var code := "RESPECT"
@@ -23,6 +25,8 @@ func _ready() -> void:
 		if a.begins_with("--code="): code = a.trim_prefix("--code=")
 		if a == "--triche": _triche = true
 		if a == "--roue": _roue = true
+		if a == "--superette": _superette = true
+		if a == "--pause": _pause = true
 
 	# La nuit forcée : le cycle jour/nuit tourne en temps réel, et deux photos
 	# prises à trois minutes d'écart n'ont pas la même lumière.
@@ -97,11 +101,21 @@ func _ready() -> void:
 	hud.sans_limite = false
 	hud.chrono = 96.0
 	hud.fiche = {
-		"jauges": [{"nom": "VIE", "part": 0.72, "couleur": Palette.BON, "valeur": "72"}],
+		# QUATRE JAUGES : vie, tôle, faim, soif — telles que `fiche_joueur` les
+		# empile. La soif est sous le seuil du creux, donc rouge : c'est l'état
+		# qu'il faut pouvoir juger sur une image, pas celui où tout va bien.
+		"jauges": [
+			{"nom": "VIE", "part": 0.72, "couleur": Palette.BON, "valeur": "72"},
+			{"nom": "TÔLE", "part": 0.55, "couleur": Palette.SERIE, "valeur": "110"},
+			{"nom": "FAIM", "part": 0.48, "couleur": Palette.SERIEUX, "valeur": "48"},
+			{"nom": "SOIF", "part": 0.14, "couleur": Palette.CRITIQUE, "valeur": "14"},
+		],
 		"etoiles": 2,
 		"arme": {"nom": "mitraillette", "munitions": "48"},
 		"argent": {"sur_soi": 1840, "banque": 6200, "planque": true},
-		"puces": [ville.puce_de_gang(moi, chez)],
+		"puces": [ville.puce_de_gang(moi, chez),
+			{"texte": "sandwich ×2", "couleur": Provisions.fiche("sandwich")["couleur"]},
+			{"texte": "bouteille d'eau ×1", "couleur": Provisions.fiche("eau")["couleur"]}],
 		"respect": ville.barres_de_respect(moi, ou),
 		"accent": Palette.SERIE,
 	}
@@ -121,6 +135,48 @@ func _ready() -> void:
 		roue.choix = 2
 		roue.actuelle = 0
 		roue.queue_redraw()
+
+	# `--superette` pose le menu de la boutique, panier à moitié plein et une
+	# réponse de caisse : c'est l'état qu'on ne voit jamais en photographiant
+	# un menu vide.
+	if _superette:
+		var boutique := Control.new()
+		boutique.set_anchors_preset(Control.PRESET_FULL_RECT)
+		boutique.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		boutique.set_script(load("res://ui/superette.gd"))
+		interface.add_child(boutique)
+		var articles: Array = []
+		for a in Provisions.CATALOGUE:
+			articles.append({"cle": String(a["cle"]), "nom": String(a["nom"]),
+				"prix": int(a["prix"]), "effet": Provisions.effet(String(a["cle"])),
+				"couleur": a["couleur"],
+				"possede": 2 if String(a["cle"]) == "sandwich" else (
+					1 if String(a["cle"]) == "eau" else 0)})
+		boutique.articles = articles
+		boutique.argent = 140
+		boutique.poches = 3
+		boutique.poches_max = Provisions.POCHES
+		boutique.choix = 4
+		boutique.message = "sandwich dans le sac"
+		boutique.message_couleur = PlanVille.COULEUR_SUPERETTE
+		boutique.queue_redraw()
+
+	# `--pause` pose le menu de sortie : c'est le seul écran par lequel une
+	# manche se termine, et il ne se voit qu'en appuyant sur ÉCHAP en jeu.
+	if _pause:
+		var repos := Control.new()
+		repos.set_anchors_preset(Control.PRESET_FULL_RECT)
+		repos.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		repos.set_script(load("res://ui/pause.gd"))
+		interface.add_child(repos)
+		repos.sous_titre = "$1840 sur soi · $6200 au coffre"
+		repos.lignes = [
+			{"texte": "REPRENDRE", "detail": "", "couleur": Palette.BON},
+			{"texte": "QUITTER LA VILLE", "detail": "la manche s'arrête pour la table",
+				"couleur": Palette.SERIEUX},
+		]
+		repos.choix = 1
+		repos.queue_redraw()
 
 	if _triche:
 		var menu := Control.new()

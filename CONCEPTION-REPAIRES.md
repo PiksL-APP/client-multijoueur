@@ -462,6 +462,17 @@ Deux choses apprises en les posant :
   côté du lit. `point_de_poste()` donne le point où l'on se tient, et le jeu
   comme la marque l'appellent : deux calculs pour un même point, c'est un bouton
   qui ment tôt ou tard.
+- ⚠ **devant, c'est du côté de la FAÇADE.** La première version « sortait » du
+  gabarit par le plus court chemin, ce qui n'est pas devant : pour le lit de
+  l'Atelier, le plus court chemin était les dix-huit centimètres entre le lit
+  et sa table de chevet — la marque y était invisible et le joueur ne pouvait
+  pas s'y tenir. On part maintenant de la façade (+Z à `r = 0`, la convention
+  du kit), au rayon du JOUEUR, et l'on ne glisse ailleurs que si une chaise
+  occupe le devant.
+- **deux marques qui se touchent, c'est un `F` qu'on ne sait pas lire.** Dans
+  le Taudis, le portemanteau à deux pas du paillasson posait sa marque bleue
+  SUR la verte de la porte. Il est passé contre le mur est du séjour, entre le
+  coffre et le canapé.
 
 ### L'heure se force, sinon le banc ment aussi
 
@@ -552,11 +563,25 @@ a été ajoutée après que l'outil eut proposé, avec aplomb, une place que
 `outils/verifier.py` refusait.
 
 Résultat : **L'Ancien poste** passe de 0,8 à 4,8 tuiles — le coffre est monté
-dans la cellule, à côté du placard, où il se lit comme un casier. Le
-**Pavillon** reste à 1,0 : l'outil n'y trouve aucune autre place. Essayé contre
-le mur est (3,7 tuiles, mais juste devant la porte de la chambre) et au nord de
-la chambre (collé à la table à manger de l'autre côté de la cloison). Il est
-trop meublé : c'est un meuble à déplacer, pas le coffre.
+dans la cellule, à côté du placard, où il se lit comme un casier.
+
+⚠ **Le Pavillon a passé des jours « sans aucune place »**, et c'était l'outil
+qui était aveugle, pas le plan — deux fois :
+
+- il comptait comme collé un meuble **de l'autre côté d'une cloison** : la
+  table à manger de la cuisine, dos au mur nord de la chambre, interdisait tout
+  ce mur. Le même aveuglement était dans la règle d'isolement du coffre de
+  `outils/verifier.py`. Les deux testent maintenant si une cloison coupe le
+  segment entre les deux meubles ;
+- il prenait **toute arête ouverte** entre deux tuiles pour un passage à
+  dégager. Entre deux tuiles d'une même pièce il n'y a rien, et « rien » n'est
+  pas une porte : ce contrôle condamnait le milieu de chaque pièce et il ne
+  restait que les tuiles closes sur trois côtés. Il ne regarde plus que les
+  arêtes `D` et `A`.
+
+Corrigé, l'outil trouve deux places dans le Pavillon, et le coffre est monté
+**dans la chambre**, contre la cloison de la cuisine, à 2,3 tuiles de la porte
+— là où l'on met un coffre dans une maison.
 
 ## Le contrôle tourne enfin partout
 
@@ -603,10 +628,6 @@ faire des courses.
 
 ## Ce qui reste à faire
 
-- Le Pavillon : c'est le plan le plus meublé des huit, et son coffre reste à un
-  pas de l'entrée faute de place. `marche.gd --coffre` n'y trouve rien — ni
-  adossé, ni au milieu d'une pièce — et nomme le meuble à retirer. C'est un
-  meuble de trop, pas un coffre mal posé.
 - La boutique : aujourd'hui la planque s'achète au prix de `PlanVille`, et
   l'appartement suit le quartier. Une vraie boutique montrerait le catalogue,
   ses prix et ses résumés avant l'achat.

@@ -25,6 +25,7 @@ func _init() -> void:
 	_main_forte(carte)
 	_repaires(carte)
 	_voitures_de_gang(carte)
+	_le_raid(carte)
 
 	print("── %s" % ("TOUT PASSE" if _fautes == 0 else "%d FAUTE(S)" % _fautes))
 	quit(1 if _fautes > 0 else 0)
@@ -435,3 +436,103 @@ func _voitures_de_gang(carte: PlanVille) -> void:
 		if ville.respect_pour(moi, int(r)) > 50.0:
 			content = true
 	_dire(content, "un rival du secteur y gagne (%s)" % carte.nom_du_gang(int(rivaux[0])))
+
+# ------------------------------------------------------------------ le raid
+
+## PRENDRE LE REPAIRE D'UN GANG HOSTILE (§3). Le repaire s'ouvrait au palier
+## allié ; restait l'autre bout de la jauge — ce qu'on fait d'un gang qui vous
+## tire à vue. Le banc prouve les quatre règles : il faut être hostile, il faut
+## être SUR le tag, il faut abattre les hommes DU REPAIRE, et une fois pris il
+## ne se repeuple plus.
+func _le_raid(carte: PlanVille) -> void:
+	print("\n7. LE RAID D'UN REPAIRE HOSTILE")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 31
+	var ville := VilleVivante.new(carte, rng)
+	var moi := "essai"
+	var repaire := {}
+	for sy in range(0, PlanVille.LIGNES / PlanVille.SECTEUR):
+		for sx in range(0, PlanVille.COLONNES / PlanVille.SECTEUR):
+			var centre := Vector2((float(sx) + 0.5) * PlanVille.SECTEUR * PlanVille.PAS,
+				(float(sy) + 0.5) * PlanVille.SECTEUR * PlanVille.PAS)
+			for r in carte.lieux_autour(centre, PlanVille.SECTEUR * PlanVille.PAS)["repaires"]:
+				if int(r["gang"]) >= 0:
+					repaire = r
+					break
+			if not repaire.is_empty(): break
+		if not repaire.is_empty(): break
+	_dire(not repaire.is_empty(), "un repaire dans la ville engendrée")
+	if repaire.is_empty():
+		return
+	var chez := int(repaire["gang"])
+	var ou: Vector2 = repaire["p"]
+	var id := int(repaire["id"])
+
+	# ⚠ PAS DE RAID SANS HOSTILITÉ. Nettoyer le repaire d'un gang neutre, ce
+	# serait le contrat de la cabine avec un autre nom.
+	ville.tenir_le_terrain(moi, id, ou, chez)
+	_dire(ville.raid_de(moi).is_empty(),
+		"à %d de respect (neutre), se tenir là n'ouvre rien" % int(ville.respect_pour(moi, chez)))
+
+	ville._ajuster_respect(moi, chez, -40.0)
+	_dire(ville.gang_hostile(moi, chez), "on descend à %d : ils tirent à vue"
+		% int(ville.respect_pour(moi, chez)))
+	ville.sortants.clear()
+	ville.tenir_le_terrain(moi, id, ou, chez)
+	var raid := ville.raid_de(moi)
+	_dire(not raid.is_empty(), "le raid s'ouvre sans toucher une touche")
+	_dire(int(raid["restants"]) == VilleVivante.RAID_HOMMES,
+		"il faut les %d hommes du repaire" % VilleVivante.RAID_HOMMES)
+	_dire(String(_dernier(ville, "raid").get("e", "")) == "ouvre", "et le jeu l'annonce")
+
+	# ⚠ UN HOMME DU GANG LOIN DU TAG NE COMPTE PAS : un raid qu'on avance en
+	# chassant trois rues plus loin se finirait sans jamais s'approcher.
+	var loin := _quelqu_un(ville, VilleVivante.GANG,
+		ou + Vector2(PlanVille.RAYON_REPAIRE * 4.0, 0.0), chez)
+	ville._abattre(loin, moi, false)
+	_dire(int(ville.raid_de(moi)["restants"]) == VilleVivante.RAID_HOMMES,
+		"un homme abattu quatre rayons plus loin ne compte pas")
+
+	# Les cinq du repaire, eux, comptent.
+	var pris := {}
+	for k in VilleVivante.RAID_HOMMES:
+		var gars := _quelqu_un(ville, VilleVivante.GANG, ou + Vector2(20.0 * float(k), 10.0), chez)
+		ville.sortants.clear()
+		ville._abattre(gars, moi, false)
+		if k < VilleVivante.RAID_HOMMES - 1:
+			_dire(int(ville.raid_de(moi)["restants"]) == VilleVivante.RAID_HOMMES - k - 1,
+				"  %d tombé(s), il en reste %d" % [k + 1, VilleVivante.RAID_HOMMES - k - 1])
+		else:
+			pris = _dernier(ville, "raid")
+	_dire(String(pris.get("e", "")) == "pris", "au dernier, le repaire tombe")
+	_dire(ville.repaire_pris_par(id) == moi, "et il est à nous")
+	_dire(ville.raid_de(moi).is_empty(), "le raid se referme")
+
+	# ⚠ UN REPAIRE PRIS NE SE REPEUPLE PLUS. Sans ça le gang renaissait sur le
+	# tag qu'on venait de lui prendre, et la prise ne voulait rien dire.
+	var avant := ville.gens.size()
+	for _i in 40:
+		ville._peupler_les_repaires({moi: {"p": ou}})
+	var nes := 0
+	for personne in ville.gens:
+		if personne.has("attache") and Vector2(personne["attache"]) == ou:
+			nes += 1
+	_dire(nes == 0, "quarante tours d'horloge plus tard, personne n'y renaît (%d)" % nes)
+	# ⚠ LA VILLE GROSSIT QUAND MÊME, et c'est juste : `_peupler_les_repaires`
+	# peuple TOUS les repaires à portée de vue, et il y en a d'autres dans le
+	# secteur. Le banc affirmait « la ville n'a pas grossi » — il vérifiait
+	# donc surtout qu'il n'y avait aucun autre repaire à côté, ce qui n'a rien
+	# à voir avec la prise. Ce qui compte, c'est que les nouveaux venus soient
+	# attachés à un AUTRE tag.
+	var ailleurs := 0
+	for personne in ville.gens:
+		if personne.has("attache") and Vector2(personne["attache"]) != ou:
+			ailleurs += 1
+	_dire(ville.gens.size() == avant or ailleurs > 0,
+		"les %d nouveaux venus appartiennent aux repaires voisins" % (ville.gens.size() - avant))
+
+	# Et il voyage : l'instantané le porte, sinon les trois autres joueurs
+	# voient un tag qui n'a pas changé de main.
+	var copie := VilleVivante.new(carte, rng)
+	copie.appliquer_instantane(ville.instantane({moi: {"p": ou}}))
+	_dire(copie.repaire_pris_par(id) == moi, "l'instantané le dit aux autres joueurs")

@@ -115,6 +115,23 @@ func _ready() -> void:
 			add_child(sous)
 			x += ecart
 			continue
+		# `m:<chemin>` sort N'IMPORTE QUEL modèle de `res://modeles/`, bâti
+		# comme la ville le bâtit (`Decor.instance`, donc les mêmes matières).
+		# Sans ça, choisir entre quatre bâtiments du kit voulait dire les poser
+		# à la main dans l'éditeur, un par un.
+		if String(nom).begins_with("m:"):
+			var chemin := "res://modeles/%s.glb" % String(nom).substr(2)
+			if not ResourceLoader.exists(chemin):
+				push_error("modèle introuvable : " + chemin)
+				continue
+			var piece_m := Decor.instance(chemin)
+			piece_m.position = Vector3(x, 0, 0)
+			add_child(piece_m)
+			var nom_m := Decor.etiquette(String(nom).substr(2).get_file(), Palette.ENCRE_DOUCE, 18)
+			nom_m.position = Vector3(x, 0.4, 3.0)
+			add_child(nom_m)
+			x += ecart
+			continue
 		# `t:` sort la RAME DE TRAIN, `t:quai` le quai. Le train n'est visible
 		# en partie qu'au moment où il passe, à neuf cents pixels par seconde :
 		# sans ce banc on ne le jugerait jamais autrement qu'en photo floue.

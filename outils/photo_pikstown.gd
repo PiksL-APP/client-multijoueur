@@ -12,25 +12,33 @@ func _ready() -> void:
 		if a.begins_with("--sortie="): _sortie = a.trim_prefix("--sortie=")
 		if a.begins_with("--images="): _attendre = int(a.trim_prefix("--images="))
 	var fiche: Dictionary = Quartiers.CATALOGUE["pikstown"]
-	MatieresCarnage.nuit_forcee = 0.12
+	# ⚠ L'HEURE SE CHOISIT. Le banc photographiait toujours à 0,12 — l'aube :
+	# tout sortait bleu nuit, et un défaut de chaussée ne se voit pas dans le
+	# bleu. `--heure=0.5` donne le plein jour, qui est l'heure où l'on juge.
+	var heure := 0.12
+	for a in OS.get_cmdline_args():
+		if a.begins_with("--heure="): heure = float(a.trim_prefix("--heure="))
+	MatieresCarnage.nuit_forcee = heure
 	var amb: Array = MatieresCarnage.ambiance()
 	for n in amb: add_child(n)
-	MatieresCarnage.regler_heure(amb[0], amb[1], amb[2], 0.12)
-	MatieresCarnage.regler_nuit(0.12)
+	MatieresCarnage.regler_heure(amb[0], amb[1], amb[2], heure)
+	MatieresCarnage.regler_nuit(heure)
 	var env: Environment = (amb[0] as WorldEnvironment).environment
 	env.fog_density *= 0.04
 	(amb[1] as DirectionalLight3D).directional_shadow_max_distance = 9000.0
 
+	# ⚠ LE LARGE ET LE RIVAGE NE SONT PAS LA MÊME EAU. Le rivage est bâti par
+	# la passe `P_EAU` du quartier — une nappe découpée en facettes, qui ondule.
+	# Le large, lui, n'a pas besoin d'onduler : personne n'y va. Il garde donc
+	# un aplat, mais AVEC LA MÊME MATIÈRE, sinon la couture se voit à dix
+	# kilomètres. Il se pose un poil plus bas pour que la houle du rivage passe
+	# par-dessus au lieu de batailler avec lui au pixel près.
 	var mer := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(3000.0 * Quartiers.CASE, 3000.0 * Quartiers.CASE)
 	mer.mesh = pm
-	var eau := StandardMaterial3D.new()
-	eau.albedo_color = Color("#2b5f7a")
-	eau.roughness = 0.15
-	eau.metallic = 0.25
-	mer.material_override = eau
-	mer.position = Vector3(0, -2.4, 0)
+	mer.material_override = MatieresCarnage.eau()
+	mer.position = Vector3(0, -2.85, 0)
 	add_child(mer)
 
 	var t0 := Time.get_ticks_msec()

@@ -100,6 +100,46 @@ pense de vous ; chez lui, la réponse est connue (on n'entre qu'au palier allié
 et trois disques verts au sol d'une pièce de six tuiles éclairent le plancher
 comme une piste de danse.
 
+## L'autre bout de la jauge : le RAID
+
+Le repaire s'ouvre au palier allié. Restait ce qu'on fait d'un gang qui vous
+**tire à vue** : rien, jusqu'ici. On évitait son quartier, et c'était tout ce
+que le palier « vous chasse » valait.
+
+Le raid **ne se déclenche pas** : il commence quand on se tient sur le tag d'un
+gang hostile. C'est le geste, pas une touche — on est chez eux, ils tirent, et
+le compteur descend à chaque homme tombé. Cinq hommes (`PAR_REPAIRE`), et le
+repaire tombe : 2 600 $, le tag passe **à vos couleurs**, l'armurerie s'ouvre à
+vous quel que soit le respect, et le gang **n'y renaît plus**.
+
+⚠ **Il faut être hostile.** Nettoyer le repaire d'un gang neutre, ce serait le
+contrat de la cabine avec un autre nom, et sans l'aller-retour de respect qui le
+rend intéressant. Le raid est réservé à ceux qui vous chassent déjà : on ne perd
+rien qu'on n'ait déjà perdu.
+
+⚠ **On compte les hommes DU REPAIRE, pas ceux du gang.** Un raid qu'on avance en
+abattant des passants de la même bannière trois rues plus loin, ce n'est plus un
+raid, c'est une chasse — et on le finirait sans jamais s'approcher du tag. Le
+banc abat un homme à quatre rayons et vérifie que le compteur ne bouge pas.
+
+⚠ **Sortir du tag ne l'annule pas tout de suite** (22 s). Un raid qu'on perd
+parce qu'on s'est mis à couvert derrière un mur serait un raid qu'on ne gagne
+qu'en restant planté au milieu, c'est-à-dire en mourant.
+
+⚠ **Un repaire pris ne se repeuple plus.** Sans ça le gang renaissait sur le tag
+qu'on venait de lui prendre, et la prise ne voulait rien dire : on rejouait le
+même raid en boucle sur le même terrain.
+
+⚠ **Un morceau bâti APRÈS la prise porte un tag neuf**, aux couleurs du gang
+chassé : le repaint de l'événement n'a repeint que les morceaux chargés à ce
+moment-là. On s'éloigne, on revient, et le repaire est redevenu à eux — alors
+que la simulation, elle, sait qu'il est pris. Une passe par image remet les tags
+d'accord avec la ville.
+
+La prise voyage dans l'instantané (deux entiers par repaire) : les trois autres
+joueurs voient le tag changer de camp, et le banc le vérifie en appliquant
+l'instantané à une seconde ville.
+
 ## Le râtelier : un meuble qui n'existait pas
 
 Kenney est un kit de **meubles** — il n'a pas d'arme. Une bibliothèque ouverte
@@ -150,6 +190,7 @@ sept gangs, et les deux armes du jeu vendues quelque part.
   Se retourner quand on entre, ou s'écarter du râtelier, demanderait de les
   faire vivre — et donc de les rendre solides, donc de rouvrir la question du
   passage dans six tuiles.
-- **Le repaire d'un gang hostile.** Aujourd'hui la porte reste simplement
-  fermée. Y entrer de force — un raid, la prise du territoire — est un contenu
-  à part entière, et c'est ce que le guide (§3) laisse entrevoir.
+- **Le territoire ne change pas de main.** Le repaire est pris, le tag est à
+  vos couleurs, mais les pâtés autour restent peints de la bannière du gang
+  chassé : `territoire_du_pate` est procédural, et le faire mentir demanderait
+  une table d'exceptions consultée par toute la ville.

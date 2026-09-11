@@ -25,7 +25,7 @@ FICHIER = "jeux/carnage/pikstown.gd"
 ROUTE = set("#=O(/")
 EAU = set(".~")
 PORTEE = 8          # cases de berge qu'on accepte de percer pour rejoindre la rue
-PONT_MAX = 34       # longueur maximale d'un pont d'île, en cases
+PONT_MAX = 64       # longueur maximale d'un pont d'île, en cases
 
 
 def lire(src, nom):

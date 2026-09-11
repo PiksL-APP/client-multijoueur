@@ -33,6 +33,7 @@ var cle := Vector2i.ZERO
 var voitures: Dictionary = {}     ## id de voiture dormante -> [MultiMesh, indice]
 var cabines: Array = []               ## nœuds de cabine posés dans ce morceau, {n, id}
 var planques: Array = []              ## [{n: Node3D, id, prix}] — l'écriteau change quand on l'achète
+var repaires: Array = []              ## [{n: Node3D, id, gang, p}] — le tag change quand on prend le repaire
 
 ## Le chantier : le morceau se bâtit en ÉTAPES, une par image. Tout d'un coup,
 ## c'était soixante millisecondes dans le navigateur — quatre images perdues,
@@ -591,6 +592,12 @@ func _poser_les_lieux(plan: PlanVille, c0: int, l0: int) -> void:
 		var tag := FormesCarnage.tag_de_gang(plan.couleur_du_gang(int(r["gang"])), plan.nom_du_gang(int(r["gang"])))
 		tag.position = Decor.vers3d(r["p"])
 		add_child(tag)
+		# LE TAG SE RETIENT. Un repaire PRIS (raid, §3) change de couleur : le
+		# jeu doit donc pouvoir le retrouver par son identifiant, comme il
+		# retrouve déjà les cabines et les écriteaux de planque. Sans cette
+		# liste il faudrait fouiller la scène à chaque prise.
+		repaires.append({"n": tag, "id": int(r["id"]), "gang": int(r["gang"]),
+			"p": Vector2(r["p"])})
 	for g in lieux["garages"]:
 		var coin_g := PlanVille.coin_pate(g["pate"])
 		if not rect.has_point(PlanVille.centre_tuile(coin_g.x, coin_g.y)):
@@ -628,6 +635,13 @@ func _poser_les_lieux(plan: PlanVille, c0: int, l0: int) -> void:
 		porte.position = Decor.vers3d(pl["p"])
 		add_child(porte)
 		planques.append({"n": porte, "id": int(pl["id"]), "prix": int(pl["prix"])})
+	for sp in lieux["superettes"]:
+		var coin_sp := PlanVille.coin_pate(sp["pate"])
+		if not rect.has_point(PlanVille.centre_tuile(coin_sp.x, coin_sp.y)):
+			continue
+		var boutique := FormesCarnage.devanture_de_superette()
+		boutique.position = Decor.vers3d(sp["p"])
+		add_child(boutique)
 	for a in lieux["arenes"]:
 		var coin_a := PlanVille.coin_pate(a["pate"])
 		if not rect.has_point(PlanVille.centre_tuile(coin_a.x, coin_a.y)):

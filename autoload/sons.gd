@@ -111,6 +111,9 @@ func _ready() -> void:
 	_radio = AudioStreamPlayer.new()
 	_radio.bus = Reglages.BUS_EFFETS
 	add_child(_radio)
+	_lieu = AudioStreamPlayer.new()
+	_lieu.bus = Reglages.BUS_EFFETS
+	add_child(_lieu)
 	_lister_les_sfx()
 
 ## Lance la musique d'un lieu (`res://sons/<nom>.ogg`, en boucle), en fondu
@@ -195,6 +198,14 @@ func basculer() -> bool:
 	actif = not actif
 	if not actif:
 		arreter_moteur()
+		# La sirène, la radio et l'ambiance d'un lieu ont leurs propres
+		# lecteurs : sans ces trois lignes, couper le son laissait hurler une
+		# poursuite.
+		_sirene.stop()
+		_sirene_niveau = 0
+		_radio.stop()
+		_lieu.stop()
+		_lieu_en_cours = ""
 		_musique.stop()
 		_ambiance.stop()
 	else:
@@ -247,26 +258,60 @@ func _lister_les_sfx() -> void:
 
 ## Un flux de la banque de bruitages, tiré au sort dans sa famille. `null` si
 ## la famille n'existe pas — l'appelant n'a pas à s'en soucier.
+##
+## Les flux sont gardés : un pas toutes les trois dixièmes de seconde, c'est
+## trois `load` par seconde pour la même poignée de fichiers.
+var _flux: Dictionary = {}         ## nom -> AudioStream, à l'unité
+var _flux_boucles: Dictionary = {} ## nom -> copie bouclée du même
+
 func _flux_sfx(famille: String) -> AudioStream:
 	if not _sfx.has(famille):
-		return null
+		# Un nom EXACT de fichier est accepté : `radio_code_10` se range dans
+		# la famille `radio_code` (le suffixe numérique est lu comme une
+		# variante), et sans cette porte de sortie la bribe partait à la
+		# poubelle en silence — la radio disait le cap sans dire le code.
+		var seul := DOSSIER_SFX + famille + ".ogg"
+		if not ResourceLoader.exists(seul):
+			return null
+		if not _flux.has(famille):
+			_flux[famille] = load(seul)
+		return _flux[famille]
 	var noms: Array = _sfx[famille]
 	if noms.is_empty():
 		return null
-	return load(DOSSIER_SFX + String(noms[randi() % noms.size()]) + ".ogg")
+	var nom := String(noms[randi() % noms.size()])
+	if not _flux.has(nom):
+		_flux[nom] = load(DOSSIER_SFX + nom + ".ogg")
+	return _flux[nom]
+
+## La MÊME famille, mais en boucle. La copie est indispensable : `load` rend
+## toujours la même instance, donc poser `loop = true` dessus ferait tourner
+## sans fin le jour où quelqu'un jouerait ce nom en coup unique. Une sirène
+## qui ne s'arrête plus est un bogue qu'on ne retrouve pas.
+func _flux_boucle(famille: String) -> AudioStream:
+	var flux := _flux_sfx(famille)
+	if flux == null:
+		return null
+	var nom := flux.resource_path
+	if not _flux_boucles.has(nom):
+		var copie := flux.duplicate() as AudioStream
+		if copie is AudioStreamOggVorbis:
+			(copie as AudioStreamOggVorbis).loop = true
+		_flux_boucles[nom] = copie
+	return _flux_boucles[nom]
 
 ## Le moteur d'un véhicule : `demarrer_moteur("sport")` prend
 ## `moteur_sport.ogg`. Sans nom, le moteur standard.
 func demarrer_moteur_type(type: String = "standard") -> void:
 	if not actif or _moteur == null:
 		return
-	var flux := _flux_sfx("moteur_" + type)
+	var flux := _flux_boucle("moteur_" + type)
 	if flux == null:
-		flux = _flux_sfx("moteur_standard")
-	if flux != null:
-		if flux is AudioStreamOggVorbis:
-			(flux as AudioStreamOggVorbis).loop = true
+		flux = _flux_boucle("moteur_standard")
+	if flux != null and _moteur.stream != flux:
 		_moteur.stream = flux
+		if _moteur.playing:
+			_moteur.play()
 	if not _moteur.playing:
 		_moteur.play()
 
@@ -276,39 +321,93 @@ func demarrer_moteur_type(type: String = "standard") -> void:
 func voix(famille: String, volume_db: float = -10.0) -> void:
 	jouer(famille, randf_range(0.94, 1.07), volume_db)
 
-## LA SIRÈNE de la police : `niveau` 0 l'arrête, 1 et 2 donnent la lente puis
-## la rapide. Elle boucle sur son propre lecteur tant que le niveau tient —
-## rejouée à chaque image, elle bégaierait.
+## LA SIRÈNE de la police : `niveau` 0 l'arrête, au-delà elle boucle sur son
+## propre lecteur tant que le niveau tient — rejouée à chaque image, elle
+## bégaierait.
+##
+## La recherche a SIX crans et la sirène n'en avait que deux : à partir de la
+## troisième étoile, tout sonnait pareil alors que ce sont le SWAT, les agents
+## spéciaux puis l'armée qui arrivent. Le régime rapide part à trois, et le
+## ton monte d'un cran par étoile — c'est ce qui dit, sans regarder la jauge,
+## que ça vient de s'aggraver.
 var _sirene: AudioStreamPlayer
 var _sirene_niveau := 0
+var _sirene_volume := -18.0
 
 func sirene(niveau: int, volume_db: float = -18.0) -> void:
 	if _sirene == null:
 		return
+	# Le volume se règle même à niveau constant : il suit la distance de la
+	# patrouille la plus proche, qui change à chaque image.
+	if niveau > 0 and not is_equal_approx(volume_db, _sirene_volume):
+		_sirene_volume = volume_db
+		_sirene.volume_db = volume_db + min(5.0, 1.2 * float(niveau))
 	if niveau == _sirene_niveau:
 		return
+	var avant := _sirene_niveau
 	_sirene_niveau = niveau
 	if niveau <= 0 or not actif:
 		_sirene.stop()
 		return
-	var flux := _flux_sfx("sirene_lente" if niveau < 2 else "sirene_rapide")
+	_sirene.pitch_scale = 0.95 + 0.035 * float(min(niveau, 6))
+	# Changer de régime relance ; monter d'une étoile dans le même régime ne
+	# coupe pas la sirène en cours.
+	var rapide := niveau >= 3
+	if _sirene.playing and rapide == (avant >= 3) and avant > 0:
+		return
+	var flux := _flux_boucle("sirene_rapide" if rapide else "sirene_lente")
 	if flux == null:
 		return
-	if flux is AudioStreamOggVorbis:
-		(flux as AudioStreamOggVorbis).loop = true
 	_sirene.stream = flux
-	_sirene.volume_db = volume_db
+	_sirene.volume_db = volume_db + min(5.0, 1.2 * float(niveau))
 	_sirene.play()
+
+## L'AMBIANCE D'UN LIEU : la boîte de nuit qu'on longe, l'usine du quartier
+## industriel, la cloche de l'église. Une boucle sur son propre lecteur, en
+## fondu, dont le volume dit la distance — c'est ce qui fait qu'un quartier
+## s'entend avant de se lire sur le radar.
+##
+## Ce n'est ni la musique (qui est l'autoradio, dans l'habitacle) ni un
+## bruitage (qui part et s'arrête) : un lieu est là tant qu'on est à côté.
+var _lieu: AudioStreamPlayer
+var _lieu_en_cours := ""
+
+func lieu(nom: String, volume_db: float = -20.0) -> void:
+	if _lieu == null:
+		return
+	if nom == _lieu_en_cours:
+		if nom != "":
+			_lieu.volume_db = volume_db
+		return
+	_lieu_en_cours = nom
+	if nom == "" or not actif:
+		_lieu.stop()
+		return
+	var flux := _flux_boucle(nom)
+	if flux == null:
+		_lieu.stop()
+		return
+	_lieu.stream = flux
+	_lieu.volume_db = volume_db
+	_lieu.play()
 
 ## LA RADIO DE LA POLICE : une phrase assemblée de bouts enregistrés, comme
 ## dans le jeu d'origine — « central », un code, une direction, un blanc. On
 ## ne la déclenche qu'à l'entrée d'un niveau de recherche : à répétition, elle
 ## couvre tout le reste.
-const PHRASE_RADIO := ["radio_central", "radio_all_units", "radio_respond_to",
-	"radio_code_10", "radio_suspect", "radio_heading"]
+## Les ouvertures possibles. Une phrase qui commence toujours pareil devient
+## un jingle qu'on cesse d'écouter à la troisième poursuite.
+const OUVERTURES_RADIO := ["radio_all_units", "radio_central", "radio_weve_got",
+	"radio_theres_a"]
+## Ce qu'on lâche à la fin quand ça devient sérieux.
+const FINS_RADIO := ["radio_suspect", "radio_is_armed", "radio_in_need_of_assist",
+	"radio_be_advised"]
 
 var _radio_jusqua := 0.0
 
+## La phrase suit la forme du dispatch d'origine : qui appelle, ce qu'on
+## demande, le code, où, et dans quelle direction ça file. Les renforts ne se
+## citent qu'à partir de quatre étoiles — c'est à ce moment-là qu'ils sortent.
 func radio_police(niveau: int, _reserve: int = 0, cap: String = "") -> void:
 	if not actif or niveau <= 0 or _radio == null:
 		return
@@ -316,25 +415,48 @@ func radio_police(niveau: int, _reserve: int = 0, cap: String = "") -> void:
 	if maintenant < _radio_jusqua:
 		return
 	_radio_jusqua = maintenant + 9.0
-	var phrase: Array = [PHRASE_RADIO[randi() % PHRASE_RADIO.size()]]
+	var phrase: Array = [OUVERTURES_RADIO[randi() % OUVERTURES_RADIO.size()]]
+	if niveau >= 5:
+		phrase.append("radio_armed_forces")
+	elif niveau >= 4:
+		phrase.append("radio_swat_team")
+	phrase.append("radio_respond_to")
+	phrase.append("radio_a_ten")
+	phrase.append("radio_code")
+	phrase.append("radio_in_vincinity_of")
+	phrase.append("radio_zone")
 	if cap != "":
+		phrase.append("radio_heading")
 		phrase.append("radio_" + cap)
-	phrase.append("radio_spacer_a")
+	if niveau >= 3:
+		phrase.append(FINS_RADIO[randi() % FINS_RADIO.size()])
+	phrase.append("radio_spacer_b")
 	_dire_a_la_radio(phrase)
 
 var _radio: AudioStreamPlayer
 
-## Les morceaux s'enchaînent : chacun attend la fin du précédent. Les jouer
-## ensemble ferait une bouillie.
+## Les morceaux s'enchaînent en une seule ressource et c'est le serveur audio
+## qui les enchaîne. Attendre `finished` pour lancer le suivant marchait, mais
+## relancer une lecture au milieu du mixage fait râler le décodeur Vorbis à
+## chaque mot — une erreur par bribe, dix par phrase.
 func _dire_a_la_radio(morceaux: Array) -> void:
+	var bribes: Array[AudioStream] = []
 	for morceau in morceaux:
 		var flux := _flux_sfx(String(morceau))
-		if flux == null:
-			continue
-		_radio.stream = flux
-		_radio.volume_db = -14.0
-		_radio.play()
-		await _radio.finished
+		if flux != null:
+			bribes.append(flux)
+	if bribes.is_empty():
+		return
+	var phrase := AudioStreamPlaylist.new()
+	phrase.loop = false
+	phrase.fade_time = 0.0
+	phrase.shuffle = false
+	phrase.stream_count = mini(bribes.size(), 64)
+	for i in phrase.stream_count:
+		phrase.set_list_stream(i, bribes[i])
+	_radio.stream = phrase
+	_radio.volume_db = -14.0
+	_radio.play()
 
 func jouer(nom: String, hauteur: float = 1.0, volume_db: float = -6.0) -> void:
 	if not actif:

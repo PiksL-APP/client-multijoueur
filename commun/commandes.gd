@@ -186,6 +186,43 @@ static func radio_declenchee() -> bool:
 	_radio_avant = maintenant
 	return front
 
+## MANGER : G. Comme l'affaire, elle se DÉCLENCHE (un appui, un article) et
+## elle est fermée pendant une saisie — sinon taper « gratin » dans le tchat
+## viderait les poches.
+static var manger_simulee := false
+static var _manger_avant := false
+
+static func manger_tenue() -> bool:
+	if pilote_automatique:
+		return manger_simulee
+	if saisie:
+		return false
+	return Reglages.enfoncee("manger")
+
+static func manger_declenchee() -> bool:
+	var maintenant := manger_tenue()
+	var front := maintenant and not _manger_avant
+	_manger_avant = maintenant
+	return front
+
+## LA VUE : V. Comme les autres, elle se déclenche et se tait pendant une
+## saisie — basculer la caméra depuis un menu de pause n'aurait aucun sens.
+static var vue_simulee := false
+static var _vue_avant := false
+
+static func vue_tenue() -> bool:
+	if pilote_automatique:
+		return vue_simulee
+	if saisie:
+		return false
+	return Reglages.enfoncee("vue")
+
+static func vue_declenchee() -> bool:
+	var maintenant := vue_tenue()
+	var front := maintenant and not _vue_avant
+	_vue_avant = maintenant
+	return front
+
 ## Pour la conduite : x = braquage (-1 à gauche), y = accélération (-1 en
 ## marche arrière). Non normalisé — accélérer en tournant ne doit pas coûter
 ## de la vitesse.

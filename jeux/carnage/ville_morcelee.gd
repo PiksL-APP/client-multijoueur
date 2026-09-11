@@ -39,7 +39,9 @@ var par_image := 1
 ## le sol d'abord (sinon on voit à travers), la chaussée, les façades, puis ce
 ## qui décore. Chaque passe tient dans une image.
 const PASSES := [
-	Quartiers.P_SOLS,
+	# La mer avec le sol : elle EST le sol de tout ce qui n'est pas la terre,
+	# et un morceau de rivage qui paraîtrait sans elle montrerait le vide.
+	Quartiers.P_SOLS | Quartiers.P_EAU,
 	Quartiers.P_CHAUSSEES | Quartiers.P_BATEAUX,
 	Quartiers.P_BATIMENTS,
 	# Le mobilier libre arrive avec la verdure : c'est de la décoration, elle

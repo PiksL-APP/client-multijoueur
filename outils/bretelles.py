@@ -28,7 +28,7 @@ import re, sys, math
 
 FICHIER = "jeux/carnage/pikstown.gd"
 ROUTE = set("#=O(/")
-SOUPLE = set(",;o^'")
+SOUPLE = set(",;o^'P")   # ⚠ `P` compte : dans la ville refondue, le parking EST le coeur d'îlot, et c'est la plus grande réserve de terrain souple du dessin
 ECART_BRETELLES = 15      # cases entre deux bretelles : sinon ça fait un plat de nouilles
 
 # quart de tour -> (case d'entrée, côté d'entrée, case de sortie, côté de sortie),
@@ -91,7 +91,18 @@ def main():
                     return False
         return True
 
+    # ⚠ UNE GROSSE PIÈCE EN RÉSERVE D'AUTRES. `poser_piece` refuse une pièce
+    # dont une seule case est déjà prise — et le rond-point, posé AVANT les
+    # courbes, en mange neuf. Quatre bretelles tombaient sur l'emprise d'un
+    # giratoire : le script les écrivait, le moteur les refusait en silence, et
+    # seul le compte de pièces du vérificateur le disait.
     pris = set()          # cases déjà données à une pièce
+    for j in range(H):
+        for i in range(W):
+            if ch(i, j) == "O":
+                for a in (-1, 0, 1):
+                    for b in (-1, 0, 1):
+                        pris.add((i + a, j + b))
     rampes = 0
 
     # ------------------------------------------------- reprise d'une passe
@@ -107,6 +118,10 @@ def main():
             carre = [(i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)]
             niveaux = {rel(*c) for c in carre}
             bon = False
+            # Une bretelle déjà écrite qui empiète sur un rond-point est aussi
+            # fautive qu'une neuve : on la défait.
+            if any(c in pris for c in carre):
+                niveaux = {-1, -2}
             if len(niveaux) == 1:
                 n = next(iter(niveaux))
                 for q in range(4):
@@ -190,20 +205,50 @@ def main():
                 candidats.append((i, j, q, a, dd))
                 break
 
+    # ⚠ LES BRETELLES DU BORD DE MER PASSENT DEVANT. La glissière ne se pose
+    # que sur une pièce qui SURPLOMBE ; sur soixante bretelles tirées au fil de
+    # la ville, aucune ne touchait l'eau, et `road-curve-barrier` restait au
+    # fond du kit. Une bretelle de corniche est de toute façon la plus jolie du
+    # lot : elle coupe l'angle au-dessus du vide.
+    # ⚠ « SURPLOMBER », C'EST L'EAU **OU** DEUX PALIERS DE VIDE — la même règle
+    # que `Quartiers._surplombe`. Cherchée sur la seule eau, la bretelle de
+    # corniche n'existait nulle part : les carrés de terrain nu du bord de mer
+    # n'ont pas de rue aux deux bouts. Au bord d'une terrasse, il y en a.
+    def au_bord(i, j):
+        n = rel(i, j)
+        for c in ((i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)):
+            for d in ((0, -1), (1, 0), (0, 1), (-1, 0)):
+                u = (c[0] + d[0], c[1] + d[1])
+                if ch(*u) in ".~" or rel(*u) <= n - 2:
+                    return True
+        return False
+
     # L'ordre de tri disperse : on passe la ville en damier grossier plutôt que
     # ligne par ligne, et l'écart minimum fait le reste.
-    candidats.sort(key=lambda c: ((c[0] % 7) * 7 + (c[1] % 7), c[1], c[0]))
+    candidats.sort(key=lambda c: (0 if au_bord(c[0], c[1]) else 1,
+                                  (c[0] % 7) * 7 + (c[1] % 7), c[1], c[0]))
     choisies = list(gardees)
     for i, j, q, a, dd in candidats:
         carre = [(i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)]
         if any(c in pris for c in carre):
             continue
-        if any(math.dist((i, j), c) < ECART_BRETELLES for c in choisies):
+        # ⚠ LA BRETELLE DE CORNICHE A DROIT D'ÊTRE PLUS PRÈS. L'écart de quinze
+        # cases est là pour que la ville ne devienne pas un plat de nouilles ;
+        # il n'a aucune raison de faire renoncer à la SEULE bretelle du dessin
+        # qui surplombe quelque chose — celle dont dépendent
+        # `road-curve-barrier` et `road-curve-intersection-barrier`.
+        ecart = ECART_BRETELLES // 3 if au_bord(i, j) else ECART_BRETELLES
+        if any(math.dist((i, j), c) < ecart for c in choisies):
             continue
-        grille[j][i] = "("
+        # ⚠ LE `(` S'ÉCRIT EN DERNIER. Le coin nord-ouest de la pièce EST le
+        # bout de sortie pour un quart de tour sur quatre (`BOUTS[2]` a
+        # D = (0,0)) : écrire le `(` puis les deux bouts remettait un `#`
+        # par-dessus, et la bretelle disparaissait sans que rien ne le dise —
+        # le compteur en annonçait une de plus que le dessin n'en portait, et
+        # le vérificateur ne voyait rien puisqu'il compte les caractères.
         grille[dd[1]][dd[0]] = "#"
-        if a != (i, j):
-            grille[a[1]][a[0]] = "#"
+        grille[a[1]][a[0]] = "#"
+        grille[j][i] = "("
         for c in carre:
             pris.add(c)
         choisies.append((i, j))

@@ -314,10 +314,16 @@ static func _tirage(c: Vector2i) -> int:
 ## LE PASSAGE PIÉTON. Il se met au PIED d'un carrefour, pas au milieu d'une rue
 ## — c'est là qu'on traverse. Une case sur deux seulement : une avenue dont
 ## chaque approche est zébrée ressemble à un circuit de karting.
+## ⚠ UN T EST UN CARREFOUR AUSSI. Le zébra ne se posait qu'au pied d'un
+## croisement à quatre branches (masque 15) ; dans une ville de rues décalées,
+## trois croisements sur quatre sont des T, et ils en étaient privés. On accepte
+## donc toute case voisine d'une jonction à trois branches ou plus — et une fois
+## sur deux, pas une sur une : un zébra à chaque coin de rue est un tapis rayé.
 static func passage_ici(carte: CarteVille, c: Vector2i) -> bool:
 	if _tirage(c) % 2 == 0: return false
 	for d in COTES:
-		if carte.masque(c + d) == 15: return true
+		var m := carte.masque(c + d)
+		if m == 15 or m == 7 or m == 11 or m == 13 or m == 14: return true
 	return false
 
 ## LA GLISSIÈRE. Le kit dessine ses barrières SÉPARÉMENT de la chaussée : un
@@ -340,7 +346,8 @@ const BARRIERES := {
 	"road-slant": "road-slant-barrier", "road-slant-high": "road-slant-high-barrier",
 	"road-square": "road-square-barrier", "road-split": "road-split-barrier",
 	"road-roundabout": "road-roundabout-barrier",
-	"road-bridge": "road-straight-barrier",
+	# ⚠ PAS DE GLISSIÈRE SUR `road-bridge` : la pièce a ses propres parapets, et
+	# le rail posé par-dessus atterrissait sur la route du dessous.
 	"road-driveway-single": "road-driveway-single-barrier",
 	"road-driveway-double": "road-driveway-double-barrier",
 	"road-side": "road-side-barrier", "road-side-entry": "road-side-entry-barrier",

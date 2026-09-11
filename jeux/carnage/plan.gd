@@ -200,6 +200,9 @@ const RAYON_CABINE := 68.0
 const RAYON_REPAIRE := 230.0
 const RAYON_HOPITAL := 90.0
 const RAYON_PLANQUE := 70.0
+## LA SUPÉRETTE (faim et soif). Plus large qu'une planque : on y entre à pied
+## comme au volant, et c'est le seul lieu du jeu dont on ressort avec un sac.
+const RAYON_SUPERETTE := 80.0
 ## Le prix d'une planque : trois gammes, du studio à la villa. Le pâté décide,
 ## comme tout le reste — même prix chez tout le monde, sans rien diffuser.
 ## Les prix sont calés sur ce qu'on gagne : un contrat rapporte quelques
@@ -223,7 +226,7 @@ var _semences: Dictionary = {}    ## Vector2i (cellule de 8 pâtés) -> {p, type
 var _zones: Dictionary = {}       ## indice de pâté -> type | (gang + 1) << 8
 var _pates: Dictionary = {}       ## Vector2i (pâté) -> Array[9] de fiches de tuile
 var _rues: Dictionary = {}        ## indice de tuile -> fiche de tuile de rue
-var _secteurs: Dictionary = {}    ## Vector2i -> {garages, cabines, arenes, repaires}
+var _secteurs: Dictionary = {}    ## Vector2i -> {garages, cabines, arenes, repaires, superettes…}
 var _libres: Dictionary = {}      ## indice de tuile -> fiche de voie libre ({} si aucune)
 
 # ------------------------------------------------------------ construction
@@ -909,7 +912,8 @@ func _fermable(a: Vector2i, b: Vector2i) -> bool:
 func _lieux_du_secteur(secteur: Vector2i) -> Dictionary:
 	if _secteurs.has(secteur):
 		return _secteurs[secteur]
-	var fiche := {"garages": [], "cabines": [], "arenes": [], "repaires": [], "hopitaux": [], "planques": []}
+	var fiche := {"garages": [], "cabines": [], "arenes": [], "repaires": [], "hopitaux": [],
+		"planques": [], "superettes": []}
 	var par_pate := SECTEUR / PERIODE
 	var candidats: Array = []
 	var frontieres: Array = []
@@ -988,6 +992,18 @@ func _lieux_du_secteur(secteur: Vector2i) -> Dictionary:
 		var coin_p := coin_pate(pl)
 		fiche["planques"].append({"p": centre_tuile(coin_p.x, coin_p.y + 2), "id": indice_pate(pl), "pate": pl,
 			"prix": PRIX_PLANQUE[posmod(indice_pate(pl), PRIX_PLANQUE.size())]})
+	# LA SUPÉRETTE : une par secteur, jamais dans l'eau ni sur la voie (les
+	# candidats sont déjà filtrés). Sa porte est la tuile du BAS-MILIEU, celle
+	# que `_lieu_visitable` laisse en dalle : on se gare devant, dans la rue.
+	#
+	# ⚠ Elle se tire APRÈS l'hôpital et la planque, et `choisir` refuse un
+	# pâté déjà pris : deux lieux visitables sur le même pâté, c'est deux
+	# portes au même endroit et un `F` qui ne sait plus à qui répondre.
+	var sp: Vector2i = choisir.call(candidats)
+	if sp.x >= 0:
+		var coin_s := coin_pate(sp)
+		fiche["superettes"].append({"p": centre_tuile(coin_s.x + 1, coin_s.y + 2),
+			"id": indice_pate(sp), "pate": sp})
 	_secteurs[secteur] = fiche
 	return fiche
 
@@ -997,7 +1013,8 @@ func _secteur_de(point: Vector2) -> Vector2i:
 ## Tous les lieux à moins de `rayon` d'un point : on ne regarde que les
 ## secteurs que le cercle touche.
 func lieux_autour(point: Vector2, rayon: float) -> Dictionary:
-	var resultat := {"garages": [], "cabines": [], "arenes": [], "repaires": [], "hopitaux": [], "planques": []}
+	var resultat := {"garages": [], "cabines": [], "arenes": [], "repaires": [], "hopitaux": [],
+		"planques": [], "superettes": []}
 	var s0 := _secteur_de(point - Vector2(rayon, rayon))
 	var s1 := _secteur_de(point + Vector2(rayon, rayon))
 	for sy in range(max(0, s0.y), min(LIGNES / SECTEUR, s1.y + 1)):
@@ -1011,7 +1028,7 @@ func lieux_autour(point: Vector2, rayon: float) -> Dictionary:
 
 func _lieu_du_pate(pate: Vector2i) -> String:
 	var fiche := _lieux_du_secteur(Vector2i(pate.x * PERIODE / SECTEUR, pate.y * PERIODE / SECTEUR))
-	for genre in ["arenes", "repaires", "garages", "cabines", "hopitaux", "planques"]:
+	for genre in ["arenes", "repaires", "garages", "cabines", "hopitaux", "planques", "superettes"]:
 		for lieu in fiche[genre]:
 			if Vector2i(lieu["pate"]) == pate:
 				return genre
@@ -1051,6 +1068,9 @@ func hopital_le_plus_proche(point: Vector2) -> Dictionary:
 
 func cabine_de(point: Vector2) -> int:
 	return _lieu_de(point, "cabines", RAYON_CABINE)
+
+func superette_de(point: Vector2) -> int:
+	return _lieu_de(point, "superettes", RAYON_SUPERETTE)
 
 func _lieu_de(point: Vector2, genre: String, rayon: float) -> int:
 	for lieu in lieux_autour(point, rayon)[genre]:
@@ -1544,10 +1564,11 @@ func _amenager_pate(pate: Vector2i) -> Array:
 			_repaire(fiches, pate, quartier, gang)
 		"garages", "cabines":
 			_simple(fiches, pate, quartier, gang, lieu == "garages")
-		"hopitaux", "planques":
-			# Le pâté d'un lieu qu'on VISITE se bâtit en petit, et sa tuile
-			# centrale (hôpital) ou son coin (planque) reste dégagé : sinon le
-			# bâti se pose dessus et on ne voit plus ni la croix ni la porte.
+		"hopitaux", "planques", "superettes":
+			# Le pâté d'un lieu qu'on VISITE se bâtit en petit, et une de ses
+			# tuiles reste dégagée : la centrale pour l'hôpital, un coin pour
+			# la planque, celle du bas pour la supérette. Sinon le bâti se pose
+			# dessus et on ne voit plus ni la croix ni la porte.
 			_lieu_visitable(fiches, pate, quartier, gang, lieu)
 		_:
 			match quartier:
@@ -1981,12 +2002,13 @@ func _lieu_visitable(fiches: Array, pate: Vector2i, quartier: int, _gang: int, l
 		VIEUX: style = F_VIEUX
 		INDUSTRIE, PORT: style = F_HANGAR
 		BANLIEUE: style = F_MAISON
-	var libre := Vector2i(1, 1) if lieu == "hopitaux" else Vector2i(0, 2)
+	var libre := Vector2i(1, 1) if lieu == "hopitaux" else (
+		Vector2i(1, 2) if lieu == "superettes" else Vector2i(0, 2))
 	for j in 3:
 		for i in 3:
 			if i == libre.x and j == libre.y:
 				var fiche: Dictionary = _f(fiches, i, j)
-				fiche["sol"] = S_BETON if lieu == "hopitaux" else S_PAVES
+				fiche["sol"] = S_PAVES if lieu == "planques" else S_BETON
 				continue
 			var sel := 360 + j * 3 + i
 			var basse := 6.0 if lieu == "hopitaux" else 4.5
@@ -2449,6 +2471,10 @@ const CARTE_EAU := Color("#1a3a5c")
 const CARTE_RUE := Color("#262628")
 const CARTE_AVENUE := Color("#3c3c3e")
 const CARTE_RAIL := Color("#0c0c0c")
+## LA SUPÉRETTE sur la carte et au radar. Un vert d'eau : aucune autre pastille
+## ne le porte, et c'est la seule façon de la repérer quand on a faim — chercher
+## une façade de trois tuiles dans six cent quatre-vingts colonnes, non.
+const COULEUR_SUPERETTE := Color("#5ad6a8")
 
 func peindre_pate(image: Image, indice: int) -> void:
 	var pate := pate_par_indice(indice)
@@ -2485,7 +2511,8 @@ func peindre_pate(image: Image, indice: int) -> void:
 func peindre_secteur(image: Image, secteur: Vector2i) -> void:
 	var fiche := _lieux_du_secteur(secteur)
 	for entree in [["garages", Palette.SERIE], ["cabines", Palette.AVERTISSEMENT],
-			["arenes", Palette.CRITIQUE], ["repaires", Palette.ENCRE]]:
+			["arenes", Palette.CRITIQUE], ["repaires", Palette.ENCRE],
+			["superettes", COULEUR_SUPERETTE]]:
 		for lieu in fiche[entree[0]]:
 			var c := int(Vector2(lieu["p"]).x / PAS)
 			var l := int(Vector2(lieu["p"]).y / PAS)

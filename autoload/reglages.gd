@@ -53,6 +53,15 @@ const DEFAUTS := {
 	"klaxon": KEY_H,
 	"carte": KEY_TAB,
 	"radio": KEY_R,
+	## MANGER ET BOIRE : G, comme « grignoter ». La touche prend dans les
+	## poches ce qui répond au besoin le plus pressant — elle n'ouvre pas de
+	## menu, parce qu'on s'en sert en courant.
+	"manger": KEY_G,
+	## LA VUE SUBJECTIVE : V. Elle ne remplace pas la vue du jeu, elle bascule —
+	## une partie entière à hauteur d'homme serait injouable (on ne voit pas la
+	## voiture qui arrive par la droite), mais c'est la seule façon de REGARDER
+	## la ville qu'on a bâtie.
+	"vue": KEY_V,
 	"tchat": KEY_T,
 }
 
@@ -68,6 +77,8 @@ const LIBELLES := {
 	"klaxon": "Klaxonner",
 	"carte": "Voir la carte",
 	"radio": "Changer de station",
+	"manger": "Manger ou boire",
+	"vue": "Vue subjective / de dessus",
 	"tchat": "Parler",
 }
 

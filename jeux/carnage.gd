@@ -252,6 +252,57 @@ const PORTEE_PORTE := 0.9
 ## cogne partout. Deux tuiles par seconde (quatre mètres) se pilote.
 const PAS_DEDANS := 2.0
 
+# ------------------------------------------------------- la faim et la soif
+#
+## DEUX JAUGES QUI DESCENDENT, et une ville où l'on peut rester indéfiniment.
+## C'est ce qui manquait à une manche sans chrono : sans horloge, rien
+## n'oblige plus à sortir de la voiture — on tourne, on tire, on ne rentre
+## jamais. La faim et la soif remettent une PENDULE, mais une pendule qu'on
+## peut remonter, ce qui n'est pas du tout la même chose qu'un compte à rebours.
+##
+## ⚠ ELLES VIVENT CHEZ LE CLIENT. C'est un état personnel : personne d'autre
+## n'a besoin de savoir que vous avez faim, et la vie — qui, elle, voyage déjà
+## — suffit à raconter ce qui vous arrive aux trois autres joueurs. Les faire
+## passer par l'hôte, ce serait deux nombres de plus à quinze paquets par
+## seconde pour une information que personne ne lit.
+##
+## LA SOIF DESCEND PLUS VITE QUE LA FAIM, et c'est voulu : l'eau est l'article
+## le moins cher de la supérette. On a donc un besoin fréquent et bon marché
+## (qui apprend le geste) et un besoin lent et coûteux (qui fait faire des
+## courses). Deux jauges à la même vitesse, ce serait une seule jauge dessinée
+## deux fois.
+const FAIM_MAX := 100.0
+const DUREE_FAIM := 260.0          ## s pour passer de plein à vide
+const DUREE_SOIF := 200.0
+## À pied on se dépense : on a faim plus vite qu'au volant. Le facteur est
+## petit (un tiers) — assez pour qu'un long trajet à pied se paie, pas assez
+## pour punir qui descend de voiture, ce que le jeu passe son temps à demander.
+const EFFORT_A_PIED := 1.35
+## Ce que coûte le ventre vide, par seconde. À deux points, on tient cinquante
+## secondes à pleine vie : de quoi comprendre, trouver une supérette et y
+## arriver. À cinq, on mourait avant d'avoir lu le message.
+const DEGAT_JEUNE := 2.0
+## En dessous, la jauge passe au rouge et le tableau de bord le dit. Vingt
+## pour cent : le même seuil que la réserve d'une voiture, et pour la même
+## raison — il faut prévenir AVANT la panne, pas pendant.
+const SEUIL_CREUX := 20.0
+
+var _faim := FAIM_MAX
+var _soif := FAIM_MAX
+var _creux_dit := 0.0              ## anti-répétition de l'annonce
+var _provisions: Dictionary = {}   ## cle d'article -> nombre, SUR SOI
+var _frigo: Dictionary = {}        ## le même, dans le frigo de la planque
+## LA SORTIE D'UNE MANCHE. Carnage n'a pas de chrono, et depuis que le hub et
+## l'écran de résultats ont disparu, `Partie.terminer()` n'était plus appelé de
+## nulle part : une manche ne finissait JAMAIS — ni retour au salon, ni
+## classement, ni dépôt en base. ÉCHAP est la sortie.
+var _depuis_raid := 0.0            ## cadence de l'annonce « je tiens le terrain »
+var _pause_ouverte := false
+var _pause_vue: Control
+var _superette_en_cours := -1
+var _superette_ouverte := false
+var _superette_vue: Control
+
 # ------------------------------------------------------------ le train
 #
 ## LE TRAIN (§1.3), côté joueur. La simulation vit chez l'hôte
@@ -267,7 +318,9 @@ var _place_train := 0.0            ## où l'on se tient dans la rame, en px depu
 var _quai_dit := 0.0               ## anti-répétition de l'annonce « train à quai »
 var _quais_poses := false
 var _compacteurs: Array = []       ## les casses posées le long de la voie
-var _depuis_roulement := 0.0       ## cadence du roulement entendu quand une rame passe
+var _depuis_roulement := 0.0
+var _depuis_corne := 4.0
+var _depuis_chenilles := 0.0       ## cadence du roulement entendu quand une rame passe
 const PORTEE_TRAIN := 130.0        ## px : d'où l'on peut sauter dedans, à quai
 
 var _dedans := ""                  ## l'identifiant de l'appartement où l'on est, ou ""
@@ -404,13 +457,14 @@ var _place := 0
 var _depuis_envoi := 0.0
 var _depuis_instantane := 0.0
 var _sortie_de_banc := false
+var _rentre_de_banc := false
 var _pulsation := false
 
 func duree_manche() -> float:
 	return DUREE
 
 func aide() -> String:
-	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · F : affaires (planque, hôpital) · H : klaxon · TAB : carte · caisse = arme, trousse ou billet · colis doré = à ramasser · crâne rouge = Kill Frenzy · au volant d'un taxi, F prend et dépose un client · garage bleu = étoiles effacées, et un sur deux est un ATELIER (F sur une pastille) · cabine verte/jaune/rouge = contrat (la couleur dit ce qu'il faut de respect) · tag de gang au sol = son repaire, il ouvre à 80 de respect (armurerie) · maison violette = planque à acheter · croix blanche = hôpital · quai GARE = le train, E pour monter quand il est à l'arrêt · dalle CASSE au bord de la voie = F broie la voiture contre de l'argent et une arme"
+	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · F : affaires (planque, hôpital) · G : manger ou boire · V : vue subjective · H : klaxon · TAB : carte · ÉCHAP : pause et sortie de la ville · caisse = arme, trousse ou billet · colis doré = à ramasser · crâne rouge = Kill Frenzy · au volant d'un taxi, F prend et dépose un client · garage bleu = étoiles effacées, et un sur deux est un ATELIER (F sur une pastille) · cabine verte/jaune/rouge = contrat (la couleur dit ce qu'il faut de respect) · tag de gang au sol = son repaire, il ouvre à 80 de respect (armurerie) · maison violette = planque à acheter · croix blanche = hôpital · dalle verte SUPÉRETTE = à manger et à boire (le frigo de la planque les garde) · quai GARE = le train, E pour monter quand il est à l'arrêt · dalle CASSE au bord de la voie = F broie la voiture contre de l'argent et une arme"
 
 # ------------------------------------------------------- mise en place
 
@@ -457,6 +511,14 @@ func preparer() -> void:
 				elif String(argument).ends_with("pont"):
 					# `--banc-position=pont` : sur un tablier, l'eau des deux côtés.
 					_position = carte.un_pont()
+				elif String(argument).ends_with("superette"):
+					# `--banc-position=superette` : devant une boutique. Les
+					# supérettes se tirent par secteur, on ne peut donc pas
+					# écrire leur tuile à la main — et sans cette option, un
+					# pilote au hasard n'en croise pas une en une minute.
+					var pres: Array = carte.lieux_autour(_position, PlanVille.SECTEUR * PlanVille.PAS * 2.0)["superettes"]
+					if not pres.is_empty():
+						_position = Vector2(pres[0]["p"])
 				elif String(argument).ends_with("rail"):
 					# `--banc-position=rail` : au quai le plus central. La voie
 					# dépend du code de la manche, qui est tiré au lancement —
@@ -471,6 +533,19 @@ func preparer() -> void:
 						if p.distance_to(milieu) < court:
 							court = p.distance_to(milieu)
 							_position = p
+	# ⚠ LE PILOTE DU BANC PART AVEC DE QUOI PAYER. Il commence à zéro comme
+	# tout le monde et ramasse des billets au hasard de ce qu'il renverse : en
+	# une minute de banc il n'avait jamais les quarante dollars d'une bouteille
+	# d'eau, et la supérette — la caisse, le refus, les poches pleines — ne
+	# passait donc JAMAIS par une manche. Un joueur, lui, part bien à zéro.
+	if Commandes.pilote_automatique:
+		_argent = 900
+		# `--banc-subjectif` : la manche commence à hauteur d'homme. C'est la
+		# seule façon de PHOTOGRAPHIER la vue subjective — les touches
+		# synthétiques n'atteignent pas le clavier physique, et une vue qu'on
+		# ne peut pas photographier est une vue qu'on ne juge pas.
+		if "--banc-subjectif" in OS.get_cmdline_args():
+			_subjectif = true
 	_vehicule = ID_VOITURE_DEPART + place
 	_pied = false
 	# La manche commence AU VOLANT : la radio s'allume avec elle, sur la
@@ -860,12 +935,28 @@ func simuler_local(delta: float) -> void:
 	# autres joueurs en pause pour lire un menu.
 	if Commandes.konami(delta):
 		_basculer_la_triche()
+	# ⚠ ÉCHAP A UNE PRÉCÉDENCE, et elle ne se devine pas : il FERME d'abord ce
+	# qui est ouvert (la triche, la boutique) et n'ouvre la pause que s'il n'y
+	# avait rien. Sans cet ordre, ÉCHAP devant la caisse d'une supérette
+	# proposait de quitter la ville.
+	if _front_de_pause(KEY_ESCAPE):
+		if _triche_ouverte:
+			_basculer_la_triche()
+		elif _superette_ouverte:
+			_basculer_la_superette()
+		else:
+			_basculer_la_pause()
+	if _pause_ouverte:
+		_naviguer_dans_la_pause()
 	# ⚠ On NE SORT PAS de la boucle : la ville continue de vivre derrière le
 	# menu (c'est du multijoueur, et un monde figé qui reprend d'un coup à la
 	# fermeture saute de trois rues). Le joueur, lui, ne bouge plus : c'est
 	# `Commandes.saisie` qui ferme ses touches, comme pour le tchat du village.
 	if _triche_ouverte:
 		_naviguer_dans_la_triche()
+	# LA SUPÉRETTE, même règle : la ville tourne derrière, le joueur est figé.
+	if _superette_ouverte:
+		_naviguer_dans_la_superette()
 
 	_depuis_portiere = max(0.0, _depuis_portiere - delta)
 	# ⚠ Le délai se teste AVANT de lire la touche : `action_declenchee` consomme
@@ -961,6 +1052,8 @@ func _piloter_pour_le_banc() -> void:
 			var d := int(ville.point_de_voie(float(t["s"])).distance_to(_position))
 			if train_le_plus_proche < 0 or d < train_le_plus_proche:
 				train_le_plus_proche = d
+		print("[banc] faim %d · soif %d · %d provision(s) en poche, %d au frigo"
+			% [int(_faim), int(_soif), Provisions.compte(_provisions), Provisions.compte(_frigo)])
 		print("[banc] t=%ds fps=%d gens=%d autos=%d feux=%d secours=%d morceaux=%d cubes=%d quads=%d maillage_max=%.1fms fiches=%d noeuds=%d trains=%d/%dpx %s" % [int(temps),
 			Engine.get_frames_per_second(), ville.gens.size(), ville.autos.size(), ville.feux.size(), secours,
 			_morceaux.size(), cubes, MorceauVille.quads_total, MorceauVille.maillage_max_ms,
@@ -971,6 +1064,17 @@ func _piloter_pour_le_banc() -> void:
 	# passait le banc sans être exercée.
 	_pulsation = not _pulsation
 	Commandes.action_simulee = false
+	# ⚠ LE PILOTE RENTRE PAR LA VRAIE PORTE. Le banc s'arrêtait sur le chrono
+	# de `duree_forcee` — donc `Partie._process` appelait `terminer()` tout
+	# seul, et la sortie du joueur (le menu de pause, la demande à l'hôte, le
+	# retour au salon) n'était JAMAIS exercée par une manche. Elle l'est
+	# maintenant à neuf dixièmes du temps ; le chrono reste le filet si le
+	# menu se coince.
+	if not _rentre_de_banc and temps > duree_reelle() * 0.9:
+		_rentre_de_banc = true
+		print("[banc] quitte la ville par le menu de pause")
+		_quitter_la_ville()
+		return
 	if not _sortie_de_banc and not _pied and temps > duree_reelle() * 0.4:
 		_sortie_de_banc = true
 		Commandes.action_simulee = true
@@ -999,6 +1103,10 @@ func _piloter_pour_le_banc() -> void:
 	# appuie sur F. Sans ça, l'achat, le dépôt et le soin ne seraient jamais
 	# exercés avant livraison.
 	Commandes.affaire_simulee = _affaire != "" and _pulsation
+	# Le pilote MANGE quand il a faim : sans ça, la touche, le choix de
+	# l'article et la consommation ne seraient jamais exercés par une manche —
+	# et c'est précisément le genre de code qui casse en silence.
+	Commandes.manger_simulee = (_faim < 70.0 or _soif < 70.0) and _pulsation
 	# La carte pendant trois secondes : c'est ainsi qu'on la photographie.
 	Commandes.carte_simulee = temps > 8.0 and temps < 11.0
 
@@ -1202,7 +1310,7 @@ func _marcher(delta: float) -> void:
 		_depuis_pas -= delta
 		if _depuis_pas <= 0.0:
 			_depuis_pas = 0.34
-			Sons.jouer("pas_beton", _rng.randf_range(0.94, 1.08), -20.0)
+			Sons.jouer(_pas_du_sol(), _rng.randf_range(0.94, 1.08), -20.0)
 		var suivant := _position + commande.normalized() * VITESSE_A_PIED * delta
 		_position = carte.degager(suivant, RAYON_A_PIED)[0]
 		# À pied non plus, on ne traverse pas une voiture garée : on la contourne.
@@ -1215,6 +1323,42 @@ func _marcher(delta: float) -> void:
 		_vitesse = 0.0
 		_depuis_pas = 0.0
 	_surveiller_la_friche(delta)
+
+## Le sol sous les pieds, dit par le quartier plutôt que par la tuile : c'est
+## l'information que le joueur entend vraiment — on marche dans l'herbe au
+## parc, sur des planches au port, sur de la ferraille à l'usine. Lire la
+## tuile exacte donnerait un pas qui change trois fois par seconde en
+## traversant un passage clouté.
+func _pas_du_sol() -> String:
+	match carte.quartier(_position):
+		8, 9:                     # parc, plan d'eau
+			return "pas_herbe"
+		7:                        # le port : les pontons
+			return "pas_bois"
+		6:                        # zone industrielle : caillebotis et ferraille
+			return "pas_metal"
+		_:
+			return "pas_beton"
+
+## L'AMBIANCE DU QUARTIER : une boucle par secteur, dont le volume ne bouge
+## pas — c'est un fond, pas un événement. Elle se tait en voiture : l'habitacle
+## a l'autoradio, et empiler les deux ne fait qu'une soupe.
+##
+## Dix quartiers, dix fonds. C'est le seul endroit du jeu où l'on entend qu'on
+## a changé de secteur sans regarder le radar.
+const FONDS_QUARTIER := ["lieu_horloge", "lieu_transfo", "lieu_radiocassette",
+	"lieu_eglise", "lieu_hiphop", "lieu_country", "lieu_usine", "lieu_bar",
+	"grillon", "riviere"]
+
+func _sentir_le_quartier() -> void:
+	if not _pied or _train >= 0 or _dedans != "":
+		Sons.lieu("")
+		return
+	var q := carte.quartier(_position)
+	if q < 0 or q >= FONDS_QUARTIER.size():
+		Sons.lieu("")
+		return
+	Sons.lieu(String(FONDS_QUARTIER[q]), -24.0)
 
 func _conduire(delta: float) -> void:
 	if _hors_service > 0.0:
@@ -1476,7 +1620,30 @@ func _surveiller_les_lieux(delta: float) -> void:
 		_plaques = max(0.0, _plaques - delta)
 		if _plaques == 0.0:
 			_dire_affaire("plaques repérées")
+	_avoir_faim(delta)
+	# MANGER : une touche, pas de menu. Elle vient AVANT les affaires : à la
+	# caisse d'une supérette, `F` achète et `G` mange, et les deux doivent
+	# pouvoir se suivre sans fermer quoi que ce soit.
+	if Commandes.manger_declenchee():
+		_consommer()
+	if Commandes.vue_declenchee():
+		_basculer_la_vue()
 	_surveiller_les_affaires(delta)
+	# LA SUPÉRETTE s'ouvre quand on entre sur son pas de porte, et se ferme
+	# quand on s'en va. Pas de `F` : le menu EST l'interaction, et une boutique
+	# où il faut appuyer sur une touche pour voir qu'il y a une boutique, c'est
+	# une boutique que personne ne trouve.
+	#
+	# ⚠ On ne la rouvre pas tant qu'on n'en est pas SORTI (`_superette_en_cours`).
+	# Sans ce garde, refermer le menu d'un coup d'ÉCHAP le rouvrait à l'image
+	# suivante, puisqu'on n'avait pas bougé d'un pixel.
+	var boutique := carte.superette_de(_position)
+	if boutique != _superette_en_cours:
+		if _superette_ouverte and boutique < 0:
+			_basculer_la_superette()
+		_superette_en_cours = boutique
+		if boutique >= 0 and not _superette_ouverte and _hors_service <= 0.0:
+			_basculer_la_superette()
 	# Une cabine se décroche à pied comme au volant : obliger à descendre au
 	# milieu d'une avenue pour prendre un contrat, c'est se faire faucher.
 	var cabine := carte.cabine_de(_position)
@@ -1586,10 +1753,25 @@ func _surveiller_les_affaires(_delta: float) -> void:
 		var repaire: Dictionary = carte.repaire_de(_position)
 		var chez := int(repaire.get("gang", -1))
 		var du_gang := ville.respect_pour(Session.cle, chez)
-		if du_gang >= VilleVivante.SEUIL_ALLIE:
-			_affaire = "F : entrer chez %s" % carte.nom_du_gang(chez)
+		var a_nous := ville.repaire_pris_par(int(repaire.get("id", -1))) == Session.cle
+		# ⚠ UN REPAIRE PRIS EST À SON PRENEUR, quel que soit le respect. C'est
+		# tout le prix du raid : on l'a payé en munitions, on n'a pas à
+		# remonter ensuite une jauge chez des gens qu'on vient de chasser.
+		if du_gang >= VilleVivante.SEUIL_ALLIE or a_nous:
+			_affaire = "F : entrer %s" % ("chez vous" if a_nous else "chez %s" % carte.nom_du_gang(chez))
 			if Commandes.affaire_declenchee():
 				_entrer_dans_le_repaire(chez)
+		elif ville.humeur(Session.cle, chez) == VilleVivante.H_VUE:
+			# LE RAID (§3). Se tenir là SUFFIT : ils tirent déjà, le compteur
+			# descend à chaque homme tombé, et il n'y a aucune touche à
+			# apprendre. Le tableau de bord dit ce qui reste.
+			_tenir_le_terrain(int(repaire.get("id", -1)), Vector2(repaire.get("p", _position)), chez)
+			var raid := ville.raid_de(Session.cle)
+			if raid.is_empty():
+				_affaire = "%s vous chasse — tenez le terrain" % carte.nom_du_gang(chez)
+			else:
+				_affaire = "RAID — encore %d homme(s) de %s" % [int(raid["restants"]),
+					carte.nom_du_gang(chez)]
 		else:
 			# ⚠ LE REFUS DIT LE CHIFFRE. C'est la leçon des cabines : sans lui,
 			# une porte qui ne s'ouvre pas se lit comme une porte cassée, et
@@ -1781,6 +1963,53 @@ func _entrer_chez_soi(planque: int) -> void:
 	Sons.jouer("portail", 1.0, -8.0)
 	print("[carnage] entré chez soi : %s (planque %d)" % [_dedans, planque])
 
+## REPEINDRE LE TAG D'UN REPAIRE PRIS, dans tous les morceaux chargés. Le
+## repaire peut être à cheval sur deux morceaux voisins : on parcourt, on ne
+## suppose pas.
+## ⚠ UN MORCEAU BÂTI APRÈS LA PRISE porte un tag NEUF, aux couleurs du gang
+## chassé : le repaint de l'événement n'a repeint que les morceaux chargés à ce
+## moment-là. On s'éloigne, on revient, et le repaire est redevenu à eux —
+## alors que la ville, elle, sait qu'il est pris. Une passe par image, sur une
+## poignée d'entrées, remet les tags d'accord avec la simulation.
+func _rafraichir_les_repaires() -> void:
+	if ville.repaires_pris.is_empty():
+		return
+	for cle in _morceaux:
+		for entree in (_morceaux[cle] as MorceauVille).repaires:
+			var id := int(entree["id"])
+			if not ville.repaires_pris.has(id) or bool(entree.get("repeint", false)):
+				continue
+			entree["repeint"] = true
+			var qui := String(ville.repaires_pris[id]["j"])
+			var place := int(joueurs.get(qui, {}).get("place", 0))
+			FormesCarnage.repeindre_le_tag(entree["n"] as Node3D, Palette.couleur_joueur(place),
+				String(joueurs.get(qui, {}).get("pseudo", "?")))
+
+func _reprendre_le_tag(id: int, qui: String) -> void:
+	var place := int(joueurs.get(qui, {}).get("place", 0))
+	var couleur := Palette.couleur_joueur(place)
+	var nom := String(joueurs.get(qui, {}).get("pseudo", "?"))
+	for cle in _morceaux:
+		for entree in (_morceaux[cle] as MorceauVille).repaires:
+			if int(entree["id"]) == id:
+				entree["repeint"] = true
+				FormesCarnage.repeindre_le_tag(entree["n"] as Node3D, couleur, nom)
+
+## TENIR LE TERRAIN. Le client dit « je suis sur ce tag » ; c'est l'hôte qui
+## décide si ça ouvre un raid (il est le seul à connaître le respect de tout le
+## monde et l'état des autres raids). On n'annonce qu'une fois par seconde : le
+## raid se rafraîchit, il ne se rouvre pas, et quinze paquets par seconde pour
+## dire qu'on n'a pas bougé, c'est quinze de trop.
+func _tenir_le_terrain(id: int, ou: Vector2, gang: int) -> void:
+	_depuis_raid -= get_process_delta_time()
+	if _depuis_raid > 0.0:
+		return
+	_depuis_raid = 1.0
+	canal.envoyer("terrain", {"i": id, "x": int(ou.x), "y": int(ou.y), "g": gang})
+	if est_hote():
+		ville.tenir_le_terrain(Session.cle, id, ou, gang)
+		_vider_les_evenements()
+
 ## ENTRER DANS UN REPAIRE. Même mécanique que chez soi — l'intérieur est bâti
 ## loin sous la ville, les deux façades côté caméra sont escamotées, les marques
 ## au sol disent où `F` répond — avec un seul intérieur pour les sept gangs,
@@ -1902,9 +2131,12 @@ func _affaires_dedans() -> void:
 	# répondait à travers le lit, et la marque était ailleurs que le bouton.
 	var au_coffre := Interieurs.point_de_poste(_dedans, "coffre")
 	var a_la_penderie := Interieurs.point_de_poste(_dedans, "garde-robe")
+	var au_frigo := Interieurs.point_de_poste(_dedans, "frigo")
 	var pres_du_coffre: bool = au_coffre != Vector2.ZERO and _dedans_p.distance_to(au_coffre) < PORTEE_COFFRE
 	var pres_de_la_penderie: bool = a_la_penderie != Vector2.ZERO \
 		and _dedans_p.distance_to(a_la_penderie) < PORTEE_COFFRE
+	var pres_du_frigo: bool = au_frigo != Vector2.ZERO \
+		and _dedans_p.distance_to(au_frigo) < PORTEE_COFFRE
 	var pres_de_la_porte := _dedans_p.distance_to(Interieurs.entree(_dedans)) < PORTEE_PORTE
 	if pres_du_coffre:
 		var suivante := _amelioration_suivante()
@@ -1932,6 +2164,22 @@ func _affaires_dedans() -> void:
 		_affaire = "F : ressortir au volant" if au_volant else "F : ressortir"
 		if Commandes.affaire_declenchee():
 			_sortir_de_chez_soi()
+	elif pres_du_frigo:
+		# LE GARDE-MANGER. Même geste que le coffre, et c'est voulu : F range,
+		# E reprend. Deux réserves dans la même pièce qui s'ouvriraient de deux
+		# façons différentes, c'est une touche qu'on cherche à chaque fois.
+		var dans_les_poches := Provisions.compte(_provisions)
+		var au_frais := Provisions.compte(_frigo)
+		if dans_les_poches > 0:
+			_affaire = "F : ranger %d provision(s)" % dans_les_poches
+		else:
+			_affaire = "frigo — %d/%d au frais" % [au_frais, Provisions.FRIGO]
+		if au_frais > 0:
+			_affaire += "   ·   E : remplir les poches"
+		if Commandes.affaire_declenchee():
+			_ranger_au_frigo()
+		elif au_frais > 0 and Commandes.action_declenchee():
+			_prendre_au_frigo()
 	elif pres_de_la_penderie:
 		_affaire = "F : se changer — %s" % Personnages.nom(Session.personnage_affiche())
 		if Commandes.affaire_declenchee():
@@ -1961,6 +2209,45 @@ func _affaires_au_repaire() -> void:
 			_acheter_a_l_armurerie(gang)
 	else:
 		_affaire = "chez %s — le râtelier est au fond" % carte.nom_du_gang(gang)
+
+## RANGER AU FRIGO : tout ce qu'on porte, d'un coup. Un menu de quantités dans
+## un jeu qui se joue à quatre touches ne se lit pas — et on ne vient pas chez
+## soi pour faire l'inventaire, on vient vider ses poches.
+##
+## ⚠ Le frigo a un PLAFOND. Ce qui ne rentre pas reste sur soi, et le message
+## le dit : un rangement qui fait disparaître ce qui dépasse, c'est trois
+## burgers perdus qu'on cherchera toute la manche.
+func _ranger_au_frigo() -> void:
+	var range := 0
+	for cle in _provisions.keys():
+		while int(_provisions.get(cle, 0)) > 0 and Provisions.compte(_frigo) < Provisions.FRIGO:
+			Provisions.retirer(_provisions, String(cle))
+			Provisions.ajouter(_frigo, String(cle))
+			range += 1
+	if range == 0:
+		_dire_affaire("le frigo est plein" if not _provisions.is_empty() else "rien à ranger")
+		return
+	var reste := Provisions.compte(_provisions)
+	_dire_affaire("%d au frais%s" % [range, " — %d ne rentrent pas" % reste if reste > 0 else ""])
+	Sons.jouer("porte", 1.1, -13.0)
+
+## REPRENDRE : on remplit les poches avec ce qui comble le plus, en commençant
+## par le plus utile (`Provisions.le_mieux` appliqué au frigo). Prendre « le
+## premier de la liste » remplissait le sac de bouteilles d'eau parce qu'elles
+## sont en tête du catalogue.
+func _prendre_au_frigo() -> void:
+	var pris := 0
+	while Provisions.compte(_provisions) < Provisions.POCHES and not _frigo.is_empty():
+		var cle := Provisions.le_mieux(_frigo, _faim, _soif, _vie, FAIM_MAX)
+		# Plus rien d'utile au regard de l'état actuel : on prend quand même ce
+		# qui reste, parce qu'on part pour une sortie, pas pour un repas.
+		if cle == "":
+			cle = String(_frigo.keys()[0])
+		Provisions.retirer(_frigo, cle)
+		Provisions.ajouter(_provisions, cle)
+		pris += 1
+	_dire_affaire("%d provision(s) en poche" % pris if pris > 0 else "les poches sont pleines")
+	Sons.jouer("porte", 0.9, -13.0)
 
 ## RETIRER. Sans ça, le coffre était un puits : l'argent y entrait et n'en
 ## sortait plus, et on ne pouvait pas ressortir avec de quoi payer un hôpital
@@ -2295,14 +2582,22 @@ func _compter_les_frolements() -> void:
 func _codes_de_triche() -> Array:
 	return load("res://ui/triche.gd").codes_neufs()
 
+## `saisie` est le drapeau du tchat du village : il coupe les commandes de jeu
+## sans toucher au reste. Un menu ouvert ne doit pas conduire.
+##
+## ⚠ IL Y A MAINTENANT TROIS MENUS (la pause, la triche, la supérette) et ils
+## peuvent se superposer. Chacun écrivait `saisie = <le mien>` : en fermer un
+## rendait les commandes alors qu'un autre était encore ouvert, et l'on
+## conduisait à travers l'écran. Un seul endroit fait la somme.
+func _regler_la_saisie() -> void:
+	Commandes.saisie = _pause_ouverte or _triche_ouverte or _superette_ouverte
+
 func _basculer_la_triche() -> void:
 	_triche_ouverte = not _triche_ouverte
 	if _triche_vue:
 		_triche_vue.visible = _triche_ouverte
 		_triche_vue.queue_redraw()
-	# `saisie` est le drapeau du tchat du village : il coupe les commandes de
-	# jeu sans toucher au reste. Un menu ouvert ne doit pas conduire.
-	Commandes.saisie = _triche_ouverte
+	_regler_la_saisie()
 	if _triche_ouverte:
 		Sons.jouer("portail", 0.6, -6.0)
 	else:
@@ -2323,6 +2618,19 @@ func _naviguer_dans_la_triche() -> void:
 	if _front_de_triche(KEY_ESCAPE):
 		_basculer_la_triche()
 	_triche_vue.queue_redraw()
+
+## ⚠ UN SECOND JEU DE FRONTS, et c'est indispensable. `_front_de_triche`
+## mémorise l'état précédent de chaque touche dans `_triche_avant` ; la boucle
+## la consulte pour ÉCHAP AVANT que les menus ne la consultent pour se fermer.
+## Un seul jeu, et le premier lecteur avalait le front : la pause s'ouvrait, le
+## menu de triche ne se fermait plus, ou l'inverse selon l'ordre des lignes.
+var _pause_avant: Dictionary = {}
+
+func _front_de_pause(code: int) -> bool:
+	var maintenant := Input.is_key_pressed(code)
+	var front: bool = maintenant and not bool(_pause_avant.get(code, false))
+	_pause_avant[code] = maintenant
+	return front
 
 func _front_de_triche(code: int) -> bool:
 	var maintenant := Input.is_key_pressed(code)
@@ -2386,6 +2694,84 @@ func _activer_le_code(indice: int) -> void:
 			# `nuit_forcee` est le réglage du banc de photo : on s'en sert ici
 			# pour arrêter l'horloge, et `-1` la rend au cycle.
 			MatieresCarnage.nuit_forcee = 0.9 if bool(code["actif"]) else -1.0
+		"garde_manger":
+			# Un de chaque dans les poches, le reste au frigo : c'est la façon
+			# la plus rapide de voir l'inventaire, la touche `G` et le choix de
+			# `Provisions.le_mieux` sans faire trois fois le tour de la ville.
+			_provisions = {}
+			_frigo = {}
+			for a in Provisions.CATALOGUE:
+				if Provisions.compte(_provisions) < Provisions.POCHES:
+					Provisions.ajouter(_provisions, String(a["cle"]))
+				Provisions.ajouter(_frigo, String(a["cle"]), 3)
+		"festin":
+			_faim = FAIM_MAX
+			_soif = FAIM_MAX
+			_vie = VIE_MAX
+		"flotte":
+			# Une voiture de gang, donc ARMÉE (§1.3) : on se retrouve au volant
+			# avec la mitrailleuse de toit, ce qui demande sinon de trouver un
+			# repaire et d'en voler une.
+			_prendre_le_volant(ID_VOITURE_GARAGE + _place, VilleVivante.VOITURE_GANG,
+				carte.degager(_position, RAYON_VOITURE)[0], _angle, PV_VOITURE,
+				FormesCarnage.MODELE_POLICE)
+		"clefs":
+			# TOUS les repaires du secteur passent à vous. C'est le seul moyen
+			# de voir un tag changer de camp sans mener cinq raids — et c'est
+			# exactement ce pour quoi un menu de triche existe.
+			if est_hote():
+				var pris := 0
+				for r in carte.lieux_autour(_position, PlanVille.SECTEUR * PlanVille.PAS * 1.5)["repaires"]:
+					if int(r["gang"]) < 0 or ville.repaires_pris.has(int(r["id"])):
+						continue
+					ville.repaires_pris[int(r["id"])] = {"j": Session.cle, "gang": int(r["gang"])}
+					pris += 1
+				_vider_les_evenements()
+				_dire_affaire("%d repaire(s) à vous" % pris)
+			else:
+				_dire_affaire("il faut être l'hôte pour ça")
+		"express":
+			# La rame la plus proche se gare ici. Un train passe toutes les
+			# vingt secondes quelque part sur une ligne de soixante-dix mille
+			# pixels : l'attendre au bon endroit, c'est un quart d'heure.
+			if est_hote():
+				var court := 1.0e12
+				var rame := {}
+				for t in ville.trains:
+					var d: float = ville.point_de_voie(float(t["s"])).distance_to(_position)
+					if d < court:
+						court = d
+						rame = t
+				if not rame.is_empty():
+					var v := ville.voie()
+					rame["s"] = (_position - Vector2(v["o"])).dot(Vector2(v["d"]))
+					rame["v"] = 0.0
+					rame["arret"] = VilleVivante.ARRET_EN_GARE * 3.0
+					_vider_les_evenements()
+			else:
+				_dire_affaire("il faut être l'hôte pour ça")
+		"immobilier":
+			# La planque la plus proche, offerte, avec ses trois améliorations :
+			# le coffre, l'arsenal et le garage demandent sinon deux cent mille
+			# dollars, c'est-à-dire une manche entière.
+			var pl := carte.planque_de(_position)
+			if pl >= 0:
+				_planque = pl
+				canal.envoyer("planque", {"j": Session.cle, "i": pl})
+			for amelioration in _ameliorations:
+				_ameliorations[amelioration] = true
+			_dire_affaire("planque et améliorations" if pl >= 0 else "améliorations — il manque la planque")
+		"fantome":
+			# ⚠ CE N'EST PAS LE CASIER VIERGE : celui-là efface les étoiles une
+			# fois, celui-ci les EMPÊCHE de monter, comme les plaques de
+			# l'atelier mais sans fin. C'est ce qu'il faut pour visiter la
+			# ville sans être interrompu toutes les trente secondes.
+			if est_hote():
+				ville.plaques[Session.cle] = 1.0e9 if bool(code["actif"]) else 0.0
+				ville.chaleur[Session.cle] = 0.0
+				_vider_les_evenements()
+			else:
+				canal.envoyer("mod", {"m": "plaques", "d": 1.0e9 if bool(code["actif"]) else 0.0})
 	_annoncer(String(code["nom"]).split(" — ")[0], Palette.CRITIQUE, 2.0)
 	Sons.jouer("bonus", 0.8, -8.0)
 
@@ -2404,8 +2790,10 @@ func _signaler_la_triche() -> void:
 ## s'ouvre qu'au volant : à pied, l'autoradio est éteint et il n'y a rien à
 ## choisir.
 func _tenir_la_roue() -> void:
+	# ⚠ AUCUN MENU OUVERT. La roue se TIENT (elle n'a pas de front) : ouverte
+	# par-dessus la pause, elle rendait les commandes en se refermant.
 	var voulue := not _pied and _hors_service <= 0.0 and not _triche_ouverte \
-		and Commandes.radio_tenue()
+		and not _pause_ouverte and not _superette_ouverte and Commandes.radio_tenue()
 	if voulue and not _roue:
 		_roue = true
 		_roue_choix = _station
@@ -2413,7 +2801,10 @@ func _tenir_la_roue() -> void:
 		Sons.jouer("bonus", 1.9, -20.0)
 	elif not voulue and _roue:
 		_roue = false
-		Commandes.saisie = false
+		# ⚠ On ne REND pas les commandes, on recalcule : un menu peut être
+		# ouvert par-dessus, et `saisie = false` en sortant de la roue faisait
+		# conduire à travers le menu de pause.
+		_regler_la_saisie()
 		_changer_de_station(_roue_choix)
 	if _roue:
 		_viser_dans_la_roue()
@@ -2595,6 +2986,47 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 					float(charge.get("a", 0.0)), float(charge.get("pv", PV_VOITURE)),
 					int(charge.get("m", -1)), int(charge.get("g", VilleVivante.CIVILE)))
 				_vider_les_evenements()
+		"terrain":
+			if est_hote():
+				ville.tenir_le_terrain(String(charge.get("cle", "")), int(charge.get("i", -1)),
+					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
+					int(charge.get("g", -1)))
+				_vider_les_evenements()
+		"raid":
+			var qui := String(charge.get("j", ""))
+			var gang_r := int(charge.get("g", -1))
+			match String(charge.get("e", "")):
+				"ouvre":
+					if qui == Session.cle:
+						_annoncer("RAID SUR %s — %d hommes" % [
+							carte.nom_du_gang(gang_r).to_upper(), int(charge.get("n", 0))],
+							Palette.CRITIQUE, 3.0)
+						Sons.jouer("bip", 0.7, -8.0)
+				"avance":
+					if qui == Session.cle and int(charge.get("n", 0)) <= 2:
+						_annoncer("encore %d" % int(charge.get("n", 0)), Palette.SERIEUX, 1.6)
+				"perdu":
+					if qui == Session.cle:
+						_annoncer("raid abandonné", Palette.ENCRE_FAIBLE, 2.0)
+				"pris":
+					# LE REPAIRE TOMBE. On repeint le tag chez TOUT LE MONDE —
+					# c'est le seul endroit de la ville qui change de main, et
+					# un quartier qui change de camp sans que ça se voie, ça
+					# n'est jamais arrivé.
+					_reprendre_le_tag(int(charge.get("i", -1)), qui)
+					if qui == Session.cle:
+						_annoncer("REPAIRE PRIS — %s est chassé" % carte.nom_du_gang(gang_r).to_upper(),
+							Palette.BON, 4.0)
+						Sons.jouer("fin", 1.0, -6.0)
+					else:
+						_annoncer("%s a pris le repaire %s" % [String(joueurs.get(qui, {}).get("pseudo", "un joueur")),
+							carte.du_gang(gang_r)], Palette.AVERTISSEMENT, 3.0)
+		"rentrer":
+			# Un joueur demande la fin. Seul l'hôte peut conclure (voir
+			# `_quitter_la_ville`) — il diffusera le « fin » que tout le monde
+			# reçoit, classement compris.
+			if est_hote():
+				terminer("%s rentre" % String(charge.get("p", "un joueur")))
 		"broyer":
 			# LA CASSE. Le client dit « je broie celle-ci », l'hôte tranche : la
 			# voiture quitte la ville, la somme et le butin repartent dans un
@@ -2744,8 +3176,8 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 			_effet_explosion(ou_obus)
 			_effet_depart_de_coup(Vector2(float(charge.get("dx", 0)), float(charge.get("dy", 0))),
 				(ou_obus - Vector2(float(charge.get("dx", 0)), float(charge.get("dy", 0)))).angle())
-			var loin_obus: float = ou_obus.distance_to(_position)
-			Sons.jouer("explosion_grande", 0.82, -4.0 - loin_obus * 0.006)
+			# L'explosion est déjà sonnée par `_effet_explosion` : une seconde
+			# détonation par-dessus s'entendait comme un écho de studio.
 		"swat":
 			if String(charge.get("j", "")) == Session.cle:
 				_annoncer("ILS DESCENDENT DU FOURGON", Palette.CRITIQUE, 2.6)
@@ -2862,7 +3294,7 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 					Sons.jouer("fin", 1.3, -4.0)
 				else:
 					_dire_affaire("colis %d/%d" % [_colis, _colis_sur])
-					Sons.jouer("ramasse", 1.25, -8.0)
+					Sons.jouer("bonus_pieton", 1.25, -8.0)
 		"frenzy":
 			if String(charge.get("j", "")) != Session.cle:
 				return
@@ -2988,6 +3420,13 @@ func _encaisser(degats: float, cause: String, par: String) -> void:
 func _tomber() -> void:
 	_vie = 0.0
 	_hors_service = HORS_SERVICE
+	# ⚠ ON FERME LA BOUTIQUE. Se faire descendre devant la caisse laissait le
+	# menu ouvert ET `saisie` posée : plus moyen de bouger, et ÉCHAP fermait
+	# un menu de supérette pendant qu'on se relevait dans la rue.
+	if _superette_ouverte:
+		_basculer_la_superette()
+	if _pause_ouverte:
+		_basculer_la_pause()
 	# La police ramasse ce qu'on avait sur soi — et l'arme, sauf si on a un
 	# arsenal à la planque. C'est ce qui fait qu'on rentre déposer son argent
 	# au lieu de rouler jusqu'à la mort.
@@ -3122,8 +3561,11 @@ func _effet_gain(position: Vector2, points: int, facteur: int, cle: String, quoi
 ## au milieu d'une dalle rouillée ressemble à un défaut d'affichage — et c'est
 ## ce que le joueur croira, parce que c'est ce que ça a l'air d'être.
 func _effet_broyage(position: Vector2) -> void:
-	Sons.jouer("choc", 0.55, -4.0)
-	Sons.jouer("ecrasement", 0.7, -6.0)
+	# Le moteur du compacteur, puis la tôle qui cède. Deux temps : une casse
+	# qui ne fait qu'un bruit d'impact ressemble à un accrochage de plus.
+	Sons.jouer("broyeur", 0.9, -8.0)
+	Sons.jouer("vehicule_broye", _rng.randf_range(0.9, 1.05), -4.0)
+	Sons.jouer("choc_dur", 0.7, -9.0)
 	_secousse = max(_secousse, 0.32)
 	for noeud in _compacteurs:
 		var machine: Node3D = noeud
@@ -3140,8 +3582,15 @@ func _effet_broyage(position: Vector2) -> void:
 			anim.tween_interval(0.5)
 			anim.tween_property(machoire, "position:x", depart, 0.7)
 
-func _effet_explosion(position: Vector2) -> void:
-	Sons.jouer("explosion_grande", _rng.randf_range(0.92, 1.06), -4.0)
+## `ampleur` de 0 à 1 : une caisse qui saute et le char qui canonne ne sont
+## pas le même événement, et jusqu'ici ils faisaient le même bruit.
+func _effet_explosion(position: Vector2, ampleur: float = 1.0) -> void:
+	var quelle := "explosion_grande"
+	if ampleur < 0.4:
+		quelle = "explosion_petite"
+	elif ampleur < 0.75:
+		quelle = "explosion_moyenne"
+	Sons.jouer(quelle, _rng.randf_range(0.92, 1.06), -4.0)
 	_secousse = max(_secousse, 0.4)
 	# La bouffée de feu, et un éclair orange sur les façades autour : au
 	# crépuscule, une explosion doit ÉCLAIRER, pas seulement projeter des éclats.
@@ -3236,7 +3685,9 @@ func rafraichir_scene(delta: float) -> void:
 	_placer_camera(delta)
 	_animer_les_feux(delta)
 	_animer_les_cabines()
+	_rafraichir_les_repaires()
 	_faire_hurler_la_police(delta)
+	_sentir_le_quartier()
 	_rafraichir_contrat(delta)
 	_rafraichir_radar()
 	_rafraichir_banniere(delta)
@@ -3401,8 +3852,28 @@ func _faire_hurler_la_police(delta: float) -> void:
 		Sons.sirene(0)
 		return
 	# La sirène tourne en continu tant qu'on est recherché : une poursuite est
-	# un état. Elle enfle avec les étoiles et passe au régime rapide à trois.
-	Sons.sirene(niveau, -20.0)
+	# un état. Elle enfle avec les étoiles, passe au régime rapide à trois —
+	# et son volume suit la patrouille la plus proche. À volume fixe, on ne
+	# savait pas si on les avait semés : la jauge d'étoiles reste allumée
+	# plusieurs secondes après qu'ils ont perdu la trace.
+	var proche := 1e9
+	var char_proche := 1e9
+	for auto in ville.autos:
+		if int(auto["genre"]) != VilleVivante.PATROUILLE:
+			continue
+		var d: float = (auto["p"] as Vector2).distance_to(_position)
+		proche = min(proche, d)
+		if int(auto.get("corps", 0)) == VilleVivante.CORPS_ARMEE:
+			char_proche = min(char_proche, d)
+	Sons.sirene(niveau, -14.0 - 16.0 * clamp(proche / 1600.0, 0.0, 1.0))
+	# LE CHAR s'entend avant de se voir, et c'est tout l'intérêt : on ne
+	# tourne pas dans sa rue par hasard deux fois.
+	if char_proche < 1100.0:
+		_depuis_chenilles -= delta
+		if _depuis_chenilles <= 0.0:
+			_depuis_chenilles = 0.9
+			Sons.jouer("chenilles", _rng.randf_range(0.94, 1.04),
+				-12.0 - 14.0 * (char_proche / 1100.0))
 	# Le dispatch, lui, parle par intervalles — assez pour raconter la chasse,
 	# assez peu pour qu'on entende encore le moteur.
 	_depuis_radio -= delta
@@ -3442,8 +3913,12 @@ func _alerte_contrat() -> Dictionary:
 	}
 
 func _placer_le_joueur(delta: float) -> void:
-	_corps_auto.visible = not _pied and _hors_service <= 0.0
-	_corps_pied.visible = _pied and (_hors_service <= 0.0 or fmod(_hors_service, 0.3) > 0.15)
+	# ⚠ SON PROPRE CORPS DISPARAÎT EN VUE SUBJECTIVE : l'œil est posé dans la
+	# tête du pantin, et sans ça l'écran devient une texture de peau. Les
+	# AUTRES joueurs, eux, restent visibles — c'est même tout l'intérêt.
+	_corps_auto.visible = not _pied and _hors_service <= 0.0 and not _subjectif
+	_corps_pied.visible = _pied and not _subjectif \
+		and (_hors_service <= 0.0 or fmod(_hors_service, 0.3) > 0.15)
 
 	if _corps_auto.visible:
 		_corps_auto.position = Decor.vers3d(_position, 0.0)
@@ -3726,6 +4201,194 @@ func _placer_les_helicos(delta: float) -> void:
 			_depuis_battement = 0.36
 			Sons.jouer("battement", 1.0, -14.0)
 
+## LA FAIM ET LA SOIF, une image après l'autre. Appelée depuis
+## `_surveiller_les_lieux`, donc à pied, au volant et dans le train — mais pas
+## chez soi ni dans un repaire : à l'intérieur, le temps du ventre s'arrête.
+## Ce n'est pas du réalisme, c'est du confort : on entre chez soi pour ranger
+## de l'argent, pas pour se faire surprendre par une jauge qu'on ne voit plus.
+func _avoir_faim(delta: float) -> void:
+	var effort := EFFORT_A_PIED if _pied else 1.0
+	_faim = maxf(0.0, _faim - FAIM_MAX / DUREE_FAIM * effort * delta)
+	_soif = maxf(0.0, _soif - FAIM_MAX / DUREE_SOIF * effort * delta)
+	_creux_dit = maxf(0.0, _creux_dit - delta)
+	# L'AVERTISSEMENT arrive au seuil, une fois, puis se rappelle toutes les
+	# vingt secondes. Une annonce à chaque image serait un mur de texte ; une
+	# seule annonce et l'on meurt en ayant oublié.
+	if _creux_dit <= 0.0 and (_faim <= SEUIL_CREUX or _soif <= SEUIL_CREUX):
+		_creux_dit = 20.0
+		if _faim <= 0.0 or _soif <= 0.0:
+			_annoncer("VOUS DÉPÉRISSEZ — trouvez une supérette", Palette.CRITIQUE, 3.0)
+		elif _faim <= _soif:
+			_annoncer("vous avez faim", Palette.AVERTISSEMENT, 2.4)
+		else:
+			_annoncer("vous avez soif", Palette.AVERTISSEMENT, 2.4)
+	# LE VENTRE VIDE RONGE. On ne passe PAS par `_encaisser` : elle secoue
+	# l'écran, joue un choc et retient un agresseur. Mourir de faim n'a ni
+	# coupable ni impact — c'est une usure, et une secousse par seconde pendant
+	# cinquante secondes rendrait le jeu injouable bien avant la mort.
+	if (_faim > 0.0 and _soif > 0.0) or _hors_service > 0.0 or _invincible:
+		return
+	var creux := (1.0 if _faim <= 0.0 else 0.0) + (1.0 if _soif <= 0.0 else 0.0)
+	_vie -= DEGAT_JEUNE * creux * delta
+	if _vie <= 0.0:
+		_tomber()
+
+## MANGER. La touche n'ouvre pas de menu : elle prend dans les poches ce qui
+## répond au besoin le plus pressant (`Provisions.le_mieux`). Trois touches
+## pour choisir entre un sandwich et une bouteille d'eau pendant qu'on se fait
+## tirer dessus, personne ne le fait deux fois.
+func _consommer() -> void:
+	var cle := Provisions.le_mieux(_provisions, _faim, _soif, _vie, FAIM_MAX)
+	if cle == "":
+		# ⚠ On distingue « rien sur soi » de « rien d'utile » : un joueur à
+		# quatre-vingt-dix-huit de faim avec trois sandwichs n'a pas un
+		# inventaire vide, il n'a simplement pas besoin de manger.
+		_dire_affaire("rien à consommer" if _provisions.is_empty() else "pas besoin pour l'instant")
+		return
+	Provisions.retirer(_provisions, cle)
+	var a := Provisions.fiche(cle)
+	_faim = clampf(_faim + float(a["faim"]), 0.0, FAIM_MAX)
+	_soif = clampf(_soif + float(a["soif"]), 0.0, FAIM_MAX)
+	_vie = clampf(_vie + float(a["vie"]), 1.0, VIE_MAX)
+	_dire_affaire("%s — %s" % [String(a["nom"]).to_lower(), Provisions.effet(cle)])
+	Sons.jouer("dalle", _rng.randf_range(0.9, 1.1), -14.0)
+
+# ------------------------------------------------------------- la pause
+
+func _basculer_la_pause() -> void:
+	_pause_ouverte = not _pause_ouverte
+	_regler_la_saisie()
+	if _pause_ouverte:
+		if _pause_vue == null:
+			_pause_vue = Control.new()
+			_pause_vue.set_anchors_preset(Control.PRESET_FULL_RECT)
+			_pause_vue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_pause_vue.set_script(load("res://ui/pause.gd"))
+			interface().add_child(_pause_vue)
+		_pause_vue.choix = 0
+		Sons.jouer("clic", 0.8, -12.0)
+	elif _pause_vue != null:
+		_pause_vue.queue_free()
+		_pause_vue = null
+
+func _naviguer_dans_la_pause() -> void:
+	if _pause_vue == null:
+		return
+	# Le sous-titre dit ce qu'on emporte : l'argent DÉPOSÉ compte, celui qu'on
+	# a sur soi aussi. C'est la dernière chose qu'on veut vérifier avant de
+	# rentrer, et aller la lire ailleurs qu'ici, personne ne le fait.
+	_pause_vue.sous_titre = "$%d sur soi · $%d au coffre" % [_argent, _banque]
+	_pause_vue.lignes = [
+		{"texte": "REPRENDRE", "detail": "", "couleur": Palette.BON},
+		{"texte": "QUITTER LA VILLE", "detail": "la manche s'arrête pour la table",
+			"couleur": Palette.SERIEUX},
+	]
+	if _front_de_triche(KEY_UP):
+		_pause_vue.choix = posmod(int(_pause_vue.choix) - 1, 2)
+	if _front_de_triche(KEY_DOWN):
+		_pause_vue.choix = posmod(int(_pause_vue.choix) + 1, 2)
+	if _front_de_triche(KEY_ENTER) or _front_de_triche(KEY_KP_ENTER) or _front_de_triche(KEY_SPACE):
+		if int(_pause_vue.choix) == 0:
+			_basculer_la_pause()
+		else:
+			_quitter_la_ville()
+	_pause_vue.queue_redraw()
+
+## RENTRER. C'est ici que la manche se termine, et c'est le seul endroit.
+##
+## ⚠ SEUL L'HÔTE PEUT CONCLURE. `Partie.terminer()` diffuse le classement ET le
+## dépose en base, une fois : quatre clients qui déposent, c'est quatre parties
+## en base pour une seule jouée. Un joueur ordinaire demande donc à l'hôte de
+## conclure, et l'hôte lui répond par le « fin » que tout le monde reçoit.
+##
+## La manche s'arrête POUR LA TABLE, et le menu le dit avant qu'on appuie. On
+## aurait pu ne faire sortir que le partant — mais son score resterait alors
+## dans un classement que personne ne dépose, et il faudrait décider quoi faire
+## du dernier joueur resté seul en ville. Une manche est une manche : elle
+## commence ensemble et elle finit ensemble.
+func _quitter_la_ville() -> void:
+	_basculer_la_pause()
+	if est_hote():
+		terminer("%s rentre" % Session.pseudo)
+	else:
+		canal.envoyer("rentrer", {"j": Session.cle, "p": Session.pseudo})
+
+# -------------------------------------------------------- la supérette
+
+## Ouvrir et fermer la boutique. Même mécanique que le menu de triche : la
+## ville continue de tourner derrière, le joueur seul est figé.
+func _basculer_la_superette() -> void:
+	_superette_ouverte = not _superette_ouverte
+	_regler_la_saisie()
+	if _superette_ouverte:
+		if _superette_vue == null:
+			_superette_vue = Control.new()
+			_superette_vue.set_anchors_preset(Control.PRESET_FULL_RECT)
+			_superette_vue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_superette_vue.set_script(load("res://ui/superette.gd"))
+			interface().add_child(_superette_vue)
+		_superette_vue.choix = 0
+		_superette_vue.message = ""
+		Sons.jouer("porte", 1.0, -10.0)
+	elif _superette_vue != null:
+		_superette_vue.queue_free()
+		_superette_vue = null
+		Sons.jouer("porte", 0.8, -12.0)
+
+func _naviguer_dans_la_superette() -> void:
+	if _superette_vue == null:
+		return
+	# Le catalogue se recopie à chaque image avec ce qu'on possède et ce qu'on
+	# peut payer : acheter change les deux, et un menu qui ne se met à jour
+	# qu'à la fermeture ment pendant tout l'achat.
+	var liste: Array = []
+	for a in Provisions.CATALOGUE:
+		liste.append({"cle": String(a["cle"]), "nom": String(a["nom"]), "prix": int(a["prix"]),
+			"effet": Provisions.effet(String(a["cle"])), "couleur": a["couleur"],
+			"possede": int(_provisions.get(String(a["cle"]), 0))})
+	_superette_vue.articles = liste
+	_superette_vue.argent = _argent
+	_superette_vue.poches = Provisions.compte(_provisions)
+	_superette_vue.poches_max = Provisions.POCHES
+	# LE PILOTE DU BANC FAIT SES COURSES. Il ne peut pas appuyer sur les
+	# flèches — `_front_de_triche` lit le clavier physique — donc il achèterait
+	# zéro article et la caisse, les poches pleines et le refus faute d'argent
+	# ne seraient jamais exercés par une manche.
+	if Commandes.pilote_automatique:
+		for a in liste:
+			if _argent >= int(a["prix"]) and Provisions.compte(_provisions) < Provisions.POCHES:
+				_acheter_a_la_superette(String(a["cle"]))
+				break
+		_basculer_la_superette()
+		return
+	if _front_de_triche(KEY_UP):
+		_superette_vue.choix = posmod(int(_superette_vue.choix) - 1, liste.size())
+	if _front_de_triche(KEY_DOWN):
+		_superette_vue.choix = posmod(int(_superette_vue.choix) + 1, liste.size())
+	if _front_de_triche(KEY_ENTER) or _front_de_triche(KEY_KP_ENTER) or _front_de_triche(KEY_SPACE):
+		_acheter_a_la_superette(String(liste[int(_superette_vue.choix)]["cle"]))
+	if _front_de_triche(KEY_ESCAPE):
+		_basculer_la_superette()
+	_superette_vue.queue_redraw()
+
+func _acheter_a_la_superette(cle: String) -> void:
+	var prix := Provisions.prix(cle)
+	if Provisions.compte(_provisions) >= Provisions.POCHES:
+		_superette_vue.message = "vos poches sont pleines — rangez au frigo, chez vous"
+		_superette_vue.message_couleur = Palette.AVERTISSEMENT
+		Sons.jouer("choc", 0.6, -16.0)
+		return
+	if _argent < prix:
+		_superette_vue.message = "il manque $%d" % (prix - _argent)
+		_superette_vue.message_couleur = Palette.CRITIQUE
+		Sons.jouer("choc", 0.6, -16.0)
+		return
+	_encaisser_argent(-prix)
+	Provisions.ajouter(_provisions, cle)
+	_superette_vue.message = "%s dans le sac" % Provisions.nom(cle).to_lower()
+	_superette_vue.message_couleur = PlanVille.COULEUR_SUPERETTE
+	Sons.jouer("bip", 1.2, -14.0)
+
 ## LES RAMES ET LES QUAIS. Les quais ne sont posés QU'UNE FOIS : leur place
 ## vient de `VilleVivante.gares()`, qui ne dépend que du code de la manche.
 ## Les rames, elles, bougent à chaque image.
@@ -3787,6 +4450,21 @@ func _sentir_le_train(delta: float) -> void:
 			if _depuis_roulement <= 0.0:
 				_depuis_roulement = 0.42
 				Sons.jouer("roulement", _rng.randf_range(0.93, 1.07), -16.0 - 12.0 * (d / 900.0))
+			# Le klaxon, rare et fort : c'est lui qui fait lever la tête quand
+			# on roule vers la voie sans avoir vu la rame arriver. Le
+			# roulement seul ne se distingue pas d'un moteur de camion.
+			_depuis_corne -= delta
+			if _depuis_corne <= 0.0 and d < 620.0:
+				_depuis_corne = _rng.randf_range(7.0, 13.0)
+				Sons.jouer("train_klaxon", _rng.randf_range(0.95, 1.05), -12.0 - 8.0 * (d / 620.0))
+		elif float(t["v"]) <= 300.0 and d < 400.0:
+			# À l'approche d'un quai, le freinage. Un train qui s'arrête en
+			# silence ressemble à un train en panne.
+			_depuis_roulement -= delta
+			if _depuis_roulement <= 0.0:
+				_depuis_roulement = 2.2
+				Sons.jouer("train_arrive" if float(t["arret"]) <= 0.0 else "train_part",
+					1.0, -15.0 - 8.0 * (d / 400.0))
 	if not _pied or _quai_dit > 0.0:
 		return
 	var quai := ville.rame_a_quai(_position)
@@ -3831,7 +4509,8 @@ func _monter_dans_le_train() -> bool:
 	_place_train = VilleVivante.longueur_de_rame() * 0.5
 	_vitesse = 0.0
 	_eteindre_la_radio()
-	Sons.jouer("portail", 1.0, -9.0)
+	Sons.jouer("porte_glissante", 1.0, -8.0)
+	Sons.jouer("train_part", 0.95, -13.0)
 	_annoncer("en route", Palette.BON, 2.0)
 	return true
 
@@ -3846,7 +4525,7 @@ func _descendre_du_train() -> void:
 	# sur le ballast, hors de portée de tout.
 	var cote := Vector2.RIGHT.rotated(ville.cap_de_voie() + PI * 0.5) * 34.0
 	_position = carte.degager(_position + cote, RAYON_A_PIED)[0]
-	Sons.jouer("portail", 0.85, -9.0)
+	Sons.jouer("porte_glissante", 0.9, -8.0)
 
 ## La jauge est fille de son porteur : sans compenser la rotation, elle
 ## tournerait avec lui et deviendrait illisible dès le premier virage.
@@ -3895,8 +4574,65 @@ func _regler_jauge(porteur: Node3D, part: float) -> void:
 func _dedans3d(p: Vector2, hauteur: float = 0.0) -> Vector3:
 	return Interieurs.SOUS_SOL + Vector3(p.x * Interieurs.ECHELLE, hauteur, p.y * Interieurs.ECHELLE)
 
+# ------------------------------------------------------ la vue subjective
+#
+## LA PREMIÈRE PERSONNE. Carnage se joue de haut, à soixante-douze degrés : on
+## voit la rue, les voitures qui arrivent, le tag au coin. C'est la vue de
+## GTA 2 et ce n'est pas négociable pour jouer — mais c'est aussi une vue qui
+## ne montre jamais une FAÇADE. Deux cent trente-neuf modèles de kit, des
+## néons, des vitrines, des enseignes : personne ne les a jamais vus autrement
+## qu'en plan.
+##
+## ⚠ ELLE NE REMPLACE PAS LA VUE DU JEU, elle s'y ajoute — `V` bascule. Une
+## partie entière en vue subjective serait injouable : on ne voit pas la
+## voiture qui arrive par la droite, et tout l'équilibre du jeu (les portées,
+## le rayon des lieux, le radar) est réglé pour une caméra haute.
+##
+## ⚠ ON NE MONTRE PAS SON PROPRE PANTIN. En vue subjective, la tête du
+## personnage est exactement là où est l'œil : on regarde l'intérieur de son
+## crâne, et l'écran devient une texture de peau. Le corps se cache tant que la
+## vue dure — c'est ce que fait n'importe quel jeu à la première personne, et
+## ça ne se devine qu'en l'essayant.
+const HAUTEUR_OEIL_PIED := 3.0      ## unités 3D : la tête du pantin
+const HAUTEUR_OEIL_AUTO := 2.2      ## assis, un peu plus bas
+const AVANCE_OEIL := 1.1            ## devant le nez, pour ne pas voir sa propre nuque
+const FOV_SUBJECTIF := 78.0         ## large : de près, 54° donne un tunnel
+
+var _subjectif := false
+
+func _basculer_la_vue() -> void:
+	_subjectif = not _subjectif
+	if _camera != null:
+		_camera.fov = FOV_SUBJECTIF if _subjectif else 54.0
+	# La caméra saute d'un coup : interpolée depuis quarante unités de haut,
+	# elle traverse les immeubles pendant une seconde et demie.
+	_placer_camera(1000.0)
+	_annoncer("vue subjective" if _subjectif else "vue de dessus", Palette.SERIE, 1.6)
+	Sons.jouer("clic", 1.2, -14.0)
+
+## Où est l'œil, et vers quoi il regarde. Séparé du placement pour que le banc
+## d'image puisse le demander sans faire tourner une manche.
+func oeil() -> Array:
+	var haut := HAUTEUR_OEIL_PIED if _pied else HAUTEUR_OEIL_AUTO
+	var devant := Vector2.RIGHT.rotated(_angle)
+	var ou := Decor.vers3d(_position + devant * AVANCE_OEIL, haut)
+	return [ou, ou + Decor.vers3d(devant * 40.0, -1.5)]
+
 func _placer_camera(delta: float) -> void:
 	if _camera == null:
+		return
+	# LA VUE SUBJECTIVE passe avant tout le reste — sauf chez soi, où elle n'a
+	# rien à montrer qu'on ne voie déjà : un appartement se regarde en entier.
+	if _subjectif and _dedans == "":
+		var vu := oeil()
+		_camera.position = (_camera.position as Vector3).lerp(vu[0], clamp(delta * 14.0, 0, 1))
+		# ⚠ `look_at` refuse deux points confondus, et ça arrive : à l'arrêt,
+		# à la première image, la caméra n'a pas encore bougé vers l'œil.
+		if _camera.position.distance_to(vu[1]) > 0.05:
+			_camera.look_at(vu[1], Vector3.UP)
+		if _secousse > 0.0:
+			_secousse = max(0.0, _secousse - delta * 2.0)
+			_camera.rotation.z = _rng.randf_range(-1.0, 1.0) * _secousse * 0.06
 		return
 	if _dedans != "":
 		# Chez soi, la caméra ne suit pas : elle cadre l'appartement entier
@@ -3943,6 +4679,15 @@ func fiche_joueur() -> Dictionary:
 	if not _pied:
 		jauges.append({"nom": "TÔLE", "part": _pv_vehicule / PV_VOITURE,
 			"couleur": Palette.SERIE, "valeur": "%d" % int(_pv_vehicule)})
+	# LA FAIM ET LA SOIF, sous la vie et la tôle. Elles passent au rouge sous
+	# le seuil du creux : la couleur change AVANT le chiffre, parce qu'on lit
+	# une barre du coin de l'œil et un nombre seulement quand on le cherche.
+	jauges.append({"nom": "FAIM", "part": _faim / FAIM_MAX,
+		"couleur": Palette.SERIEUX if _faim > SEUIL_CREUX else Palette.CRITIQUE,
+		"valeur": "%d" % int(_faim)})
+	jauges.append({"nom": "SOIF", "part": _soif / FAIM_MAX,
+		"couleur": Color("#4aa8e0") if _soif > SEUIL_CREUX else Palette.CRITIQUE,
+		"valeur": "%d" % int(_soif)})
 	fiche["jauges"] = jauges
 	fiche["arme"] = {"nom": String(ARMES[_arme]["nom"]), "munitions": "" if _munitions < 0 else "%d" % _munitions}
 	fiche["argent"] = {"sur_soi": _argent, "banque": _banque, "planque": _planque >= 0}
@@ -3983,6 +4728,14 @@ func fiche_joueur() -> Dictionary:
 	if not _pied and _station != Sons.STATION_SILENCE and _station_dite > 0.0:
 		var station: Dictionary = Sons.STATIONS[_station]
 		puces.append({"texte": "♪ %s" % String(station["nom"]), "couleur": station["couleur"]})
+	# L'INVENTAIRE, une puce par sorte d'article avec son compte. Il ne
+	# s'affiche que s'il y a quelque chose : une ligne « 0 provision » sur un
+	# tableau de bord déjà chargé, c'est du bruit permanent pour une
+	# information qu'on connaît.
+	for cle in _provisions:
+		var article := Provisions.fiche(String(cle))
+		puces.append({"texte": "%s ×%d" % [String(article.get("nom", cle)).to_lower(),
+			int(_provisions[cle])], "couleur": article.get("couleur", Palette.ENCRE_DOUCE)})
 	if bool(_mods.get("mitrailleuse", false)):
 		puces.append({"texte": "mitrailleuse", "couleur": Color("#f2c53d")})
 	for quoi in ["mines", "huile"]:
