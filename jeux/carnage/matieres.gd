@@ -837,6 +837,51 @@ void fragment() {
 }
 """
 
+## LE VÉGÉTAL : les arbres et les buissons du Nature Kit (pas d'atlas, la
+## couleur au sommet) — et ils PLIENT AU VENT. Le sommet se déplace en
+## proportion de sa hauteur (le pied ne bouge pas), à une phase tirée de la
+## position dans le monde pour que deux arbres voisins ne balancent pas
+## ensemble. `vent` vient de la météo : une brise par temps clair, une
+## bourrasque sous l'orage. C'est le seul mouvement de la ville qui ne soit
+## pas une voiture ou un passant, et c'est ce qui fait qu'un parc a l'air
+## vivant même vide.
+const VEGETAL := """
+shader_type spatial;
+render_mode cull_back, diffuse_lambert, specular_schlick_ggx;
+
+uniform float vent : hint_range(0.0, 1.0) = 0.15;
+uniform float mouille : hint_range(0.0, 1.0) = 0.0;
+
+varying vec3 c;
+
+void vertex() {
+	c = COLOR.rgb;
+	vec3 posm = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	// Le balancement croît avec la hauteur, au carré : le tronc tient, la
+	// cime va. Deux sinus de fréquences différentes, sinon toute la rangée
+	// ondule comme une seule vague.
+	float h = max(VERTEX.y, 0.0);
+	float ampl = vent * 0.012 * h * h;
+	float phase = posm.x * 0.35 + posm.z * 0.21;
+	VERTEX.x += sin(TIME * (1.3 + 0.9 * vent) + phase) * ampl;
+	VERTEX.z += cos(TIME * (0.9 + 0.7 * vent) + phase * 1.7) * ampl * 0.6;
+}
+
+void fragment() {
+	// Mouillé, le feuillage fonce et luit un peu.
+	ALBEDO = c * (1.0 - 0.18 * mouille);
+	ROUGHNESS = 0.9 - 0.3 * mouille;
+	SPECULAR = 0.15 + 0.2 * mouille;
+}
+"""
+
+static var _vegetal: ShaderMaterial
+
+static func vegetal() -> ShaderMaterial:
+	if _vegetal == null:
+		_vegetal = _materiau(VEGETAL)
+	return _vegetal
+
 ## LE FAISCEAU DES PHARES : un coin de lumière additif devant la voiture, qui
 ## n'existe vraiment que quand l'air a quelque chose à éclairer — la brume, la
 ## pluie. Par temps clair il reste une lueur ; dans le brouillard, c'est le
@@ -1102,7 +1147,8 @@ static var _nuit_courante := 0.5
 ## chape), les voxels (chape) et le calque d'écran (traits, éclair). Les
 ## façades du kit et les voitures n'en savent rien : c'est la lumière
 ## (`MeteoCarnage.appliquer`) qui les grise, pas leur matière.
-static func regler_meteo(pluie: float, nuages: float, brume: float, eclair: float) -> void:
+static func regler_meteo(pluie: float, nuages: float, brume: float, eclair: float,
+		orage_courant: float = 0.0) -> void:
 	var chape := maxf(nuages, brume)
 	var s := sol()
 	s.set_shader_parameter("mouille", pluie)
@@ -1110,6 +1156,11 @@ static func regler_meteo(pluie: float, nuages: float, brume: float, eclair: floa
 	eau().set_shader_parameter("mouille", pluie)
 	flaque().set_shader_parameter("mouille", pluie)
 	faisceau().set_shader_parameter("air", clampf(brume + 0.5 * pluie, 0.0, 1.0))
+	# Le vent : une brise par beau temps, plus sous la pluie, une bourrasque
+	# sous l'orage. `orage` est la seule jauge qui vaille 1 seulement à l'orage.
+	var vent := clampf(0.15 + 0.3 * pluie + 0.55 * orage_courant, 0.0, 1.0)
+	vegetal().set_shader_parameter("vent", vent)
+	vegetal().set_shader_parameter("mouille", pluie)
 	for m in [voxel(), voxel_fusionne()]:
 		m.set_shader_parameter("couvert", chape)
 	for cle in _voxels_teintes:

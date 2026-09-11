@@ -83,6 +83,31 @@ remplace pas.
 - **L'eau** se hache d'un clapot court, se grise, se dépolit, et les impacts y
   scintillent comme au sol (`EAU`, `mouille`).
 
+## Le vent dans les arbres
+
+Les arbres et les buissons du Nature Kit passent par un shader à eux
+(`MatieresCarnage.VEGETAL`) : la couleur au sommet, comme avant, et un
+**balancement** qui croît avec la hauteur au carré — le tronc tient, la cime va
+— à une phase tirée de la position dans le monde, pour que deux arbres voisins
+n'ondulent pas comme une seule vague. `vent` = 0,15 par beau temps (une brise),
+0,45 sous la pluie, 1 sous l'orage. Mouillé, le feuillage fonce et luit un peu.
+C'est le seul mouvement de la ville qui ne soit ni une voiture ni un passant,
+et c'est ce qui fait qu'un parc a l'air vivant même vide. Les bancs, le
+monument et les rochers du même kit ne bougent pas : le shader ne s'applique
+qu'aux chemins `nature/tree`, `nature/plant` et `voxel/arbre`.
+
+## Une voiture luit, un mur non
+
+Le shader des kits (`KENNEY`) donnait à tout — murs, tôles, vitres — la
+rugosité d'un crépi (0,86) : vu de haut, une voiture était un aplat sans le
+moindre reflet. En mode `peinture` (véhicules et bateaux), la tôle passe à 0,5
+et le vitrage et les chromes — les gris **bleutés** de l'atlas, que ni la tôle
+ni les pneus n'ont (`t.b - t.r > 0,12`) — à 0,2 : le soleil accroche les
+toits, les pare-brise renvoient le ciel. Sous la pluie, tout le monde luit
+encore un peu plus (`mouille`). Les duplicata peints (`matiere_peinte`) sont
+inscrits dans un registre (`suivre_kenney`) pour recevoir la nuit et la pluie
+comme l'original — sans lui, une voiture repeinte restait sèche sous l'averse.
+
 ## Le bruit de la pluie
 
 Aucun fichier de pluie non plus, et une averse muette est une averse qu'on ne
@@ -120,7 +145,8 @@ photographier — un dixième de seconde ne se prend pas au vol sous xvfb.
 
 ## Ce qui reste
 
-- la **neige** et le **vent** (GTA 2 n'en a pas non plus) ;
+- la **neige** (GTA 2 n'en a pas non plus) ; le vent ne fait bouger que les
+  arbres — ni la pluie (qui penche toujours pareil) ni les passants ;
 - un vrai reflet **des façades** dans les flaques (il faudrait des réflexions
   d'écran, que le mode compatibilité n'a pas) ;
 - un fichier de pluie et un de tonnerre à la place des sons synthétisés, quand

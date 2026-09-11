@@ -550,7 +550,9 @@ comme GTA 2. `--meteo=pluie` fige un temps, le code MÉTÉO passe au suivant,
 `--banc-eclair` tient l'éclair pour la photo. Sur sol mouillé, chaque flaque de
 lumière rend un trait allongé (le reflet), et un faisceau additif part des
 phares de toute voiture qui roule — une lueur par temps clair, un vrai coin de
-lumière dans la brume. Détail : `CONCEPTION-METEO.md`.
+lumière dans la brume. Les arbres plient au vent (une brise par beau temps, une
+bourrasque sous l'orage), les carrosseries luisent au soleil et davantage sous
+la pluie. Détail : `CONCEPTION-METEO.md`.
 
 **Deux vraies lumières, pas une de plus.** Le mode compatibilité n'en supporte
 que huit par objet ; une flaque additive au sol sous chaque lampadaire fait le

@@ -150,7 +150,7 @@ func appliquer(delta: float, monde: WorldEnvironment, soleil: DirectionalLight3D
 		env.ambient_light_color = env.ambient_light_color.lerp(Color("#eef2ff"), eclair)
 		ciel.sky_top_color = ciel.sky_top_color.lerp(Color("#e6ecff"), eclair * 0.7)
 		ciel.sky_horizon_color = ciel.sky_horizon_color.lerp(Color("#f4f6ff"), eclair * 0.7)
-	MatieresCarnage.regler_meteo(pluie, nuages, brume, eclair)
+	MatieresCarnage.regler_meteo(pluie, nuages, brume, eclair, orage)
 	_regler_le_bruit_de_pluie()
 
 ## Un éclair toutes les cinq à seize secondes d'orage, jamais réglé comme une

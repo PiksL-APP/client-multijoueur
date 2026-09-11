@@ -482,6 +482,11 @@ static func matiere_kenney(chemin_modele: String) -> Material:
 		m = MatieresCarnage.kenney(texture, chemin_modele.contains("/batiments/") \
 			or chemin_modele.contains("/pavillons/") or chemin_modele.contains("/industriel/"),
 			chemin_modele.contains("/voitures/") or chemin_modele.contains("/bateaux/"))
+	elif chemin_modele.contains("/nature/tree") or chemin_modele.contains("/nature/plant") \
+			or chemin_modele.contains("/voxel/arbre"):
+		# Les arbres et les buissons : la couleur au sommet, et le vent
+		# (voir `MatieresCarnage.VEGETAL`).
+		m = MatieresCarnage.vegetal()
 	else:
 		# Pas d'atlas (le Nature Kit) : la couleur de sommet porte tout.
 		var simple := StandardMaterial3D.new()
