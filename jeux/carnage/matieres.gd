@@ -1435,9 +1435,13 @@ static func nuit() -> float:
 ## Les trois heures de référence — jour, heure bleue, nuit — entre lesquelles
 ## tout s'interpole : ciel, soleil, ambiante, brouillard, halo.
 const HEURES := [
-	{"haut": Color("#3b7bd8"), "horizon": Color("#cfe2f5"), "sol_h": Color("#8fa0b0"), "sol_b": Color("#3a4450"),
-		"soleil_x": -52.0, "soleil_y": -38.0, "soleil_c": Color("#fff0d0"), "soleil_e": 1.45,
-		"ambiante": Color("#7f97c8"), "ambiante_e": 0.62, "brume": Color("#7f93ab"), "brume_d": 0.0005,
+	# ⚠ LE PLEIN JOUR EST UN DIORAMA (cahier ville v2, § 1, validé le 12/09) :
+	# un soleil franc et chaud, une ambiante claire et peu bleue, des ombres
+	# nettes. L'ancienne ambiante (#7f97c8 à 0,62) teintait tout l'ombre en
+	# bleu et la ville sortait froide, même à midi.
+	{"haut": Color("#3d8fd6"), "horizon": Color("#bfe0f5"), "sol_h": Color("#8fa0b0"), "sol_b": Color("#3a4450"),
+		"soleil_x": -55.0, "soleil_y": -30.0, "soleil_c": Color("#fff3dc"), "soleil_e": 1.75,
+		"ambiante": Color("#cfd6e4"), "ambiante_e": 0.55, "brume": Color("#9fb0c4"), "brume_d": 0.0004,
 		"halo": 0.4, "seuil": 0.95, "lune": 0.1},
 	{"haut": Color("#0a1030"), "horizon": Color("#c85a3a"), "sol_h": Color("#3a2430"), "sol_b": Color("#06070c"),
 		"soleil_x": -42.0, "soleil_y": -52.0, "soleil_c": Color("#ffb27a"), "soleil_e": 1.25,

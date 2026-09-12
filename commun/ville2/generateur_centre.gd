@@ -22,7 +22,7 @@ const DEMI := Ville2.DEMI
 const COIN := 0.38
 const BORD := 0.42
 ## Où se gare une voiture : contre le trottoir, sur la bande de chaussée.
-const STATIONNEMENT := 0.24
+const STATIONNEMENT := 0.21
 
 ## Les quatre côtés d'un pâté et le quart de tour qui met la FAÇADE (−Z du
 ## modèle) vers ce côté : nord 0, est 3, sud 2, ouest 1.
@@ -127,6 +127,7 @@ static func generer(graine := 1, taille := Vector2i(40, 40), curseurs := {}) -> 
 	# 6. Les détails de rue.
 	_mobilier(v, alea, avenues_x, avenues_y)
 	_voitures_garees(v, alea, place, gare)
+	_panneaux_pub(v, alea, avenues_x, avenues_y, pas)
 	v.rasteriser()
 	return v
 
@@ -187,13 +188,27 @@ static func _pate_d_immeubles(v: Ville2, r: Rect2i, alea: RandomNumberGenerator,
 				hy += e.y
 			else:
 				hy += 1
-	# La cour : une benne, un arbre, une voiture.
+	# La cour (cahier § 3 : « parkings et arrière-cours, jardins intérieurs ») :
+	# un pâté sur deux a un parking (voitures, bennes, escalier de secours en
+	# moins), l'autre un jardin (pelouse, arbres, banc).
 	var cx := (float(hx0 + hx1) * 0.5) * DEMI
 	var cz := (float(hy0 + hy1) * 0.5) * DEMI
-	v.ajouter_objet("benne", cx - 6.0, cz - 6.0, alea.randf_range(-0.3, 0.3))
-	v.ajouter_objet("arbre_oak", cx + 7.0, cz + 5.0, alea.randf() * TAU)
-	if alea.randf() < 0.6:
-		v.ajouter_objet(KitVille2.VOITURES[alea.randi() % KitVille2.VOITURES.size()], cx - 4.0, cz + 6.0, PI * 0.5)
+	if (r.position.x + r.position.y) % 2 == 0:
+		for k in 3:
+			if alea.randf() < 0.75:
+				v.ajouter_objet(KitVille2.VOITURES[alea.randi() % KitVille2.VOITURES.size()],
+					cx - 9.0 + float(k) * 9.0, cz + 7.0, PI * 0.5 + alea.randf_range(-0.05, 0.05))
+		v.ajouter_objet("benne", cx - 12.0, cz - 9.0, 0.0)
+		v.ajouter_objet("benne", cx - 7.0, cz - 9.0, 0.0)
+		v.ajouter_objet("poubelle", cx + 12.0, cz - 9.0, alea.randf() * TAU)
+		v.ajouter_objet("arbre_oak", cx + 11.0, cz + 2.0, alea.randf() * TAU)
+	else:
+		v.objets.append({"m": "pelouse", "x": cx, "z": cz, "r": 0.0, "h": 0.0, "w": 30.0, "d": 30.0})
+		v.ajouter_objet("arbre", cx - 8.0, cz - 7.0, alea.randf() * TAU)
+		v.ajouter_objet("arbre_rond", cx + 9.0, cz + 6.0, alea.randf() * TAU)
+		v.ajouter_objet("buisson", cx + 8.0, cz - 9.0, alea.randf() * TAU)
+		v.ajouter_objet("banc", cx - 6.0, cz + 8.0, PI)
+		v.ajouter_objet("lampadaire_parc", cx + 2.0, cz - 2.0, alea.randf() * TAU)
 
 ## Un pâté de tours : deux tours au plus, le reste en immeubles hauts.
 static func _pate_de_tours(v: Ville2, r: Rect2i, alea: RandomNumberGenerator) -> void:
@@ -281,6 +296,19 @@ static func _la_place(v: Ville2, place: Rect2i, alea: RandomNumberGenerator) -> 
 		for k in 4:
 			var a := PI * 0.25 + PI * 0.5 * float(k)
 			v.ajouter_objet("buisson", px + cos(a) * 0.9 * CASE, cz + sin(a) * 0.6 * CASE, alea.randf() * TAU)
+	# Les terrasses (cahier § 8 : « activités : bancs, terrasses ») le long du
+	# côté est, face à l'avenue : parasols du kit et bancs, deux rangs.
+	var xe := (float(place.end.x) - 0.7) * CASE
+	for k in range(place.position.y, place.end.y):
+		var az := (float(k) + 0.5) * CASE
+		v.ajouter_objet("parasol", xe, az - 4.0, alea.randf() * TAU)
+		v.ajouter_objet("parasol", xe - 7.0, az + 4.0, alea.randf() * TAU)
+		v.ajouter_objet("banc", xe - 3.5, az, PI * 0.5)
+	# Des jardinières aux quatre coins.
+	for sx in [0.35, float(place.size.x) - 0.35]:
+		for sy in [0.35, float(place.size.y) - 0.35]:
+			v.ajouter_objet("res://modeles/kenney/pavillons/planter.glb",
+				(float(place.position.x) + sx) * CASE, (float(place.position.y) + sy) * CASE, 0.0)
 	# Une rangée d'arbres et de bancs le long des deux grands côtés.
 	for k in range(place.position.x, place.end.x):
 		var ax := (float(k) + 0.5) * CASE
@@ -397,3 +425,100 @@ static func _voitures_garees(v: Ville2, alea: RandomNumberGenerator, place: Rect
 			# Le sens de la voie : à droite dans son sens de marche.
 			var angle := (0.0 if s > 0.0 else PI) if selon_x else (PI * 0.5 if s < 0.0 else -PI * 0.5)
 			v.ajouter_objet(KitVille2.VOITURES[alea.randi() % KitVille2.VOITURES.size()], ou.x, ou.y, angle)
+
+# ------------------------------------------------------------------ les panneaux pub
+
+## LES 24 VISUELS (cahier § 7). DEUX POSES, ET DEUX SEULEMENT :
+##   - SUR UN TOIT, cadre et poteaux courts, sur un immeuble de hauteur
+##     MOYENNE qui donne sur une avenue. Un panneau sur une tour ne se lit pas
+##     d'en bas : on plafonne la hauteur du toit à `PUB_TOIT_MAX`.
+##   - SUR UN PIGNON AVEUGLE, à plat contre le mur, le bas du panneau à
+##     hauteur d'étage. Il faut un VRAI pignon : un mur large, qui donne sur
+##     une rue DE L'AUTRE CÔTÉ, et rien devant.
+##
+## ⚠ CE QUI LES FAISAIT VOLER. Première version : on acceptait tout côté dont
+## la demi-case voisine touchait une rue. Sur un pâté, la case « voisine » d'un
+## petit immeuble est souvent la COUR ou la fente entre deux immeubles : le
+## panneau se retrouvait suspendu dans une venelle, de travers, invisible de la
+## rue et posé sur rien. Il faut donc que la case visée soit de la chaussée
+## ET qu'aucun lot ne la touche.
+const PUB_TOIT_MAX := 1.8              ## en cases : au-delà, c'est une tour
+const PUB_TOIT_MIN := 1.15             ## en dessous, le panneau dépasse la rue
+const PUB_PIED := 2.0                  ## les poteaux courts d'un panneau de toit
+const PUB_LARGE_MAX := 17.0            ## 8,5 m : la largeur d'une affiche
+const PUB_MUR_MIN := 15.0              ## un pignon plus étroit n'est pas un pignon
+const PUB_BAS := 8.0                   ## le bas d'un panneau mural, en unités
+const PUB_HAUT_MAX := 28.0             ## le haut : au-delà, on ne le lit plus
+## ⚠ LE PANNEAU SORT DU MUR. Une descente d'eau Kenney dépasse de ~0,6 unité :
+## à ras du mur, elle barrait l'affiche de haut en bas.
+const PUB_DEBORD := 1.55
+
+## ⚠ UN PANNEAU PAR PÂTÉ, PAS UN PAR IMMEUBLE. Sans cette règle, chaque
+## immeuble d'une même rue prenait le sien : trois panneaux côte à côte sur
+## trois toits voisins, et la ville se lisait comme un bord de périphérique.
+static func _panneaux_pub(v: Ville2, alea: RandomNumberGenerator, _avenues_x: Array, _avenues_y: Array,
+		pas: int = 5) -> void:
+	var image := 0
+	var pris: Dictionary = {}          ## une pose par case visée : jamais deux face à face
+	var toit_du_pate: Dictionary = {}  ## un panneau de toit par pâté
+	var mur_du_pate: Dictionary = {}   ## un panneau mural par pâté
+	for l in v.lots:
+		if String(l["genre"]) != "immeuble": continue
+		var m := String(l["m"])
+		var t := KitVille2.taille(m)
+		var hauteur := t.y * CASE
+		var q := int(l["q"])
+		var centre := v.centre_du_lot(l)
+		var ici := Vector2i(floori(centre.x / CASE), floori(centre.z / CASE))
+		# La façade du modèle regarde −Z, tournée de `q` quarts (Basis(UP, +90°)
+		# envoie (x, z) sur (z, −x)).
+		var facade := Vector2i(0, -1)
+		for _k in q: facade = Vector2i(facade.y, -facade.x)
+		# 1. LE TOIT, face à l'avenue, sur un immeuble de hauteur moyenne.
+		var devant := ici + facade
+		var pate := Vector2i(floori(float(ici.x) / float(pas)), floori(float(ici.y) / float(pas)))
+		if v.genre_de_route(devant) == Ville2.R_AVENUE and t.y >= PUB_TOIT_MIN and t.y <= PUB_TOIT_MAX \
+				and not pris.has(devant) and not toit_du_pate.has(pate) and alea.randf() < 0.8:
+			pris[devant] = true
+			toit_du_pate[pate] = true
+			var mur_f := (t.x if q % 2 == 0 else t.z) * CASE
+			var large := minf(mur_f * 0.82, PUB_LARGE_MAX)
+			v.objets.append({"m": "pub", "x": centre.x, "z": centre.z, "r": _vers(facade),
+				"h": 0.0, "y": hauteur, "w": large, "hh": large * 9.0 / 16.0,
+				"pied": PUB_PIED, "image": image})
+			image += 1
+			continue
+		# 2. UN PIGNON AVEUGLE : un côté (ni la façade, ni l'arrière) dont la
+		# case d'en face est de la chaussée libre, et dont le mur est large.
+		for cote in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			if cote == facade or cote == -facade: continue
+			var demi_mur := ((t.x if (cote.x != 0) == (q % 2 == 1) else t.z)) * CASE * 0.5
+			var mur := demi_mur * 2.0
+			if mur < PUB_MUR_MIN: continue
+			var demi_dehors := ((t.x if (cote.x != 0) == (q % 2 == 0) else t.z)) * CASE * 0.5
+			# La case que le panneau REGARDE : celle qui commence juste après le mur.
+			var face := Vector2i(floori((centre.x + float(cote.x) * (demi_dehors + 2.0)) / CASE),
+				floori((centre.z + float(cote.y) * (demi_dehors + 2.0)) / CASE))
+			if face == ici: continue
+			if not v.carte.route(face) or v.lot_sur(face) >= 0: continue
+			if pris.has(face) or mur_du_pate.has(pate): continue
+			if alea.randf() > 0.5: continue
+			pris[face] = true
+			mur_du_pate[pate] = true
+			var large := minf(mur * 0.7, PUB_LARGE_MAX)
+			var haut := large * 9.0 / 16.0
+			# Le bas à hauteur d'étage, le haut plafonné : un panneau à
+			# trente mètres ne se lit pas depuis le trottoir d'en face.
+			var bas := clampf(hauteur * 0.45, PUB_BAS, maxf(PUB_BAS, PUB_HAUT_MAX - haut))
+			if bas + haut > hauteur - 1.0:
+				bas = maxf(1.5, hauteur - haut - 1.5)
+			if bas < 1.0: continue
+			v.objets.append({"m": "pub", "x": centre.x + float(cote.x) * (demi_dehors + PUB_DEBORD),
+				"z": centre.z + float(cote.y) * (demi_dehors + PUB_DEBORD), "r": _vers(cote),
+				"h": 0.0, "y": bas, "w": large, "hh": haut, "pied": 0.0, "image": image})
+			image += 1
+			break
+
+## L'angle qui met le +Z d'un panneau (sa face imprimée) vers cette direction.
+static func _vers(d: Vector2i) -> float:
+	return atan2(float(d.x), float(d.y))

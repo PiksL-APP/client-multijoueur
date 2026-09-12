@@ -65,6 +65,17 @@ func _ready() -> void:
 	RenduVille2.inventaire = true
 	add_child(RenduVille2.batir(ville))
 	print("bati en %d ms" % (Time.get_ticks_msec() - t0))
+	# La nuit, les lampadaires éclairent comme en jeu (`carnage.gd` accroche
+	# la même flaque à chaque luminaire reconnu à son maillage).
+	if heure >= 0.5:
+		var maillages := FormesCarnage.maillages_de_lampadaires()
+		var allumes := 0
+		for n in find_children("*", "MeshInstance3D", true, false):
+			var mi := n as MeshInstance3D
+			if mi.mesh in maillages:
+				mi.add_child(FormesCarnage.lueur_de_lampadaire(mi.mesh))
+				allumes += 1
+		print("%d lampadaires allumés" % allumes)
 
 	var lx := float(ville.taille.x) * Ville2.CASE
 	var lz := float(ville.taille.y) * Ville2.CASE

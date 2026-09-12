@@ -71,6 +71,7 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 			if carte.route(c):
 				var f: Array = carte.tuile(c)
 				var nom := String(f[0])
+				nom = _variante_avenue(ville, c, nom)
 				if CarteVille.AJOUREES.has(nom):
 					_tuile(racine, "tile-low", centre - Vector3(0, EPAISSEUR_TUILE, 0), 0)
 				_tuile(racine, nom, centre, int(f[1]))
@@ -79,6 +80,21 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 					_tuile(racine, String(CarteVille.BARRIERES[nom]), centre, int(f[1]))
 			else:
 				_tuile(racine, _dalle_de(ville, c), centre, 0, TEINTE_DALLE)
+
+## LES PASSAGES PIÉTONS (cahier § 5 : « feux tricolores aux carrefours
+## d'avenues », § 8 : « piétons sur les passages »). Sur une avenue, un
+## carrefour prend la variante à zébras du kit, et le tronçon droit qui y
+## mène prend `road-crossing`. Les rues gardent le tirage de `CarteVille`.
+static func _variante_avenue(ville: Ville2, c: Vector2i, nom: String) -> String:
+	if ville.genre_de_route(c) != Ville2.R_AVENUE: return nom
+	if nom.begins_with("road-crossroad"): return "road-crossroad-path"
+	if nom.begins_with("road-intersection"): return "road-intersection-path"
+	if nom == "road-straight":
+		for d in CarteVille.COTES:
+			var m := ville.carte.masque(c + d)
+			if ville.carte.route(c + d) and m != 5 and m != 10 and m != 0:
+				return "road-crossing"
+	return nom
 
 ## Quelle dalle sous une case sans rue : le trottoir du kit en ville, la
 ## pelouse ailleurs (un parc, un jardin).
@@ -141,6 +157,11 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 	if modele == "pelouse":
 		_pelouse(parent, ou, float(fiche_objet.get("w", CASE)), float(fiche_objet.get("d", CASE)))
 		return
+	if modele == "pub":
+		_panneau(parent, ou + Vector3(0, float(fiche_objet.get("y", 0.0)), 0), tourne,
+			float(fiche_objet.get("w", 14.0)), float(fiche_objet.get("hh", 8.0)),
+			float(fiche_objet.get("pied", 3.0)), int(fiche_objet.get("image", 0)))
+		return
 	var chemin := ""
 	var h := hauteur
 	var couleur := Color.WHITE
@@ -199,6 +220,111 @@ static func _poser_rail(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 				var p := pa.lerp(pb, f)
 				_boite(racine, Vector3(1.2, 0.3, 9.0) if selon_x else Vector3(9.0, 0.3, 1.2),
 					p + Vector3(0, 0.15, 0), TEINTE_TRAVERSE)
+
+# ------------------------------------------------------------------ les panneaux pub
+
+## LES 24 VISUELS DU CLIENT (cahier § 7) : sur les toits des immeubles moyens
+## (cadre + poteaux courts) et sur les pignons aveugles. Plus jamais sur pieds
+## au milieu d'un trottoir. Les affiches vivent dans `images/panneaux/pubNN.jpg`
+## et se comptent : le client en dépose une de plus, elle est en ville.
+const PUB_DOSSIER := "res://images/panneaux/"
+static var _affiches: Array[String] = []
+static var _pub_matieres: Dictionary = {}
+static var _pub_cadre: StandardMaterial3D = null
+static var _cube: BoxMesh = null
+
+static func affiches() -> Array[String]:
+	if not _affiches.is_empty(): return _affiches
+	var trous := 0
+	var n := 1
+	while trous < 3 and n < 200:
+		var chemin := PUB_DOSSIER + "pub%02d.jpg" % n
+		if ResourceLoader.exists(chemin):
+			_affiches.append(chemin)
+			trous = 0
+		else:
+			trous += 1
+		n += 1
+	return _affiches
+
+static func _matiere_pub(chemin: String) -> StandardMaterial3D:
+	if _pub_matieres.has(chemin): return _pub_matieres[chemin]
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = load(chemin)
+	m.roughness = 0.62
+	# Éclairé : faible de jour (noyé dans le soleil), lisible la nuit.
+	m.emission_enabled = true
+	m.emission_texture = m.albedo_texture
+	m.emission = Color(1, 1, 1)
+	m.emission_energy_multiplier = 0.18
+	m.cull_mode = BaseMaterial3D.CULL_BACK
+	_pub_matieres[chemin] = m
+	return m
+
+## Deux poteaux, un cadre, une affiche, l'affiche vers +Z tourné de `tour`.
+## `ou` est le pied (le toit, ou le sol au pied du pignon avec `pied` = 0).
+static func _panneau(parent: Node3D, ou: Vector3, tour: float, large: float, haut: float,
+		pied: float, image: int) -> void:
+	var liste := affiches()
+	if liste.is_empty(): return
+	if _cube == null:
+		_cube = BoxMesh.new()
+		_cube.size = Vector3.ONE
+	if _pub_cadre == null:
+		_pub_cadre = StandardMaterial3D.new()
+		_pub_cadre.albedo_color = Color("#2f3338")
+		_pub_cadre.roughness = 0.8
+	var base := Basis(Vector3.UP, tour)
+	# ⚠ `Basis.scaled()` MET À L'ÉCHELLE DANS LE MONDE, PAS DANS L'OBJET. Un
+	# `Basis(UP, 90°).scaled(Vector3(14, 8, 3))` étire l'axe X DU MONDE de 14 :
+	# sur un panneau tourné d'un quart, le caisson sortait perpendiculaire au
+	# mur — quatorze unités de profondeur, trois de large, en travers de
+	# l'affiche. On met donc l'échelle AVANT la rotation.
+	var boite := func(dims: Vector3, centre: Vector3) -> Transform3D:
+		return Transform3D(base * Basis.from_scale(dims), centre)
+	var mi_h := pied + haut * 0.5
+	# ⚠ UN PANNEAU MURAL EST UN CAISSON, PAS UNE PEINTURE. Les façades Kenney
+	# ont du relief — descente d'eau au milieu, bandeaux, appuis de fenêtre. Une
+	# affiche plaquée au mur se faisait TRAVERSER par la descente d'eau, qui la
+	# barrait de haut en bas. Le cadre d'un panneau mural est donc un caisson
+	# épais : il coiffe le relief, et l'affiche se pose sur sa face avant.
+	var ep := 3.2 if pied <= 0.0 else 0.5
+	if pied > 0.0:
+		for s in [-1.0, 1.0]:
+			var n := MeshInstance3D.new()
+			n.mesh = _cube
+			n.material_override = _pub_cadre
+			n.transform = boite.call(Vector3(0.7, pied + haut * 0.5, 0.7),
+				ou + base * Vector3(s * large * 0.36, (pied + haut * 0.5) * 0.5, 0.0))
+			parent.add_child(n)
+	# ⚠ L'AFFICHE DONNE SES PROPORTIONS, PAS LE PANNEAU. `large` et `haut` ne
+	# sont qu'un ENCOMBREMENT MAXIMAL (ce que le mur ou le toit peut porter) :
+	# on y inscrit l'image à son format, sinon un visuel qui n'est pas en 16:9
+	# sort étiré, et le client dépose ce qu'il veut dans `images/panneaux/`.
+	var chemin := String(liste[posmod(image, liste.size())])
+	var matiere := _matiere_pub(chemin)
+	var rapport := 9.0 / 16.0
+	var tex: Texture2D = matiere.albedo_texture
+	if tex != null and tex.get_width() > 0:
+		rapport = float(tex.get_height()) / float(tex.get_width())
+	if large * rapport > haut:
+		large = haut / rapport
+	else:
+		haut = large * rapport
+	mi_h = pied + haut * 0.5
+	var cadre := MeshInstance3D.new()
+	cadre.mesh = _cube
+	cadre.material_override = _pub_cadre
+	cadre.transform = boite.call(Vector3(large + 1.0, haut + 1.0, ep), ou + Vector3(0, mi_h, 0))
+	parent.add_child(cadre)
+	var toile := MeshInstance3D.new()
+	var q := QuadMesh.new()
+	q.size = Vector2(large, haut)
+	toile.mesh = q
+	toile.material_override = matiere
+	toile.transform = Transform3D(base, ou + Vector3(0, mi_h, 0) + base * Vector3(0, 0, ep * 0.5 + 0.06))
+	toile.set_meta("modele", "pub")
+	parent.add_child(toile)
 
 ## Une pelouse : un plan vert, posé un rien au-dessus de la dalle.
 const TEINTE_PELOUSE := Color("#5d9a3c")

@@ -70,6 +70,9 @@ var gares: Array = []                  ## [{nom, x, z, principale}]
 var carte: CarteVille
 ## Le lot qui couvre chaque case, −1 sinon (dérivé).
 var _lot_de: PackedInt32Array
+## Le genre de la route qui passe par chaque case ("" sinon), dérivé : la
+## voie rapide l'emporte sur l'avenue, l'avenue sur la rue.
+var _genre_de: PackedStringArray
 
 func _init(t: Vector2i = Vector2i(40, 40)) -> void:
 	redimensionner(t)
@@ -213,10 +216,18 @@ func rasteriser() -> CarteVille:
 			var c := Vector2i(i, j)
 			if terre(c):
 				carte.poser_sol(c, palier(c))
+	_genre_de.resize(taille.x * taille.y)
+	_genre_de.fill("")
 	for r in routes:
+		var g := String(r["genre"])
 		for c in cases_de_route(r):
 			if carte.terre(c):
 				carte.poser_route(c, true)
+			if dedans(c):
+				var k := indice(c)
+				var ici := _genre_de[k]
+				if ici == "" or g == R_VOIE_RAPIDE or (g == R_AVENUE and ici == R_RUE):
+					_genre_de[k] = g
 	for o in ouvrages:
 		carte.poser_piece(String(o["t"]), Vector2i(int(o["i"]), int(o["j"])),
 			Vector2i(int(o["w"]), int(o.get("h", o["w"]))), int(o["q"]),
@@ -231,15 +242,8 @@ func rasteriser() -> CarteVille:
 
 ## Le genre de la route qui passe par cette case ("" si aucune).
 func genre_de_route(c: Vector2i) -> String:
-	var meilleur := ""
-	for r in routes:
-		for rc in cases_de_route(r):
-			if rc == c:
-				var g := String(r["genre"])
-				if g == R_VOIE_RAPIDE: return g
-				if g == R_AVENUE: meilleur = g
-				elif meilleur == "": meilleur = g
-	return meilleur
+	if _genre_de.is_empty() or not dedans(c): return ""
+	return _genre_de[indice(c)]
 
 # ------------------------------------------------------------------ JSON
 
