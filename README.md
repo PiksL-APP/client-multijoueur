@@ -57,8 +57,10 @@ propres fichiers, sans maillage, et se greffent sur le squelette à la volée
 
 **Tout se règle** (`autoload/reglages.gd`, gardé dans `user://`) : trois
 volumes sur trois bus audio, l'effet maquette, les ombres, la finesse du rendu,
-le plein écran, et chaque touche du clavier. Les trois valent partout, menu ET
-Piks Theft Auto : `Commandes` lit toutes ses touches dans les réglages, et
+le plein écran, la souris de la vue subjective (sa vitesse en pour cent, le
+haut/bas inversé — réglables aussi depuis la pause, sans quitter la ville), et
+chaque touche du clavier. Les trois valent partout, menu ET Piks Theft Auto :
+`Commandes` lit toutes ses touches dans les réglages, et
 `MatieresCarnage.ambiance()` y prend son halo et ses ombres.
 
 **Un mur ne stoppe pas, il fait glisser.** Une collision ne coûte que la part
@@ -283,9 +285,25 @@ une VOIE FERRÉE traverse en diagonale, seul trait qui ne suive pas la grille ;
 et des ÎLOTS de deux pâtés sur deux se fondent — souvent dans la zone
 industrielle, les parcs et les cités, presque jamais dans la vieille ville —
 leurs rues intérieures devenant une cour en croix qu'on traverse. Les pâtés
-que l'eau ou la voie touchent deviennent des quais. `TAB` affiche la carte
+que l'eau ou la voie touchent deviennent des quais. `TAB` bascule la carte
 entière (un pixel par tuile, peinte par lots pendant les deux premières
 secondes de la manche) avec sa légende et la position de chacun.
+
+**La carte se manipule, et elle a un GPS** (`ui/carte.gd`, `jeux/carnage/gps.gd`,
+depuis le 12/09). Molette pour zoomer autour du curseur (jusqu'à ×12), glisser
+pour se déplacer, `−` `+` `✕` en tête de panneau pour ceux qui n'ont ni
+molette ni TAB. Un clic pose un REPÈRE ; l'itinéraire est calculé PAR LES RUES
+(A* sur les carrefours de la ville procédurale, sur les cases de rue de
+Pikstown), projeté sur la chaussée aux deux bouts, et se voit trois fois : le
+tracé rose sur la carte avec la distance, le tracé découpé dans le radar, et un
+ruban rose au sol qui suit le relief. Les LIEUX sont cliquables : garages,
+supérettes, hôpitaux, repaires (aux couleurs de leur gang), planques (avec
+l'appartement et le prix), arènes, cabines en zoomant — le nom se lit au
+survol, et cliquer dessus vise la porte du lieu, pas le pâté d'à côté. Une
+puce « gps supérette · 640 m » reste dans le tableau de bord tant qu'on n'est
+pas arrivé ; s'écarter de trois tuiles recalcule, arriver efface, et une île
+sans pont répond « aucune route n'y mène ». `--banc-carte` ouvre la carte au
+coup d'envoi, `--banc-gps=colonne,ligne` y pose un repère.
 
 **La ville n'est pas un quadrillage.** Une PLACE EN ÉTOILE, un peu au nord du
 centre — un obélisque sur un îlot, un parvis pavé qui rayonne — d'où partent
@@ -833,6 +851,7 @@ godot --headless --path . -s outils/marche.gd          # les 15 intérieurs sont
 godot --headless --path . -s outils/provisions.gd      # faim, soif, catalogue, supérettes
 ./outils/tableau.sh /tmp/menu.png superette            # le menu de la supérette
 ./outils/tableau.sh /tmp/pause.png pause               # le menu de pause et la sortie
+./outils/tableau.sh /tmp/touches.png touches           # la fiche des touches (ÉCHAP → LES TOUCHES)
 ./outils/tableau.sh /tmp/triche.png triche             # les 18 codes du menu Konami
 ./outils/tableau.sh /tmp/planque.png planque           # le menu du coffre, chez soi
 godot --path . --solo --banc-jeu=carnage --manche=40 --banc-subjectif --photo=/tmp/vues
@@ -918,9 +937,21 @@ départ de la ferme : c'est le filet qui manquait.
 
 - Rendu en mode compatibilité (exigé par le web) : ombres directionnelles
   seulement, pas d'occlusion ambiante ni de reflets.
-- Sur téléphone, un manche virtuel et un bouton apparaissent — et n'apparaissent
-  que là : un pavé tactile affiché à quelqu'un qui a un clavier passe pour un
-  défaut. `--tactile` les force, pour pouvoir les vérifier au banc.
+- Sur téléphone et tablette, un manche virtuel et TROIS boutons apparaissent —
+  TIR, ENTRER/SORTIR, et un menu `≡` qui déplie en éventail ce qu'on fait de
+  temps en temps : CARTE, SAC (→ MANGER, BOIRE), RADIO au volant, PAUSE
+  (l'ÉCHAP). Un quatrième, AFFAIRE (le `F`), ne surgit que quand `F` ferait
+  quelque chose ici. Le pavé n'apparaît qu'en ville, et que là : un pavé
+  tactile affiché à quelqu'un qui a un clavier passe pour un défaut. Il
+  s'efface sous la carte (elle a ses boutons) et sous les menus, qui se
+  lisent au doigt :
+  toucher une ligne la vise, la toucher encore la valide, toucher hors du
+  cadre ferme (`Charte.menu_touche` → `Commandes.appuyer`, une touche
+  virtuelle que les menus lisent comme le clavier). Sur un TÉLÉPHONE (moins de
+  600 points dans le sens court) la scène passe de 1280×720 à 960×540 : tout
+  grandit d'un tiers, et la mise en page tient. `--tactile` force le pavé,
+  `--telephone` la petite taille, `--banc-volet=menu|sac` l'éventail ouvert,
+  pour les vérifier au banc.
 - Les ressources binaires du dépôt sont des kits Kenney, CC0, un dossier par
   kit avec sa licence et son atlas `Textures/colormap.png` (⚠ les glTF de
   Kenney référencent l'atlas en fichier EXTERNE : copier les seuls maillages

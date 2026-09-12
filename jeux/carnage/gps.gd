@@ -98,6 +98,10 @@ static func _vers_l_est(carte: PlanVille, k: int, l: int) -> bool:
 static var _chauffe := 0
 
 static func chauffer(carte: PlanVille, budget_usec: int = 2500) -> bool:
+	# La ville dessinée n'a rien à chauffer : une case de rue est une entrée
+	# de dictionnaire, pas un bras de rivière à tester.
+	if carte is PlanDessine or carte is PlanV2:
+		return true
 	_preparer(carte)
 	var total := _kx() * _ky()
 	var depart := Time.get_ticks_usec()
@@ -205,6 +209,8 @@ static func _tirer(tas: Array) -> Array:
 ## hors de la chaussée : on s'arrête au bord de la rue en face, comme un GPS.
 ## Vide s'il n'existe pas (une île sans pont, un point hors carte).
 static func itineraire(carte: PlanVille, depart: Vector2, arrivee: Vector2) -> PackedVector2Array:
+	if carte is PlanDessine or carte is PlanV2:
+		return _itineraire_dessine(carte, depart, arrivee)
 	_preparer(carte)
 	var td := troncon_proche(carte, depart)
 	var ta := troncon_proche(carte, arrivee)
@@ -326,3 +332,89 @@ static func ecart(chemin: PackedVector2Array, p: Vector2) -> float:
 ## Le bout de la route : là où l'on « arrive ».
 static func bout(chemin: PackedVector2Array) -> Vector2:
 	return chemin[chemin.size() - 1] if not chemin.is_empty() else Vector2.ZERO
+
+# ------------------------------------------------------------ la ville dessinée
+
+## PIKSTOWN N'A PAS DE GRILLE. Ses rues sont des CASES (`CarteVille.route(c)`,
+## deux tuiles de côté), qui tournent, se croisent et montent comme l'éditeur
+## les a posées. Le graphe est donc celui des cases de rue, quatre voisines
+## chacune, et le chemin va de centre de case en centre de case — c'est l'axe
+## de la chaussée, une case de rue faisant exactement la largeur d'une rue.
+## Même A*, même tas, autre graphe : la seule chose que `carte is PlanDessine`
+## change, comme pour le fond du radar.
+
+## La case de rue la plus proche d'un point, en spirale, jusqu'à six cases :
+## un clic au milieu d'un îlot ou dans l'eau tombe sur la rue d'à côté.
+## `plan` : un `PlanDessine` ou un `PlanV2` — mêmes `carte`, `cases_x`, `centre_case`.
+static func _case_de_rue_proche(plan, p: Vector2) -> Vector2i:
+	var c0: Vector2i = plan.case_de_point(p)
+	var mieux := Vector2i(-1, -1)
+	var d_mieux := INF
+	for rayon in 7:
+		for dl in range(-rayon, rayon + 1):
+			for dk in range(-rayon, rayon + 1):
+				if maxi(absi(dk), absi(dl)) != rayon:
+					continue
+				var c: Vector2i = c0 + Vector2i(dk, dl)
+				if not plan.carte.route(c):
+					continue
+				var d: float = plan.centre_case(c).distance_squared_to(p)
+				if d < d_mieux:
+					d_mieux = d
+					mieux = c
+		if mieux.x >= 0:
+			return mieux
+	return mieux
+
+static func _itineraire_dessine(plan, depart: Vector2, arrivee: Vector2) -> PackedVector2Array:
+	var a := _case_de_rue_proche(plan, depart)
+	var b := _case_de_rue_proche(plan, arrivee)
+	if a.x < 0 or b.x < 0:
+		return PackedVector2Array()
+	var pa: Vector2 = plan.centre_case(b)
+	var large: int = plan.cases_x + 2
+	var origine := a.x + a.y * large
+	var but := b.x + b.y * large
+	var cout: Dictionary = {origine: 0.0}
+	var venu: Dictionary = {origine: -1}
+	var tas: Array = [[plan.centre_case(a).distance_to(pa), origine, 0.0]]
+	var trouve := false
+	while not tas.is_empty():
+		var e := _tirer(tas)
+		var id: int = e[1]
+		var c: float = e[2]
+		if c > float(cout.get(id, INF)) + 0.001:
+			continue
+		if id == but:
+			trouve = true
+			break
+		var ici := Vector2i(id % large, id / large)
+		for d in CarteVille.COTES:
+			var v: Vector2i = ici + d
+			if not plan.carte.route(v):
+				continue
+			var vid := v.x + v.y * large
+			var nc := c + PlanDessine.CASE_PX
+			if nc < float(cout.get(vid, INF)):
+				cout[vid] = nc
+				venu[vid] = id
+				_pousser(tas, [nc + plan.centre_case(v).distance_to(pa), vid, nc])
+	if not trouve:
+		return PackedVector2Array()
+	var chemin: Array = []
+	var courant := but
+	while courant >= 0:
+		chemin.append(plan.centre_case(Vector2i(courant % large, courant / large)))
+		courant = int(venu[courant])
+	chemin.reverse()
+	var out := PackedVector2Array()
+	out.append(depart)
+	for i in chemin.size():
+		if i > 0 and i < chemin.size() - 1:
+			var avant: Vector2 = chemin[i - 1]
+			var apres: Vector2 = chemin[i + 1]
+			var ici: Vector2 = chemin[i]
+			if is_zero_approx((ici - avant).cross(apres - ici)):
+				continue
+		out.append(chemin[i])
+	return _nettoyer(out)

@@ -16,19 +16,41 @@ extends Control
 const LARGEUR := 440.0
 const LIGNE := 34.0
 
-## Les deux seules choses qu'on puisse vouloir ici. Trois lignes, et il faudrait
-## déjà se demander laquelle on visait — un menu de pause se lit sans lire.
+## Quatre lignes : reprendre, la fiche des touches, la souris, quitter. On
+## avait dit deux — « un menu de pause se lit sans lire » — et c'est encore
+## vrai : la fiche des touches n'est pas un choix qu'on hésite à faire, c'est
+## ce qu'on vient chercher quand on ne sait plus quelle touche fait quoi, et
+## c'est PRÉCISÉMENT dans la pause qu'on le cherche. La souris, c'est pareil :
+## sa sensibilité se juge en vue subjective, pas dans un menu d'accueil, et
+## la ligne se règle sur place (← →) sans quitter la ville.
 var lignes: Array = []          ## [{texte, detail, couleur}] — rempli par le jeu
 var choix := 0
 var titre := "PAUSE"
 var sous_titre := ""
 
+var _rect := Rect2()            ## le cartouche, tel que dessiné — pour le doigt
+var _y0 := 0.0                  ## la ligne de base de la première ligne
+
+func _ready() -> void:
+	# Le menu prend la souris : au doigt, une ligne se vise puis se valide,
+	# et un appui hors du cartouche est un ÉCHAP (`Charte.menu_touche`).
+	mouse_filter = Control.MOUSE_FILTER_STOP
+
+func _gui_input(evenement: InputEvent) -> void:
+	if evenement is InputEventMouseButton and evenement.pressed \
+			and (evenement as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		choix = Charte.menu_touche((evenement as InputEventMouseButton).position, _rect, _y0, lignes.size(), LIGNE, choix)
+		queue_redraw()
+		accept_event()
+
 func _draw() -> void:
 	var taille := get_viewport_rect().size
 	var hauteur := 118.0 + lignes.size() * LIGNE
 	var rect := Charte.menu(self, taille, LARGEUR, hauteur, titre, sous_titre)
+	_rect = rect
 	var x := rect.position.x + Charte.MARGE_MENU
 	var y := Charte.haut_contenu(rect) + 14.0
+	_y0 = y
 
 	for i in lignes.size():
 		var l: Dictionary = lignes[i]
@@ -48,4 +70,4 @@ func _draw() -> void:
 			Charte.texte_dessine(self, Vector2(rect.end.x - Charte.MARGE_MENU - ld, y), detail, 13, Charte.ENCRE_FAIBLE, 0)
 		y += LIGNE
 
-	Charte.aide_menu(self, rect, "↑ ↓ choisir · entrée valider · échap reprendre")
+	Charte.aide_menu(self, rect, "↑ ↓ choisir · entrée valider · échap reprendre" if not Tactile.actif() else "toucher une ligne, puis la toucher encore · hors du cadre : reprendre")

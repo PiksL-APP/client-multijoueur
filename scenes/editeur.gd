@@ -2414,6 +2414,107 @@ func _exporter() -> void:
 	else:
 		_sortir(_texte_fiche(), "quartier_%s.txt" % _id, "à recoller dans Quartiers.CATALOGUE")
 
+# ─────────────────────────────── PUBLIER EN LIGNE ──────────────────────────────
+#
+## ⚠ POURQUOI. Exporter, copier, écraser le fichier, commiter, pousser : quatre
+## gestes pour un dessin, et le dernier oublié une fois sur deux — la ville en
+## ligne restait celle de la veille sans que rien ne le dise. Ici, UN bouton :
+## le fichier part à `api/publier-carte` (fonction Vercel), qui le commite sur
+## `main` par l'API GitHub ; le push déclenche l'export web, et Vercel sert la
+## nouvelle ville quelques minutes après. Voir `mettre-en-ligne.md`.
+##
+## ⚠ ON NE PUBLIE PAS UN PLAN FAUTIF. L'export web abandonne sur la moindre
+## faute (`outils/verifier.gd`) : autant le dire ICI, avant d'avoir commité un
+## fichier que personne ne pourra exporter.
+const ADRESSE_PUBLICATION := "https://multijoueur.piks-l.com/api/publier-carte"
+const FICHIER_CLE := "user://cle_publication.txt"
+
+var _champ_cle: LineEdit
+var _champ_note: LineEdit
+var _bouton_publier: Button
+var _etat_publication: Label
+var _publication_en_cours := false
+
+## La clé est celle que le client a choisie sur Vercel (CLE_PUBLICATION) ;
+## tapée une fois, elle reste dans le profil du navigateur (`user://`).
+func _lire_cle() -> String:
+	var f := FileAccess.open(FICHIER_CLE, FileAccess.READ)
+	if f == null: return ""
+	var t := f.get_as_text().strip_edges()
+	f.close()
+	return t
+
+func _garder_cle(texte: String) -> void:
+	var f := FileAccess.open(FICHIER_CLE, FileAccess.WRITE)
+	if f != null:
+		f.store_string(texte.strip_edges()); f.close()
+
+func _adresse_publication() -> String:
+	# Dans le navigateur, la fonction vit sur la même origine que la page :
+	# c'est ce qui la fait marcher aussi sur un aperçu Vercel.
+	if OS.has_feature("web"):
+		var origine = JavaScriptBridge.eval("window.location.origin", true)
+		if typeof(origine) == TYPE_STRING and String(origine).begins_with("http"):
+			return String(origine) + "/api/publier-carte"
+	return ADRESSE_PUBLICATION
+
+func _etat_publier(texte: String, couleur: Color) -> void:
+	if _etat_publication == null: return
+	_etat_publication.text = texte
+	_etat_publication.add_theme_color_override("font_color", couleur)
+	_dire(texte)
+
+func _publier() -> void:
+	if _publication_en_cours: return
+	if String(_fiche.get("source", "")) == "":
+		_etat_publier("Seule la ville dessinée (pikstown) se publie.", Palette.CRITIQUE)
+		return
+	var cle := _champ_cle.text.strip_edges() if _champ_cle != null else ""
+	if cle == "":
+		_etat_publier("Il faut la clé de publication (celle de Vercel, CLE_PUBLICATION).", Palette.CRITIQUE)
+		return
+	var fautes: Array = Quartiers.fautes(_fiche)
+	if not fautes.is_empty():
+		_etat_publier("%d faute(s) sur le plan — l'export refuserait. Corrige d'abord (panneau Vérification)." % fautes.size(), Palette.CRITIQUE)
+		return
+	var texte := _texte_source()
+	# On garde aussi la copie locale : ce qui est parti est ce qu'on a ici.
+	var f := FileAccess.open("user://pikstown.gd", FileAccess.WRITE)
+	if f != null:
+		f.store_string(texte); f.close()
+	_publication_en_cours = true
+	_bouton_publier.disabled = true
+	_etat_publier("Publication… (%d caractères)" % texte.length(), Palette.ENCRE_FAIBLE)
+	var requete := HTTPRequest.new()
+	requete.timeout = 60.0
+	add_child(requete)
+	requete.request_completed.connect(func(resultat: int, code: int, _entetes: PackedStringArray, corps: PackedByteArray):
+		requete.queue_free()
+		_publication_en_cours = false
+		_bouton_publier.disabled = false
+		if resultat != HTTPRequest.RESULT_SUCCESS:
+			_etat_publier("Pas de réponse du serveur (%d) — réseau ?" % resultat, Palette.CRITIQUE)
+			return
+		var reponse = JSON.parse_string(corps.get_string_from_utf8())
+		if typeof(reponse) != TYPE_DICTIONARY:
+			_etat_publier("Réponse illisible (HTTP %d)." % code, Palette.CRITIQUE)
+			return
+		if code == 200 and bool(reponse.get("ok", false)):
+			_etat_publier("Poussée (commit %s). L'export web tourne : en ligne dans 3 à 5 minutes." % String(reponse.get("commit", "?")), Palette.BON)
+			if _champ_note != null: _champ_note.text = ""
+		else:
+			_etat_publier("Refusé : %s" % String(reponse.get("erreur", "HTTP %d" % code)), Palette.CRITIQUE)
+	)
+	var charge := JSON.stringify({"cle": cle, "contenu": texte,
+		"note": _champ_note.text.strip_edges() if _champ_note != null else ""})
+	var erreur := requete.request(_adresse_publication(), PackedStringArray(["Content-Type: application/json"]),
+		HTTPClient.METHOD_POST, charge)
+	if erreur != OK:
+		requete.queue_free()
+		_publication_en_cours = false
+		_bouton_publier.disabled = false
+		_etat_publier("Requête impossible (%d)." % erreur, Palette.CRITIQUE)
+
 func _exporter_fiche() -> void:
 	_sortir(_texte_fiche(), "fiche_%s.txt" % _id, "à recoller dans Quartiers.CATALOGUE")
 
@@ -2898,6 +2999,24 @@ func _interface() -> void:
 	_bouton_dessus = Atelier.bouton("De dessus")
 	_bouton_dessus.pressed.connect(_vue_dessus)
 	barre2.add_child(_bouton_dessus)
+
+	# ── PUBLIER ─────────────────────────────────────────────────────────────
+	# Un bouton, et la ville est en ligne : le fichier part à
+	# `api/publier-carte`, qui le commite sur main ; l'export web suit.
+	var cPub := _bloc(boite, "PUBLIER", true)
+	_champ_cle = Atelier.champ("clé de publication (une fois)")
+	_champ_cle.secret = true
+	_champ_cle.text = _lire_cle()
+	_champ_cle.text_changed.connect(_garder_cle)
+	cPub.add_child(_champ_cle)
+	_champ_note = Atelier.champ("note du commit (facultatif)")
+	cPub.add_child(_champ_note)
+	_bouton_publier = Atelier.bouton("Publier la ville en ligne", true)
+	_bouton_publier.pressed.connect(_publier)
+	cPub.add_child(_bouton_publier)
+	_etat_publication = Atelier.texte("", Atelier.CORPS_PETIT, Atelier.ENCRE_FAIBLE)
+	_etat_publication.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	cPub.add_child(_etat_publication)
 
 	# ── ATELIER (fermé) ──────────────────────────────────────────────────────
 	var cA := _bloc(boite, "ATELIER", false)

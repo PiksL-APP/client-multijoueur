@@ -24,17 +24,21 @@ var autres: Array = []        ## {p: Vector2, couleur: Color}
 var patrouilles: Array = []   ## Vector2
 var etoiles := 0
 var cible: Dictionary = {}    ## {k: genre du contrat, g: gang visé} — ce qu'il faut aller chercher
+var gps := Vector2.ZERO       ## le repère posé sur la grande carte, ZERO sinon
+var route := PackedVector2Array()   ## l'itinéraire vers lui, en pixels de jeu
 
 func _draw() -> void:
 	if carte == null:
 		return
 	var cadre := Rect2(Vector2(MARGE, MARGE), Vector2(COTE, COTE))
 	var centre := cadre.get_center()
-	UI.cartouche(self, cadre, Color(0, 0, 0, 0), Color(Palette.FOND, 0.88))
+	Charte.cartouche(self, cadre, Color(0, 0, 0, 0), Color(Charte.NUIT, 0.86))
 	var rayon_vue := COTE * 0.5 / ECHELLE     # en pixels de jeu, la moitié du cadre
 
 	if carte is PlanDessine:
 		_fond_dessine(carte as PlanDessine, cadre, centre, rayon_vue)
+	elif carte is PlanV2:
+		_fond_v2(carte as PlanV2, cadre, centre, rayon_vue)
 	else:
 		_fond_procedural(cadre, centre, rayon_vue)
 	_lieux_et_pions(cadre, centre, rayon_vue)
@@ -70,6 +74,35 @@ func _fond_dessine(plan: PlanDessine, cadre: Rect2, centre: Vector2, rayon_vue: 
 				# Un bâtiment se lit plus sombre que le sol : c'est ce qui fait
 				# voir les rues sans les avoir dessinées.
 				if Quartiers._lettre(lettre) != "":
+					couleur = Color(couleur.darkened(0.5), couleur.a + 0.35)
+			draw_rect(visible, couleur, true)
+
+## La ville v2 : même lecture case par case, mais un bâtiment est un lot et
+## un parc un quartier — plus de lettres.
+func _fond_v2(plan: PlanV2, cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
+	var taille := PlanV2.CASE_PX * ECHELLE
+	var c0 := plan.case_de_point(moi - Vector2(rayon_vue, rayon_vue)) - Vector2i.ONE
+	var c1 := plan.case_de_point(moi + Vector2(rayon_vue, rayon_vue)) + Vector2i.ONE
+	var bitume := Color(0.05, 0.05, 0.06, 0.9)
+	for j in range(c0.y, c1.y + 1):
+		for i in range(c0.x, c1.x + 1):
+			var c := Vector2i(i, j)
+			var rect := Rect2(_vers_radar(Vector2(c) * PlanV2.CASE_PX, centre), Vector2(taille, taille))
+			var visible := rect.intersection(cadre)
+			if visible.size.x <= 0.0 or visible.size.y <= 0.0:
+				continue
+			var couleur: Color
+			if not plan.carte.terre(c):
+				couleur = Color(Palette.SERIE, 0.22)
+			elif plan.carte.route(c):
+				couleur = bitume
+			else:
+				if plan.district_de_case(c) == PlanVille.PARC:
+					couleur = Color(Palette.BON, 0.16)
+				else:
+					var gang := plan.gang_de_case(c)
+					couleur = Color(plan.couleur_du_gang(gang), 0.24) if gang >= 0 else Color(Palette.ENCRE, 0.10)
+				if plan.ville.lot_sur(c) >= 0:
 					couleur = Color(couleur.darkened(0.5), couleur.a + 0.35)
 			draw_rect(visible, couleur, true)
 
@@ -168,6 +201,24 @@ func _lieux_et_pions(cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
 		if cadre.has_point(ou):
 			draw_rect(Rect2(ou - Vector2(3.5, 3.5), Vector2(7, 7)), PlanVille.COULEUR_SUPERETTE, true)
 
+	# L'ITINÉRAIRE GPS, en rose, par-dessus les rues et sous les pastilles :
+	# la ligne est découpée au cadre, un tracé qui sort du radar barrerait
+	# l'écran. Puis le repère lui-même, comme une cible de contrat.
+	if route.size() >= 2:
+		var points := PackedVector2Array()
+		for p in route:
+			points.append(_vers_radar(p, centre))
+		var coins := PackedVector2Array([cadre.position, Vector2(cadre.end.x, cadre.position.y),
+			cadre.end, Vector2(cadre.position.x, cadre.end.y)])
+		# ⚠ `intersect`, pas `clip` : chez Godot, « clip » est la DIFFÉRENCE —
+		# il rend ce qui est DEHORS. Le premier essai dessinait l'itinéraire
+		# partout sur l'écran sauf dans le radar.
+		for morceau in Geometry2D.intersect_polyline_with_polygon(points, coins):
+			if morceau.size() >= 2:
+				draw_polyline(morceau, Color(Charte.ROSE, 0.9), 3.0, true)
+	if gps != Vector2.ZERO:
+		_viser(gps, Charte.ROSE, cadre, centre, false)
+
 	# La cible du contrat : le repaire du gang à nettoyer ou le garage où livrer.
 	# Dans le cadre, elle clignote ; hors du cadre, une flèche au bord dit où
 	# aller. Un contrat sans cible visible, c'est un chrono qui tourne pendant
@@ -185,22 +236,7 @@ func _lieux_et_pions(cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
 		elif genre == "livraison":
 			visee = carte.garage_le_plus_proche(moi)
 		if not visee.is_empty():
-			var ou := _vers_radar(visee["p"], centre)
-			var clignote := fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.5
-			if cadre.grow(-8.0).has_point(ou):
-				if clignote:
-					draw_arc(ou, 8.0, 0, TAU, 16, Palette.AVERTISSEMENT, 2.0)
-			else:
-				var direction := (ou - centre).normalized()
-				var bord := centre + direction * (COTE * 0.5 - 9.0)
-				var cote := Vector2(-direction.y, direction.x)
-				draw_colored_polygon(PackedVector2Array([bord + direction * 7.0,
-					bord - direction * 4.0 + cote * 5.0, bord - direction * 4.0 - cote * 5.0]),
-					Palette.AVERTISSEMENT if clignote else Palette.AVERTISSEMENT.darkened(0.3))
-				var police: Font = UI.TITRE_POLICE
-				var distance := int(Vector2(visee["p"]).distance_to(moi) / PlanVille.PAS)
-				draw_string(police, bord - direction * 16.0 - Vector2(10, -4), "%d" % distance,
-					HORIZONTAL_ALIGNMENT_CENTER, 20, 8, Palette.AVERTISSEMENT)
+			_viser(Vector2(visee["p"]), Charte.ORANGE, cadre, centre, true)
 
 	for p: Vector2 in patrouilles:
 		var ou := _vers_radar(p, centre)
@@ -223,21 +259,46 @@ func _lieux_et_pions(cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
 		centre + avant * 7.0, centre - avant * 4.0 + cote_m * 4.0,
 		centre - avant * 4.0 - cote_m * 4.0]), ma_couleur)
 
-	draw_rect(cadre.grow(-UI.BORDURE * 0.5), UI.CADRE, false, UI.BORDURE)
+	draw_rect(cadre.grow(-0.5), Charte.CADRE, false, 1.0)
 
 	# La couleur ne porte jamais seule le sens : chaque pastille est nommée à
-	# côté d'elle, sous le cadre.
-	var police: Font = UI.TEXTE_POLICE
+	# côté d'elle, sous le cadre, en petites capitales.
 	var x := MARGE + 4.0
-	var y := MARGE + COTE + 14.0
-	for entree in [["garage", Palette.SERIE], ["cabine", Palette.AVERTISSEMENT],
-			["arène", Palette.CRITIQUE], ["repaire", Palette.ENCRE],
+	var y := MARGE + COTE + 15.0
+	for entree in [["garage", Palette.SERIE], ["cabine", Charte.ORANGE],
+			["arène", Palette.CRITIQUE], ["repaire", Color.WHITE],
 			["supérette", PlanVille.COULEUR_SUPERETTE]]:
+		var nom := String(entree[0])
+		var l := Charte.largeur_capitales(nom, 10, 0.14)
+		if x + 7.0 + l > MARGE + COTE + 2.0 and x > MARGE + 4.0:
+			x = MARGE + 4.0
+			y += 14.0
 		draw_circle(Vector2(x, y - 4.0), 3.0, entree[1])
-		draw_string(police, Vector2(x + 7.0, y), String(entree[0]),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_DOUCE)
-		x += 8.0 + police.get_string_size(String(entree[0]),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 12.0
+		Charte.capitales_dessinees(self, Vector2(x + 7.0, y), nom, 10, Charte.ENCRE_DOUCE, 0.14, 3)
+		x += 7.0 + l + 12.0
+
+## UNE CIBLE SUR LE RADAR : dans le cadre elle clignote (ou reste pleine pour
+## le GPS, qu'on a posé soi-même) ; hors du cadre, une flèche au bord dit où
+## aller, avec la distance en pâtés. Un contrat sans cible visible, c'est un
+## chrono qui tourne pendant qu'on cherche.
+func _viser(p: Vector2, couleur: Color, cadre: Rect2, centre: Vector2, clignotant: bool) -> void:
+	var ou := _vers_radar(p, centre)
+	var clignote := not clignotant or fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.5
+	if cadre.grow(-8.0).has_point(ou):
+		if clignote:
+			draw_arc(ou, 8.0, 0, TAU, 16, couleur, 2.0)
+			if not clignotant:
+				draw_circle(ou, 3.0, couleur)
+		return
+	var direction := (ou - centre).normalized()
+	var bord := centre + direction * (COTE * 0.5 - 9.0)
+	var cote := Vector2(-direction.y, direction.x)
+	draw_colored_polygon(PackedVector2Array([bord + direction * 7.0,
+		bord - direction * 4.0 + cote * 5.0, bord - direction * 4.0 - cote * 5.0]),
+		couleur if clignote else couleur.darkened(0.3))
+	var distance := "%d" % int(p.distance_to(moi) / PlanVille.PAS)
+	var l := Charte.largeur_capitales(distance, 11, 0.1)
+	Charte.capitales_dessinees(self, bord - direction * 18.0 + Vector2(-l * 0.5, 4.0), distance, 11, couleur, 0.1, 3)
 
 func _pastille(ou: Vector2, rayon: float, couleur: Color) -> void:
 	draw_circle(ou, rayon, couleur)

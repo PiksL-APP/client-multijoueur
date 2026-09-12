@@ -1,5 +1,5 @@
 extends Ecran
-## Les options : le son, l'image, les touches. Trois onglets, un seul écran.
+## Les options : le son, l'image, la souris, les touches. Trois onglets, un seul écran.
 ##
 ## Tout se règle EN DIRECT : bouger le curseur du volume fait aussitôt sonner
 ## un bip au nouveau niveau, couper les ombres les fait disparaître de la ville
@@ -31,7 +31,7 @@ func demarrer() -> void:
 	colonne.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	marge.add_child(colonne)
 
-	colonne.add_child(Charte.entete("Options", "Le son, l'image, les touches. Tout est gardé sur cette machine."))
+	colonne.add_child(Charte.entete("Options", "Le son, l'image, la souris, les touches. Tout est gardé sur cette machine."))
 
 	_onglets = TabContainer.new()
 	_onglets.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -130,7 +130,20 @@ func _page_image() -> Control:
 func _page_touches() -> Control:
 	var boite := _page("Touches")
 	var page: VBoxContainer = _pages["Touches"]
-	page.add_child(Charte.texte("Cliquez sur une touche puis appuyez sur la nouvelle. Elles valent pour Piks Theft Auto comme pour les parties courtes. Les flèches du clavier restent toujours actives pour se déplacer.", 16, Color(1, 1, 1, 0.5), true))
+	# LA SOURIS D'ABORD : c'est le seul réglage de l'onglet qu'on vient
+	# retoucher une fois le jeu pris en main, les touches ne bougent plus après
+	# le premier soir. Un facteur en pour cent (20 à 300) sur la sensibilité de
+	# base de la vue subjective — et le même réglage que la ligne LA SOURIS de
+	# la pause, qui permet de l'ajuster sans quitter la ville.
+	page.add_child(_curseur("Souris — vitesse du regard en vue subjective", Reglages.souris,
+			Reglages.SOURIS_MIN, Reglages.SOURIS_MAX, func(v: float) -> void:
+		Reglages.souris = clampf(v, Reglages.SOURIS_MIN, Reglages.SOURIS_MAX)
+		Reglages.ecrire()))
+	page.add_child(_bascule("Inverser le haut et le bas de la souris", Reglages.souris_inversee, "",
+		func(v: bool) -> void:
+			Reglages.souris_inversee = v
+			Reglages.ecrire()))
+	page.add_child(Charte.texte("Cliquez sur une touche puis appuyez sur la nouvelle. Les flèches du clavier restent toujours actives pour se déplacer.", 16, Color(1, 1, 1, 0.5), true))
 	# Dix actions ne tiennent pas dans la hauteur d'un onglet : la liste défile.
 	var defilement := ScrollContainer.new()
 	defilement.size_flags_vertical = Control.SIZE_EXPAND_FILL

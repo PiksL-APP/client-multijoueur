@@ -81,6 +81,8 @@ static func affaire_tenue() -> bool:
 		return affaire_simulee
 	if saisie:
 		return false
+	if Tactile.actif() and Tactile.bouton_affaire_tenu:
+		return true
 	return Reglages.enfoncee("affaire")
 
 static func affaire_declenchee() -> bool:
@@ -98,10 +100,13 @@ static func klaxon() -> bool:
 		return klaxon_simule
 	if saisie:
 		return false
+	if Tactile.actif() and Tactile.bouton_klaxon_tenu:
+		return true
 	return Reglages.enfoncee("klaxon")
 
-## La carte de la ville : TAB tenu. Tenue, pas déclenchée — on la consulte
-## d'un coup d'œil et on la lâche, comme dans GTA 2.
+## La carte de la ville : TAB, ou le bouton CARTE du pavé tactile. On rend
+## l'ÉTAT de la touche ; c'est l'écran de jeu qui en lit le front et bascule
+## la carte — ouverte, elle reste ouverte, on ne conduit pas un pouce sur TAB.
 static var carte_simulee := false
 
 static func carte() -> bool:
@@ -109,7 +114,30 @@ static func carte() -> bool:
 		return carte_simulee
 	if saisie:
 		return false
+	if Tactile.actif() and Tactile.bouton_carte_tenu:
+		return true
 	return Reglages.enfoncee("carte")
+
+## LES TOUCHES VIRTUELLES : un doigt qui tape une ligne de menu, ou le bouton
+## PAUSE du pavé tactile, « appuie » sur ENTRÉE ou ÉCHAP. Les menus lisent le
+## clavier au front (`_front_de_triche` dans l'écran de jeu) ; plutôt que de
+## leur apprendre la souris un par un, on leur fait croire à une touche —
+## tenue deux images, le temps qu'un front soit vu quel que soit l'ordre des
+## lectures (l'entrée arrive avant `_process`, jamais après).
+static var _virtuelles := {}          ## code → image de l'appui
+
+static func appuyer(code: int) -> void:
+	_virtuelles[code] = Engine.get_process_frames()
+
+static func virtuelle(code: int) -> bool:
+	if not _virtuelles.has(code):
+		return false
+	var depuis := Engine.get_process_frames() - int(_virtuelles[code])
+	return depuis >= 0 and depuis <= 1
+
+## Une touche de menu, physique ou virtuelle.
+static func touche_menu(code: int) -> bool:
+	return Input.is_key_pressed(code) or virtuelle(code)
 
 ## LE CODE KONAMI : ↑ ↑ ↓ ↓ ← → ← → B A.
 ##
@@ -197,6 +225,8 @@ static func manger_tenue() -> bool:
 		return manger_simulee
 	if saisie:
 		return false
+	if Tactile.actif() and Tactile.bouton_manger_tenu:
+		return true
 	return Reglages.enfoncee("manger")
 
 static func manger_declenchee() -> bool:

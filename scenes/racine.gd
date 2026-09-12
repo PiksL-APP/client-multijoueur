@@ -15,6 +15,7 @@ const ECRANS := {
 	"salon": "res://scenes/salon.gd",
 	"carnage": "res://jeux/carnage.gd",
 	"editeur": "res://scenes/editeur.gd",
+	"editeur2": "res://scenes/editeur_v2.gd",
 }
 ## Où l'on entre, et où l'on revient. Une constante plutôt qu'un littéral
 ## répété : le jour où l'accueil change encore, il change à un seul endroit.
@@ -220,4 +221,7 @@ func aller_a(nom: String, donnees: Dictionary = {}) -> void:
 	add_child(ecran)
 	_ecran = ecran
 	_nom_ecran = nom
+	# Le pavé tactile ne vit qu'en ville : sur le chargement et dans le salon
+	# il n'a rien à commander, et un manche posé sur l'affiche fait défaut.
+	Tactile.en_jeu = nom == JEU
 	ecran.demarrer()

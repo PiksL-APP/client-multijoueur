@@ -27,6 +27,21 @@ var poches_max := 0
 var message := ""              ## la dernière réponse de la caisse
 var message_couleur: Color = Palette.ENCRE_DOUCE
 
+var _rect := Rect2()            ## le cartouche, tel que dessiné — pour le doigt
+var _y0 := 0.0                  ## la ligne de base de la première ligne
+
+func _ready() -> void:
+	# Le menu prend la souris : au doigt, une ligne se vise puis se valide,
+	# et un appui hors du cartouche est un ÉCHAP (`Charte.menu_touche`).
+	mouse_filter = Control.MOUSE_FILTER_STOP
+
+func _gui_input(evenement: InputEvent) -> void:
+	if evenement is InputEventMouseButton and evenement.pressed \
+			and (evenement as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		choix = Charte.menu_touche((evenement as InputEventMouseButton).position, _rect, _y0, articles.size(), LIGNE, choix)
+		queue_redraw()
+		accept_event()
+
 func _draw() -> void:
 	var taille := get_viewport_rect().size
 	var hauteur := 170.0 + articles.size() * LIGNE
@@ -35,8 +50,10 @@ func _draw() -> void:
 	# lire APRÈS le refus, c'est une fois de trop.
 	var entete := "$%d   ·   %d/%d en poche" % [argent, poches, poches_max]
 	var rect := Charte.menu(self, taille, LARGEUR, hauteur, "Supérette", entete, PlanVille.COULEUR_SUPERETTE)
+	_rect = rect
 	var x := rect.position.x + Charte.MARGE_MENU
 	var y := Charte.haut_contenu(rect) + 10.0
+	_y0 = y
 
 	for i in articles.size():
 		var a: Dictionary = articles[i]
@@ -70,4 +87,4 @@ func _draw() -> void:
 		var lm := Charte.largeur_texte(message, 14)
 		Charte.texte_dessine(self, Vector2(rect.position.x + (rect.size.x - lm) * 0.5, rect.end.y - 44.0),
 			message, 14, message_couleur, 0)
-	Charte.aide_menu(self, rect, "↑ ↓ choisir · entrée acheter · échap sortir")
+	Charte.aide_menu(self, rect, "↑ ↓ choisir · entrée acheter · échap sortir" if not Tactile.actif() else "toucher un article, puis le toucher encore pour l'acheter · hors du cadre : sortir")

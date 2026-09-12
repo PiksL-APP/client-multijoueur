@@ -1,5 +1,5 @@
 extends Node
-## Les réglages du joueur : son, image, touches. Écrits dans `user://`, donc
+## Les réglages du joueur : son, image, souris, touches. Écrits dans `user://`, donc
 ## dans le stockage du navigateur — ils suivent la machine, pas le compte.
 ##
 ## Un seul endroit décide, et tout le reste vient LIRE ici. C'est pour ça que
@@ -21,6 +21,7 @@ const BUS_EFFETS := "Effets"
 const USINE := {
 	"volume_general": 0.8, "volume_musique": 0.6, "volume_effets": 0.9,
 	"effets": true, "ombres": true, "finesse": 1.0, "plein_ecran": false,
+	"souris": 1.0, "souris_inversee": false,
 }
 
 # ── Son ────────────────────────────────────────────────────────────────────
@@ -37,6 +38,21 @@ var ombres: bool = USINE["ombres"]
 ## moins de pixels à calculer, une netteté à peine entamée sur du voxel.
 var finesse: float = USINE["finesse"]
 var plein_ecran: bool = USINE["plein_ecran"]
+
+# ── Souris ─────────────────────────────────────────────────────────────────
+## La vitesse de la tête en vue subjective (la touche V). C'est un FACTEUR sur
+## la sensibilité de base réglée dans le jeu (`SENSIBILITE_SOURIS`, en radians
+## par pixel) — 1 vaut « comme livré », 0,5 deux fois plus lent, 2 deux fois
+## plus vif. Un facteur plutôt qu'une valeur en radians : « 140 % » se lit, «
+## 0,0034 rad/px » non, et le jour où la base change, les réglages des joueurs
+## restent justes.
+const SOURIS_MIN := 0.2
+const SOURIS_MAX := 3.0
+var souris: float = USINE["souris"]
+## Pousser la souris vers l'avant BAISSE le regard, comme un manche à balai :
+## une partie des joueurs ne joue qu'ainsi, et sans ce réglage ils ne jouent
+## pas la vue subjective du tout.
+var souris_inversee: bool = USINE["souris_inversee"]
 
 # ── Touches ────────────────────────────────────────────────────────────────
 ## Les codes sont PHYSIQUES : `KEY_W` tombe sur le Z d'un clavier AZERTY.
@@ -141,8 +157,17 @@ func remettre_tout() -> void:
 	ombres = USINE["ombres"]
 	finesse = USINE["finesse"]
 	plein_ecran = USINE["plein_ecran"]
+	souris = USINE["souris"]
+	souris_inversee = USINE["souris_inversee"]
 	touches = DEFAUTS.duplicate()
 	appliquer_tout()
+	ecrire()
+
+## Régler la souris d'un cran (depuis la pause : ← et →). Bornée, arrondie au
+## dixième pour que « 130 % » ne devienne jamais « 129,999 % », et écrite tout
+## de suite : un réglage qu'on perd en quittant la ville n'en est pas un.
+func regler_la_souris(pas: float) -> void:
+	souris = clampf(snappedf(souris + pas, 0.1), SOURIS_MIN, SOURIS_MAX)
 	ecrire()
 
 func remettre_les_touches() -> void:
@@ -209,6 +234,11 @@ func prendre_de_la_page(choix: Dictionary) -> void:
 		finesse = clampf(float(choix["finesse"]) / 100.0, 0.5, 1.0)
 	if choix.has("plein_ecran"):
 		plein_ecran = bool(choix["plein_ecran"])
+	# La souris du kit va de 20 à 300 (des pour cent), comme ses volumes.
+	if choix.has("souris"):
+		souris = clampf(float(choix["souris"]) / 100.0, SOURIS_MIN, SOURIS_MAX)
+	if choix.has("souris_inversee"):
+		souris_inversee = bool(choix["souris_inversee"])
 	var touches_page = choix.get("touches", null)
 	if touches_page is Array:
 		var ordre := ["avancer", "reculer", "gauche", "droite", "tir", "action", "carte"]
@@ -246,6 +276,8 @@ func charger() -> void:
 	ombres = bool(fichier.get_value("image", "ombres", ombres))
 	finesse = float(fichier.get_value("image", "finesse", finesse))
 	plein_ecran = bool(fichier.get_value("image", "plein_ecran", plein_ecran))
+	souris = clampf(float(fichier.get_value("souris", "vitesse", souris)), SOURIS_MIN, SOURIS_MAX)
+	souris_inversee = bool(fichier.get_value("souris", "inversee", souris_inversee))
 	for action in DEFAUTS:
 		touches[action] = int(fichier.get_value("touches", action, DEFAUTS[action]))
 
@@ -258,6 +290,8 @@ func ecrire() -> void:
 	fichier.set_value("image", "ombres", ombres)
 	fichier.set_value("image", "finesse", finesse)
 	fichier.set_value("image", "plein_ecran", plein_ecran)
+	fichier.set_value("souris", "vitesse", souris)
+	fichier.set_value("souris", "inversee", souris_inversee)
 	for action in touches:
 		fichier.set_value("touches", action, int(touches[action]))
 	fichier.save(FICHIER)

@@ -18,6 +18,7 @@ var _roue := false
 var _superette := false
 var _planque := false
 var _pause := false
+var _touches := false
 
 func _ready() -> void:
 	var code := "RESPECT"
@@ -28,6 +29,7 @@ func _ready() -> void:
 		if a == "--roue": _roue = true
 		if a == "--superette": _superette = true
 		if a == "--pause": _pause = true
+		if a == "--touches": _touches = true
 		if a == "--planque": _planque = true
 
 	# La nuit forcée : le cycle jour/nuit tourne en temps réel, et deux photos
@@ -196,11 +198,23 @@ func _ready() -> void:
 		repos.sous_titre = "$1840 sur soi · $6200 au coffre"
 		repos.lignes = [
 			{"texte": "REPRENDRE", "detail": "", "couleur": Palette.BON},
+			{"texte": "LES TOUCHES", "detail": "toutes, à pied et au volant", "couleur": Charte.ORANGE},
+			{"texte": "LA SOURIS", "detail": "140 % · ← → régler · entrée : inverser", "couleur": Palette.SERIE},
 			{"texte": "QUITTER LA VILLE", "detail": "la manche s'arrête pour la table",
 				"couleur": Palette.SERIEUX},
 		]
-		repos.choix = 1
+		repos.choix = 2
 		repos.queue_redraw()
+
+	# `--touches` pose la fiche des touches, celle qu'ouvre la pause : tout ce
+	# que le jeu sait faire au clavier, avec les noms du clavier de la machine.
+	if _touches:
+		var fiche := Control.new()
+		fiche.set_anchors_preset(Control.PRESET_FULL_RECT)
+		fiche.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		fiche.set_script(load("res://ui/touches.gd"))
+		interface.add_child(fiche)
+		fiche.queue_redraw()
 
 	if _triche:
 		var menu := Control.new()

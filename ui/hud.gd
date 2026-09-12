@@ -35,6 +35,7 @@ var reseau_libelle := ""
 var reseau_couleur := Palette.ENCRE_FAIBLE
 var son_actif := true
 var temps := 0.0                  ## pour les clignotements
+var viseur := false               ## la croix au centre : vue subjective
 
 func _draw() -> void:
 	var taille := get_viewport_rect().size
@@ -52,6 +53,8 @@ func _draw() -> void:
 	if fiche.has("alerte"):
 		_peindre_l_alerte(taille)
 	_peindre_l_aide(taille)
+	if viseur:
+		_peindre_le_viseur(taille)
 	if message != "":
 		# Le décompte en très gros ; une phrase en capitales, plus modeste,
 		# sinon « EN ATTENTE DES JOUEURS » déborde d'un écran de 960 pixels.
@@ -59,6 +62,17 @@ func _draw() -> void:
 			Charte.inscription_titre(self, taille * 0.5, message, 96, Color.WHITE)
 		else:
 			Charte.inscription(self, taille * 0.5, message, 26, Color.WHITE, 0.30)
+
+## LE VISEUR de la vue subjective : quatre traits fins autour d'un centre vide,
+## avec une ombre pour rester lisible sur un ciel clair comme sur une façade
+## sombre. Vide au milieu — un point plein cache précisément ce qu'on vise.
+func _peindre_le_viseur(taille: Vector2) -> void:
+	var c := taille * 0.5
+	for ombre in [true, false]:
+		var couleur := Color(0, 0, 0, 0.55) if ombre else Color(1, 1, 1, 0.9)
+		var e := 3.0 if ombre else 1.5
+		for d in [Vector2.RIGHT, Vector2.LEFT, Vector2.UP, Vector2.DOWN]:
+			draw_line(c + d * 5.0, c + d * 13.0, couleur, e)
 
 ## Chrono et fortunes : un cartouche, le chrono en Archivo Black, les joueurs
 ## dans l'ordre de la table, chacun souligné d'une barre à la longueur de sa
@@ -106,7 +120,9 @@ func _peindre_les_scores() -> void:
 ## radar de Carnage se pose juste en dessous.
 func _peindre_le_reseau(taille: Vector2) -> void:
 	var y := MARGE + 12.0
-	var son := "son coupé  [M]" if not son_actif else "[M] son"
+	# Au doigt, pas de touche : le son se coupe dans le menu ≡ du pavé.
+	var son := ("son coupé" if not son_actif else "son") if Tactile.actif() \
+		else ("son coupé  [M]" if not son_actif else "[M] son")
 	var largeur_son := Charte.largeur_capitales(son, 10, 0.16)
 	var x := taille.x - MARGE - largeur_son
 	Charte.capitales_dessinees(self, Vector2(x, y), son, 10,

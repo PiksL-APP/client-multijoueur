@@ -221,7 +221,10 @@ var _chantier: MorceauVille = null   ## le morceau en cours de construction, une
 ## objet que l'éditeur. Les `MorceauVille` voxel restent déclarés pour la casse
 ## et les voitures dormantes, qui n'ont pas encore leur équivalent dessiné :
 ## leur dictionnaire reste vide, et tout ce qui le parcourt ne fait rien.
-var _ville_dessinee: VilleMorcelee = null
+## ⚠ NON TYPÉ : c'est un `VilleMorcelee` (Pikstown) ou un `MorceauxV2` (la
+## ville v2 du cahier), qui répondent aux mêmes appels — `suivre`,
+## `morceaux_batis`, `par_image`.
+var _ville_dessinee = null
 var _cachees: Dictionary = {}        ## id dormante -> vrai : déjà effacée de sa nappe
 
 # ------------------------------------------------------- le joueur local
@@ -310,6 +313,7 @@ var _frigo: Dictionary = {}        ## le même, dans le frigo de la planque
 var _depuis_raid := 0.0            ## cadence de l'annonce « je tiens le terrain »
 var _pause_ouverte := false
 var _pause_vue: Control
+var _touches_vue: Control          ## la fiche des touches, posée par-dessus la pause
 var _superette_en_cours := -1
 var _superette_ouverte := false
 var _planque_ouverte := false        ## le menu du coffre, chez soi
@@ -478,7 +482,19 @@ var _plan_image: Image                ## la carte entière, un pixel par tuile, 
 var _plan_texture: ImageTexture
 var _plan_pate := 0                   ## prochain pâté à peindre
 var _plan_secteur := 0                ## prochain secteur dont peindre les lieux
-var _plan_vue: Control                ## l'incrustation, TAB tenu
+var _carte_vue: Control               ## `ui/carte.gd` : la grande carte, TAB bascule
+var _carte_ouverte := false
+var _carte_avant := false             ## l'état de la touche à l'image d'avant (le front)
+## LE GPS : le repère posé sur la carte, l'itinéraire par les rues qui y mène,
+## et le fil rose au sol qui le montre. `_route_depuis` est la position à
+## laquelle on l'a calculé — on ne recalcule que si l'on s'en écarte.
+var _gps := Vector2.ZERO
+var _gps_nom := ""                  ## le lieu visé sur la carte (« supérette »), ou rien
+var _route := PackedVector2Array()
+var _route_depuis := Vector2.ZERO
+var _depuis_route := 0.0
+var _fil_gps: MeshInstance3D = null
+var _gps_chaud := false
 var _hud_banniere: Label
 var _banniere_reste := 0.0
 var _territoire_vu := -99
@@ -510,7 +526,7 @@ func duree_manche() -> float:
 	return DUREE
 
 func aide() -> String:
-	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · F : affaires (planque, hôpital) · G : manger ou boire · V : vue subjective · H : klaxon (à pied : le détonateur) · TAB : carte · ÉCHAP : pause et sortie de la ville · caisse = arme, trousse ou billet · colis doré = à ramasser · crâne rouge = Kill Frenzy · au volant d'un taxi, F prend et dépose un client · garage bleu = étoiles effacées, et un sur deux est un ATELIER (F sur une pastille) · cabine verte/jaune/rouge = contrat (la couleur dit ce qu'il faut de respect) · tag de gang au sol = son repaire, il ouvre à 80 de respect (armurerie) · maison violette = planque à acheter · croix blanche = hôpital · dalle verte SUPÉRETTE = à manger et à boire (le frigo de la planque les garde) · quai GARE = le train, E pour monter quand il est à l'arrêt · dalle CASSE au bord de la voie = F broie la voiture contre de l'argent et une arme"
+	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · F : affaires (planque, hôpital) · G : manger ou boire · V : vue subjective · H : klaxon (à pied : le détonateur) · TAB : carte (molette pour zoomer, clic pour poser un GPS) · ÉCHAP : pause et sortie de la ville · caisse = arme, trousse ou billet · colis doré = à ramasser · crâne rouge = Kill Frenzy · au volant d'un taxi, F prend et dépose un client · garage bleu = étoiles effacées, et un sur deux est un ATELIER (F sur une pastille) · cabine verte/jaune/rouge = contrat (la couleur dit ce qu'il faut de respect) · tag de gang au sol = son repaire, il ouvre à 80 de respect (armurerie) · maison violette = planque à acheter · croix blanche = hôpital · dalle verte SUPÉRETTE = à manger et à boire (le frigo de la planque les garde) · quai GARE = le train, E pour monter quand il est à l'arrêt · dalle CASSE au bord de la voie = F broie la voiture contre de l'argent et une arme"
 
 # ------------------------------------------------------- mise en place
 
@@ -525,7 +541,13 @@ func preparer() -> void:
 	# questions que `PlanVille`, mais depuis le dessin de Pikstown : c'est
 	# elle qu'on joue. La procédurale reste dans le dépôt pour le hub et les
 	# vitrines ; ici, plus personne ne la voit.
-	carte = PlanDessine.new(code)
+	# ⚠ LA VILLE V2 D'ABORD. Si `cartes/temoin-centre.json` existe (le modèle
+	# du cahier des charges du 12/09), c'est elle qu'on joue : `PlanV2` répond
+	# aux mêmes questions. Pikstown reste le repli tant que la v2 n'a pas tout.
+	if FileAccess.file_exists(PlanV2.CHEMIN_PAR_DEFAUT):
+		carte = PlanV2.new(code)
+	else:
+		carte = PlanDessine.new(code)
 	ville = VilleVivante.new(carte, _rng)
 
 	_planter_decor()
@@ -686,7 +708,7 @@ func preparer() -> void:
 	# La bannière : le nom du quartier et de qui le tient, quand on y entre.
 	# Le sol change de teinte, mais une teinte ne se nomme pas toute seule.
 	# Elle se pose sous les étoiles du HUD, qui occupent le haut du milieu.
-	_hud_banniere = UI.titre("", 16)
+	_hud_banniere = Charte.capitales("", 17, Color.WHITE, 0.30, 6)
 	_hud_banniere.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	_hud_banniere.offset_top = 64
 	_hud_banniere.offset_bottom = 90
@@ -718,12 +740,34 @@ func preparer() -> void:
 	_plan_image = Image.create(carte.colonnes(), carte.lignes(), false, Image.FORMAT_RGB8)
 	_plan_image.fill(PlanVille.CARTE_EAU)
 	_plan_texture = ImageTexture.create_from_image(_plan_image)
-	_plan_vue = Control.new()
-	_plan_vue.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_plan_vue.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_plan_vue.visible = false
-	_plan_vue.draw.connect(_dessiner_le_plan)
-	interface().add_child(_plan_vue)
+	# ⚠ TAB BASCULE, il ne se tient plus. Une carte qu'on zoome et sur laquelle
+	# on clique ne se consulte pas la touche enfoncée — il faut la main pour la
+	# souris. Elle reste ouverte, la ville continue derrière, et c'est le seul
+	# écran du jeu qui prenne la souris.
+	_carte_vue = Control.new()
+	_carte_vue.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_carte_vue.set_script(load("res://ui/carte.gd"))
+	_carte_vue.visible = false
+	# Au-dessus du tableau de bord, qui est bâti APRÈS elle par le socle :
+	# sans ça le chrono et les jauges s'impriment sur la carte. L'ordre dans
+	# l'arbre ne suffit pas (le HUD arrive plus tard) ; l'indice z, si.
+	_carte_vue.z_index = 10
+	_carte_vue.texture = _plan_texture
+	_carte_vue.etendue = carte.etendue()
+	_carte_vue.tuiles = Vector2i(carte.colonnes(), carte.lignes())
+	_carte_vue.legende = [["garage", Palette.SERIE], ["cabine", Charte.ORANGE], ["arène", Palette.CRITIQUE],
+		["planque", Color("#b070d0")], ["hôpital", Color("#f0f4f8")], ["repaire — couleur du gang", Color.WHITE],
+		["parc", Color("#50a050")], ["eau", Color("#3a6a9c")], ["voie ferrée", Color("#404040")],
+		["boulevard", Color("#8a8a90")], ["supérette", PlanVille.COULEUR_SUPERETTE]]
+	_carte_vue.gps_choisi.connect(_poser_le_gps)
+	_carte_vue.gps_efface.connect(_effacer_le_gps)
+	_carte_vue.logement_choisi.connect(_viser_un_logement)
+	# Le ✕ de la carte : la seule façon de la refermer sans clavier.
+	_carte_vue.fermer.connect(func() -> void:
+		if _carte_ouverte:
+			_basculer_la_carte())
+	_carte_vue.touche_fermer = Reglages.nom_de_touche("carte").to_lower()
+	interface().add_child(_carte_vue)
 
 	# LA ROUE DES STATIONS, repliée. Elle ne s'ouvre que `R` tenue, au volant.
 	_roue_vue = Control.new()
@@ -760,6 +804,20 @@ func preparer() -> void:
 	for argument in OS.get_cmdline_args():
 		if String(argument).begins_with("--banc-feu="):
 			_feux_de_banc = int(String(argument).substr(11))
+
+	# `--banc-carte` : la carte tenue ouverte. Le pilote automatique ne tient
+	# pas TAB, et tout ce qui se dessine SOUS la carte — la légende, le tableau
+	# « où loger » — n'avait jamais été photographié : vérifié en données,
+	# jamais à l'écran. C'est le même trou que les huit appartements.
+	_carte_de_banc = "--banc-carte" in OS.get_cmdline_args()
+	_carte_banc_demandee = _carte_de_banc
+	# `--banc-gps=colonne,ligne` (en tuiles) : un repère posé au coup d'envoi,
+	# pour photographier l'itinéraire sans souris.
+	for argument in OS.get_cmdline_args():
+		if String(argument).begins_with("--banc-gps="):
+			var morceaux := String(argument).substr(11).split(",")
+			if morceaux.size() == 2:
+				_gps = Vector2(float(morceaux[0]), float(morceaux[1])) * PlanVille.PAS
 
 	# `--banc-dedans` : entrer chez soi au coup d'envoi. Une planque s'achète
 	# après plusieurs minutes de jeu et l'intérieur ne se voit qu'une fois
@@ -854,16 +912,22 @@ func _planter_decor() -> void:
 ## rue.
 func _diffuser_la_ville(entiers: int = 0) -> void:
 	if _ville_dessinee == null:
-		_ville_dessinee = VilleMorcelee.new()
-		_ville_dessinee.par_image = 1
-		_ville_dessinee.regler((carte as PlanDessine).fiche_ville, "pikstown", 2)
+		if carte is PlanV2:
+			_ville_dessinee = MorceauxV2.new()
+			_ville_dessinee.par_image = 1
+			_ville_dessinee.regler((carte as PlanV2).ville, 2)
+		else:
+			_ville_dessinee = VilleMorcelee.new()
+			_ville_dessinee.par_image = 1
+			_ville_dessinee.regler((carte as PlanDessine).fiche_ville, "pikstown", 2)
 		monde().add_child(_ville_dessinee)
 		if entiers > 0:
 			# Le départ : les morceaux autour du joueur d'un coup, comme
 			# l'éditeur le fait autour de son pivot. Les suivants viennent à
 			# un par image pendant le décompte.
 			_ville_dessinee.suivre(_en3d(_position))
-			for k in entiers * VilleMorcelee.PASSES.size():
+			var passes: int = RenduVille2.PASSES.size() if carte is PlanV2 else VilleMorcelee.PASSES.size()
+			for k in entiers * passes:
 				_ville_dessinee._process(0.0)
 			return
 	_ville_dessinee.suivre(_en3d(_position))
@@ -878,12 +942,18 @@ func _peindre_le_plan() -> void:
 	var total := carte.nombre_de_pates()
 	var secteurs := (carte.colonnes() / PlanVille.SECTEUR) * (carte.lignes() / PlanVille.SECTEUR)
 	if _plan_pate < total:
-		for i in PATES_PAR_IMAGE:
-			if _plan_pate >= total:
-				break
+		# Un BUDGET DE TEMPS plutôt qu'un nombre : Pikstown compte 96 000 cases
+		# (une case peinte coûte quatre pixels), la ville procédurale 14 000
+		# pâtés (trois mille pixels et autant de tests d'eau chacun). À cent
+		# vingt par image, la carte dessinée mettait treize secondes à
+		# apparaître ; à deux millisecondes par image, une seconde et demie.
+		var depart_peinture := Time.get_ticks_usec()
+		var peints := 0
+		while _plan_pate < total and (peints < PATES_PAR_IMAGE or Time.get_ticks_usec() - depart_peinture < 2000):
 			carte.peindre_pate(_plan_image, _plan_pate)
 			_plan_pate += 1
-		if _plan_pate >= total or _plan_pate % (PATES_PAR_IMAGE * 10) == 0:
+			peints += 1
+		if _plan_pate >= total or _plan_pate % (PATES_PAR_IMAGE * 10) < peints:
 			_plan_texture.update(_plan_image)
 	elif _plan_secteur < secteurs:
 		for i in 3:
@@ -894,44 +964,86 @@ func _peindre_le_plan() -> void:
 			_plan_secteur += 1
 		if _plan_secteur >= secteurs:
 			_plan_texture.update(_plan_image)
-	_plan_vue.visible = Commandes.carte()
-	if _plan_vue.visible:
-		_plan_vue.queue_redraw()
+			# La carte est complète : ses lieux le sont aussi, on les donne à
+			# la vue en une fois — jamais par image, la liste en compte des
+			# centaines.
+			_carte_vue.lieux = _lieux_de_la_carte()
+	# Le FRONT de la touche : appuyer ouvre, appuyer referme. Le banc
+	# (`--banc-carte`) l'ouvre au coup d'envoi.
+	var tenue := Commandes.carte()
+	if tenue and not _carte_avant:
+		_basculer_la_carte()
+	_carte_avant = tenue
+	if _carte_de_banc and not _carte_ouverte:
+		_carte_de_banc = false
+		_basculer_la_carte()
+	if _carte_ouverte:
+		_carte_vue.moi = _position
+		_carte_vue.mon_angle = _angle
+		_carte_vue.ma_couleur = _ma_couleur()
+		_carte_vue.autres = _radar.autres if _radar != null else []
+		_carte_vue.gps = _gps
+		_carte_vue.route = _route
+		_carte_vue.boutique = _lignes_de_la_boutique()
+		_carte_vue.boutique_ids = _ids_de_la_boutique()
+		_carte_vue.queue_redraw()
 
-func _dessiner_le_plan() -> void:
-	var taille := _plan_vue.size
-	var hauteur: float = taille.y * 0.68
-	var largeur: float = hauteur * float(carte.colonnes()) / float(carte.lignes())
-	# Un peu au-dessus du milieu : la légende passe sous la carte sans mordre
-	# sur la ligne d'état du bas.
-	var cadre := Rect2((taille - Vector2(largeur, hauteur)) * 0.5 - Vector2(0.0, taille.y * 0.05), Vector2(largeur, hauteur))
-	_plan_vue.draw_rect(cadre.grow(6.0), Color(Palette.FOND, 0.9), true)
-	_plan_vue.draw_texture_rect(_plan_texture, cadre, false)
-	_plan_vue.draw_rect(cadre.grow(6.0), Palette.FILET, false, 1.0)
-	var echelle := Vector2(largeur, hauteur) / carte.etendue()
-	for cle in _autres:
-		var a: Dictionary = _autres[cle]
-		_plan_vue.draw_circle(cadre.position + Vector2(a["p"]) * echelle, 5.0,
-			Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 1))))
-	var moi := cadre.position + _position * echelle
-	var avant := Vector2.RIGHT.rotated(_angle)
-	var cote := Vector2(-avant.y, avant.x)
-	_plan_vue.draw_colored_polygon(PackedVector2Array([moi + avant * 10.0, moi - avant * 6.0 + cote * 6.0,
-		moi - avant * 6.0 - cote * 6.0]), _ma_couleur())
-	_plan_vue.draw_arc(moi, 14.0, 0, TAU, 24, _ma_couleur(), 2.0)
-	# La légende, dans la police de la charte (la police de secours ne se
-	# dessinait plus une fois le post-traitement posé dans la même couche).
-	var police: Font = UI.TEXTE_POLICE
-	var x := cadre.position.x
-	var y := cadre.end.y + 24.0
-	for entree in [["garage", Palette.SERIE], ["cabine", Palette.AVERTISSEMENT], ["arène", Palette.CRITIQUE],
-			["planque", Color("#b070d0")], ["hôpital", Color("#f0f4f8")],
-			["repaire", Palette.ENCRE], ["parc", Color("#50a050")], ["eau", Color("#3a6a9c")], ["voie ferrée", Color("#404040")],
-			["boulevard", Color("#8a8a90")]]:
-		_plan_vue.draw_rect(Rect2(Vector2(x - 4.0, y - 9.0), Vector2(8, 8)), entree[1], true)
-		_plan_vue.draw_string(police, Vector2(x + 9.0, y), String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_DOUCE)
-		x += 12.0 + police.get_string_size(String(entree[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 16.0
-	_dessiner_la_boutique(cadre, y + 22.0, police)
+## En quittant la ville, le pavé tactile retrouve tous ses boutons : l'état
+## est dans l'autoload, il survivrait à cet écran.
+func _exit_tree() -> void:
+	Tactile.carte_ouverte = false
+	Tactile.affaire_possible = false
+	Tactile.detonateur_possible = false
+	super()
+
+func _basculer_la_carte() -> void:
+	_carte_ouverte = not _carte_ouverte
+	_carte_vue.visible = _carte_ouverte
+	# Le tableau de bord et le radar s'effacent sous la carte : à travers le
+	# voile, un chrono et trois jauges ne sont plus que du bruit derrière les
+	# rues — c'est ce que fait GTA, et ça se lit tout de suite.
+	if _hud != null:
+		_hud.visible = not _carte_ouverte
+	if _radar != null:
+		_radar.visible = not _carte_ouverte
+	if _hud_banniere != null:
+		_hud_banniere.visible = not _carte_ouverte
+	# Le pavé tactile s'efface sous la carte : un manche sous une carte plein
+	# écran ferait rouler la voiture à chaque glisser.
+	Tactile.carte_ouverte = _carte_ouverte
+	if _carte_ouverte:
+		if (_carte_vue.lieux as Array).is_empty():
+			_carte_vue.lieux = _lieux_de_la_carte()
+		_carte_vue.centrer_sur_moi()
+		Sons.jouer("clic", 1.1, -14.0)
+
+## LES LIEUX CLIQUABLES DE LA CARTE : tout ce que le radar sait dessiner,
+## d'un coup, pour toute la ville. Le nom est celui qu'on lit au survol — la
+## planque dit son appartement et son prix, le repaire son gang — et c'est
+## sur le point du lieu (sa porte, son tag) que le GPS se pose au clic.
+func _lieux_de_la_carte() -> Array:
+	var tous := carte.lieux_autour(carte.etendue() * 0.5, carte.etendue().length())
+	var liste: Array = []
+	for r in tous["repaires"]:
+		liste.append({"p": r["p"], "genre": "repaire", "nom": "repaire %s" % carte.du_gang(int(r["gang"])),
+			"couleur": carte.couleur_du_gang(int(r["gang"]))})
+	for g in tous["garages"]:
+		liste.append({"p": g["p"], "genre": "garage", "nom": "garage", "couleur": Palette.SERIE})
+	for h in tous["hopitaux"]:
+		liste.append({"p": h["p"], "genre": "hôpital", "nom": "hôpital", "couleur": Color("#f0f4f8")})
+	for sp in tous["superettes"]:
+		liste.append({"p": sp["p"], "genre": "supérette", "nom": "supérette", "couleur": PlanVille.COULEUR_SUPERETTE})
+	for pl in tous["planques"]:
+		var id_logement := Interieurs.pour_quartier(carte.quartier(pl["p"]))
+		var logement := String(Interieurs.CATALOGUE[id_logement]["nom"])
+		var nom := logement if _planque == int(pl["id"]) else "%s — $%d" % [logement, int(pl["prix"])]
+		liste.append({"p": pl["p"], "genre": "planque", "nom": nom, "couleur": Color("#b070d0"),
+			"logement": id_logement})
+	for a in tous["arenes"]:
+		liste.append({"p": a["p"], "genre": "arène", "nom": "arène — tir ami", "couleur": Palette.CRITIQUE})
+	for c in tous["cabines"]:
+		liste.append({"p": c["p"], "genre": "cabine", "nom": "cabine", "couleur": Charte.ORANGE})
+	return liste
 
 ## LA BOUTIQUE DES PLANQUES, sous la carte, tant qu'on n'en a pas.
 ##
@@ -942,21 +1054,155 @@ func _dessiner_le_plan() -> void:
 ##
 ## ⚠ Il DISPARAÎT une fois qu'on a sa planque : à ce moment-là c'est du bruit
 ## sur une carte qu'on ouvre pour se repérer, pas pour faire des courses.
-func _dessiner_la_boutique(cadre: Rect2, haut: float, police: Font) -> void:
+func _lignes_de_la_boutique() -> Array:
 	if _planque >= 0:
+		return []
+	var lignes: Array = []
+	for f in Interieurs.logements():
+		lignes.append("%s — %s" % [String(f["nom"]), String(PlanVille.NOMS_QUARTIERS[int(f["quartier"])])])
+	return lignes
+
+func _ids_de_la_boutique() -> Array:
+	if _planque >= 0:
+		return []
+	var ids: Array = []
+	for f in Interieurs.logements():
+		ids.append(String(f["id"]))
+	return ids
+
+## Une ligne de la boutique cliquée : le GPS va à la planque LA PLUS PROCHE
+## qui donne cet appartement. « Où vais-je pour avoir le penthouse » a enfin
+## une réponse qui se suit — pas seulement le nom d'un quartier à chercher.
+func _viser_un_logement(id: String) -> void:
+	var meilleure := {}
+	var d_min := INF
+	for l in _carte_vue.lieux:
+		var lieu: Dictionary = l
+		if String(lieu["genre"]) != "planque" or String(lieu.get("logement", "")) != id:
+			continue
+		var d: float = Vector2(lieu["p"]).distance_to(_position)
+		if d < d_min:
+			d_min = d
+			meilleure = lieu
+	if meilleure.is_empty():
+		_dire_affaire("aucune planque de ce genre")
 		return
-	_plan_vue.draw_string(police, Vector2(cadre.position.x, haut),
-		"OÙ LOGER — le quartier décide de l'appartement", HORIZONTAL_ALIGNMENT_LEFT,
-		-1, 11, Palette.ENCRE_FAIBLE)
-	var table := Interieurs.logements()
-	var colonne := cadre.size.x * 0.5
-	for i in table.size():
-		var f: Dictionary = table[i]
-		var quartier := String(PlanVille.NOMS_QUARTIERS[int(f["quartier"])])
-		_plan_vue.draw_string(police,
-			Vector2(cadre.position.x + float(i % 2) * colonne, haut + 16.0 + float(i / 2) * 14.0),
-			"%s — %s" % [String(f["nom"]), quartier],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_DOUCE)
+	_carte_vue.gps_nom = String(meilleure["nom"])
+	_poser_le_gps(Vector2(meilleure["p"]))
+
+# ------------------------------------------------------------- le GPS
+
+## Un point cliqué sur la carte : on y va par les rues. La ligne du tableau
+## de bord le dit, le radar le montre, le fil au sol y mène.
+func _poser_le_gps(p: Vector2) -> void:
+	_gps = p
+	_gps_nom = String(_carte_vue.gps_nom)
+	_recalculer_la_route()
+	Sons.jouer("clic", 1.4, -16.0)
+
+func _effacer_le_gps() -> void:
+	_gps = Vector2.ZERO
+	_gps_nom = ""
+	_carte_vue.gps_nom = ""
+	_route = PackedVector2Array()
+	_rebatir_le_fil()
+	if _radar != null:
+		_radar.gps = _gps
+		_radar.route = _route
+
+func _recalculer_la_route() -> void:
+	_route = Gps.itineraire(carte, _position, _gps)
+	_route_depuis = _position
+	_depuis_route = 0.0
+	_rebatir_le_fil()
+	if _radar != null:
+		_radar.gps = _gps
+		_radar.route = _route
+
+## Par image : arrivé, on efface ; écarté du tracé, on recalcule — pas plus
+## d'une fois par demi-seconde, la recherche visite toute la ville.
+const ARRIVEE_GPS := 130.0            ## px de jeu : une tuile et demie du bout de la route
+const ECART_GPS := 320.0              ## px de jeu : trois tuiles hors du tracé
+
+func _suivre_le_gps(delta: float) -> void:
+	# La table des tronçons se chauffe par petits lots dès le départ : au
+	# premier clic elle est déjà connue, et la route sort en quelques
+	# millisecondes au lieu de geler l'image trois secondes.
+	if not _gps_chaud:
+		_gps_chaud = Gps.chauffer(carte)
+	if _gps == Vector2.ZERO:
+		return
+	# On arrive au BOUT DE LA ROUTE — le bord de la rue en face du point cliqué —
+	# pas au point lui-même, qui peut être au fond d'un pâté.
+	if not _route.is_empty() and _position.distance_to(Gps.bout(_route)) < ARRIVEE_GPS:
+		_dire_affaire("vous êtes arrivé")
+		_effacer_le_gps()
+		return
+	_depuis_route += delta
+	if _depuis_route < 0.5:
+		return
+	if _route.is_empty() or Gps.ecart(_route, _position) > ECART_GPS:
+		_recalculer_la_route()
+		if _route.is_empty():
+			# Une île sans pont, un point hors carte : le dire et lâcher, plutôt
+			# qu'un repère qu'on poursuit sans route pour toujours.
+			_dire_affaire("aucune route n'y mène")
+			_effacer_le_gps()
+
+## LE FIL AU SOL : un ruban rose posé sur la chaussée, le long de l'itinéraire,
+## comme la ligne violette des GTA. Un seul maillage, rebâti quand la route
+## change — jamais par image.
+func _rebatir_le_fil() -> void:
+	if _fil_gps != null:
+		_fil_gps.queue_free()
+		_fil_gps = null
+	if _route.size() < 2:
+		return
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var demi := 0.55                  # unités 3D : un ruban d'un mètre dix
+	# ⚠ LA VILLE DESSINÉE A DU RELIEF : un ruban tendu d'un carrefour à l'autre
+	# passerait sous une rampe et au-dessus d'un pont. On découpe chaque
+	# segment tous les cent pixels (une tuile) et chaque point prend l'altitude
+	# du sol sous lui, par le même `_en3d` que les voitures.
+	var points: Array = []
+	for i in range(1, _route.size()):
+		var p0 := _route[i - 1]
+		var p1 := _route[i]
+		var n_pas := maxi(1, int(ceil(p0.distance_to(p1) / PlanVille.PAS)))
+		for k in n_pas:
+			points.append(_en3d(p0.lerp(p1, float(k) / float(n_pas)), 0.16))
+	points.append(_en3d(_route[_route.size() - 1], 0.16))
+	for i in range(1, points.size()):
+		var a: Vector3 = points[i - 1]
+		var b: Vector3 = points[i]
+		var d := (b - a)
+		if d.length() < 0.01:
+			continue
+		var n := Vector3(-d.z, 0.0, d.x).normalized() * demi
+		st.add_vertex(a - n); st.add_vertex(b - n); st.add_vertex(b + n)
+		st.add_vertex(a - n); st.add_vertex(b + n); st.add_vertex(a + n)
+		# Un disque à chaque coude : sans lui, deux rubans qui tournent laissent
+		# un coin vide au carrefour.
+		if i < points.size() - 1:
+			var c := b
+			for k in 12:
+				var a0 := TAU * float(k) / 12.0
+				var a1 := TAU * float(k + 1) / 12.0
+				st.add_vertex(c)
+				st.add_vertex(c + Vector3(cos(a1), 0.0, sin(a1)) * demi)
+				st.add_vertex(c + Vector3(cos(a0), 0.0, sin(a0)) * demi)
+	var maillage := st.commit()
+	_fil_gps = MeshInstance3D.new()
+	_fil_gps.mesh = maillage
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(Charte.ROSE, 0.80)
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_fil_gps.material_override = m
+	_fil_gps.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	monde().add_child(_fil_gps)
 
 ## Un IMPACT sur une façade. ⚠ Plus rien ne part du décor depuis la v12 : le
 ## morceau rend seulement la couleur et le point touchés, et on en tire les
@@ -1012,7 +1258,11 @@ func simuler_local(delta: float) -> void:
 	# avait rien. Sans cet ordre, ÉCHAP devant la caisse d'une supérette
 	# proposait de quitter la ville.
 	if _front_de_pause(KEY_ESCAPE):
-		if _triche_ouverte:
+		if _touches_vue != null:
+			_fermer_les_touches()
+		elif _carte_ouverte:
+			_basculer_la_carte()
+		elif _triche_ouverte:
 			_basculer_la_triche()
 		elif _superette_ouverte:
 			_basculer_la_superette()
@@ -1031,6 +1281,7 @@ func simuler_local(delta: float) -> void:
 	# LA SUPÉRETTE, même règle : la ville tourne derrière, le joueur est figé.
 	if _superette_ouverte:
 		_naviguer_dans_la_superette()
+	_suivre_le_gps(delta)
 	if _planque_ouverte:
 		_naviguer_dans_la_planque()
 
@@ -1189,8 +1440,12 @@ func _piloter_pour_le_banc() -> void:
 	# l'article et la consommation ne seraient jamais exercés par une manche —
 	# et c'est précisément le genre de code qui casse en silence.
 	Commandes.manger_simulee = (_faim < 70.0 or _soif < 70.0) and _pulsation
-	# La carte pendant trois secondes : c'est ainsi qu'on la photographie.
-	Commandes.carte_simulee = temps > 8.0 and temps < 11.0
+	# La carte, ouverte à huit secondes et refermée à quatorze — TAB BASCULE
+	# maintenant, le pilote n'appuie qu'un instant. `--banc-carte` l'ouvre dès
+	# le coup d'envoi et la garde : le pilote n'y touche alors plus, sinon son
+	# appui la refermait.
+	Commandes.carte_simulee = not _carte_banc_demandee and \
+		((temps > 8.0 and temps < 8.3) or (temps > 14.0 and temps < 14.3))
 
 ## Ce que vise le pilote du banc. Tant qu'il n'a pas de contrat, il va
 ## décrocher : sans ce détour, une cabine sur vingt-six par vingt tuiles n'est
@@ -1299,7 +1554,7 @@ func _basculer_portiere() -> void:
 			_vider_les_evenements()
 		if not id_rendu in _bombes_posees:
 			_bombes_posees.append(id_rendu)
-		_dire_affaire("bombe armée — %s à pied pour la faire sauter" % Reglages.nom_de_touche("klaxon"))
+		_dire_affaire("bombe armée — %s à pied pour la faire sauter" % _nom_du_detonateur())
 	# Le reste du matériel reste avec la carrosserie : on descend les mains
 	# vides, comme on est monté.
 	_mods = {}
@@ -1747,7 +2002,13 @@ func _surveiller_les_lieux(delta: float) -> void:
 	# caisse d'une supérette, `F` achète et `G` mange, et les deux doivent
 	# pouvoir se suivre sans fermer quoi que ce soit.
 	if Commandes.manger_declenchee():
-		_consommer()
+		# Au doigt, le SAC a dit quoi : manger ou boire. Au clavier, `G` prend
+		# ce qui manque le plus.
+		_consommer(Tactile.envie if Tactile.actif() else "")
+	# LA RADIO AU DOIGT : pas de roue à tenir, un appui passe à la station
+	# suivante et la puce « ♪ » dit laquelle. Au volant seulement, comme R.
+	if not _pied and Tactile.radio_declenchee():
+		_changer_de_station(_station + 1)
 	if Commandes.vue_declenchee():
 		_basculer_la_vue()
 	_surveiller_les_affaires(delta)
@@ -2897,13 +3158,15 @@ func _naviguer_dans_la_triche() -> void:
 var _pause_avant: Dictionary = {}
 
 func _front_de_pause(code: int) -> bool:
-	var maintenant := Input.is_key_pressed(code)
+	# Physique ou virtuelle (`Commandes.appuyer`) : le doigt sur un menu ou sur
+	# le bouton PAUSE du pavé passe par la même porte que la touche.
+	var maintenant := Commandes.touche_menu(code)
 	var front: bool = maintenant and not bool(_pause_avant.get(code, false))
 	_pause_avant[code] = maintenant
 	return front
 
 func _front_de_triche(code: int) -> bool:
-	var maintenant := Input.is_key_pressed(code)
+	var maintenant := Commandes.touche_menu(code)
 	var front: bool = maintenant and not bool(_triche_avant.get(code, false))
 	_triche_avant[code] = maintenant
 	return front
@@ -3358,7 +3621,7 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 			if String(charge.get("j", "")) == Session.cle:
 				_lance_flammes = true
 				_annoncer("LE PATRON VOUS LAISSE LE LANCE-FLAMMES", Palette.AVERTISSEMENT, 3.2)
-				_dire_affaire("lance-flammes : au volant d'un camion de pompiers, F bascule la lance")
+				_dire_affaire(_au_doigt("lance-flammes : au volant d'un camion de pompiers, F bascule la lance"))
 				Sons.jouer("bonus", 1.0, -8.0)
 				if Commandes.pilote_automatique:
 					print("[banc] lance-flammes reçu")
@@ -4218,6 +4481,8 @@ func _rafraichir_radar() -> void:
 ## rendrait le feu inoffensif à haute vitesse.
 var _brasiers: Dictionary = {}        ## id du feu -> Node3D
 var _feux_de_banc := 0                ## `--banc-feu=N` : foyers à rallumer autour du pilote
+var _carte_de_banc := false           ## `--banc-carte` : la carte ouverte au coup d'envoi…
+var _carte_banc_demandee := false     ## …et le pilote ne la referme pas
 var _depuis_feu_banc := 0.0
 var _depuis_brulure := 0.0
 
@@ -4801,8 +5066,8 @@ func _avoir_faim(delta: float) -> void:
 ## répond au besoin le plus pressant (`Provisions.le_mieux`). Trois touches
 ## pour choisir entre un sandwich et une bouteille d'eau pendant qu'on se fait
 ## tirer dessus, personne ne le fait deux fois.
-func _consommer() -> void:
-	var cle := Provisions.le_mieux(_provisions, _faim, _soif, _vie, FAIM_MAX)
+func _consommer(envie: String = "") -> void:
+	var cle := _le_mieux_pour(envie) if envie != "" else Provisions.le_mieux(_provisions, _faim, _soif, _vie, FAIM_MAX)
 	if cle == "":
 		# ⚠ On distingue « rien sur soi » de « rien d'utile » : un joueur à
 		# quatre-vingt-dix-huit de faim avec trois sandwichs n'a pas un
@@ -4816,6 +5081,39 @@ func _consommer() -> void:
 	_vie = clampf(_vie + float(a["vie"]), 1.0, VIE_MAX)
 	_dire_affaire("%s — %s" % [String(a["nom"]).to_lower(), Provisions.effet(cle)])
 	Sons.jouer("dalle", _rng.randf_range(0.9, 1.1), -14.0)
+
+## L'article qui répond le mieux à UNE envie — « boire » : celui qui rend le
+## plus de soif utile, « manger » : de faim. Rien d'utile, rien.
+func _le_mieux_pour(envie: String) -> String:
+	var champ := "soif" if envie == "boire" else "faim"
+	var manque: float = FAIM_MAX - (_soif if envie == "boire" else _faim)
+	var meilleur := ""
+	var note := 0.0
+	for cle in _provisions:
+		var a := Provisions.fiche(String(cle))
+		if a.is_empty():
+			continue
+		var n := minf(float(a[champ]), manque)
+		if n > note:
+			note = n
+			meilleur = String(cle)
+	return meilleur
+
+## UN MESSAGE SANS TOUCHE AU DOIGT. Les textes du jeu nomment `E` et `F` —
+## sur un téléphone ces lettres n'existent pas, les boutons s'appellent ENTRER
+## et AFFAIRE. On traduit à la sortie, en un seul endroit, plutôt que
+## d'écrire chaque message deux fois.
+func _au_doigt(texte: String) -> String:
+	if not Tactile.actif():
+		return texte
+	return texte.replace("F : ", "AFFAIRE : ").replace("E : ", "ENTRER : ") \
+		.replace("E pour ", "ENTRER pour ").replace("F bascule", "AFFAIRE bascule")
+
+## Comment on fait sauter la voiture piégée : la touche du klaxon au clavier,
+## le bouton BOUM de l'éventail au doigt. Aucun message ne nomme une touche
+## sur un téléphone.
+func _nom_du_detonateur() -> String:
+	return "BOUM (menu ≡)" if Tactile.actif() else Reglages.nom_de_touche("klaxon")
 
 # ------------------------------------------------------------- la pause
 
@@ -4832,11 +5130,39 @@ func _basculer_la_pause() -> void:
 		_pause_vue.choix = 0
 		Sons.jouer("clic", 0.8, -12.0)
 	elif _pause_vue != null:
+		_fermer_les_touches()
 		_pause_vue.queue_free()
 		_pause_vue = null
 
+## LA FICHE DES TOUCHES, par-dessus la pause. Elle ne remplace pas le menu :
+## elle le couvre, et ÉCHAP ou ENTRÉE la retirent pour retrouver la pause
+## telle qu'on l'a laissée.
+func _ouvrir_les_touches() -> void:
+	if _touches_vue != null:
+		return
+	_touches_vue = Control.new()
+	_touches_vue.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_touches_vue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_touches_vue.set_script(load("res://ui/touches.gd"))
+	interface().add_child(_touches_vue)
+	Sons.jouer("clic", 0.9, -12.0)
+
+func _fermer_les_touches() -> void:
+	if _touches_vue == null:
+		return
+	_touches_vue.queue_free()
+	_touches_vue = null
+	Sons.jouer("clic", 0.8, -12.0)
+
 func _naviguer_dans_la_pause() -> void:
 	if _pause_vue == null:
+		return
+	# La fiche des touches prend les touches : ENTRÉE la referme (ÉCHAP le
+	# fait plus haut), le reste ne bouge pas le menu qu'elle couvre.
+	if _touches_vue != null:
+		if _front_de_triche(KEY_ENTER) or _front_de_triche(KEY_KP_ENTER) or _front_de_triche(KEY_SPACE):
+			_fermer_les_touches()
+		_touches_vue.queue_redraw()
 		return
 	# Le sous-titre dit ce qu'on emporte : l'argent DÉPOSÉ compte, celui qu'on
 	# a sur soi aussi. C'est la dernière chose qu'on veut vérifier avant de
@@ -4844,18 +5170,22 @@ func _naviguer_dans_la_pause() -> void:
 	_pause_vue.sous_titre = "$%d sur soi · $%d au coffre" % [_argent, _banque]
 	_pause_vue.lignes = [
 		{"texte": "REPRENDRE", "detail": "", "couleur": Palette.BON},
+		{"texte": "LES COMMANDES" if Tactile.actif() else "LES TOUCHES",
+			"detail": "le manche et les boutons" if Tactile.actif() else "toutes, à pied et au volant",
+			"couleur": Charte.ORANGE},
 		{"texte": "QUITTER LA VILLE", "detail": "la manche s'arrête pour la table",
 			"couleur": Palette.SERIEUX},
 	]
+	var n: int = (_pause_vue.lignes as Array).size()
 	if _front_de_triche(KEY_UP):
-		_pause_vue.choix = posmod(int(_pause_vue.choix) - 1, 2)
+		_pause_vue.choix = posmod(int(_pause_vue.choix) - 1, n)
 	if _front_de_triche(KEY_DOWN):
-		_pause_vue.choix = posmod(int(_pause_vue.choix) + 1, 2)
+		_pause_vue.choix = posmod(int(_pause_vue.choix) + 1, n)
 	if _front_de_triche(KEY_ENTER) or _front_de_triche(KEY_KP_ENTER) or _front_de_triche(KEY_SPACE):
-		if int(_pause_vue.choix) == 0:
-			_basculer_la_pause()
-		else:
-			_quitter_la_ville()
+		match int(_pause_vue.choix):
+			0: _basculer_la_pause()
+			1: _ouvrir_les_touches()
+			_: _quitter_la_ville()
 	_pause_vue.queue_redraw()
 
 ## RENTRER. C'est ici que la manche se termine, et c'est le seul endroit.
@@ -5157,7 +5487,7 @@ func _sentir_le_train(delta: float) -> void:
 	if not quai.is_empty() and ville.point_de_voie(float(quai["s"])).distance_to(_position) \
 			< PORTEE_TRAIN + VilleVivante.longueur_de_rame():
 		_quai_dit = 4.0
-		_annoncer("train à quai — E pour monter", Palette.AVERTISSEMENT, 2.6)
+		_annoncer(_au_doigt("train à quai — E pour monter"), Palette.AVERTISSEMENT, 2.6)
 
 ## VOYAGER. Le passager n'a rien à piloter : il se tient dans la rame et
 ## regarde la ville défiler. `E` le fait descendre — mais seulement à l'arrêt,
@@ -5180,7 +5510,7 @@ func _voyager(delta: float) -> void:
 		_affaire = ""
 		if _quai_dit <= 0.0:
 			_quai_dit = 3.0
-			_annoncer("à quai — E pour descendre", Palette.AVERTISSEMENT, 2.4)
+			_annoncer(_au_doigt("à quai — E pour descendre"), Palette.AVERTISSEMENT, 2.4)
 
 func _monter_dans_le_train() -> bool:
 	var t := ville.rame_a_quai(_position)
@@ -5390,9 +5720,18 @@ func fiche_joueur() -> Dictionary:
 	if _mot_affaire_reste > 0.0:
 		puces.append({"texte": _mot_affaire, "couleur": Palette.AVERTISSEMENT})
 	elif _affaire != "":
-		puces.append({"texte": _affaire, "couleur": Palette.SERIE})
+		# Au doigt il n'y a pas de F : la puce nomme le bouton, et le bouton
+		# AFFAIRE du pavé n'apparaît que quand il y a une affaire.
+		puces.append({"texte": _au_doigt(_affaire), "couleur": Palette.SERIE})
+	Tactile.affaire_possible = _affaire.begins_with("F : ")
 	if _hors_service > 0.0:
 		puces.append({"texte": "à terre — %d s" % int(ceil(_hors_service)), "couleur": Palette.CRITIQUE})
+	# LE GPS, tant qu'il y a une route : le lieu visé et ce qu'il reste par
+	# les rues — la carte fermée, c'est la seule ligne qui dise où l'on va.
+	if _gps != Vector2.ZERO and _route.size() >= 2:
+		var km := Gps.longueur(_route) / PlanVille.PAS * 0.02
+		var dist := "%.1f km" % km if km >= 1.0 else "%d m" % int(km * 1000.0)
+		puces.append({"texte": "gps %s%s" % ["" if _gps_nom == "" else _gps_nom + " · ", dist], "couleur": Charte.ROSE})
 	if _eperon > 0.0:
 		puces.append({"texte": "éperon %ds" % int(ceil(_eperon)), "couleur": Palette.SERIEUX})
 	var territoire := carte.territoire(_position)
@@ -5444,11 +5783,14 @@ func fiche_joueur() -> Dictionary:
 		# Le détonateur, tant qu'une voiture piégée attend : sans la puce, on
 		# oubliait qu'on l'avait, et la voiture sautait sous un passant trois
 		# rues plus loin sans qu'on sache pourquoi.
-		puces.append({"texte": "détonateur : %s à pied (×%d)" % [Reglages.nom_de_touche("klaxon"), _bombes_posees.size()],
+		puces.append({"texte": "détonateur : %s à pied (×%d)" % [_nom_du_detonateur(), _bombes_posees.size()],
 			"couleur": Color("#e07a3c")})
+	# Au doigt, le détonateur est un bouton de l'éventail — qui n'apparaît que
+	# tant qu'une voiture piégée attend.
+	Tactile.detonateur_possible = not _bombes_posees.is_empty()
 	if _pied:
 		var auto := ville.vehicule_proche(_position, PORTEE_ENTREE)
-		puces.append({"texte": "E : monter" if not auto.is_empty() else "à pied", "couleur": Palette.AVERTISSEMENT if not auto.is_empty() else Palette.ENCRE_DOUCE})
+		puces.append({"texte": _au_doigt("E : monter") if not auto.is_empty() else "à pied", "couleur": Palette.AVERTISSEMENT if not auto.is_empty() else Palette.ENCRE_DOUCE})
 	if _hors_ville > 0.2:
 		puces.append({"texte": "VOUS QUITTEZ LA VILLE", "couleur": Palette.CRITIQUE})
 	fiche["puces"] = puces
@@ -5475,7 +5817,9 @@ func _rafraichir_l_aide() -> void:
 	if etat == _aide_etat:
 		return
 	_aide_etat = etat
-	_hud.aide = aide_touches()
+	# Pas de ligne de touches au doigt : « W S avancer » n'aide personne sur
+	# un téléphone, et elle passait sous les boutons du pavé.
+	_hud.aide = [] if Tactile.actif() else aide_touches()
 
 func aide_touches() -> Array:
 	var t := func(action: String) -> String: return Reglages.nom_de_touche(action)
@@ -5488,5 +5832,5 @@ func aide_touches() -> Array:
 		# quelque chose à faire sauter : sinon le cabochon promet une bombe
 		# qu'on n'a pas.
 		[t.call("klaxon"), "détonateur" if _pied and not _bombes_posees.is_empty() else "klaxon"],
-		[t.call("carte"), "carte"],
+		[t.call("carte"), "carte et GPS"],
 	]

@@ -25,6 +25,8 @@ fait tirer dessus.
 | `R` **tenue** | la **roue des stations** : pousser dans une direction, relâcher (au volant) |
 | `H` | au volant, le **klaxon** ; à pied, le **détonateur** des voitures qu'on a piégées à l'atelier |
 | ↑ ↑ ↓ ↓ ← → ← → B A | le **menu de triche** (⚠ la manche ne compte plus pour vous) |
+| `ÉCHAP` | la pause : reprendre, **la fiche des touches** (toutes, à pied et au volant, avec les noms de votre clavier), **la souris** (← → sa vitesse, ENTRÉE inverse le haut/bas), quitter la ville |
+| `V` + **souris** | la **vue subjective** : la souris tourne la tête, on marche là où l'on regarde, on tire dans le viseur |
 
 ## Ce qui répond déjà
 
@@ -79,6 +81,57 @@ haut, elle traverse les immeubles pendant une seconde et demie.
 ⚠ **`look_at` refuse deux points confondus**, et ça arrive : à l'arrêt, à la
 première image, la caméra n'a pas encore rejoint l'œil.
 
+### La souris regarde (12/09)
+
+La première vue subjective regardait droit devant, dans l'axe du corps : on ne
+pouvait ni lever les yeux sur une façade ni tourner la tête en marchant —
+c'est-à-dire qu'on ne pouvait rien **regarder**, dans une vue faite pour ça. La
+souris est maintenant **capturée** tant que la vue dure, et elle tourne la
+tête (lacet et tangage, le tangage borné : on n'est pas une caméra libre) :
+
+- **à pied, la tête mène le corps** : « avancer » va là où l'on regarde, `Q`
+  et `D` font un pas de côté, et l'on tire dans l'axe du **viseur** — une
+  croix fine au centre, vide au milieu (un point plein cache ce qu'on vise).
+  La tête monte et descend en marchant, comme le pas s'entend ;
+- **au volant, la tête tourne autour de la voiture** (presque jusqu'à
+  derrière soi) et **se recentre toute seule** quand la souris s'arrête une
+  seconde : on jette un œil au carrefour et l'on retrouve sa route sans avoir
+  à la chercher. On descend en regardant là où l'on regardait ;
+- la ligne d'aide dit `SOURIS regarder` et `V vue de dessus`.
+
+⚠ **Dans le navigateur, capturer la souris demande un geste** (pointer lock) :
+la touche `V` en est un, un clic aussi. ÉCHAP la rend TOUJOURS — le
+navigateur l'impose — et c'est précisément le moment où l'on ouvre la pause ;
+en revenant, elle est reprise au premier clic ou à la première touche. La
+souris est rendue à tout menu (`Commandes.saisie`), chez soi, hors de la vue,
+et en quittant la ville — un salon sans curseur, c'est un joueur qui croit le
+jeu planté. Une demande de capture toutes les demi-secondes au plus : une par
+image, c'était soixante refus par seconde dans la console du navigateur.
+
+Photo : `--banc-subjectif --banc-regard=0.9,0.45` (la tête tournée à droite et
+levée) dans une manche solo.
+
+**La vitesse de la souris se règle** (13/09) — à trois endroits, pour un seul
+réglage (`Reglages.souris`, un facteur de 20 % à 300 % sur la base
+`SENSIBILITE_SOURIS` de 0,0024 rad/px ; `Reglages.souris_inversee` pour le
+haut/bas à l'envers, « comme un manche ») :
+
+- **dans la pause**, la ligne **LA SOURIS** : ← → la changent de dix pour cent,
+  ENTRÉE inverse le haut et le bas, le détail dit la valeur. C'est là qu'on
+  la règle vraiment — une sensibilité se juge en jouant, personne ne quitte
+  la ville pour la toucher de dix pour cent ;
+- **dans les options de l'accueil**, onglet Touches (`scenes/options.gd`) : un
+  curseur et une bascule, avant la liste des touches ;
+- **dans les options de la page** (`web/coque.html`, onglet Touches) : les
+  mêmes, passés au moteur par `PK.entrer` (`souris`, `souris_inversee`) comme
+  les volumes.
+
+Un facteur plutôt qu'une valeur en radians : « 140 % » se lit, « 0,0034 rad/px »
+non — et si la base change un jour, les réglages des joueurs restent justes.
+Le jeu lit le facteur à chaque mouvement de souris, pas à l'entrée en ville :
+c'est ce qui permet à la pause de le changer en pleine partie. Écrit dans
+`user://reglages.cfg` (section `souris`) à chaque cran.
+
 ## Le raid d'un repaire
 
 Se tenir sur le tag d'un gang qui vous **tire à vue** ouvre un raid : cinq
@@ -107,9 +160,26 @@ hub et l'écran de résultats ont disparu, `Partie.terminer()` n'était plus app
 de nulle part — une manche ne finissait donc **jamais** : ni retour au salon, ni
 classement, ni dépôt du score en base.
 
-**ÉCHAP** ouvre la pause : REPRENDRE, ou **QUITTER LA VILLE**. Le sous-titre dit
-ce qu'on emporte (l'argent sur soi et celui du coffre) — c'est la dernière chose
-qu'on veut vérifier avant de rentrer.
+**ÉCHAP** ouvre la pause : REPRENDRE, **LES TOUCHES**, **LA SOURIS**, ou **QUITTER LA VILLE**.
+Le sous-titre dit ce qu'on emporte (l'argent sur soi et celui du coffre) —
+c'est la dernière chose qu'on veut vérifier avant de rentrer.
+
+**LES TOUCHES** (`ui/touches.gd`) est la fiche complète, en trois colonnes —
+partout, à pied, au volant — avec les noms **du clavier de la machine** lus dans
+les réglages (« Z » sur un AZERTY, la flèche haut si on l'a remise là). La
+ligne d'aide en bas de l'écran ne montre que six touches, la ligne du HUD ne
+dit que l'affaire du moment : le détonateur, la roue des stations, ce que fait
+`F` chez soi ou la lance du camion de pompiers, on les découvrait en appuyant
+au hasard. ÉCHAP ou ENTRÉE la referment sur la pause telle qu'on l'a laissée.
+Photo : `./outils/tableau.sh /tmp/touches.png touches`.
+
+⚠ **piks-l.com n'est que le « Quitter » de l'accueil.** Certaines triches (et
+« QUITTER LA VILLE » selon l'ordre des flèches) envoyaient la page sur
+piks-l.com au milieu d'une manche : le kit HTML de l'accueil (`web/coque.html`)
+gardait son écouteur `keydown` sur `window` une fois caché sous la toile — ÉCHAP
+en jeu refermait son écran de départ, puis ↑ ↓ et ENTRÉE des menus du jeu
+faisaient défiler SON menu jusqu'à « Quitter ». Le kit ne lit plus le clavier
+dès que la main est passée au moteur (`PK.enJeu`).
 
 ⚠ **ÉCHAP a une précédence**, et elle ne se devine pas : il **ferme** d'abord ce
 qui est ouvert (la triche, la supérette) et n'ouvre la pause que s'il n'y avait

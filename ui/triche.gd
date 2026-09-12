@@ -63,14 +63,31 @@ var codes: Array = []          ## [{nom, mot, actif, unique}] — rempli par le 
 var choix := 0
 var temps := 0.0
 
+var _rect := Rect2()            ## le cartouche, tel que dessiné — pour le doigt
+var _y0 := 0.0                  ## la ligne de base de la première ligne
+
+func _ready() -> void:
+	# Le menu prend la souris : au doigt, une ligne se vise puis se valide,
+	# et un appui hors du cartouche est un ÉCHAP (`Charte.menu_touche`).
+	mouse_filter = Control.MOUSE_FILTER_STOP
+
+func _gui_input(evenement: InputEvent) -> void:
+	if evenement is InputEventMouseButton and evenement.pressed \
+			and (evenement as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		choix = Charte.menu_touche((evenement as InputEventMouseButton).position, _rect, _y0, codes.size(), LIGNE, choix)
+		queue_redraw()
+		accept_event()
+
 func _draw() -> void:
 	var taille := get_viewport_rect().size
 	var hauteur := 116.0 + codes.size() * LIGNE
 	# Un voile sur toute la ville : le menu est une PAUSE de l'attention, même
 	# si la manche continue de tourner derrière.
 	var rect := Charte.menu(self, taille, LARGEUR, hauteur, "Triche", "la manche ne comptera pas", Charte.ROSE)
+	_rect = rect
 	var x := rect.position.x + Charte.MARGE_MENU
 	var y := Charte.haut_contenu(rect) + 8.0
+	_y0 = y
 
 	for i in codes.size():
 		var code: Dictionary = codes[i]
@@ -93,4 +110,4 @@ func _draw() -> void:
 		Charte.capitales_dessinees(self, Vector2(rect.end.x - Charte.MARGE_MENU - le, y), etat, 11, couleur, 0.16)
 		y += LIGNE
 
-	Charte.aide_menu(self, rect, "↑ ↓ choisir · entrée activer · échap fermer")
+	Charte.aide_menu(self, rect, "↑ ↓ choisir · entrée activer · échap fermer" if not Tactile.actif() else "toucher un code, puis le toucher encore · hors du cadre : fermer")

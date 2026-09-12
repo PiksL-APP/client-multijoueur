@@ -2,7 +2,7 @@
 # tableau.sh [sortie] [triche]
 # Photographie les trois barres de respect du district et les cinq humeurs.
 # Un second argument ajoute une incrustation : `triche` (le menu du code
-# Konami) ou `roue` (la roue des stations de radio).
+# Konami), `roue` (la roue des stations), `pause`, `planque` ou `touches` (la fiche).
 cd "$(dirname "$0")/.."
 mkdir -p /tmp/tableau
 [ -z "$SANS_IMPORT" ] && timeout 300 ${GODOT:-godot} --headless --path . --import > /tmp/tableau/import.log 2>&1

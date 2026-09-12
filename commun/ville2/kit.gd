@@ -1,0 +1,171 @@
+class_name KitVille2
+extends RefCounted
+## LE KIT, MESURÉ. Les emprises des bâtiments Kenney (largeur, hauteur,
+## profondeur en unités Kenney = en CASES, puisqu'une tuile du kit fait une
+## case), relevées dans les GLB (`scratchpad/mesure_glb.py`, 12/09). C'est ce
+## qui permet au lot de s'adapter au modèle : on ne pose jamais un bâtiment
+## sur un lot plus petit que lui, et on ne l'étire jamais.
+##
+## Les props (lampadaires, feux, arbres, bancs) viennent d'autres kits, à
+## d'autres échelles : ils sont donnés avec la HAUTEUR voulue en unités 3D,
+## celle qui va avec les voitures et les piétons du jeu (proportions validées
+## par le client, cahier § 2).
+
+const RACINE := "res://modeles/kenney/"
+const CASE := 20.0
+
+## [largeur X, hauteur Y, profondeur Z] en cases.
+const BATIMENTS := {
+	"batiments/building-a": [0.884, 1.293, 0.940],
+	"batiments/building-b": [0.970, 1.293, 0.940],
+	"batiments/building-c": [0.884, 0.893, 1.090],
+	"batiments/building-d": [0.840, 1.293, 0.900],
+	"batiments/building-e": [1.640, 0.893, 1.008],
+	"batiments/building-f": [0.840, 1.693, 1.030],
+	"batiments/building-g": [0.970, 1.693, 0.922],
+	"batiments/building-h": [0.884, 1.293, 1.008],
+	"batiments/building-i": [1.240, 1.680, 1.302],
+	"batiments/building-j": [2.084, 1.693, 1.340],
+	"batiments/building-k": [2.084, 1.470, 0.942],
+	"batiments/building-l": [1.370, 2.270, 1.402],
+	"batiments/building-m": [1.240, 3.150, 1.242],
+	"batiments/building-n": [2.320, 2.480, 1.820],
+	"batiments/building-skyscraper-a": [1.360, 2.880, 1.360],
+	"batiments/building-skyscraper-b": [1.360, 4.480, 1.360],
+	"batiments/building-skyscraper-c": [1.280, 4.080, 1.388],
+	"batiments/building-skyscraper-d": [1.280, 5.470, 1.388],
+	"batiments/building-skyscraper-e": [1.295, 4.080, 1.242],
+	"industriel/building-a": [2.084, 1.470, 1.242],
+	"industriel/building-b": [2.084, 1.470, 1.262],
+	"industriel/building-c": [1.876, 1.250, 2.108],
+	"industriel/building-d": [0.884, 1.415, 1.420],
+	"industriel/building-e": [1.684, 1.650, 1.290],
+	"industriel/building-f": [1.790, 1.925, 1.280],
+	"industriel/building-g": [1.678, 1.280, 1.284],
+	"industriel/building-h": [1.322, 0.734, 1.310],
+	"industriel/building-i": [1.028, 0.734, 1.300],
+	"industriel/building-j": [1.027, 0.861, 1.300],
+	"industriel/building-k": [1.303, 0.773, 0.914],
+	"industriel/building-l": [2.084, 1.925, 1.870],
+	"industriel/building-m": [1.316, 1.519, 1.700],
+	"industriel/building-n": [0.977, 1.905, 1.420],
+	"industriel/building-o": [0.884, 0.918, 1.240],
+	"industriel/building-p": [1.684, 0.715, 0.992],
+	"industriel/building-q": [2.140, 0.880, 1.770],
+	"industriel/building-r": [2.484, 1.393, 1.272],
+	"industriel/building-s": [2.120, 0.837, 0.916],
+	"industriel/building-t": [1.722, 1.015, 1.390],
+	"pavillons/building-type-a": [1.300, 0.834, 1.028],
+	"pavillons/building-type-b": [1.828, 1.138, 1.140],
+	"pavillons/building-type-c": [1.286, 1.034, 1.028],
+	"pavillons/building-type-d": [1.756, 1.238, 1.028],
+	"pavillons/building-type-e": [1.300, 1.138, 1.028],
+	"pavillons/building-type-f": [1.428, 1.138, 1.406],
+	"pavillons/building-type-g": [1.450, 0.768, 1.178],
+	"pavillons/building-type-h": [1.300, 0.737, 0.916],
+	"pavillons/building-type-i": [1.286, 0.737, 1.028],
+	"pavillons/building-type-j": [1.370, 1.038, 0.916],
+	"pavillons/building-type-k": [0.921, 1.150, 1.020],
+	"pavillons/building-type-l": [1.034, 1.049, 1.020],
+	"pavillons/building-type-m": [1.428, 0.737, 1.428],
+	"pavillons/building-type-n": [1.784, 1.138, 1.378],
+	"pavillons/building-type-o": [1.270, 1.138, 1.028],
+	"pavillons/building-type-p": [1.240, 0.918, 0.990],
+	"pavillons/building-type-q": [1.240, 0.918, 0.886],
+	"pavillons/building-type-r": [1.028, 1.141, 1.020],
+	"pavillons/building-type-s": [1.406, 1.138, 1.086],
+	"pavillons/building-type-t": [1.314, 1.156, 1.406],
+	"pavillons/building-type-u": [1.428, 1.138, 1.087],
+}
+
+## Les familles du centre (cahier § 3 : « quelques tours au milieu d'immeubles
+## de 5-8 étages »). Un étage du kit fait ~0,32 unité Kenney.
+const TOURS := ["batiments/building-skyscraper-a", "batiments/building-skyscraper-b",
+	"batiments/building-skyscraper-c", "batiments/building-skyscraper-d",
+	"batiments/building-skyscraper-e"]
+const IMMEUBLES_HAUTS := ["batiments/building-l", "batiments/building-m", "batiments/building-n",
+	"batiments/building-i", "batiments/building-j"]
+const IMMEUBLES := ["batiments/building-a", "batiments/building-b", "batiments/building-d",
+	"batiments/building-f", "batiments/building-g", "batiments/building-h",
+	"batiments/building-k"]
+const COMMERCES := ["batiments/building-c", "batiments/building-e"]
+
+## Les props : modèle, hauteur voulue (unités 3D). Les hauteurs reprennent
+## celles du jeu actuel (`FormesCarnage.PROPS_KENNEY`), validées à l'image.
+const PROPS := {
+	"lampadaire": {"m": "urbain/light-square", "h": 5.6, "c": "#5a5f68"},
+	"lampadaire_double": {"m": "urbain/light-square-double", "h": 5.6, "c": "#5a5f68"},
+	"lampadaire_parc": {"m": "urbain/light-curved", "h": 4.0, "c": "#5a5f68"},
+	"feu": {"m": "urbain/traffic-light", "h": 4.4},
+	"stop": {"m": "routes/road-sign-stop", "h": 3.4},
+	"plaque": {"m": "routes/road-sign-street", "h": 3.4},
+	"poubelle": {"m": "urbain/dumpster", "h": 1.5},
+	"benne": {"m": "urbain/dumpster", "h": 2.4},
+	"borne": {"m": "urbain/construction-barrier", "h": 1.2},
+	"cone": {"m": "urbain/construction-cone", "h": 0.9},
+	"arbre": {"m": "nature/tree_default", "h": 7.6},
+	"arbre_oak": {"m": "nature/tree_oak", "h": 6.4},
+	"arbre_rond": {"m": "nature/tree_fat", "h": 6.0},
+	"arbre_petit": {"m": "nature/tree_oak", "h": 5.2},
+	"palmier": {"m": "nature/tree_palm", "h": 8.0},
+	"buisson": {"m": "nature/plant_bushDetailed", "h": 1.5},
+	"banc": {"m": "nature/bench", "h": 1.3},
+	"monument": {"m": "nature/statue_column", "h": 9.0},
+	"auvent": {"m": "batiments/detail-awning", "h": 0.0},
+	"auvent_large": {"m": "batiments/detail-awning-wide", "h": 0.0},
+	"parasol": {"m": "batiments/detail-parasol-a", "h": 3.0},
+	"conteneur": {"m": "industriel/shipping-container-a", "h": 0.0},
+}
+
+## Les voitures garées : Car Kit Kenney et modèles du client, longueur voulue.
+const VOITURES := ["voitures/sedan", "voitures/sedan-sports", "voitures/hatchback-sports",
+	"voitures/suv", "voitures/suv-luxury", "voitures/van", "voitures/taxi", "voitures/delivery"]
+const LONGUEUR_VOITURE := 4.75            ## 19 voxels x 0,25 : le gabarit du jeu
+
+## LES MODÈLES DU CLIENT (`modeles/piksl/`), déjà en unités du jeu : ils se
+## posent à l'échelle 1, tels quels (cahier § 10 : « GLB exporté de Blender
+## déposé dans modeles/piksl/, posé tel quel »). Tailles mesurées dans le GLB,
+## en unités 3D. `echelle` corrige un modèle dessiné trop petit.
+const PIKSL := {
+	"piksl/gare": {"taille": [159.8, 59.5, 63.05], "echelle": 1.0},
+	"piksl/hospital": {"taille": [30.0, 15.46, 30.0], "echelle": 1.0},
+	"piksl/supermarket": {"taille": [30.0, 6.64, 24.6], "echelle": 1.0},
+	"piksl/firestation": {"taille": [23.8, 15.1, 18.0], "echelle": 1.0},
+	"piksl/eglise": {"taille": [14.6, 20.3, 24.6], "echelle": 1.0},
+	"piksl/garage_de_peinture": {"taille": [8.32, 4.71, 6.75], "echelle": 2.4},
+}
+
+## La taille d'un modèle EN CASES (largeur X, hauteur Y, profondeur Z).
+static func taille(modele: String) -> Vector3:
+	if PIKSL.has(modele):
+		var f: Dictionary = PIKSL[modele]
+		var t: Array = f["taille"]
+		var e := float(f.get("echelle", 1.0)) / CASE
+		return Vector3(float(t[0]) * e, float(t[1]) * e, float(t[2]) * e)
+	var t: Array = BATIMENTS.get(modele, [1.0, 1.0, 1.0])
+	return Vector3(float(t[0]), float(t[1]), float(t[2]))
+
+## Le facteur à appliquer au maillage brut pour le poser dans le monde : une
+## unité Kenney = une case ; un modèle du client est déjà en unités du jeu.
+static func echelle(modele: String) -> float:
+	if PIKSL.has(modele):
+		return float((PIKSL[modele] as Dictionary).get("echelle", 1.0))
+	return CASE
+
+## L'emprise d'un modèle en DEMI-cases, arrondie au-dessus, AVANT rotation.
+static func emprise(modele: String) -> Vector2i:
+	var t := taille(modele)
+	return Vector2i(ceili(t.x * 2.0 - 0.02), ceili(t.z * 2.0 - 0.02))
+
+## L'emprise dans le monde après `quarts` quarts de tour.
+static func emprise_tournee(modele: String, quarts: int) -> Vector2i:
+	var e := emprise(modele)
+	return Vector2i(e.y, e.x) if posmod(quarts, 4) % 2 == 1 else e
+
+static func chemin(modele: String) -> String:
+	if modele.begins_with("res://"): return modele
+	if modele.begins_with("piksl/"): return "res://modeles/" + modele + ".glb"
+	return RACINE + modele + ".glb"
+
+static func etages(modele: String) -> int:
+	return maxi(1, roundi(taille(modele).y / 0.32))

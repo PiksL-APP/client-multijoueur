@@ -25,13 +25,30 @@ var banque := 0
 var message := ""
 var message_couleur: Color = Charte.ENCRE_DOUCE
 
+var _rect := Rect2()            ## le cartouche, tel que dessiné — pour le doigt
+var _y0 := 0.0                  ## la ligne de base de la première ligne
+
+func _ready() -> void:
+	# Le menu prend la souris : au doigt, une ligne se vise puis se valide,
+	# et un appui hors du cartouche est un ÉCHAP (`Charte.menu_touche`).
+	mouse_filter = Control.MOUSE_FILTER_STOP
+
+func _gui_input(evenement: InputEvent) -> void:
+	if evenement is InputEventMouseButton and evenement.pressed \
+			and (evenement as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		choix = Charte.menu_touche((evenement as InputEventMouseButton).position, _rect, _y0, lignes.size(), LIGNE, choix)
+		queue_redraw()
+		accept_event()
+
 func _draw() -> void:
 	var taille := get_viewport_rect().size
 	var hauteur := 176.0 + lignes.size() * LIGNE
 	var entete := "$%d sur soi   ·   $%d au coffre" % [argent, banque]
 	var rect := Charte.menu(self, taille, LARGEUR, hauteur, "Chez soi", entete, Charte.ORANGE)
+	_rect = rect
 	var x := rect.position.x + Charte.MARGE_MENU
 	var y := Charte.haut_contenu(rect) + 12.0
+	_y0 = y
 
 	for i in lignes.size():
 		var l: Dictionary = lignes[i]
@@ -77,4 +94,4 @@ func _draw() -> void:
 		var lm := Charte.largeur_texte(message, 14)
 		Charte.texte_dessine(self, Vector2(rect.position.x + (rect.size.x - lm) * 0.5, rect.end.y - 44.0),
 			message, 14, message_couleur, 0)
-	Charte.aide_menu(self, rect, "↑ ↓ choisir · entrée valider · échap sortir")
+	Charte.aide_menu(self, rect, "↑ ↓ choisir · entrée valider · échap sortir" if not Tactile.actif() else "toucher une ligne, puis la toucher encore · hors du cadre : sortir")
