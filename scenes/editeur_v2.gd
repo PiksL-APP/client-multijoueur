@@ -502,20 +502,36 @@ func _interface() -> void:
 	# nature »). « nature » montre les 330 modèles du dossier ; « nature · tree »
 	# n'en montre que les arbres. Les deux sont dans la liste, la catégorie
 	# d'abord.
+	#
+	# ⚠ LA CLÉ EST DANS LES MÉTADONNÉES, PAS DANS LE LIBELLÉ. Le libellé porte
+	# une puce et un compte (« ↳ tree · 61 ») pour que la hiérarchie SE VOIE
+	# dans la liste déroulante ; le filtre, lui, a besoin du nom exact. Relire
+	# le libellé pour en extraire la clé, c'est le genre de ficelle qui casse
+	# au premier renommage.
 	var vues: Dictionary = {}
+	var combien: Dictionary = {}
 	for m in KitVille2.catalogue():
 		var cat := KitVille2.categorie(m)
 		if not vues.has(cat): vues[cat] = {}
+		combien[cat] = int(combien.get(cat, 0)) + 1
 		var fam := KitVille2.famille(m)
-		if fam != cat: (vues[cat] as Dictionary)[fam] = true
+		if fam != cat:
+			(vues[cat] as Dictionary)[fam] = true
+			combien[fam] = int(combien.get(fam, 0)) + 1
+	_familles.set_item_metadata(0, {"cle": FAMILLE_RACCOURCIS})
+	_familles.set_item_metadata(1, {"cle": FAMILLE_TOUT})
 	var cats: Array = vues.keys()
 	cats.sort()
 	for cat in cats:
-		_familles.add_item(String(cat))
+		_familles.add_item("%s  ·  %d" % [cat, int(combien.get(cat, 0))])
+		_familles.set_item_metadata(_familles.item_count - 1, {"cle": cat})
 		var rayons: Array = (vues[cat] as Dictionary).keys()
 		rayons.sort()
 		for r in rayons:
-			_familles.add_item(String(r))
+			# Le rayon s'affiche sous sa catégorie, décalé : « ↳ tree · 61 ».
+			var court := String(r).get_slice(KitVille2.SEPARATEUR_RAYON, 1).strip_edges()
+			_familles.add_item("      ↳ %s  ·  %d" % [court, int(combien.get(r, 0))])
+			_familles.set_item_metadata(_familles.item_count - 1, {"cle": r})
 	# ⚠ AUCUN FOCUS SUR LES LISTES. Une liste qui a le clavier avale les
 	# flèches : on croyait déplacer la caméra, on faisait défiler le catalogue.
 	_familles.focus_mode = Control.FOCUS_NONE
@@ -826,7 +842,9 @@ func _remplir_palette() -> void:
 	# ⚠ LA PALETTE RESTE VISIBLE MÊME HORS POSE. Le client veut VOIR le
 	# catalogue et son aperçu ; la cacher dès qu'on prend l'outil Sélection
 	# revenait à lui retirer la moitié de l'écran.
-	var f := _familles.get_item_text(_familles.selected).get_slice(" (", 0)
+	var fiche: Variant = _familles.get_item_metadata(_familles.selected)
+	var f: String = String((fiche as Dictionary).get("cle", FAMILLE_TOUT)) \
+		if fiche is Dictionary else FAMILLE_TOUT
 	var cherche := _recherche.text.strip_edges().to_lower()
 	var source: Array = []
 	if f == FAMILLE_RACCOURCIS:
@@ -834,7 +852,7 @@ func _remplir_palette() -> void:
 	else:
 		source = KitVille2.catalogue().duplicate()
 		if f != FAMILLE_TOUT:
-			var par_categorie := not f.contains("·")
+			var par_categorie := not f.contains(KitVille2.SEPARATEUR_RAYON)
 			var gardes: Array = []
 			for m in source:
 				var va := KitVille2.categorie(String(m)) if par_categorie \
@@ -850,8 +868,6 @@ func _remplir_palette() -> void:
 	var choisi: int = _lot_choisi if _outil == OUTIL_LOT else _objet_choisi
 	if _palette.item_count > 0:
 		_palette.select(clampi(choisi, 0, _palette.item_count - 1))
-	_familles.set_item_text(_familles.selected,
-		"%s (%d)" % [f.get_slice(" (", 0), _palette.item_count])
 	_maj_apercu()
 
 ## Le nom montré dans la liste : le nom de fichier pour un modèle, le mot du

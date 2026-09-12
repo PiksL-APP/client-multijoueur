@@ -311,12 +311,18 @@ const SEUIL_RAYON := 60
 ## « batiments », « voitures » — pas « kenney/nature ». Le client range par
 ## CATÉGORIE, et le kit d'origine ne l'intéresse pas : deux dossiers de nature
 ## venus de deux kits sont la même étagère.
+## Ce qui sépare la catégorie de son rayon dans le nom d'une famille. L'éditeur
+## s'en sert pour savoir s'il filtre sur une étagère ou sur un rayon, ET pour
+## n'afficher que le rayon sous sa catégorie — il doit donc être partagé, pas
+## réécrit des deux côtés.
+const SEPARATEUR_RAYON := " · "
+
 static func famille(chemin_modele: String) -> String:
 	var dossier := categorie(chemin_modele)
 	if _gros.is_empty(): _compter()
 	if not _gros.has(dossier): return dossier
 	var fichier := chemin_modele.get_file().get_basename()
-	return "%s · %s" % [dossier, _rayon(fichier)]
+	return dossier + SEPARATEUR_RAYON + _rayon(dossier, fichier)
 
 ## La catégorie d'un modèle : le dernier dossier de son chemin. C'est elle qui
 ## fait l'étagère dans l'éditeur.
@@ -329,22 +335,57 @@ static func categorie(chemin_modele: String) -> String:
 
 static var _gros: Dictionary = {}
 
+## ⚠ UN RAYON D'UN SEUL MODÈLE N'EST PAS UN RAYON. Premier jet : tout dossier
+## de plus de `SEUIL_RAYON` modèles était découpé sur le préfixe du nom. Sur
+## `nature` c'est parfait (tree, rock, cliff, fence…) ; sur `nourriture` ça
+## donnait SOIXANTE-SIX rayons, dont « advocado · 1 », « bacon · 1 », « egg · 3 »
+## — une liste déroulante plus longue que le catalogue qu'elle range. Un rayon
+## ne compte donc que s'il tient au moins `MINI_RAYON` modèles ; le reste
+## retombe dans « divers ». Et un dossier qui n'en dégage pas au moins deux
+## n'est pas découpé du tout (`interieur` sortait un unique rayon « divers »
+## de 141 modèles : le découpage n'y servait à rien).
+const MINI_RAYON := 4
+const MINI_RAYONS_UTILES := 2
+
+## Les rayons retenus, dossier par dossier : `{ "nature": { "tree": true, … } }`.
+static var _rayons: Dictionary = {}
+
 static func _compter() -> void:
 	_gros = {"—": true}
+	_rayons = {}
 	var n: Dictionary = {}
+	var bruts: Dictionary = {}
 	for m in catalogue():
 		var d := categorie(String(m))
 		n[d] = int(n.get(d, 0)) + 1
+		if not bruts.has(d): bruts[d] = {}
+		var r := _prefixe(String(m).get_file().get_basename())
+		var par: Dictionary = bruts[d]
+		par[r] = int(par.get(r, 0)) + 1
 	for d in n:
-		if int(n[d]) > SEUIL_RAYON: _gros[d] = true
+		if int(n[d]) <= SEUIL_RAYON: continue
+		var gardes: Dictionary = {}
+		for r in (bruts[d] as Dictionary):
+			if String(r) != "divers" and int((bruts[d] as Dictionary)[r]) >= MINI_RAYON:
+				gardes[r] = true
+		if gardes.size() < MINI_RAYONS_UTILES: continue
+		_gros[d] = true
+		_rayons[d] = gardes
 
-## Le rayon d'un nom de modèle : ce qui précède le premier `_`, ou le premier
+## Le préfixe d'un nom de modèle : ce qui précède le premier `_`, ou le premier
 ## `-` à défaut. `tree_pineTallA` → `tree` ; `road-bend-square` → `road`.
-static func _rayon(fichier: String) -> String:
+static func _prefixe(fichier: String) -> String:
 	var k := fichier.find("_")
 	if k < 0: k = fichier.find("-")
 	if k <= 0: return "divers"
 	return fichier.substr(0, k)
+
+## Le rayon d'un modèle dans son dossier : son préfixe s'il a été retenu comme
+## rayon, « divers » sinon.
+static func _rayon(dossier: String, fichier: String) -> String:
+	var r := _prefixe(fichier)
+	var gardes: Dictionary = _rayons.get(dossier, {})
+	return r if gardes.has(r) else "divers"
 
 static func nom_court(chemin_modele: String) -> String:
 	return chemin_modele.get_file().get_basename()

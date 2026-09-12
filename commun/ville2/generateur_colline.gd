@@ -46,6 +46,16 @@ const PALIER := Ville2.PALIER
 ## palier, la largeur (i0..i1 compris) et la ligne de la route. Chaque terrasse
 ## est plus étroite que celle d'en dessous : c'est ce qui donne une silhouette
 ## de colline plutôt qu'un gâteau de mariage.
+## Le curseur de relief. À 1,0 la colline a sa hauteur pleine ; à 0 le terrain
+## est plat et il n'y a plus que le plan de ville. `p` est le palier de chaque
+## terrasse et RIEN d'autre dans ce fichier ne fixe une altitude : cette seule
+## ligne commande tout le dénivelé.
+const RELIEF := 1.0
+
+## Le palier effectif d'une terrasse : son palier nominal, fois le relief.
+static func palier_de(t: Dictionary) -> float:
+	return float(t["p"]) * RELIEF
+
 const TERRASSES := [
 	{"j0": 21, "j1": 25, "i0": 4, "i1": 36, "p": 4, "route": 23},
 	{"j0": 16, "j1": 20, "i0": 6, "i1": 34, "p": 8, "route": 18},
@@ -65,7 +75,31 @@ const J_BASSE := 26
 ## mettre à l'échelle : 15 unités de haut, donc 15 de large, et une fente tous
 ## les cinq.) Le sommet est à cent unités — cinquante mètres, le haut de la
 ## fourchette du cahier (§ 4).
-const PENTE_FLANC := 0.85              ## la descente du flanc, en palier par case
+## ⚠⚠ LE FLANC DESCEND PAR TERRASSES, PAS PAR MARCHES D'UNE CASE. Trois essais
+## ont été nécessaires, et les deux premiers ont été refusés par le client le
+## même jour :
+##
+## 1. pente lissée (0,85 palier par case) → « je ne veux pas de pente lissée » ;
+## 2. un palier par case → vingt marches fines qui descendent en éventail :
+##    « je voulais juste pas d'escalier comme tu l'as fait » ;
+## 3. celui-ci — UNE MARCHE DE QUATRE PALIERS TOUS LES `LARGE_MARCHE` CASES.
+##
+## La différence n'est pas de degré. Une marche de quatre paliers fait VINGT
+## UNITÉS, c'est-à-dire une case : la hauteur exacte d'un `cliff_block` du kit
+## nature (mesuré 20 × 20 × 20). Chaque redan est donc un bloc du kit posé tel
+## quel, et sa largeur de trois cases en fait une TERRASSE — quelque chose où
+## l'on peut marcher, poser un arbre, faire passer un sentier. Une marche d'un
+## palier sur une case de large n'est ni l'un ni l'autre : c'est une contremarche,
+## et vingt contremarches font un escalier.
+##
+## Du sommet (palier 20) au pied, cinq redans suffisent, soit quinze cases.
+const MARCHE_FLANC := 4.0              ## la hauteur d'un redan, en paliers
+const LARGE_MARCHE := 3                ## sa largeur, en cases
+
+## Le palier du flanc à `d` cases du bord de la terrasse.
+static func palier_du_flanc(depart: float, d: int) -> float:
+	var redan := float((d + LARGE_MARCHE - 1) / LARGE_MARCHE)
+	return depart - redan * MARCHE_FLANC
 
 ## LES LACETS : la route monte par les extrémités, alternativement à l'est et
 ## à l'ouest. `x` est la colonne du demi-tour.
@@ -139,8 +173,13 @@ static func generer(graine := 3, taille := Vector2i(40, 40), curseurs := {}) -> 
 	v.rasteriser()
 	_lots(v, alea)
 	v.rasteriser()
-	_falaises(v, alea)
-	_escaliers(v)
+	# ⚠ RIEN À HABILLER SUR UN TERRAIN PLAT. Les falaises tiennent le nez des
+	# terrasses et les escaliers relient deux niveaux : sans relief, les unes
+	# sont des panneaux plantés dans l'herbe et les autres des marches vers
+	# nulle part. Elles reviennent avec `RELIEF`.
+	if RELIEF > 0.0:
+		_falaises(v, alea)
+		_escaliers(v)
 	_sentiers(v, alea)
 	_nature(v, alea)
 	_details(v, alea)
@@ -161,7 +200,7 @@ static func _terrain(v: Ville2) -> void:
 		for j in range(int(t["j0"]), int(t["j1"]) + 1):
 			var b := bornes(t, j)
 			for i in range(b.x, b.y + 1):
-				v.poser_terre(Vector2i(i, j), float(t["p"]) * PALIER)
+				v.poser_terre(Vector2i(i, j), palier_de(t) * PALIER)
 				# ⚠ LA TERRASSE EST UN JARDIN, PAS UNE DALLE. Laissée en
 				# `M_DALLE` (la matière par défaut), chaque terrasse sortait en
 				# béton d'un bord à l'autre : une ville de parkings à flanc de
@@ -188,12 +227,20 @@ static func _terrain(v: Ville2) -> void:
 				# à l'autre ne peut être ni au ras du haut ni au ras du bas. La
 				# pente lissée n'a pas ce défaut : le sol y varie CONTINÛMENT,
 				# donc `TerrainV2.hauteur_en` place chaque objet pile dessus.
-				_flanc(v, Vector2i(b.x - d, j), float(t["p"]) - float(d) * PENTE_FLANC)
-				_flanc(v, Vector2i(b.y + d, j), float(t["p"]) - float(d) * PENTE_FLANC)
+				_flanc(v, Vector2i(b.x - d, j), palier_du_flanc(palier_de(t), d))
+				_flanc(v, Vector2i(b.y + d, j), palier_du_flanc(palier_de(t), d))
+	# Le pied du coteau : au-delà de neuf cases, le flanc n'a pas fini de
+	# descendre là où la terrasse est haute. On le prolonge jusqu'à zéro.
+	for t in TERRASSES:
+		for j in range(int(t["j0"]), int(t["j1"]) + 1):
+			var b := bornes(t, j)
+			for d in range(10, 22):
+				_flanc(v, Vector2i(b.x - d, j), palier_du_flanc(palier_de(t), d))
+				_flanc(v, Vector2i(b.y + d, j), palier_du_flanc(palier_de(t), d))
 	# Le versant nord, derrière le sommet : la colline retombe vers le bord.
 	var haut: Dictionary = TERRASSES[TERRASSES.size() - 1]
 	for j in range(0, int(haut["j0"])):
-		var reste := float(haut["p"]) - float(int(haut["j0"]) - j) * 2.3
+		var reste := palier_du_flanc(palier_de(haut), int(haut["j0"]) - j)
 		for i in range(int(haut["i0"]) - 3, int(haut["i1"]) + 4):
 			_flanc(v, Vector2i(i, j), reste)
 	# Le pied des terrasses basses, côté ville : une amorce d'herbe entre le
@@ -212,12 +259,21 @@ static func bornes(t: Dictionary, j: int) -> Vector2i:
 static func _dent(j: int, sel: int) -> int:
 	return int(absf(sin(float(j * 7 + sel * 13) * 0.9)) * 3.4)
 
+## ⚠ LA MARCHE TOMBE SUR UN PALIER ENTIER. Le sol est en gradins : la hauteur
+## d'une case se VOIT, en pleine face, sur la jupe verticale du gradin. Une
+## case à 3,4 paliers ferait une marche de deux unités à côté d'une marche de
+## cinq, et le coteau bégaierait. On arrondit donc au palier.
 static func _flanc(v: Ville2, c: Vector2i, palier_voulu: float) -> void:
 	if not v.dedans(c): return
-	var y := maxf(palier_voulu, 0.0) * PALIER
+	# ⚠ L'HERBE SE POSE MÊME QUAND L'ALTITUDE NE BOUGE PAS. Le flanc ne peut
+	# que MONTER (sinon il creuse une douve autour de la colline), et sans
+	# relief il ne monte jamais : la sortie anticipée emportait alors la pose
+	# de la matière, et tout le coteau sortait en BÉTON — un immense parking
+	# autour des lotissements. Le coteau est de l'herbe, avec ou sans pente.
+	v.poser_matiere(c, Ville2.M_HERBE)
+	var y := maxf(roundf(palier_voulu), 0.0) * PALIER
 	if y <= v.sol(c): return
 	v.poser_terre(c, y)
-	v.poser_matiere(c, Ville2.M_HERBE)
 
 static func _quartiers(v: Ville2) -> void:
 	v.quartiers = [
@@ -303,7 +359,7 @@ static func _palier_de_terrasse(c: Vector2i) -> int:
 	for t in TERRASSES:
 		var b := bornes(t, c.y)
 		if c.y >= int(t["j0"]) and c.y <= int(t["j1"]) and c.x >= b.x and c.x <= b.y:
-			return int(t["p"])
+			return roundi(palier_de(t))
 	return -1
 
 # ------------------------------------------------------------------ les lots
@@ -350,7 +406,7 @@ const FALAISES := ["nature/cliff_rock", "nature/cliff_rock", "nature/cliff_stone
 static func _falaises(v: Ville2, alea: RandomNumberGenerator) -> void:
 	for t in TERRASSES:
 		var j := int(t["j1"])
-		var y := float(t["p"]) * PALIER
+		var y := palier_de(t) * PALIER
 		var b := bornes(t, j)
 		for i in range(b.x, b.y + 1):
 			var c := Vector2i(i, j)
@@ -378,8 +434,8 @@ static func _escaliers(v: Ville2) -> void:
 		var a_l_est: bool = int(LACETS[k]["x"]) > 20
 		var i: int = int(haut["i0"]) + 3 if a_l_est else int(haut["i1"]) - 3
 		var j := int(haut["j1"])
-		var y_bas := float(bas["p"]) * PALIER
-		var y_haut := float(haut["p"]) * PALIER
+		var y_bas := palier_de(bas) * PALIER
+		var y_haut := palier_de(haut) * PALIER
 		# ⚠ À L'ÉCHELLE DU KIT, SANS ÉTIREMENT. `cliff_steps_rock` mesure
 		# exactement une case de haut (20 unités) : c'est la hauteur d'une
 		# terrasse. Posé tel quel, il tombe pile entre les deux niveaux — c'est
@@ -470,7 +526,7 @@ static func _details(v: Ville2, alea: RandomNumberGenerator) -> void:
 	for k in TERRASSES.size():
 		var t: Dictionary = TERRASSES[k]
 		var route := int(t["route"])
-		var y := float(t["p"]) * PALIER
+		var y := palier_de(t) * PALIER
 		for i in range(int(t["i0"]) + 2, int(t["i1"]) - 1, 4):
 			v.ajouter_objet("lampadaire", (float(i) + 0.1) * CASE,
 				(float(route) + 0.12) * CASE, PI)

@@ -1,20 +1,24 @@
 class_name TerrainV2
 extends RefCounted
-## LE TERRAIN CONTINU (cahier § 4 : « maillage lissé »).
+## LE TERRAIN EN GRADINS.
 ##
-## La ville est plate là où le kit pose ses tuiles : une rue, un ouvrage, un
-## lot sont posés À PLAT au palier de leur case, et c'est ce qui garde les
-## marquages et les trottoirs du kit à leurs proportions. Partout ailleurs —
-## herbe, sable, terre, roche, et le fond de la mer — le sol est un MAILLAGE
-## qui suit l'altitude case par case, lissé aux coins.
+## ⚠ CE FICHIER A CHANGÉ D'ÉCOLE LE 12/09. Il maillait un terrain CONTINU,
+## lissé aux coins — une belle colline ronde. Le client l'a refusé net : « je
+## ne veux pas de pente lissée, on les verra plus tard », après avoir constaté
+## que les objets flottaient. Il avait raison, et la raison est géométrique :
+## sur une case en pente le sol n'a pas UNE hauteur mais une par point, donc
+## l'arbre qu'on y pose ne peut être posé qu'en un seul endroit — partout
+## ailleurs il flotte ou s'enterre.
 ##
-## ⚠ LA SOUDURE EST TOUTE LA DIFFICULTÉ. Un coin de grille touche quatre
-## cases. Si l'une d'elles est PLATE (une tuile du kit), le coin prend SON
-## altitude : le terrain vient mourir exactement au bord de la tuile, sans
-## marche ni fente. Si aucune ne l'est, le coin prend la MOYENNE des quatre :
-## c'est ce qui fait une colline lisse au lieu d'un escalier de cases. Deux
-## morceaux voisins calculent le même coin à partir des mêmes cases : ils se
-## rejoignent au millième près, et la couture ne se voit pas.
+## Désormais : UNE CASE DE TERRE = UN PLATEAU. Un carré plat à l'altitude de
+## la case, et des jupes verticales qui le rattachent à ses voisins plus bas.
+## Le relief se lit en marches nettes, comme le diorama du kit Kenney — et
+## `hauteur_en()` rend une hauteur exacte en tout point, donc RIEN NE PEUT
+## PLUS FLOTTER.
+##
+## Seul LE FOND DE LA MER garde le maillage lissé d'avant : on n'y pose rien,
+## et une plage doit entrer dans l'eau sans marche. `hauteur_coin` et
+## `couleur_coin` ne servent plus qu'à lui.
 ##
 ## ⚠ LA MER A UN FOND. Une plage « en pente douce où le sable entre dans
 ## l'eau » n'existe que si les cases d'eau portent une altitude négative : le
@@ -108,16 +112,18 @@ static func _couleur_case(ville: Ville2, c: Vector2i) -> Color:
 		return COULEURS[Ville2.M_SABLE].lerp(TEINTE_FOND, p)
 	return COULEURS.get(ville.matiere_de(c), COULEURS[Ville2.M_HERBE])
 
-## L'ALTITUDE EXACTE DU SOL en un point du monde — celle du maillage, pas
-## celle de la case. Sur une pente, poser un arbre au palier de sa case
-## l'enterrait d'un côté et le faisait flotter de l'autre : on interpole donc
-## entre les quatre coins, comme le maillage lui-même.
+## L'ALTITUDE EXACTE DU SOL en un point du monde. À TERRE, C'EST CELLE DE LA
+## CASE, ET RIEN D'AUTRE : le sol est en gradins, une case = un plateau, donc
+## tout point de la case est à la même hauteur. C'est là toute la vertu du
+## gradin — un objet posé n'importe où dans la case est POSÉ, jamais à moitié
+## enterré ni en l'air. Seul le fond de la mer reste interpolé : on n'y pose
+## rien, et une plage doit entrer dans l'eau sans marche.
 static func hauteur_en(ville: Ville2, x: float, z: float) -> float:
 	var i := floori(x / CASE)
 	var j := floori(z / CASE)
 	var c := Vector2i(i, j)
-	if ville.plate(c):
-		return ville.sol(c)
+	if ville.terre(c):
+		return dessus(ville, c)
 	var u := x / CASE - float(i)
 	var w := z / CASE - float(j)
 	var h00 := hauteur_coin(ville, i, j)
@@ -125,6 +131,11 @@ static func hauteur_en(ville: Ville2, x: float, z: float) -> float:
 	var h01 := hauteur_coin(ville, i, j + 1)
 	var h11 := hauteur_coin(ville, i + 1, j + 1)
 	return lerpf(lerpf(h00, h10, u), lerpf(h01, h11, u), w)
+
+## Le DESSUS d'une case de terre : la tuile du kit si la case est plate, son
+## sol sinon. C'est la seule altitude qu'une case possède.
+static func dessus(ville: Ville2, c: Vector2i) -> float:
+	return hauteur_plate(ville, c) if ville.plate(c) else ville.sol(c)
 
 ## Le maillage du terrain pour une zone (en cases). Rend `null` s'il n'y a
 ## rien à mailler — une zone entièrement pavée, par exemple.
@@ -161,14 +172,18 @@ static func maillage(ville: Ville2, zone: Rect2i) -> ArrayMesh:
 			# le haut et elle passait PAR-DESSUS la chaussée : le lacet
 			# disparaissait sous l'herbe. Une case plate reçoit donc un carré
 			# plat, posé un cheveu sous la tuile, dans la couleur de son sol.
-			if ville.plate(c):
-				var y := hauteur_plate(ville, c) - SOUS_LA_TUILE
-				var teinte := _couleur_case(ville, c)
-				var k0 := sommets.size()
-				for p in [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]:
-					sommets.append(Vector3((float(i) + p.x) * CASE, y, (float(j) + p.y) * CASE))
-					couleurs.append(teinte)
-				indices.append_array([k0, k0 + 1, k0 + 2, k0, k0 + 2, k0 + 3])
+			#
+			# ⚠⚠⚠ ET C'EST VRAI DE TOUTE CASE DE TERRE, PAS SEULEMENT DES
+			# CASES PLATES (décision du client, 12/09 : « je ne veux pas de
+			# pente lissée, on les verra plus tard »). Le maillage lissé était
+			# joli et il était FAUX : sur une pente, le sol vaut une hauteur
+			# différente à chaque point de la case, donc un objet posé au
+			# milieu flotte d'un côté et s'enterre de l'autre. En gradins, une
+			# case = un plateau = UNE hauteur : plus rien ne peut flotter. Le
+			# relief se lit alors comme le diorama du kit — des plateaux nets
+			# et des cassures franches, qu'on habille des falaises Kenney.
+			if ville.terre(c):
+				_gradin(ville, c, sommets, couleurs, indices)
 				continue
 			var a: int = coin.call(i, j)
 			var b: int = coin.call(i + 1, j)
@@ -191,8 +206,77 @@ static func maillage(ville: Ville2, zone: Rect2i) -> ArrayMesh:
 	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	return m
 
-## Les normales, accumulées par sommet : c'est ce qui donne une colline LISSE
-## plutôt qu'un damier de facettes. `SurfaceTool` ferait la même chose, au
+## UN GRADIN : le plateau de la case, plus les jupes verticales qui le
+## rattachent à ce qui est plus bas autour. Sans les jupes on verrait sous la
+## colline — un plateau suspendu au-dessus du vide.
+##
+## ⚠ LA JUPE DESCEND UN PEU TROP BAS, EXPRÈS. Elle vise le dessus du voisin,
+## puis s'enfonce de `ENFOUI` : à la jonction terre/mer le voisin n'est pas un
+## gradin mais la nappe interpolée du fond, qui ne tombe pas exactement au même
+## endroit. Un chevauchement d'un dixième d'unité ne se voit pas ; une fente
+## d'un millième, si.
+const ENFOUI := 0.1
+## Le flanc d'un gradin est plus sombre que son dessus : c'est ce qui donne le
+## relief sans avoir à calculer un éclairage par facette.
+const OMBRE_DU_FLANC := 0.78
+
+static func _gradin(ville: Ville2, c: Vector2i, sommets: PackedVector3Array,
+		couleurs: PackedColorArray, indices: PackedInt32Array) -> void:
+	var i := c.x
+	var j := c.y
+	var y := dessus(ville, c)
+	# Une case plate porte une tuile du kit : la nappe passe juste dessous,
+	# pour boucher la rainure sans percer la tuile.
+	if ville.plate(c): y -= SOUS_LA_TUILE
+	var teinte := _couleur_case(ville, c)
+	var k0 := sommets.size()
+	for p in [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]:
+		sommets.append(Vector3((float(i) + p.x) * CASE, y, (float(j) + p.y) * CASE))
+		couleurs.append(teinte)
+	indices.append_array([k0, k0 + 1, k0 + 2, k0, k0 + 2, k0 + 3])
+	# Les quatre côtés, dans l'ordre des coins ci-dessus : nord (0→1), est
+	# (1→2), sud (2→3), ouest (3→0). Le voisin de chaque côté décide.
+	var flanc := teinte * OMBRE_DU_FLANC
+	flanc.a = teinte.a
+	const COTES := [
+		[Vector2i(0, -1), Vector2(0, 0), Vector2(1, 0)],
+		[Vector2i(1, 0), Vector2(1, 0), Vector2(1, 1)],
+		[Vector2i(0, 1), Vector2(1, 1), Vector2(0, 1)],
+		[Vector2i(-1, 0), Vector2(0, 1), Vector2(0, 0)],
+	]
+	for k in COTES:
+		var n: Vector2i = c + (k[0] as Vector2i)
+		var bas := _pied_du_gradin(ville, n, y)
+		if bas >= y - 0.001: continue
+		var p0: Vector2 = k[1]
+		var p1: Vector2 = k[2]
+		var m0 := sommets.size()
+		# ⚠ HAUT, BAS, BAS, HAUT — ET PAS HAUT, HAUT, BAS, BAS. Godot veut le
+		# sens HORAIRE vu de face (même règle que le dessus, plus bas) : en
+		# suivant le bord puis en descendant, on tourne dans l'autre sens et
+		# toutes les jupes sortaient à l'envers. Elles étaient donc culled, on
+		# voyait LA MER À TRAVERS LA COLLINE, et au fond la face intérieure du
+		# mur d'en face — un coteau en lamelles flottantes. C'est exactement le
+		# piège déjà payé sur le dessus de la plage, un cran plus bas.
+		for t in [[p0, y], [p0, bas], [p1, bas], [p1, y]]:
+			var p: Vector2 = t[0]
+			sommets.append(Vector3((float(i) + p.x) * CASE, float(t[1]),
+				(float(j) + p.y) * CASE))
+			couleurs.append(flanc)
+		indices.append_array([m0, m0 + 1, m0 + 2, m0, m0 + 2, m0 + 3])
+
+## Jusqu'où descend la jupe de ce côté : au dessus du voisin, un doigt plus
+## bas. Hors carte, on descend d'une case entière — le bord du monde est une
+## falaise, pas une feuille de papier.
+static func _pied_du_gradin(ville: Ville2, n: Vector2i, y: float) -> float:
+	if not ville.dedans(n): return y - CASE
+	if not ville.terre(n): return ville.sol(n) - ENFOUI
+	return dessus(ville, n) - ENFOUI
+
+## Les normales, accumulées par sommet. À terre les sommets ne sont PLUS
+## partagés d'une case à l'autre (chaque gradin a les siens), donc chaque
+## facette garde la sienne, bien nette — c'est ce qu'on veut. Le fond de la
+## mer, lui, partage toujours ses coins : il reste lisse. `SurfaceTool` ferait la même chose, au
 ## prix d'une copie de tout le maillage.
 static func _normales(sommets: PackedVector3Array, indices: PackedInt32Array) -> PackedVector3Array:
 	var n := PackedVector3Array()
