@@ -165,6 +165,9 @@ func demarrer() -> void:
 	if temoin == "plage":
 		_ville = GenerateurPlage.generer(2)
 		_chemin = "res://cartes/temoin-plage.json"
+	elif temoin == "colline":
+		_ville = GenerateurColline.generer(3)
+		_chemin = "res://cartes/temoin-colline.json"
 	elif temoin == "centre":
 		_ville = GenerateurCentre.generer(1)
 	else:
@@ -291,6 +294,25 @@ func _essai() -> void:
 	print("[essai] annulé : %d lots" % _ville.lots.size())
 	_annuler()
 	_annuler()
+	# ⚠ UN VRAI CLIC, POUSSÉ DANS LA FENÊTRE. Tous les essais ci-dessus
+	# appellent les gestes en direct : ils ont dit « la sélection marche »
+	# pendant que le client, lui, ne pouvait RIEN sélectionner — un test plein
+	# écran avalait chaque clic avant la ville. Celui-ci traverse tout le
+	# chemin, `_unhandled_input` compris, et c'est le seul qui prouve quelque
+	# chose sur ce qu'on livre.
+	_tout_voir()
+	_choisir_outil(OUTIL_SELECTION)
+	_case = Vector2i(-9, -9)
+	var ecran := get_viewport().get_visible_rect().size
+	for presse in [true, false]:
+		var clic := InputEventMouseButton.new()
+		clic.button_index = MOUSE_BUTTON_LEFT
+		clic.pressed = presse
+		clic.position = ecran * 0.5
+		get_viewport().push_input(clic)
+	if _case == Vector2i(-9, -9):
+		push_error("[essai] LE CLIC N'ARRIVE PAS JUSQU'À LA VILLE")
+	print("[essai] clic réel au centre : case %s, sélection %s" % [str(_case), str(_selection)])
 	# ⚠ LE BANC N'ÉCRIT PAS SUR LA CARTE QU'IL A OUVERTE. Il l'a couverte de
 	# ses gestes d'essai : enregistrée en place, elle partait au dépôt.
 	_chemin = "user://essai_editeur.json"
@@ -987,7 +1009,14 @@ func _unhandled_input(ev: InputEvent) -> void:
 				if b.shift_pressed:
 					_glisse = b.pressed
 				elif b.pressed:
-					if _sur_l_interface(b.position): return
+					# ⚠ NE PLUS TESTER « EST-CE QUE JE SUIS SUR L'INTERFACE ».
+					# Depuis la refonte en logiciel, le premier enfant de la
+					# couche est un conteneur PLEIN ÉCRAN : le test répondait
+					# « oui » partout et AUCUN CLIC n'arrivait jamais à la
+					# ville — ni sélection, ni pose. Le filtre de souris fait
+					# déjà le travail : les panneaux ARRÊTENT l'événement
+					# (`MOUSE_FILTER_STOP`), le centre le LAISSE PASSER, et
+					# `_unhandled_input` ne reçoit que ce qui tombe sur la vue.
 					# Un clic dans la vue rend le clavier à la vue : sans ça,
 					# un champ resté actif avalait les flèches et le ZQSD.
 					get_viewport().gui_release_focus()
@@ -1000,12 +1029,6 @@ func _unhandled_input(ev: InputEvent) -> void:
 					_poser_le_glisse()
 	elif ev is InputEventKey and (ev as InputEventKey).pressed:
 		_touche(ev as InputEventKey)
-
-func _sur_l_interface(p: Vector2) -> bool:
-	for n in interface().get_children():
-		if n is Control and (n as Control).get_global_rect().has_point(p):
-			return true
-	return false
 
 func _touche(k: InputEventKey) -> void:
 	if k.ctrl_pressed:
