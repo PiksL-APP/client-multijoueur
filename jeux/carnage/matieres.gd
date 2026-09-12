@@ -48,12 +48,13 @@ uniform vec4 lignes[7];      // (nx, ny, c, -) : n·p = c
 uniform vec4 origines[7];    // (ox, oy, longueur vers +d, longueur vers -d)
 uniform vec4 anneaux[2];     // (cx, cy, rx, ry)
 uniform vec4 etoiles[3];     // (cx, cy, rayon, rayon de l'îlot)
-uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+global uniform float nuit;
 // LA MÉTÉO (MeteoCarnage) : `mouille` = la pluie qui tombe ou vient de tomber,
 // `couvert` = la chape de nuages. Le sol mouillé était réservé à la nuit ;
 // il l'est maintenant aussi sous l'averse, en plein jour.
-uniform float mouille : hint_range(0.0, 1.0) = 0.0;
-uniform float couvert : hint_range(0.0, 1.0) = 0.0;
+global uniform float mouille;
+global uniform float couvert;
+global uniform float neige;
 
 void vertex() {
 	uvl = UV;
@@ -316,22 +317,44 @@ void fragment() {
 	// enseignes. La pluie mouille plus large que la rosée de la nuit : les
 	// flaques gagnent du terrain avec `mouille`.
 	bool bitume = (k <= 3 || k == 11 || k == 15 || k == 16) && spec > 0.3;
-	float eau = max(nuit, mouille);
-	if (bitume && eau > 0.05) {
-		float fl = smoothstep(0.52 - 0.14 * mouille, 0.66, bruit(posm.xz / 9.0 + vec2(3.7, 1.3)));
-		float humide = eau * (0.35 + 0.65 * fl);
-		col *= 1.0 - 0.38 * humide;
+	// Sous la pluie, les dalles, les pavés et le béton se mouillent comme le
+	// bitume — la rosée de la nuit, elle, ne brille que sur l'asphalte.
+	bool dur = bitume || ((k == 4 || k == 5 || k == 10 || k == 17) && mouille > 0.05);
+	float eau = max(nuit * (bitume ? 1.0 : 0.0), mouille);
+	if (dur && eau > 0.05) {
+		float fl = smoothstep(0.5 - 0.12 * mouille, 0.7, bruit(posm.xz / 9.0 + vec2(3.7, 1.3)));
+		float humide = eau * (0.4 + 0.6 * fl);
+		// L'asphalte mouillé FONCE, uniformément ; la FLAQUE, elle, rend le
+		// ciel — plus claire que la rue autour le jour, un miroir sombre qui
+		// porte les lumières la nuit. ⚠ La première version fonçait surtout
+		// dans les flaques et ajoutait une lueur bleue partout : la rue entière
+		// devenait une nappe bleu-gris sans un dessin, on ne voyait plus ni le
+		// grain ni les bandes.
+		col *= 1.0 - 0.28 * eau;
+		vec3 ciel_flaque = mix(vec3(0.60, 0.64, 0.70), vec3(0.05, 0.07, 0.12), nuit);
+		col = mix(col, ciel_flaque, fl * mouille * 0.45 * (1.0 - nuit));
 		// Pas un miroir parfait : la lune y ferait une tache blanche qui suit
 		// la caméra sur trois pâtés.
-		rug = mix(rug, 0.28, humide);
-		spec = mix(spec, 0.6, humide);
+		rug = mix(rug, 0.22, humide);
+		spec = mix(spec, 0.7, humide);
 		emission += vec3(0.05, 0.07, 0.12) * fl * nuit;
-		// LES IMPACTS : sous l'averse, une cellule sur cent s'allume un
-		// dixième de seconde — c'est ce qui dit que la pluie TOMBE, quand les
-		// traits à l'écran ne disent que qu'elle passe. De jour comme de nuit.
+		// LES RONDS DANS L'EAU : sous l'averse, chaque goutte qui touche une
+		// flaque y ouvre un anneau qui s'élargit et s'efface en une demi-
+		// seconde. ⚠ La première version allumait des CARRÉS d'une cellule un
+		// dixième de seconde : ça scintillait comme un défaut de compression.
+		// Un anneau qui grandit, c'est ce que l'œil connaît.
 		if (mouille > 0.05) {
-			float imp = step(0.982 - 0.01 * mouille, hache(floor(posm.xz) + floor(TIME * 9.0) * vec2(1.0, 3.0)));
-			emission += vec3(0.7, 0.75, 0.85) * imp * mouille * (0.6 + 0.4 * fl);
+			vec2 cr = floor(posm.xz / 1.6);
+			vec2 fr = fract(posm.xz / 1.6) - 0.5;
+			float g0 = hache(cr + vec2(41.0));
+			float cycle = floor(TIME * 1.6 + g0);
+			float ph = fract(TIME * 1.6 + g0);
+			float actif = step(1.0 - 0.6 * mouille, hache(cr + cycle * vec2(1.0, 7.0)));
+			vec2 centre = (vec2(hache(cr + cycle + vec2(3.0)), hache(cr + cycle + vec2(9.0))) - 0.5) * 0.5;
+			float r = length(fr - centre);
+			float rayon = ph * 0.38;
+			float anneau = smoothstep(0.11, 0.02, abs(r - rayon)) * (1.0 - ph) * (1.0 - ph);
+			emission += vec3(0.9, 0.95, 1.0) * anneau * actif * mouille * (0.4 + 0.6 * fl);
 		}
 	} else if (mouille > 0.05 && k != 12) {
 		// L'herbe, la terre et les dalles foncent sous la pluie sans luire.
@@ -339,6 +362,19 @@ void fragment() {
 		rug = mix(rug, rug * 0.7, mouille);
 	}
 	if (k != 4 && k != 5 && k != 10 && k != 17) joint = 0.0;
+	// LA NEIGE : elle tient sur les trottoirs, l'herbe et les dalles, et
+	// moins sur la chaussée, où les roues la dégagent — deux bandes de
+	// roulement restent grises au milieu de la rue. Elle vient par plaques
+	// (le bruit), et couvre tout quand la jauge est pleine.
+	if (neige > 0.01) {
+		float couverture = smoothstep(0.15, 0.75, bruit(posm.xz / 5.0 + vec2(1.0, 9.0)) * 0.6 + neige * 0.6);
+		float roulee = bitume ? (0.45 + 0.55 * smoothstep(0.0, 0.5, abs(fract(uvl.x * 2.0 + 0.25) - 0.5) * 2.0)) : 1.0;
+		float tapis = couverture * neige * roulee;
+		col = mix(col, vec3(0.86, 0.89, 0.94) * (0.92 + 0.08 * hache(celm + vec2(53.0))), tapis);
+		rug = mix(rug, 0.7, tapis);
+		spec = mix(spec, 0.25, tapis);
+		emission *= 1.0 - tapis;
+	}
 	ALBEDO = col * teinte * (1.0 + grain - joint) * nuages(posm.xz);
 	ROUGHNESS = rug;
 	SPECULAR = spec;
@@ -373,8 +409,8 @@ uniform float vitesse : hint_range(0.1, 5.0, 0.1) = 1.0;
 uniform float metal : hint_range(0.0, 1.0) = 0.35;
 uniform float speculaire : hint_range(0.0, 1.0) = 0.6;
 uniform float rugosite : hint_range(0.0, 1.0) = 0.12;
-uniform float nuit : hint_range(0.0, 1.0) = 0.5;
-uniform float mouille : hint_range(0.0, 1.0) = 0.0;   // la pluie (météo)
+global uniform float nuit;
+global uniform float mouille;   // la pluie (météo)
 
 // La hauteur du sommet, ramenée entre -1 et 1 : elle sert à blanchir la crête.
 varying float crete;
@@ -587,14 +623,15 @@ const VOXEL := """
 shader_type spatial;
 render_mode cull_back, diffuse_lambert, specular_schlick_ggx;
 
-uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+global uniform float nuit;
 // La peinture d'un maillage à couleurs de sommet (une voiture) : elle
 // multiplie les cubes de mur, pas les lumières ni les vitres.
 uniform vec4 teinte : source_color = vec4(1.0);
 // 1.0 pour un MAILLAGE FUSIONNÉ (un pâté d'immeubles en un seul maillage de
 // cubes d'une unité) : les UV y portent la position en cellules, pas 0..1.
 uniform float fusionne = 0.0;
-uniform float couvert : hint_range(0.0, 1.0) = 0.0;   // la chape de nuages (météo)
+global uniform float couvert;   // la chape de nuages (météo)
+global uniform float neige;     // la neige sur les faces qui regardent le ciel
 
 varying vec4 c;
 varying vec2 uvl;
@@ -681,10 +718,19 @@ void fragment() {
 		col *= 1.0 - 0.20 * bord * (1.0 - lumiere);
 	}
 	col *= mix(nuages(posm.xz), 1.0, lumiere);
+	// LA NEIGE sur les faces qui regardent le ciel : les toits des immeubles
+	// voxel, le dessus des cubes. Par plaques, puis d'un tenant.
+	float tapis = 0.0;
+	if (neige > 0.01) {
+		float dessus = smoothstep(0.6, 0.9, nrm.y) * (1.0 - vitre) * (1.0 - lumiere);
+		float couverture = smoothstep(0.15, 0.75, bruit(posm.xz / 5.0 + vec2(1.0, 9.0)) * 0.6 + neige * 0.6);
+		tapis = couverture * neige * dessus;
+		col = mix(col, vec3(0.86, 0.89, 0.94), tapis);
+	}
 	ALBEDO = col;
-	ROUGHNESS = mix(0.85, 0.2, vitre);
+	ROUGHNESS = mix(mix(0.85, 0.2, vitre), 0.7, tapis);
 	SPECULAR = mix(0.15, 0.7, vitre);
-	EMISSION = c.rgb * (lumiere * 1.4 + eclaire * 1.1) * smoothstep(0.3, 0.85, nuit);
+	EMISSION = c.rgb * (lumiere * 1.4 + eclaire * 1.1) * smoothstep(0.3, 0.85, nuit) * (1.0 - tapis);
 }
 """
 
@@ -699,13 +745,14 @@ shader_type spatial;
 render_mode cull_back, diffuse_lambert, specular_schlick_ggx;
 
 uniform sampler2D atlas : source_color, filter_nearest;
-uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+global uniform float nuit;
 uniform float fenetres : hint_range(0.0, 1.0) = 0.0;
 uniform vec4 teinte : source_color = vec4(1.0);
 // LA PEINTURE DU GARAGE (§1.3) : à 1.0, `teinte` ne recouvre que la TÔLE.
 uniform float peinture : hint_range(0.0, 1.0) = 0.0;
 // La pluie (météo) : une carrosserie mouillée luit.
-uniform float mouille : hint_range(0.0, 1.0) = 0.0;
+global uniform float mouille;
+global uniform float neige;
 
 varying vec4 c;
 varying vec3 posm;
@@ -717,6 +764,13 @@ void vertex() {
 
 float hache(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float bruit(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hache(i), hache(i + vec2(1.0, 0.0)), f.x), mix(hache(i + vec2(0.0, 1.0)), hache(i + vec2(1.0, 1.0)), f.x), f.y);
 }
 
 void fragment() {
@@ -762,8 +816,67 @@ void fragment() {
 	float vitre_auto = step(0.12, t.b - t.r) * step(0.35, t.b) * peinture;
 	float rug_auto = mix(0.5, 0.2, vitre_auto);
 	float rug = mix(mix(0.86, 0.32, vitre), rug_auto, peinture);
-	ROUGHNESS = rug * (1.0 - 0.35 * mouille);
-	SPECULAR = mix(mix(0.18, 0.6, vitre), mix(0.35, 0.65, vitre_auto), peinture) + 0.15 * mouille;
+	float spec = mix(mix(0.18, 0.6, vitre), mix(0.35, 0.65, vitre_auto), peinture);
+	vec3 emission = EMISSION;
+	// LA TÊTE D'UN LAMPADAIRE S'ALLUME LA NUIT : ce qui est blanc dans l'atlas
+	// à plus de six unités du sol, sur un objet qui n'est ni bâtiment ni
+	// véhicule, c'est une lampe (les bandes blanches des routes sont au sol,
+	// les enseignes des immeubles passent par `fenetres`). Le halo fait le reste.
+	float lampe = step(0.86, lum) * (1.0 - fenetres) * (1.0 - peinture) * step(6.0, posm.y) * nuitf;
+	emission += vec3(1.0, 0.86, 0.62) * lampe * 1.8;
+	// LE SOL DE PIKSTOWN est fait de tuiles du kit (routes, dalles, pavés) :
+	// elles se mouillent comme le shader SOL mouille l'asphalte — sur les faces
+	// HORIZONTALES des matières qui ne sont ni un bâtiment (`fenetres`) ni un
+	// véhicule (`peinture`). L'asphalte fonce, la flaque rend le ciel, les
+	// gouttes y ouvrent des ronds. Sans ce bloc, la ville dessinée restait
+	// sèche sous l'averse pendant que la procédurale ruisselait.
+	vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	float plat = step(0.9, nw.y) * (1.0 - fenetres) * (1.0 - peinture);
+	if (mouille > 0.02 && plat > 0.5) {
+		// L'herbe (un vert franc dans l'atlas) fonce mais ne fait pas de
+		// flaques : une pelouse-miroir, ça ne se voit nulle part.
+		float herbe = step(0.25, sat) * step(t.r * 1.15, t.g);
+		float fl = smoothstep(0.5 - 0.12 * mouille, 0.7, bruit(posm.xz / 9.0 + vec2(3.7, 1.3))) * (1.0 - herbe);
+		float humide = mouille * (0.4 + 0.6 * fl);
+		ALBEDO *= 1.0 - 0.28 * mouille;
+		vec3 ciel_flaque = mix(vec3(0.60, 0.64, 0.70), vec3(0.05, 0.07, 0.12), nuit);
+		ALBEDO = mix(ALBEDO, ciel_flaque, fl * mouille * 0.45 * (1.0 - nuit));
+		rug = mix(rug, 0.22, humide);
+		spec = mix(spec, 0.7, humide);
+		emission += vec3(0.05, 0.07, 0.12) * fl * nuit;
+		vec2 cr = floor(posm.xz / 1.6);
+		vec2 fr = fract(posm.xz / 1.6) - 0.5;
+		float g0 = hache(cr + vec2(41.0));
+		float cycle = floor(TIME * 1.6 + g0);
+		float ph = fract(TIME * 1.6 + g0);
+		float actif = step(1.0 - 0.6 * mouille, hache(cr + cycle * vec2(1.0, 7.0)));
+		vec2 centre = (vec2(hache(cr + cycle + vec2(3.0)), hache(cr + cycle + vec2(9.0))) - 0.5) * 0.5;
+		float rayon = ph * 0.38;
+		float anneau = smoothstep(0.11, 0.02, abs(length(fr - centre) - rayon)) * (1.0 - ph) * (1.0 - ph);
+		emission += vec3(0.9, 0.95, 1.0) * anneau * actif * mouille * (0.4 + 0.6 * fl);
+	}
+	// LA NEIGE tient sur tout ce qui est horizontal et n'est pas une voiture :
+	// les toits, les tuiles de la ville dessinée, les têtes de lampadaire. Par
+	// plaques d'abord, puis d'un tenant — un toit blanc sur un immeuble rouge,
+	// c'est ce qui fait une ville sous la neige vue de haut.
+	float plat_neige = step(0.75, nw.y) * (1.0 - peinture);
+	if (neige > 0.01 && plat_neige > 0.5) {
+		float couverture = smoothstep(0.15, 0.75, bruit(posm.xz / 5.0 + vec2(1.0, 9.0)) * 0.6 + neige * 0.6);
+		// La chaussée (sombre dans l'atlas) reste ROULÉE : la neige y tient
+		// par plaques sales, jamais d'un tenant — sinon la rue disparaissait
+		// sous le même blanc que les trottoirs et on ne savait plus où rouler.
+		// (l'asphalte du kit est à 0,42 de luminance, le trottoir à 0,66)
+		float chaussee = 1.0 - smoothstep(0.46, 0.60, lum);
+		couverture *= mix(1.0, 0.2 + 0.5 * bruit(posm.xz / 2.2 + vec2(4.0)), chaussee);
+		float tapis = couverture * neige;
+		ALBEDO = mix(ALBEDO, vec3(0.86, 0.89, 0.94) * (0.93 + 0.07 * hache(floor(posm.xz))), tapis);
+		rug = mix(rug, 0.7, tapis);
+		spec = mix(spec, 0.25, tapis);
+		emission *= 1.0 - tapis;
+	}
+	EMISSION = emission;
+	ROUGHNESS = rug * (1.0 - 0.35 * mouille * peinture);
+	SPECULAR = spec + 0.15 * mouille * peinture;
 }
 """
 
@@ -788,7 +901,6 @@ static func kenney(atlas: Texture2D, fenetres: bool, peinture: bool = false) -> 
 	# Les véhicules se REPEIGNENT (tôle seule) ; les bâtiments et les props se
 	# teintent en bloc, comme avant — leur couleur d'instance est un ton.
 	m.set_shader_parameter("peinture", 1.0 if peinture else 0.0)
-	m.set_shader_parameter("nuit", _nuit_courante)
 	_kenneys[cle] = m
 	return m
 
@@ -805,8 +917,8 @@ shader_type spatial;
 // devait être transparente. On l'a vu sur l'eau avant de comprendre.
 render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;
 
-uniform float nuit : hint_range(0.0, 1.0) = 0.5;
-uniform float mouille : hint_range(0.0, 1.0) = 0.0;   // la pluie (météo)
+global uniform float nuit;
+global uniform float mouille;   // la pluie (météo)
 
 varying vec4 c;
 varying vec2 uvl;
@@ -849,10 +961,12 @@ const VEGETAL := """
 shader_type spatial;
 render_mode cull_back, diffuse_lambert, specular_schlick_ggx;
 
-uniform float vent : hint_range(0.0, 1.0) = 0.15;
-uniform float mouille : hint_range(0.0, 1.0) = 0.0;
+global uniform float vent;
+global uniform float mouille;
+global uniform float neige;
 
 varying vec3 c;
+varying vec3 nrm;
 
 void vertex() {
 	c = COLOR.rgb;
@@ -860,6 +974,7 @@ void vertex() {
 	// Le balancement croît avec la hauteur, au carré : le tronc tient, la
 	// cime va. Deux sinus de fréquences différentes, sinon toute la rangée
 	// ondule comme une seule vague.
+	nrm = (MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz;
 	float h = max(VERTEX.y, 0.0);
 	float ampl = vent * 0.012 * h * h;
 	float phase = posm.x * 0.35 + posm.z * 0.21;
@@ -868,8 +983,11 @@ void vertex() {
 }
 
 void fragment() {
-	// Mouillé, le feuillage fonce et luit un peu.
-	ALBEDO = c * (1.0 - 0.18 * mouille);
+	// Mouillé, le feuillage fonce et luit un peu ; sous la neige, ce qui
+	// regarde le ciel blanchit.
+	vec3 col = c * (1.0 - 0.18 * mouille);
+	col = mix(col, vec3(0.92, 0.94, 0.98), neige * smoothstep(0.3, 0.8, normalize(nrm).y));
+	ALBEDO = col;
 	ROUGHNESS = 0.9 - 0.3 * mouille;
 	SPECULAR = 0.15 + 0.2 * mouille;
 }
@@ -882,6 +1000,56 @@ static func vegetal() -> ShaderMaterial:
 		_vegetal = _materiau(VEGETAL)
 	return _vegetal
 
+## LES NAPPES DE BRUME. Le brouillard d'ambiance (`Environment.fog`) est un
+## voile UNIFORME : vu de dessus, où tout est à la même distance de la
+## caméra, il ne fait que délaver l'image — une photo passée à l'eau de
+## Javel. La brume qu'on reconnaît, c'est celle qui TRAÎNE AU SOL : des
+## bancs qui dérivent dans les rues, que les toits percent, qui avalent une
+## voiture et la rendent. Une grande nappe horizontale à hauteur d'homme,
+## sous le joueur, dont l'opacité est un bruit qui glisse. Sous la pluie,
+## la même nappe, à peine, pour l'air chargé d'eau.
+const BRUME := """
+shader_type spatial;
+render_mode unshaded, blend_mix, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;
+
+global uniform float brume;
+global uniform float pluie;
+uniform vec4 couleur : source_color = vec4(0.78, 0.81, 0.85, 1.0);
+
+varying vec3 posm;
+
+float hache(vec2 p) {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float bruit(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hache(i), hache(i + vec2(1.0, 0.0)), f.x), mix(hache(i + vec2(0.0, 1.0)), hache(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+void vertex() {
+	posm = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+void fragment() {
+	vec2 q = posm.xz / 34.0 + vec2(TIME * 0.025, TIME * 0.014);
+	float n = bruit(q) * 0.55 + bruit(q * 2.3 + vec2(7.0)) * 0.3 + bruit(q * 5.1 + vec2(3.0)) * 0.15;
+	float banc = smoothstep(0.32, 0.76, n);
+	float a = banc * brume * 0.72 + (0.3 + 0.7 * banc) * pluie * 0.10;
+	ALBEDO = couleur.rgb;
+	ALPHA = clamp(a, 0.0, 0.9);
+}
+"""
+
+static var _brume: ShaderMaterial
+
+static func brume() -> ShaderMaterial:
+	if _brume == null:
+		_brume = _materiau(BRUME)
+	return _brume
+
 ## LE FAISCEAU DES PHARES : un coin de lumière additif devant la voiture, qui
 ## n'existe vraiment que quand l'air a quelque chose à éclairer — la brume, la
 ## pluie. Par temps clair il reste une lueur ; dans le brouillard, c'est le
@@ -892,8 +1060,8 @@ const FAISCEAU := """
 shader_type spatial;
 render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;
 
-uniform float nuit : hint_range(0.0, 1.0) = 0.5;
-uniform float air : hint_range(0.0, 1.0) = 0.0;   // brume + pluie (météo)
+global uniform float nuit;
+global uniform float air;   // brume + pluie (météo)
 
 varying vec4 c;
 varying vec2 uvl;
@@ -931,7 +1099,7 @@ const OMBRE := """
 shader_type spatial;
 render_mode unshaded, blend_mul, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;
 
-uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+global uniform float nuit;
 
 varying vec4 c;
 varying vec2 uvl;
@@ -995,7 +1163,7 @@ const LUMINEUX := """
 shader_type spatial;
 render_mode unshaded, cull_disabled, shadows_disabled;
 
-uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+global uniform float nuit;
 
 varying vec4 c;
 
@@ -1018,48 +1186,84 @@ shader_type canvas_item;
 render_mode blend_mix;
 
 uniform sampler2D ecran : hint_screen_texture, filter_linear;
-uniform float nuit : hint_range(0.0, 1.0) = 0.5;
+global uniform float nuit;
 uniform float secousse : hint_range(0.0, 1.0) = 0.0;
 // LA MÉTÉO : la pluie en traits sur l'écran, l'éclair qui blanchit tout.
-uniform float pluie : hint_range(0.0, 1.0) = 0.0;
-uniform float eclair : hint_range(0.0, 1.0) = 0.0;
+global uniform float pluie;
+global uniform float eclair;
+global uniform float neige;
 
 float hache(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-// UN CALQUE DE PLUIE : l'écran découpé en colonnes fines et hautes, chaque
-// colonne tirée avec son décalage et sa vitesse ; dans une case sur trois, un
-// trait fin qui file vers le bas, un peu penché. Deux calques d'échelles
-// différentes donnent la profondeur — les gros traits près de l'objectif, les
-// fins au loin. ⚠ Des points plutôt que des traits (essayé) : on croyait à de
-// la neige, ou à du bruit de compression.
-float calque_de_pluie(vec2 uv, float colonnes, float vitesse, float graine, float rapport) {
-	vec2 p = uv * vec2(colonnes, colonnes / rapport);
-	p.x += uv.y * colonnes * 0.06;   // la pluie penche
+// UN CALQUE DE FLOCONS : la même grille de cases que la pluie, mais un POINT
+// rond par case, qui descend lentement en se balançant. Deux calques, les
+// gros devant, les petits derrière.
+float calque_de_neige(vec2 uv, float colonnes, float lignes, float vitesse, float graine, float rayon) {
+	vec2 p = uv * vec2(colonnes, lignes);
 	float colonne = floor(p.x);
 	float dec = hache(vec2(colonne, graine));
-	p.y += TIME * vitesse * (0.75 + 0.5 * dec) + dec * 13.0;
+	p.y += TIME * vitesse * (0.7 + 0.6 * dec) + dec * 11.0;
+	p.x += sin(TIME * (0.8 + dec) + dec * 6.0) * 0.25;
+	vec2 f = fract(p) - 0.5;
+	float id = hache(floor(p) + vec2(graine, 0.0));
+	vec2 centre = (vec2(hache(floor(p) + vec2(2.0)), hache(floor(p) + vec2(5.0))) - 0.5) * 0.5;
+	float d = length((f - centre) * vec2(1.0, colonnes / lignes * 0.6));
+	return smoothstep(rayon, rayon * 0.4, d) * step(0.55, id);
+}
+
+// UN CALQUE DE PLUIE. L'écran est découpé en colonnes étroites et en cases
+// hautes ; chaque colonne a son décalage et sa vitesse, et une case sur trois
+// porte un trait — FIN (un pixel et demi, adouci), long, à peine penché, et
+// TRANSLUCIDE. Trois calques d'échelles différentes font la profondeur : les
+// traits lointains petits et pâles, les proches plus grands et plus vifs.
+// ⚠ La première version dessinait des barres blanches sur un tiers de
+// l'écran : on ne voyait plus la rue, on voyait des rayures. Une averse se
+// lit à ce qu'elle fait au sol et à la lumière, les traits ne sont qu'un
+// rappel — ils doivent rester sous le seuil où l'œil les compte.
+float calque_de_pluie(vec2 uv, float colonnes, float lignes, float vitesse, float graine, float largeur) {
+	vec2 p = uv * vec2(colonnes, lignes);
+	p.x += uv.y * colonnes * 0.045;   // la pluie penche, un peu
+	float colonne = floor(p.x);
+	float dec = hache(vec2(colonne, graine));
+	p.y += TIME * vitesse * (0.8 + 0.4 * dec) + dec * 13.0;
 	vec2 f = fract(p);
 	float id = hache(floor(p) + vec2(graine, 0.0));
-	float trait = smoothstep(0.30, 0.42, f.x) * smoothstep(0.62, 0.50, f.x);
-	float longueur = smoothstep(0.02, 0.12, f.y) * smoothstep(0.75, 0.35, f.y);
-	return trait * longueur * step(0.68, id);
+	float trait = 1.0 - smoothstep(0.0, largeur, abs(f.x - 0.5));
+	float longueur = smoothstep(0.0, 0.18, f.y) * smoothstep(0.9, 0.5, f.y);
+	return trait * longueur * step(0.7, id);
 }
 
 void fragment() {
 	vec2 d = SCREEN_UV - vec2(0.5);
 	vec3 c = texture(ecran, SCREEN_UV).rgb;
+	// L'ÉTALONNAGE, pour tout le jeu : une courbe en S légère (les ombres un
+	// peu plus profondes, les hautes lumières tenues) et huit pour cent de
+	// saturation en plus. Sans lui, l'image sortait plate — le mode
+	// compatibilité n'a ni occlusion ambiante ni réflexions pour la creuser.
+	float l = dot(c, vec3(0.299, 0.587, 0.114));
+	c = mix(vec3(l), c, 1.08);
+	// Moins de courbe la nuit : elle creuserait des ombres déjà noires.
+	c = mix(c, c * c * (3.0 - 2.0 * c), 0.22 * (1.0 - 0.6 * nuit));
 	if (pluie > 0.003) {
-		// Sous la pluie, l'image se refroidit et perd un peu de contraste :
-		// c'est l'air chargé d'eau entre la caméra et la rue.
-		c = mix(c, c * vec3(0.90, 0.95, 1.06) + vec3(0.03), pluie * 0.35);
-		float traits = calque_de_pluie(SCREEN_UV, 160.0, 2.6, 1.0, 9.0) * 0.55
-			+ calque_de_pluie(SCREEN_UV, 90.0, 1.9, 2.0, 7.0) * 0.45;
-		c += vec3(0.62, 0.68, 0.78) * traits * pluie * (0.55 + 0.45 * nuit);
+		// Sous la pluie, l'image se refroidit et gagne un peu de contraste :
+		// l'air est lavé, les couleurs sont plus sourdes mais pas plus grises.
+		c *= mix(vec3(1.0), vec3(0.93, 0.96, 1.03), pluie);
+		c = mix(c, (c - 0.5) * 1.06 + 0.5, pluie * 0.5);
+		float traits = calque_de_pluie(SCREEN_UV, 300.0, 22.0, 1.5, 1.0, 0.10) * 0.40
+			+ calque_de_pluie(SCREEN_UV, 200.0, 15.0, 2.2, 2.0, 0.12) * 0.55
+			+ calque_de_pluie(SCREEN_UV, 120.0, 10.0, 3.1, 3.0, 0.14) * 0.70;
+		c += vec3(0.70, 0.76, 0.86) * traits * pluie * (0.16 + 0.10 * nuit);
 	}
-	// L'éclair : tout blanchit d'un coup, puis retombe en un dixième de seconde.
-	c = mix(c, vec3(0.96, 0.97, 1.0), eclair * 0.45);
+	if (neige > 0.003) {
+		float flocons = calque_de_neige(SCREEN_UV, 90.0, 50.0, 0.22, 4.0, 0.16) * 0.5
+			+ calque_de_neige(SCREEN_UV, 50.0, 28.0, 0.34, 5.0, 0.14) * 0.8;
+		c = mix(c, vec3(0.97, 0.98, 1.0), clamp(flocons, 0.0, 1.0) * neige * 0.75);
+	}
+	// L'éclair : l'image blanchit d'un coup — pas jusqu'au blanc, on doit
+	// encore voir la rue — puis retombe en un dixième de seconde.
+	c = mix(c, vec3(0.94, 0.95, 1.0), eclair * 0.28);
 	// Un choc rougit les bords, le temps d'une image ou deux.
 	float v = smoothstep(0.30, 0.95, length(d) * 1.3);
 	c = mix(c, vec3(0.0), v * (0.34 + 0.14 * nuit));
@@ -1077,7 +1281,36 @@ static func post() -> ShaderMaterial:
 		_post = _materiau(POST)
 	return _post
 
+## LES UNIFORMES GLOBAUX. L'heure (`nuit`) et la météo (`mouille`, `couvert`,
+## `vent`, `brume`, `pluie`, `eclair`, `air`) sont des `global uniform` : une
+## seule valeur pour tous les shaders, posée par `RenderingServer`, et lue par
+## CHAQUE matière — y compris les duplicata que d'autres fichiers font des
+## matières du kit (`Quartiers._matiere`, `FormesCarnage.matiere_peinte`).
+## ⚠ Avant, chaque valeur était poussée matière par matière, dans des boucles
+## sur des registres : toute matière dupliquée hors registre restait en plein
+## jour, sèche, quand la ville passait à la nuit sous l'averse — et Pikstown
+## en duplique des dizaines. Un uniforme global ne s'oublie pas.
+const GLOBAUX := {"nuit": 0.5, "mouille": 0.0, "couvert": 0.0, "vent": 0.15,
+	"brume": 0.0, "pluie": 0.0, "eclair": 0.0, "air": 0.0, "neige": 0.0}
+static var _globaux_prets := false
+
+static func _preparer_les_globaux() -> void:
+	if _globaux_prets:
+		return
+	_globaux_prets = true
+	# ⚠ Pas de `global_shader_parameter_get` pour vérifier s'il existe déjà :
+	# hors éditeur, Godot le refuse (« can severely damage performance »). On
+	# déclare une fois par processus, et rien dans `project.godot` ne les
+	# déclare avant nous.
+	for nom in GLOBAUX:
+		RenderingServer.global_shader_parameter_add(nom, RenderingServer.GLOBAL_VAR_TYPE_FLOAT, GLOBAUX[nom])
+
+static func global(nom: String, valeur: float) -> void:
+	_preparer_les_globaux()
+	RenderingServer.global_shader_parameter_set(nom, valeur)
+
 static func _materiau(source: String) -> ShaderMaterial:
+	_preparer_les_globaux()
 	var shader := Shader.new()
 	shader.code = source
 	var m := ShaderMaterial.new()
@@ -1123,7 +1356,6 @@ static func voxel_fusionne() -> ShaderMaterial:
 	if _voxel_fusionne == null:
 		_voxel_fusionne = _materiau(VOXEL)
 		_voxel_fusionne.set_shader_parameter("fusionne", 1.0)
-		_voxel_fusionne.set_shader_parameter("nuit", _nuit_courante)
 	return _voxel_fusionne
 
 ## La matière voxel peinte d'une couleur, une par couleur (mise en cache : les
@@ -1135,7 +1367,6 @@ static func voxel_teinte(couleur: Color) -> ShaderMaterial:
 	if not _voxels_teintes.has(cle):
 		var m := _materiau(VOXEL)
 		m.set_shader_parameter("teinte", couleur)
-		m.set_shader_parameter("nuit", _nuit_courante)
 		_voxels_teintes[cle] = m
 	return _voxels_teintes[cle]
 
@@ -1148,43 +1379,22 @@ static var _nuit_courante := 0.5
 ## façades du kit et les voitures n'en savent rien : c'est la lumière
 ## (`MeteoCarnage.appliquer`) qui les grise, pas leur matière.
 static func regler_meteo(pluie: float, nuages: float, brume: float, eclair: float,
-		orage_courant: float = 0.0) -> void:
+		orage_courant: float = 0.0, neige: float = 0.0) -> void:
 	var chape := maxf(nuages, brume)
-	var s := sol()
-	s.set_shader_parameter("mouille", pluie)
-	s.set_shader_parameter("couvert", chape)
-	eau().set_shader_parameter("mouille", pluie)
-	flaque().set_shader_parameter("mouille", pluie)
-	faisceau().set_shader_parameter("air", clampf(brume + 0.5 * pluie, 0.0, 1.0))
+	global("mouille", pluie)
+	global("neige", neige)
+	global("couvert", chape)
+	global("brume", brume)
+	global("pluie", pluie)
+	global("eclair", eclair)
+	global("air", clampf(brume + 0.5 * pluie, 0.0, 1.0))
 	# Le vent : une brise par beau temps, plus sous la pluie, une bourrasque
 	# sous l'orage. `orage` est la seule jauge qui vaille 1 seulement à l'orage.
-	var vent := clampf(0.15 + 0.3 * pluie + 0.55 * orage_courant, 0.0, 1.0)
-	vegetal().set_shader_parameter("vent", vent)
-	vegetal().set_shader_parameter("mouille", pluie)
-	for m in [voxel(), voxel_fusionne()]:
-		m.set_shader_parameter("couvert", chape)
-	for cle in _voxels_teintes:
-		(_voxels_teintes[cle] as ShaderMaterial).set_shader_parameter("couvert", chape)
-	var p := post()
-	p.set_shader_parameter("pluie", pluie)
-	p.set_shader_parameter("eclair", eclair)
-	for cle in _kenneys:
-		(_kenneys[cle] as ShaderMaterial).set_shader_parameter("mouille", pluie)
-	for m in _kenneys_derives:
-		if m is ShaderMaterial:
-			(m as ShaderMaterial).set_shader_parameter("mouille", pluie)
+	global("vent", clampf(0.15 + 0.3 * pluie + 0.55 * orage_courant, 0.0, 1.0))
 
 static func regler_nuit(valeur: float) -> void:
 	_nuit_courante = valeur
-	for m in [sol(), eau(), facade(), flaque(), faisceau(), lumineux(), voxel(), voxel_fusionne(), post(), ombre()]:
-		m.set_shader_parameter("nuit", valeur)
-	for cle in _voxels_teintes:
-		(_voxels_teintes[cle] as ShaderMaterial).set_shader_parameter("nuit", valeur)
-	for cle in _kenneys:
-		(_kenneys[cle] as ShaderMaterial).set_shader_parameter("nuit", valeur)
-	for m in _kenneys_derives:
-		if m is ShaderMaterial:
-			(m as ShaderMaterial).set_shader_parameter("nuit", valeur)
+	global("nuit", valeur)
 
 # ------------------------------------------------------------ l'ambiance
 
@@ -1233,10 +1443,15 @@ const HEURES := [
 		"soleil_x": -42.0, "soleil_y": -52.0, "soleil_c": Color("#ffb27a"), "soleil_e": 1.25,
 		"ambiante": Color("#3c4a7a"), "ambiante_e": 1.05, "brume": Color("#1c2036"), "brume_d": 0.0022,
 		"halo": 0.9, "seuil": 0.72, "lune": 0.42},
+	# ⚠ LA NUIT N'EST PAS NOIRE. Sur Pikstown, dont les rues ont moins de
+	# lampadaires que la ville procédurale et des tuiles plus sombres, la
+	# première nuit (ambiante 0,8, lune 0,25) faisait un écran d'encre où l'on
+	# ne distinguait plus la chaussée du trottoir. L'heure bleue est une
+	# lumière, pas une absence : ambiante et lune montées d'un bon tiers.
 	{"haut": Color("#03050e"), "horizon": Color("#101a30"), "sol_h": Color("#0b1020"), "sol_b": Color("#030408"),
-		"soleil_x": -36.0, "soleil_y": -70.0, "soleil_c": Color("#5a6cc0"), "soleil_e": 0.28,
-		"ambiante": Color("#1a2340"), "ambiante_e": 0.8, "brume": Color("#0a0e1c"), "brume_d": 0.0026,
-		"halo": 1.0, "seuil": 0.6, "lune": 0.25},
+		"soleil_x": -36.0, "soleil_y": -70.0, "soleil_c": Color("#6478c8"), "soleil_e": 0.42,
+		"ambiante": Color("#26304f"), "ambiante_e": 1.15, "brume": Color("#0a0e1c"), "brume_d": 0.0026,
+		"halo": 1.0, "seuil": 0.6, "lune": 0.45},
 ]
 
 static func _valeur(cle: String, n: float):
@@ -1304,6 +1519,10 @@ static func ambiance() -> Array:
 	soleil.directional_shadow_max_distance = 220.0
 	soleil.shadow_bias = 0.05
 	soleil.shadow_normal_bias = 1.5
+	# Des ombres un peu DOUCES : un bord d'ombre au rasoir vu de soixante unités
+	# de haut fait une ville en carton découpé. Le flou est en pixels d'ombre,
+	# donc modeste — trop, et les petits objets perdent leur ombre.
+	soleil.shadow_blur = 1.6
 
 	var lune := DirectionalLight3D.new()
 	lune.light_color = Color("#5a72c8")

@@ -34,7 +34,7 @@ joueur au milieu de la dalle sans rien acheter et sans savoir pourquoi.
 | **MITRAILLEUSE** (jaune) | 950 $ | `ESPACE` au volant : tir avant, munitions infinies |
 | **MINES** (rouge) | 750 $ | quatre mines ; `F` en largue une derrière soi |
 | **HUILE** (violet) | 550 $ | quatre flaques ; `F` en répand une |
-| **BOMBE** (orange) | 650 $ | la voiture saute six secondes après qu'on l'a quittée |
+| **BOMBE** (orange) | 650 $ | armée quand on quitte la voiture ; `H` à pied la fait sauter, ou le premier qui prend le volant |
 
 Les plaques **ne sont pas** le garage de peinture : la jauge ne redescend pas,
 elle se **fige**. C'est ce qui en fait un achat de poursuite — on ne va pas au
@@ -67,6 +67,37 @@ ville depuis son navigateur.
 - **la bombe est attachée au VÉHICULE**, pas au joueur : sinon un joueur qui se
   déconnecte emporterait la bombe avec lui et la voiture resterait piégée
   jusqu'à la fin de la manche.
+
+## La bombe se déclenche (§7.2)
+
+Elle s'arme quand on **quitte** la voiture, et elle saute de deux façons — les
+deux de GTA 2 :
+
+- **à distance** : à pied, le klaxon (`H`) ne sert à rien — c'est donc lui le
+  détonateur. Toutes les voitures qu'on a piégées sautent d'un coup, où
+  qu'elles soient, même celles que la ville a rangées entre-temps (on les
+  réveille pour les faire sauter). C'est ce qui fait de la bombe une **arme** :
+  on gare la voiture au milieu d'un repaire, on s'éloigne, on appuie. Une puce
+  du tableau de bord (« détonateur : H à pied ×2 ») rappelle ce qui attend ;
+- **sous un voleur** : un autre joueur qui prend le volant la déclenche et y
+  reste (cent points, le seul dégât du jeu qui ne laisse rien au Medicar), et
+  l'hôte ne lui accorde pas le véhicule. Le poseur en est prévenu, avec le nom
+  du voleur. Le **poseur**, lui, remonte dans sa propre voiture sans qu'elle
+  saute — elle reste armée pour la prochaine fois qu'il en descend.
+
+⚠ **Elle attendait six secondes puis sautait toute seule.** C'était un pétard
+à retardement, pas une bombe : on n'avait ni le temps de la garer où il faut,
+ni le choix du moment, et personne ne montait jamais dedans en six secondes.
+Le guide parle d'une bombe *déclenchée*, et « plus de touche libre » n'était
+vrai qu'au volant — à pied, `H` était libre depuis le début.
+
+⚠ **On appuie, on ne tient pas.** Le klaxon se lit « tenu » (il se module) ;
+le détonateur ne part qu'au FRONT de la touche, sinon tenir `H` refaisait
+sauter ce qu'on piégeait dix secondes plus tard. Sans rien d'armé, la ligne
+dit « rien à faire sauter » plutôt que de se taire.
+
+⚠ **Une voiture piégée qui brûle autrement s'oublie** : sinon le détonateur
+comptait des voitures déjà parties en fumée, et la puce mentait.
 
 ## La mitrailleuse de bord
 
@@ -104,8 +135,12 @@ godot --headless --path . -s outils/atelier.gd   # baies, mines, huile, bombe, p
 `outils/atelier.gd` vérifie sur les fonctions du jeu : la part des garages qui
 vendent, que chaque pastille se désigne elle-même et qu'entre deux pastilles on
 tombe toujours sur l'une des deux, l'amorce et l'unicité d'une mine, le plafond
-de pièges, que l'huile fait tourner sans abîmer, que la bombe attend, et que
-les plaques gèlent la recherche puis se font repérer.
+de pièges, que l'huile fait tourner sans abîmer, que la bombe attend armée,
+saute au détonateur (deux voitures, dont une à trois mille pixels) ou sous un
+voleur mais pas sous son poseur, que les plaques gèlent la recherche puis
+se font repérer — et, chapitre 6, que le canon à eau du camion de pompiers
+éteint devant, pousse et fait fuir sans blesser, et ne porte pas à trois
+cents pixels.
 
 ## Le garage repeint pour de vrai (§1.3)
 
@@ -138,7 +173,5 @@ instantané → client → « pris ».
 
 ## Ce qui reste
 
-- la **bombe à distance** du guide (un bouton pour la déclencher) n'existe pas :
-  on n'a plus de touche libre ;
 - le **lance-flammes monté** sur le camion de pompiers (§6.2) reste à faire, et
   dépend d'une mission.

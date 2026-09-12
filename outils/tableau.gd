@@ -16,6 +16,7 @@ var _sortie := "/tmp/tableau/respect.png"
 var _triche := false
 var _roue := false
 var _superette := false
+var _planque := false
 var _pause := false
 
 func _ready() -> void:
@@ -27,6 +28,7 @@ func _ready() -> void:
 		if a == "--roue": _roue = true
 		if a == "--superette": _superette = true
 		if a == "--pause": _pause = true
+		if a == "--planque": _planque = true
 
 	# La nuit forcée : le cycle jour/nuit tourne en temps réel, et deux photos
 	# prises à trois minutes d'écart n'ont pas la même lumière.
@@ -160,6 +162,28 @@ func _ready() -> void:
 		boutique.message = "sandwich dans le sac"
 		boutique.message_couleur = PlanVille.COULEUR_SUPERETTE
 		boutique.queue_redraw()
+
+	# `--planque` pose le menu du coffre, avec un peu d'argent sur soi, le
+	# coffre déjà installé et l'arsenal à portée : l'état où l'on hésite.
+	if _planque:
+		var coffre := Control.new()
+		coffre.set_anchors_preset(Control.PRESET_FULL_RECT)
+		coffre.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		coffre.set_script(load("res://ui/planque.gd"))
+		interface.add_child(coffre)
+		coffre.lignes = [
+			{"cle": "depot", "nom": "déposer", "effet": "mettre son argent à l'abri du coffre", "etat": "depot", "couleur": Palette.BON},
+			{"cle": "retrait", "nom": "retirer", "effet": "reprendre tout ce qu'il y a au coffre", "etat": "retrait", "couleur": Palette.AVERTISSEMENT},
+			{"cle": "coffre", "nom": "coffre", "effet": "on garde le double de sa fortune en mourant", "prix": 1800, "etat": "fait", "couleur": Palette.SERIE},
+			{"cle": "arsenal", "nom": "arsenal", "effet": "on ne perd plus son arme en mourant", "prix": 3200, "etat": "achat", "couleur": Palette.SERIE},
+			{"cle": "garage", "nom": "garage", "effet": "la voiture ramenée ici vous attend après la mort", "prix": 5000, "etat": "apres:arsenal", "couleur": Palette.SERIE},
+		]
+		coffre.argent = 640
+		coffre.banque = 3450
+		coffre.choix = 3
+		coffre.message = "coffre installé"
+		coffre.message_couleur = Palette.BON
+		coffre.queue_redraw()
 
 	# `--pause` pose le menu de sortie : c'est le seul écran par lequel une
 	# manche se termine, et il ne se voit qu'en appuyant sur ÉCHAP en jeu.

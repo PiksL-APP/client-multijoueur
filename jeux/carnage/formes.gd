@@ -515,6 +515,45 @@ static func couleur_de_l_auto(carte: PlanVille, modele: int, id: int, de_gang: b
 		return Color.WHITE
 	return VoxelsCarnage.peinture(modele, id)
 
+## LES LAMPADAIRES DE LA VILLE DESSINÉE. Pikstown pose ses luminaires comme
+## n'importe quel objet du kit (`Quartiers._objet`) : un maillage, une
+## matière, pas de lumière. La nuit, une rue sans flaque de lampadaire est
+## une rue noire. Le jeu retrouve les lampadaires PAR LEUR MAILLAGE — le cache
+## `_kenney` sait quels maillages viennent d'un `urbain/light-*` — et leur
+## accroche une flaque additive au sol, comme la ville procédurale le fait
+## pour les siens (`MorceauVille.LAMPES`). Aucune ligne dans les fichiers de
+## la ville dessinée : c'est ce qui permet de la laisser évoluer sans nous.
+static func maillages_de_lampadaires() -> Array:
+	var liste: Array = []
+	for cle in _kenney:
+		if String(cle).contains("/urbain/light-"):
+			liste.append(_kenney[cle])
+	return liste
+
+## La flaque au sol d'un lampadaire posé tel quel (base à l'origine, tête au
+## bout du bras). La tête est à l'opposé de la base dans la boîte du maillage :
+## le centre de la boîte, doublé, dit où elle pend — sans rien savoir du
+## modèle. Rayon et couleur suivent la hauteur : un mât de onze unités éclaire
+## plus large qu'un réverbère de parc.
+static func lueur_de_lampadaire(maillage: Mesh) -> MeshInstance3D:
+	var boite := maillage.get_aabb()
+	var tete := Vector2(boite.position.x + boite.size.x * 0.5, boite.position.z + boite.size.z * 0.5) * 1.8
+	var hauteur := boite.size.y
+	var rayon := clampf(hauteur * 0.9, 4.0, 11.0)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# ⚠ AU-DESSUS DE LA CHAUSSÉE, PAS AU RAS DU MÂT. Une tuile de route du kit
+	# fait 0,02 d'épaisseur — 0,4 unité une fois à l'échelle de la case — et
+	# le mât est planté à sa base : une flaque à 0,14 restait dans l'épaisseur
+	# de l'asphalte, invisible. Photographié deux fois avant de comprendre.
+	_flaque(st, Vector3(tete.x, 0.6, tete.y), Vector3(rayon, 0, 0), Vector3(0, 0, rayon), Color(1.0, 0.76, 0.46, 0.72))
+	var noeud := MeshInstance3D.new()
+	noeud.mesh = st.commit()
+	noeud.material_override = MatieresCarnage.flaque()
+	noeud.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	noeud.name = "Lueur"
+	return noeud
+
 ## Une matière par (modèle, peinture), partagée : dix peintures de trafic,
 ## dix du garage, sept de gang — et pas un duplicata par voiture. Le blanc
 ## rend la matière du kit telle quelle (couleur d'usine).
@@ -1808,6 +1847,93 @@ static func colis() -> Node3D:
 	racine.add_child(objet)
 	return racine
 
+## LA MALLETTE d'une mission de repaire : une valise sombre à poignée et à
+## fermoirs de laiton, sur un anneau ORANGE — la couleur du poste du patron,
+## celle de tout ce qui vient du repaire. Sombre là où le colis est doré : de
+## loin, on doit savoir si l'on court vers deux cent vingt dollars ou vers la
+## fin d'une mission — et vers cinq hommes qui vont sortir.
+const ORANGE_REPAIRE := Color("#ff9d2e")
+const CUIR_MALLETTE := Color("#a86e3c")
+const LAITON := Color("#e0b040")
+static func mallette() -> Node3D:
+	var racine := Node3D.new()
+	# ⚠ L'anneau est posé à 0,6, pas à 0,05 : sur Pikstown, le trottoir est une
+	# dalle que `hauteur_en` ne compte pas, et un anneau au ras du sol est
+	# DANS la dalle — invisible. Même leçon que les flaques des lampadaires.
+	var anneau := racine_anneau(1.8, ORANGE_REPAIRE, 0.22)
+	anneau.position.y = 0.6
+	racine.add_child(anneau)
+	# Un disque qui luit sous la valise, comme sous le crâne du Frenzy : à
+	# l'ombre d'un immeuble, c'est lui qu'on voit de loin, pas la valise.
+	var socle := Decor.cylindre(1.6, 0.06, ORANGE_REPAIRE, false)
+	socle.material_override = Decor.matiere_lumineuse(Color(ORANGE_REPAIRE, 0.4), 0.8, 0.4)
+	socle.position = Vector3(0, 0.56, 0)
+	racine.add_child(socle)
+	var liste: Array = []
+	# La valise, COUCHÉE : trois cubes sur deux, ce qui donne un rectangle vu
+	# de dessus — c'est ce que la caméra voit. Debout, elle faisait un cube.
+	# ⚠ Cuir FAUVE, pas brun sombre, et en classe MUR : `LUMIERE` (alpha 0,5)
+	# est la classe des fenêtres allumées, que le shader remplace par du verre
+	# sombre le jour — la première valise rendait un bloc noir sous le soleil.
+	for i in 3:
+		for j in 2:
+			liste.append([Vector3(-0.58 + 0.58 * float(i), 0.0, -0.29 + 0.58 * float(j)), 0.6,
+				Color(CUIR_MALLETTE if j == 0 else CUIR_MALLETTE.lightened(0.18), VoxelsCarnage.MUR)])
+	# Les fermoirs, sur le bord avant, et la poignée sur le dessus : en laiton,
+	# c'est ce qui dit « valise » de loin.
+	for x in [-0.45, 0.45]:
+		liste.append([Vector3(x, 0.24, 0.52), 0.2, Color(LAITON, VoxelsCarnage.MUR)])
+	for k in 6:
+		liste.append([Vector3(-0.35 + 0.14 * float(k), 0.42, 0.0), 0.15, Color(LAITON, VoxelsCarnage.MUR)])
+	var objet := cubes(liste)
+	objet.name = "Objet"
+	objet.position = Vector3(0, 1.5, 0)
+	# À la taille du colis : plus petite, elle passait pour un butin de moins.
+	objet.scale = Vector3.ONE * 1.3
+	racine.add_child(objet)
+	return racine
+
+## LE REPÈRE DU LIEUTENANT : un disque orange au sol, plus large que l'anneau
+## d'humeur qu'il entoure, et une FLÈCHE qui pointe l'homme depuis au-dessus
+## de sa tête. La flèche, c'est le repère des cibles de GTA 2 — le joueur sait
+## déjà le lire.
+##
+## ⚠ TAILLÉ POUR ÊTRE VU DE VINGT MÈTRES. Premier essai : un anneau de 1,5 et un
+## chevron de 0,9 — sur la photo, un fil orange au pied d'un homme de trente
+## pixels, et pas de chevron du tout. La caméra du jeu cadre dix mètres de
+## large : ce qui doit se lire fait deux mètres, pas un.
+## ⚠ La flèche est UNSHADED. En voxels éclairés, elle rendait un T brun : le
+## shader de la ville ombre ses faces, et une flèche à moitié dans l'ombre ne
+## se lit plus. Elle est peinte comme les anneaux, d'une couleur qui ne
+## dépend pas de l'heure.
+static func repere_de_lieutenant() -> Node3D:
+	var racine := Node3D.new()
+	racine.name = "Lieutenant"
+	var anneau := Decor.anneau(2.4, 0.45, ORANGE_REPAIRE, 2.2)
+	anneau.name = "Anneau"
+	anneau.position = Vector3(0, 0.6, 0)
+	racine.add_child(anneau)
+	var socle := Decor.cylindre(2.0, 0.06, ORANGE_REPAIRE, false)
+	socle.material_override = Decor.matiere_lumineuse(Color(ORANGE_REPAIRE, 0.35), 0.9, 0.35)
+	socle.position = Vector3(0, 0.56, 0)
+	racine.add_child(socle)
+	# Un triangle plein, À PLAT, la pointe vers +Z — c'est-à-dire vers le bas
+	# de l'écran, vers l'homme qui est dessous. ⚠ Debout, dans le plan
+	# vertical, la caméra de soixante-douze degrés n'en voyait que la tranche :
+	# une barre orange, pas une flèche. Cinq cubes, puis trois, puis la pointe.
+	var liste: Array = []
+	for k in 5:
+		liste.append([Vector3(-1.0 + 0.5 * float(k), 0.0, -0.5), 0.52, Color(ORANGE_REPAIRE, VoxelsCarnage.MUR)])
+	for k in 3:
+		liste.append([Vector3(-0.5 + 0.5 * float(k), 0.0, 0.0), 0.52, Color(ORANGE_REPAIRE, VoxelsCarnage.MUR)])
+	liste.append([Vector3(0.0, 0.0, 0.5), 0.52, Color(ORANGE_REPAIRE, VoxelsCarnage.MUR)])
+	var fleche := cubes(liste)
+	fleche.material_override = Decor.matiere_lumineuse(ORANGE_REPAIRE, 1.4)
+	fleche.name = "Chevron"
+	fleche.position = Vector3(0, 6.0, 0)
+	racine.add_child(fleche)
+	return racine
+
 ## L'ICÔNE DE KILL FRENZY : un crâne cubique sur un anneau rouge. Rouge et
 ## anguleux là où le colis est rond et doré : de loin, on doit savoir si l'on
 ## court vers de l'argent ou vers trente secondes de carnage.
@@ -1896,6 +2022,178 @@ static func echappement(arriere: float) -> CPUParticles3D:
 
 ## Une explosion : une bouffée de feu qui vire au noir, tirée d'un coup. Le
 ## nœud se détruit tout seul à la fin de sa vie.
+## LE JET DU CANON À EAU (guide §6.2) : des gouttes en cubes, lancées depuis
+## le toit de la cabine, qui retombent en arc sur deux cents pixels. Bleu
+## pâle et un peu transparentes — de l'eau dans une ville en voxels, pas un
+## rayon laser. Émis en continu tant qu'on arrose : `emitting` fait tout.
+##
+## ⚠ `local_coords` est à FAUX : les gouttes déjà parties restent où elles
+## sont quand le camion tourne — sinon tout le jet pivotait d'un bloc, comme
+## un bâton bleu accroché au capot.
+static func jet_d_eau() -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.name = "Jet"
+	# Cent quarante gouttes d'une seconde : à quatre-vingt-dix, le jet était
+	# un chapelet de cubes qu'on comptait, pas un jet.
+	p.amount = 140
+	p.lifetime = 1.0
+	p.emitting = false
+	p.local_coords = false
+	var goutte := BoxMesh.new()
+	goutte.size = Vector3(0.45, 0.45, 0.45)
+	p.mesh = goutte
+	# Devant, c'est +X : le personnage et les voitures regardent +X. L'arc
+	# retombe à vingt et une unités, la portée de la simulation est à vingt-
+	# quatre : ce qu'on voit tomber est ce qui mouille.
+	p.direction = Vector3(1.0, 0.25, 0.0)
+	p.spread = 3.5
+	p.initial_velocity_min = 28.0
+	p.initial_velocity_max = 34.0
+	p.gravity = Vector3(0, -20.0, 0)
+	p.scale_amount_min = 0.6
+	p.scale_amount_max = 1.3
+	var teinte := Gradient.new()
+	teinte.add_point(0.0, Color(0.85, 0.95, 1.0, 0.9))
+	teinte.set_color(1, Color(0.55, 0.78, 1.0, 0.75))
+	teinte.add_point(0.75, Color(0.6, 0.8, 1.0, 0.55))
+	teinte.add_point(1.0, Color(0.7, 0.85, 1.0, 0.0))
+	p.color_ramp = teinte
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	m.roughness = 0.2
+	m.metallic = 0.1
+	p.material_override = m
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# La lance est sur le toit de la cabine, à l'avant.
+	p.position = Vector3(2.2, 3.2, 0.0)
+	return p
+
+## LES FLAMMES DE LA LANCE (guide §6.2) : la même lance, du feu au bout. Des
+## cubes plus gros, plus lents, qui MONTENT au lieu de retomber — le feu n'a
+## pas le poids de l'eau — et qui passent du jaune au rouge puis à la fumée.
+## Unshaded : une flamme à moitié dans l'ombre n'est plus une flamme.
+static func flammes_de_lance() -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.name = "Flamme"
+	p.amount = 110
+	p.lifetime = 0.75
+	p.emitting = false
+	p.local_coords = false
+	var grain := BoxMesh.new()
+	grain.size = Vector3(0.7, 0.7, 0.7)
+	p.mesh = grain
+	p.direction = Vector3(1.0, 0.12, 0.0)
+	p.spread = 7.0
+	p.initial_velocity_min = 20.0
+	p.initial_velocity_max = 26.0
+	p.gravity = Vector3(0, 4.0, 0)
+	p.damping_min = 6.0
+	p.damping_max = 9.0
+	p.scale_amount_min = 0.7
+	p.scale_amount_max = 1.8
+	var teinte := Gradient.new()
+	teinte.add_point(0.0, Color(1.0, 0.95, 0.55, 1.0))
+	teinte.set_color(1, Color(1.0, 0.45, 0.1, 0.95))
+	teinte.add_point(0.55, Color(0.9, 0.2, 0.05, 0.8))
+	teinte.add_point(1.0, Color(0.15, 0.1, 0.08, 0.0))
+	p.color_ramp = teinte
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	p.material_override = m
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.position = Vector3(2.2, 3.2, 0.0)
+	# Une lumière au bout de la lance : la nuit, le feu éclaire la rue.
+	var lueur := OmniLight3D.new()
+	lueur.name = "Lueur"
+	lueur.light_color = Color(1.0, 0.55, 0.2)
+	lueur.light_energy = 2.2
+	lueur.omni_range = 16.0
+	lueur.shadow_enabled = false
+	lueur.position = Vector3(6.0, -1.0, 0.0)
+	p.add_child(lueur)
+	return p
+
+## L'ÉCLABOUSSURE : là où le jet retombe, des gouttes courtes qui giclent vers
+## le haut. Un jet qui retombe sans rien faire au sol est un jet qui traverse
+## le bitume. Posée dans le monde, pas sur le camion : elle reste au point de
+## chute.
+static func eclaboussure() -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.name = "Eclaboussure"
+	p.amount = 60
+	p.lifetime = 0.5
+	p.emitting = false
+	p.local_coords = false
+	var goutte := BoxMesh.new()
+	goutte.size = Vector3(0.35, 0.35, 0.35)
+	p.mesh = goutte
+	p.direction = Vector3(0, 1, 0)
+	p.spread = 70.0
+	p.initial_velocity_min = 5.0
+	p.initial_velocity_max = 11.0
+	p.gravity = Vector3(0, -24.0, 0)
+	p.scale_amount_min = 0.5
+	p.scale_amount_max = 1.1
+	var teinte := Gradient.new()
+	teinte.add_point(0.0, Color(0.9, 0.97, 1.0, 0.9))
+	teinte.set_color(1, Color(0.7, 0.85, 1.0, 0.7))
+	teinte.add_point(1.0, Color(0.7, 0.85, 1.0, 0.0))
+	p.color_ramp = teinte
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	m.roughness = 0.2
+	p.material_override = m
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return p
+
+## LA FLAQUE D'EAU : le bitume mouillé là où le camion a arrosé. Un disque
+## sombre et translucide, et au milieu un reflet de ciel plus clair — c'est
+## ce que fait le shader du sol sous la pluie, ramené à une tache. Elle
+## s'efface en une dizaine de secondes (`_animer_effets`).
+static func flaque_d_eau(rayon: float) -> Node3D:
+	var racine := Node3D.new()
+	var mouille := Decor.cylindre(rayon, 0.04, Color(0.10, 0.13, 0.20), false)
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.10, 0.13, 0.20, 0.5)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mouille.material_override = m
+	mouille.name = "Mouille"
+	racine.add_child(mouille)
+	var reflet := Decor.cylindre(rayon * 0.45, 0.05, Color(0.62, 0.68, 0.78), false)
+	var r := StandardMaterial3D.new()
+	r.albedo_color = Color(0.62, 0.68, 0.78, 0.35)
+	r.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	r.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	reflet.material_override = r
+	reflet.name = "Reflet"
+	reflet.position = Vector3(rayon * 0.15, 0.01, -rayon * 0.2)
+	racine.add_child(reflet)
+	return racine
+
+## Allumer ou éteindre la lance d'un camion (le joueur, un autre joueur, l'IA) :
+## l'eau ou le feu. Le nœud se pose à la première demande et reste, éteint,
+## ensuite ; on n'allume jamais les deux.
+static func regler_le_jet(camion: Node3D, actif: bool, feu: bool = false) -> void:
+	for nom in ["Jet", "Flamme"]:
+		var voulu: bool = actif and ((nom == "Flamme") == feu)
+		var noeud := camion.get_node_or_null(String(nom)) as CPUParticles3D
+		if noeud == null:
+			if not voulu:
+				continue
+			noeud = flammes_de_lance() if nom == "Flamme" else jet_d_eau()
+			camion.add_child(noeud)
+		noeud.emitting = voulu
+		var lueur := noeud.get_node_or_null("Lueur") as OmniLight3D
+		if lueur != null:
+			lueur.visible = voulu
+
 static func explosion() -> CPUParticles3D:
 	var p := CPUParticles3D.new()
 	p.amount = 46
@@ -1915,18 +2213,30 @@ static func explosion() -> CPUParticles3D:
 	p.gravity = Vector3(0, -5.0, 0)
 	p.damping_min = 3.0
 	p.damping_max = 5.0
-	p.scale_amount_min = 1.0
-	p.scale_amount_max = 2.6
+	p.scale_amount_min = 0.8
+	p.scale_amount_max = 2.2
+	# Du feu, puis de la SUIE — sombre, et qui s'efface vite. ⚠ La première
+	# rampe finissait en gris clair à demi opaque : vus de dessus, les cubes
+	# de fumée faisaient des confettis gris étalés sur trois pâtés.
 	var teinte := Gradient.new()
-	teinte.add_point(0.0, Color(1.0, 0.85, 0.5, 1.0))
-	teinte.set_color(1, Color(1.0, 0.45, 0.15, 0.95))
-	teinte.add_point(0.45, Color(0.25, 0.22, 0.2, 0.8))
-	teinte.add_point(1.0, Color(0.1, 0.1, 0.1, 0.0))
+	teinte.add_point(0.0, Color(1.0, 0.9, 0.6, 1.0))
+	teinte.set_color(1, Color(1.0, 0.5, 0.15, 1.0))
+	teinte.add_point(0.35, Color(0.16, 0.13, 0.11, 0.85))
+	teinte.add_point(0.7, Color(0.09, 0.08, 0.08, 0.45))
+	teinte.add_point(1.0, Color(0.05, 0.05, 0.05, 0.0))
 	p.color_ramp = teinte
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	# OMBRÉS, pas plats : un cube éclairé sur une face et sombre sur l'autre se
+	# lit comme un volume qui roule dans l'air ; un cube sans ombrage est un
+	# carré de papier.
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	m.roughness = 0.9
+	# ⚠ Pas d'émission sur la matière : elle ne suit PAS la couleur de sommet,
+	# et la suie de la fin de vie ressortait orange clair — des cubes de
+	# caramel qui volaient sur trois pâtés. Le feu du début luit par la
+	# lumière ponctuelle de `_effet_explosion`, c'est assez.
 	p.material_override = m
 	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return p

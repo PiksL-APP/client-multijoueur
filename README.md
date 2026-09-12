@@ -144,6 +144,10 @@ Tuer chez l'un coûte onze points chez lui et en rapporte cinq chez ses deux
 rivaux *du secteur* — trois morts pour se faire tirer dessus, et la sanction
 s'annonce deux fois avant de tomber. Brûler une de leurs voitures compte
 aussi, sinon on ferait le vide au lance-roquettes sans jamais fâcher personne.
+Et **le respect d'un district est une quantité fixe** — cent cinquante points
+pour trois gangs : ce que l'un vous donne au-delà, il le prend aux deux
+autres. On ne peut pas être couvert par deux gangs du même district, et Le
+Consortium, qui est des trois, coûte cinquante points aux locaux de chacun.
 Détail : `CONCEPTION-GANGS.md`.
 
 **Les alliés.** Au-dessus de quatre-vingts, un homme de gang ne se contente
@@ -160,6 +164,24 @@ tenir deux étoiles jusqu'au bout. Sous quarante de respect il n'a rien pour
 vous ; au-dessus de soixante le travail est plus dur et paie une fois et demie
 plus ; au-dessus de quatre-vingts, deux fois et demie. La prime se touche en
 argent ET en respect — et fâche d'autant le gang qu'on a servi contre lui.
+
+**Les repaires** (`CONCEPTION-REPAIRES-DE-GANG.md`). Cinq hommes traînent
+autour de chaque tag, et le repaire **s'ouvre à quatre-vingts** de respect :
+derrière la porte, une armurerie qu'on ne trouve nulle part ailleurs. À l'autre
+bout de la jauge, se tenir sur le tag d'un gang qui vous tire à vue ouvre un
+**raid** — cinq hommes du repaire à abattre, et il tombe : 2 600 $, le tag
+passe à vos couleurs, l'armurerie s'ouvre à vous, le gang n'y renaît plus. Et
+depuis le 11/09 **un repaire se défend** : abattre un des hommes du tag, ou
+ouvrir un raid, met tous ses camarades à vos trousses pendant vingt-cinq
+secondes, quoi que leur gang pense de vous par ailleurs. C'est le repaire qui
+se fâche, pas la jauge — un gang neutre dont on a saigné le repaire vous laisse
+tranquille trois rues plus loin. Dedans, **le patron à la table** confie les
+**missions du repaire**, plus longues et mieux payées que les contrats : la
+mallette d'un rival à rapporter sur le tag (120 s, 2 200 $), ou la tête de son
+lieutenant, un homme trois fois plus dur coiffé d'une flèche orange (100 s,
+2 600 $) — un seul travail en main à la fois. Chez soi, sur SA planque, `F`
+ouvre un appartement qui dépend du quartier et un menu au coffre : dépôt,
+retrait, travaux (`CONCEPTION-REPAIRES.md`).
 
 **La recherche monte en six crans** (`CONCEPTION-RECHERCHE.md`). Une voiture de
 patrouille, puis la police à pied, puis **le SWAT** dont le fourgon débarque
@@ -221,13 +243,18 @@ physique : sur un AZERTY, on appuie sur les lettres imprimées.
 Frenzy** — huit victimes en trente secondes, l'arme fournie ; la **course de
 taxi**, un métier attaché à une carrosserie (on devient chauffeur en volant un
 taxi) ; et les **cascades**, qui sont des FRÔLEMENTS faute d'axe vertical :
-passer au ras d'une voiture qui roule, à pleine vitesse, sans la toucher.
+passer au ras d'une voiture qui roule, à pleine vitesse, sans la toucher. Les
+**bonus nommés** crient leur nom en capitales : MEDICAL EMERGENCY (cinq passants
+écrasés en huit secondes, 900 $), WIPE OUT (trois voitures détruites en six
+secondes, 1 200 $), INSANE STUNT (la chaîne de frôlements au maximum, 600 $) —
+les deux premiers comptés par l'hôte, là où les victimes le sont déjà.
 
 **L'atelier.** Un garage de peinture sur deux vend aussi des modifications, sur
 cinq pastilles peintes en couronne : on se gare sur celle qu'on veut et `F`
 achète. Plaques maquillées (la recherche cesse de monter quarante-cinq
 secondes, elle ne redescend pas), mitrailleuse de bord, mines, taches d'huile,
-bombe qui saute six secondes après qu'on a quitté la voiture. Mines et flaques
+bombe armée en quittant la voiture — `H` à pied la fait sauter, où qu'elle
+soit, et le voleur qui prend le volant y reste. Mines et flaques
 vivent chez l'hôte comme les caisses ; une mine s'amorce avant de mordre, une
 flaque glisse aussi sous celui qui l'a posée. Détail : `CONCEPTION-ATELIER.md`.
 
@@ -521,7 +548,14 @@ lance, à cent cinquante pixels) et le Medicar RELÈVE (le joueur se remet
 debout tout de suite, à moitié soigné, au lieu d'attendre). Quand il n'y a
 plus rien à faire, le véhicule redevient civil et se fait oublier. Le camion
 de pompiers est le dix-neuvième gabarit : caisse rouge, échelle couchée sur le
-toit, bande blanche, deux gyrophares, tuyau enroulé à l'arrière.
+toit, bande blanche, deux gyrophares, tuyau enroulé à l'arrière. Et depuis le
+11/09 **la lance se voit et se tient** (§6.2) : un jet de gouttes en cubes qui
+retombe en arc, pour le camion de la ville comme pour celui qu'on vole — au
+volant, ESPACE n'y tire pas, il ARROSE. Le jet éteint ce qui brûle devant et
+couche les passants sans les blesser : la seule façon de traverser une foule
+sans l'écraser ni la fâcher. Et le **lance-flammes**, laissé par le patron
+d'un repaire à la première mission rendue : `F` au volant bascule la lance
+eau/feu, et le feu grille, brûle et allume des foyers qui se propagent.
 
 **La cabine dit ce que le gang pense de vous.** L'enseigne au-dessus de chaque
 téléphone porte une couleur par palier de respect — du rouge « on vous tire
@@ -538,15 +572,16 @@ sourd — jamais noire : une nuit noire vue de dessus, c'est un écran vide.
 `--nuit=<0..1>` (`?nuit=` dans l'URL) force l'heure pour photographier.
 
 **Le temps qu'il fait.** Sur la même horloge, un temps toutes les dix minutes
-— clair, couvert, pluie, orage ou brouillard, tiré du créneau et donc le même
+— clair, couvert, pluie, orage, brouillard ou neige, tiré du créneau et donc le même
 pour les quatre joueurs sans un octet de réseau (`MeteoCarnage`). Le couvert
 grise le ciel et le soleil et efface l'ombre ; la pluie mouille le bitume de
 jour (flaques, reflets, éclats d'impacts), trace ses traits sur l'écran, fait
 son bruit (synthétisé : le dossier des sons n'a pas de pluie) et retire 18 %
 d'adhérence ; l'orage ajoute l'éclair qui blanchit tout un dixième de seconde
 et le tonnerre qui arrive avec le retard de la distance ; le brouillard mange
-l'horizon. Pas une particule : des calques d'écran et des uniformes de shader,
-comme GTA 2. `--meteo=pluie` fige un temps, le code MÉTÉO passe au suivant,
+l'horizon ; la neige blanchit les toits, les trottoirs et les cimes, laisse
+la chaussée roulée, et retire 28 % d'adhérence. Pas une particule : des
+calques d'écran et des uniformes de shader, comme GTA 2. `--meteo=pluie` fige un temps, le code MÉTÉO passe au suivant,
 `--banc-eclair` tient l'éclair pour la photo. Sur sol mouillé, chaque flaque de
 lumière rend un trait allongé (le reflet), et un faisceau additif part des
 phares de toute voiture qui roule — une lueur par temps clair, un vrai coin de
@@ -562,10 +597,22 @@ leur faisceau. Le **gyrophare** d'une patrouille tourne pour de vrai : bleu puis
 rouge quatre fois par seconde, feu du toit et flaque additive au sol ensemble
 (`FormesCarnage.clignoter_gyrophare`) — deux cubes émissifs sur un toit ne se
 voient pas de soixante unités de haut, une rue qui passe au bleu puis au rouge,
-si. Le reste de l'ambiance est du shader : l'ombre des nuages qui
+si. Sur Pikstown, la ville dessinée, les lampadaires sont posés sans lumière :
+le jeu les retrouve **par leur maillage** (`FormesCarnage.maillages_de_lampadaires`)
+et leur accroche une flaque au sol (`_eclairer_les_lampadaires_dessines`), et
+leur tête s'allume dans le shader — ce qui est blanc à plus de six unités du
+sol sur un objet du kit est une lampe. ⚠ La flaque est posée à 0,6 unité :
+une tuile de route du kit fait 0,4 d'épaisseur et le mât est planté à sa base,
+une flaque au ras du mât restait dans l'asphalte. L'heure et la météo sont
+des **uniformes globaux** (`MatieresCarnage.GLOBAUX`) : chaque matière, même
+dupliquée hors de tout registre, suit la nuit et la pluie. Le reste de
+l'ambiance est du shader : l'ombre des nuages qui
 glisse sur la ville, le bitume qui se mouille la nuit, une ombre de contact
 multiplicative au pied de chaque immeuble (sans elle, ils flottent), les
-traces de pneus qu'on laisse en freinant, les étincelles d'une tôle qui racle
+traces de pneus qu'on laisse en freinant, l'onde de choc d'une explosion (un
+anneau au sol qui s'ouvre en un tiers de seconde — vu de dessus, c'est lui qui
+donne sa taille) et le rond noir qu'elle laisse jusqu'à la fin de la manche,
+les étincelles d'une tôle qui racle
 un mur, la poussière d'un cube qui part, et sur l'écran une vignette avec un
 grain léger qui rougit aux chocs. ⚠ Une matière additive doit couper le
 brouillard (`fog_disabled`) : sinon il peint un carré violet là où la flaque
@@ -773,10 +820,10 @@ code pur, et c'est ce qui permet de les interroger.
 
 ```bash
 godot --headless --path . res://outils/compiler.tscn   # tout se compile-t-il ?
-godot --headless --path . -s outils/respect.gd         # gangs, paliers, contrats, alliés
+godot --headless --path . -s outils/respect.gd         # gangs, paliers, contrats, alliés, raids, colère
 godot --headless --path . -s outils/atelier.gd         # baies, mines, huile, bombe, plaques
 godot --headless --path . -s outils/recherche.gd       # les six crans, les quatre corps, le char
-godot --headless --path . -s outils/missions.gd        # colis, Kill Frenzy, taxi
+godot --headless --path . -s outils/missions.gd        # colis, Kill Frenzy, taxi, bonus nommés, missions du repaire
 godot --headless --path . -s outils/train.gd           # la voie, les rames, les quais, le fauchage, la casse
 ./outils/apercu.sh TRAIN /tmp/rail.png rail 95         # une rame à quai, dans la ville
 ./outils/voir.sh "t:,t:quai,t:casse" 24                # la rame, le quai, le compacteur
@@ -787,6 +834,7 @@ godot --headless --path . -s outils/provisions.gd      # faim, soif, catalogue, 
 ./outils/tableau.sh /tmp/menu.png superette            # le menu de la supérette
 ./outils/tableau.sh /tmp/pause.png pause               # le menu de pause et la sortie
 ./outils/tableau.sh /tmp/triche.png triche             # les 18 codes du menu Konami
+./outils/tableau.sh /tmp/planque.png planque           # le menu du coffre, chez soi
 godot --path . --solo --banc-jeu=carnage --manche=40 --banc-subjectif --photo=/tmp/vues
 ./outils/apercu.sh PROVISIONS /tmp/sup.png superette 55 # la façade dans la ville
 ./outils/voir.sh "v:0+,v:13+,v:16+,v:18+" 11           # la mitrailleuse de toit sur quatre gabarits
@@ -822,7 +870,7 @@ n'en croisait aucun.
 
 `--manche` raccourcit la manche : attendre deux minutes par vérification,
 personne ne le fait deux fois. `--banc-etoiles=3` fait partir déjà recherché,
-`--meteo=clair|couvert|pluie|orage|brouillard` fige le temps, `--banc-eclair`
+`--meteo=clair|couvert|pluie|orage|brouillard|neige` fige le temps, `--banc-eclair`
 tient l'éclair allumé.
 `--banc-position=colonne,ligne` (en tuiles) fait partir ailleurs qu'au centre —
 sans ça, le banc ne photographie jamais le port ni la banlieue ; `=etoile`,

@@ -62,6 +62,35 @@ le suivant, jusqu'à ×5, soit 450 $.
 identifiant). Sans ça, longer une file de voitures rapportait quinze primes à
 la seconde.
 
+## Les bonus nommés (§4.3)
+
+GTA 2 crie un nom en lettres capitales quand on fait quelque chose d'énorme
+d'un coup — c'est ce qui manque à un combo, qui ne dit qu'un chiffre. Trois
+séries, chacune sa fenêtre :
+
+| bonus | il faut | fenêtre | prime |
+|---|---|---|---|
+| **MEDICAL EMERGENCY** | cinq passants **écrasés** | 8 s | 900 $ |
+| **WIPE OUT** | trois voitures détruites | 6 s | 1 200 $ |
+| **INSANE STUNT** | la chaîne de frôlements au maximum (×5) | — | 600 $, en plus du frôlement |
+
+Les deux premières vivent chez l'**hôte** (`VilleVivante.SERIES`,
+`_avancer_la_serie`), là où les victimes et les épaves sont déjà comptées : un
+client qui annoncerait ses propres exploits les inventerait. ⚠ **Écrasés, pas
+abattus** : `_abattre` porte déjà le drapeau `ecrase`, et cinq passants à la
+roquette ne sont pas un exploit — vérifié au banc. La série se **remet à zéro**
+quand elle paie : sinon le sixième passant rejouerait le bonus, et le septième,
+et l'annonce ne voudrait plus rien dire.
+
+L'INSANE STUNT est le seul à vivre chez le client, qui seul voit ses
+frôlements (`_compter_les_frolements`) ; quand la chaîne touche `CASCADE_MAX`,
+le bonus s'ajoute à la prime du frôlement et la chaîne repart de zéro.
+
+Tous paient par le guichet commun (`payer`, donc un « k » avec `q` =
+« bonus ») et s'annoncent à part (« bonus », avec leur nom) : le nom en
+capitales au milieu de l'écran, pour celui qui l'a fait seulement — un bonus
+qui s'annonce chez tout le monde ressemble à une publicité.
+
 ## Où ça vit
 
 | quoi | qui décide |
@@ -79,7 +108,7 @@ sur soi. Un montant négatif ne rapporte rien (vérifié au banc).
 ## Le banc
 
 ```bash
-godot --headless --path . -s outils/missions.gd   # semailles, colis, frenzy, taxi
+godot --headless --path . -s outils/missions.gd   # semailles, colis, frenzy, taxi, bonus nommés
 ./outils/voir.sh "d:colis,d:frenzy" 7             # les deux ramassages
 ```
 
@@ -91,8 +120,6 @@ l'écran : elle vit chez le client, qui ne se charge pas hors scène.
 
 ## Ce qui reste
 
-- les **bonus nommés** du guide (Insane Stunt, Medical Emergency, Wipe Out) :
-  on n'a qu'une sorte de cascade ;
 - le **taxi Xpress** et sa carrosserie (§7.1) ;
 - les colis sont **réapprovisionnés** autour des joueurs ; GTA 2 en cache cent
   à des endroits fixes, ce qui récompense la mémoire plutôt que le hasard.

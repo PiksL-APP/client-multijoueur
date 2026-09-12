@@ -120,6 +120,11 @@ func _ready() -> void:
 				"char": piece = FormesCarnage.char_arme()
 				"colis": piece = FormesCarnage.colis()
 				"frenzy": piece = FormesCarnage.icone_frenzy()
+				"mallette": piece = FormesCarnage.mallette()
+				"lieutenant":
+					# Le repère sur un homme de gang, comme le jeu le pose.
+					piece = FormesCarnage.pieton(Color("#ff9d2e"), true, "", false, FormesCarnage.PEAUX_GANG[0])
+					piece.add_child(FormesCarnage.repere_de_lieutenant())
 			piece.position = Vector3(x, 0, 0)
 			add_child(piece)
 			x += ecart

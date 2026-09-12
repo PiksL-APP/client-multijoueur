@@ -35,8 +35,8 @@ extends Node
 const CYCLE := 600.0          ## un temps dure dix minutes
 const TRANSITION := 45.0      ## et met quarante-cinq secondes à s'installer
 
-enum {CLAIR, COUVERT, PLUIE, ORAGE, BROUILLARD}
-const NOMS := ["clair", "couvert", "pluie", "orage", "brouillard"]
+enum {CLAIR, COUVERT, PLUIE, ORAGE, BROUILLARD, NEIGE}
+const NOMS := ["clair", "couvert", "pluie", "orage", "brouillard", "neige"]
 
 ## Les quatre jauges d'un temps. Tout le reste s'interpole entre elles.
 const TEMPS := [
@@ -45,10 +45,15 @@ const TEMPS := [
 	{"nuages": 0.95, "pluie": 0.8, "brume": 0.35, "orage": 0.0},
 	{"nuages": 1.0, "pluie": 1.0, "brume": 0.45, "orage": 1.0},
 	{"nuages": 0.6, "pluie": 0.0, "brume": 1.0, "orage": 0.0},
+	# LA NEIGE : une chape claire, l'air un peu voilé, et la jauge `neige`
+	# qui blanchit les toits, les trottoirs et les arbres. Rare — c'est ce qui
+	# fait qu'on s'en souvient.
+	{"nuages": 0.75, "pluie": 0.0, "brume": 0.25, "orage": 0.0, "neige": 1.0},
 ]
 ## Les poids du tirage : quatre créneaux sur dix au beau, l'orage et le
 ## brouillard rares — un temps rare se remarque, un temps fréquent s'oublie.
-const TIRAGE := [CLAIR, CLAIR, CLAIR, CLAIR, COUVERT, COUVERT, PLUIE, PLUIE, ORAGE, BROUILLARD]
+const TIRAGE := [CLAIR, CLAIR, CLAIR, CLAIR, COUVERT, COUVERT, PLUIE, PLUIE, ORAGE, BROUILLARD,
+	CLAIR, NEIGE]
 
 ## Le banc et les codes : `--meteo=pluie` ou le code MÉTÉO figent un temps.
 static var meteo_forcee := -1
@@ -58,12 +63,14 @@ var nuages := 0.0
 var pluie := 0.0
 var brume := 0.0
 var orage := 0.0
+var neige := 0.0
 var eclair := 0.0             ## l'éclair en cours, de 1 à 0 en un dixième de seconde
 
 var _prochain_eclair := 6.0
 var _tonnerre_dans := -1.0
 var _rng := RandomNumberGenerator.new()
 var _pluie_son: AudioStreamPlayer
+var _nappe: MeshInstance3D = null      ## la nappe de brume au ras du sol
 var _tonnerre: Callable = Callable()   ## (retard, force) -> void, posé par le jeu
 
 func _init() -> void:
@@ -92,8 +99,8 @@ static func jauges(t: float) -> Dictionary:
 	var a: Dictionary = TEMPS[temps_au_creneau(k - 1)]
 	var b: Dictionary = TEMPS[temps_au_creneau(k)]
 	var r := {}
-	for cle in ["nuages", "pluie", "brume", "orage"]:
-		r[cle] = lerpf(float(a[cle]), float(b[cle]), f)
+	for cle in ["nuages", "pluie", "brume", "orage", "neige"]:
+		r[cle] = lerpf(float(a.get(cle, 0.0)), float(b.get(cle, 0.0)), f)
 	return r
 
 func temps_courant() -> int:
@@ -105,12 +112,14 @@ func brancher_le_tonnerre(quoi: Callable) -> void:
 
 ## À appeler à chaque image, APRÈS `MatieresCarnage.regler_heure` : on
 ## retouche ce qu'il a réglé, on ne le remplace pas.
-func appliquer(delta: float, monde: WorldEnvironment, soleil: DirectionalLight3D, n: float) -> void:
+func appliquer(delta: float, monde: WorldEnvironment, soleil: DirectionalLight3D, n: float,
+		centre: Vector3 = Vector3.ZERO) -> void:
 	var j := jauges(Time.get_unix_time_from_system())
 	nuages = float(j["nuages"])
 	pluie = float(j["pluie"])
 	brume = float(j["brume"])
 	orage = float(j["orage"])
+	neige = float(j["neige"])
 	_animer_les_eclairs(delta)
 
 	var env := monde.environment
@@ -124,22 +133,29 @@ func appliquer(delta: float, monde: WorldEnvironment, soleil: DirectionalLight3D
 	ciel.sky_horizon_color = ciel.sky_horizon_color.lerp(gris_bas, voile)
 	ciel.ground_horizon_color = ciel.ground_horizon_color.lerp(gris_bas * 0.8, voile)
 	# Le soleil sous les nuages : plus faible, plus blanc, et une ombre qui
-	# s'efface — sous une chape, rien ne dessine une ombre nette au sol.
+	# s'adoucit — sous une chape, rien ne dessine une ombre nette au sol.
+	# ⚠ PAS PLUS BAS QUE LA MOITIÉ, et l'ombre reste : la première version
+	# coupait le soleil de moitié, montait l'ambiante de trente pour cent et
+	# effaçait l'ombre aux trois quarts — il ne restait qu'une bouillie
+	# grise sans relief. Un jour de pluie a des ombres, douces.
 	# ⚠ Moins fort la nuit : la « lumière du soleil » y est déjà la lueur bleue
 	# de 0,28, et lui retirer encore la moitié faisait une ville où l'on ne
-	# distinguait plus la rue du trottoir. Une nuit de pluie est plus sombre
-	# qu'une nuit claire, pas aveugle.
-	soleil.light_energy *= 1.0 - (0.55 * nuages + 0.25 * brume) * (1.0 - 0.6 * n)
-	soleil.light_color = soleil.light_color.lerp(Color("#cfd6de"), nuages * 0.7)
-	soleil.shadow_opacity = 1.0 - 0.75 * maxf(nuages, brume)
-	# L'ambiante monte un peu quand le soleil baisse : une lumière plate, pas
-	# une nuit en plein jour.
-	env.ambient_light_energy *= 1.0 + 0.3 * nuages
-	env.ambient_light_color = env.ambient_light_color.lerp(Color("#8d949c").lerp(Color("#232a38"), n), voile * 0.6)
-	# La brume : le brouillard mange l'horizon, la pluie épaissit un peu l'air.
-	env.fog_density += 0.0042 * brume + 0.0009 * pluie
-	env.fog_light_color = env.fog_light_color.lerp(Color("#9ea6ae").lerp(Color("#1a1e26"), n), maxf(brume, nuages * 0.5))
-	env.fog_sky_affect = 0.35 + 0.6 * brume
+	# distinguait plus la rue du trottoir.
+	soleil.light_energy *= 1.0 - (0.4 * nuages + 0.2 * brume) * (1.0 - 0.6 * n)
+	soleil.light_color = soleil.light_color.lerp(Color("#dfe3e8"), nuages * 0.6)
+	soleil.shadow_opacity = 1.0 - 0.45 * maxf(nuages, brume)
+	env.ambient_light_energy *= 1.0 + 0.12 * nuages
+	# La neige RENVOIE la lumière : l'ambiante monte franchement, et bleuit.
+	env.ambient_light_energy *= 1.0 + 0.2 * neige
+	env.ambient_light_color = env.ambient_light_color.lerp(Color("#b8c4d8"), neige * 0.5 * (1.0 - n))
+	env.ambient_light_color = env.ambient_light_color.lerp(Color("#9aa0a8").lerp(Color("#232a38"), n), voile * 0.5)
+	# Le brouillard d'ambiance ne fait qu'un peu : vu de dessus, c'est un
+	# voile uniforme. La brume qui se voit est la NAPPE au ras du sol (voir
+	# `MatieresCarnage.BRUME`).
+	env.fog_density += 0.0016 * brume + 0.0005 * pluie
+	env.fog_light_color = env.fog_light_color.lerp(Color("#a9b0b8").lerp(Color("#1a1e26"), n), maxf(brume, nuages * 0.5))
+	env.fog_sky_affect = 0.35 + 0.5 * brume
+	_poser_la_nappe(centre, n)
 	# L'air chargé d'eau fait baver les lumières : le halo monte un peu sous
 	# l'averse — les enseignes et les phares s'auréolent, la rue « brille ».
 	env.glow_intensity += 0.3 * pluie
@@ -150,8 +166,26 @@ func appliquer(delta: float, monde: WorldEnvironment, soleil: DirectionalLight3D
 		env.ambient_light_color = env.ambient_light_color.lerp(Color("#eef2ff"), eclair)
 		ciel.sky_top_color = ciel.sky_top_color.lerp(Color("#e6ecff"), eclair * 0.7)
 		ciel.sky_horizon_color = ciel.sky_horizon_color.lerp(Color("#f4f6ff"), eclair * 0.7)
-	MatieresCarnage.regler_meteo(pluie, nuages, brume, eclair, orage)
+	MatieresCarnage.regler_meteo(pluie, nuages, brume, eclair, orage, neige)
 	_regler_le_bruit_de_pluie()
+
+## La nappe de brume suit le joueur, à hauteur d'homme : les toits la
+## percent, les rues baignent dedans. Sa couleur suit l'heure — une brume
+## claire sur une nuit noire ferait une aube.
+func _poser_la_nappe(centre: Vector3, n: float) -> void:
+	if _nappe == null:
+		_nappe = MeshInstance3D.new()
+		var plan := PlaneMesh.new()
+		plan.size = Vector2(700.0, 700.0)
+		_nappe.mesh = plan
+		_nappe.material_override = MatieresCarnage.brume()
+		_nappe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_nappe.name = "Brume"
+		add_child(_nappe)
+	_nappe.visible = brume > 0.01 or pluie > 0.01
+	_nappe.position = Vector3(centre.x, 1.7, centre.z)
+	MatieresCarnage.brume().set_shader_parameter("couleur",
+		Color("#c9ced4").lerp(Color("#1c2029"), n))
 
 ## Un éclair toutes les cinq à seize secondes d'orage, jamais réglé comme une
 ## horloge ; le tonnerre suit avec le retard de la distance.

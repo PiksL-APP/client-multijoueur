@@ -2412,6 +2412,15 @@ func du_gang(indice: int) -> String:
 		return "du " + nom.substr(3)
 	return "de " + nom
 
+## « à Le Lierre » non plus : « au Lierre », « aux Braises », « à La Fonte ».
+func au_gang(indice: int) -> String:
+	var nom := nom_du_gang(indice)
+	if nom.begins_with("Les "):
+		return "aux " + nom.substr(4)
+	if nom.begins_with("Le "):
+		return "au " + nom.substr(3)
+	return "à " + nom
+
 func couleur_du_gang(indice: int) -> Color:
 	return GANGS[posmod(indice, GANGS.size())]["couleur"]
 
@@ -2536,7 +2545,7 @@ func peindre_secteur(image: Image, secteur: Vector2i) -> void:
 			var l := int(Vector2(lieu["p"]).y / PAS)
 			for dx in range(-1, 2):
 				for dy in range(-1, 2):
-					if c + dx >= 0 and l + dy >= 0 and c + dx < COLONNES and l + dy < LIGNES:
+					if c + dx >= 0 and l + dy >= 0 and c + dx < colonnes() and l + dy < lignes():
 						image.set_pixel(c + dx, l + dy, entree[1])
 
 ## Le nombre de fiches en cache : pour le journal du banc, qui vérifie que la

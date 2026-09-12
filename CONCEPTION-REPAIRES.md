@@ -356,9 +356,20 @@ changer.
 
 | poste | F | E |
 |---|---|---|
-| le coffre | déposer, puis payer les travaux | **retirer** |
+| le coffre | ouvrir le **menu de la planque** : déposer, retirer, payer les travaux | **retirer** |
 | la garde-robe | changer de tenue | — |
 | la porte | ressortir (**au volant** si on a le garage) | — |
+
+**Le menu de la planque** (`ui/planque.gd`, même charte que la supérette) a
+remplacé le `F` à l'aveugle qui déposait puis achetait « le prochain » travail
+sans le nommer : on payait cinq mille dollars un garage sans savoir ce qu'il
+gardait. Le menu montre les trois travaux, leur prix, ce qu'ils font, et
+lequel vient d'abord (l'ordre tient : coffre, arsenal, garage). Le premier
+travail n'avait d'ailleurs **aucun effet** — il était payé pour rien, et le
+menu le montrait bien : depuis, sans coffre-fort, la planque ne cache que
+4 000 $ « sous le matelas » (`MATELAS`), le dépôt s'arrête là et le dit. Au
+volant, `F` dépose seulement. `outils/tableau.sh /tmp/x.png planque`
+photographie le menu.
 
 **Retirer** manquait : le coffre était un puits, l'argent y entrait et n'en
 sortait plus, et on ne pouvait pas ressortir avec de quoi payer un hôpital. Il

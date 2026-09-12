@@ -168,6 +168,34 @@ const SEUIL_ALLIE := 80.0
 const RESPECT_PERDU := 11.0
 const RESPECT_GAGNE := 5.0
 
+## LE TRIANGLE DE RIVALITÉ (guide §3.1) : le respect d'un district est une
+## QUANTITÉ FIXE. Cent cinquante points pour trois gangs — ce qu'on a en
+## arrivant, cinquante partout — et ce que l'un vous donne au-delà, il le
+## prend aux deux autres, au prorata de ce qu'ils ont. On ne peut donc pas
+## être couvert par deux gangs du même district : à cent chez l'un, il reste
+## cinquante à partager entre les deux autres.
+##
+## ⚠ Avant, le triangle n'était vérifié que par les chiffres : un contrat
+## fâchait le rival visé de moitié, et c'est tout. En alternant les contrats
+## de deux gangs l'un contre l'autre, on montait chez les deux (+13 ici, −6,5
+## là, puis l'inverse) et l'on finissait ami avec tout le district — la jauge
+## ne demandait plus de choisir. Une contrainte, pas un réglage.
+##
+## Le Consortium compte dans les TROIS districts, et l'on tient les trois à
+## chaque fois qu'il monte : être couvert par lui, c'est laisser cinquante
+## points aux locaux de chaque district. C'est le prix du gang qu'on croise
+## partout — et sa jauge est une : le courtiser ici le fait payer là-bas.
+## ⚠ On a essayé de ne tenir que le district où ça se passe, pour qu'un mort
+## chez Les Braises ne coûte rien à La Fonte à l'autre bout de la ville. Mais
+## un district qu'on ne tient pas dérive au-dessus du plafond (Consortium à
+## cent gagné ailleurs, ses locaux toujours à cinquante), et le premier gain
+## qu'on y fait le remet d'équerre d'un coup : le Consortium tombait de cent à
+## quarante-six sur UN contrat. Une falaise ; l'autre règle est une pente.
+## Les PERTES, elles, sont libres : un district qu'on a saigné peut descendre
+## bien sous cent cinquante — c'est la somme qu'on ne peut pas dépasser, pas
+## celle qu'on doit tenir.
+const RESPECT_DU_DISTRICT := RESPECT_DEPART * 3.0
+
 ## Les cinq humeurs, et ce que le tableau de bord en dit. Un gang « vous
 ## couvre » : c'est la seule ligne qui promet de l'aide, elle doit se
 ## distinguer d'un « vous salue » qui ne promet rien.
@@ -204,8 +232,43 @@ const PALIERS_CONTRAT := [
 	{"nom": "difficile", "prime": 2.4, "plus": 2, "respect": RESPECT_CONTRAT * 1.3},
 ]
 
+## LES MISSIONS DU REPAIRE (guide §3). Une cabine confie un travail de rue —
+## trois hommes, une voiture, deux étoiles — et le paie en une minute. Le
+## patron d'un repaire, lui, confie ce qu'on ne demande pas à n'importe qui :
+## la MALLETTE d'un rival, gardée au milieu de son repaire et qu'il faut
+## RAPPORTER ici ; ou la tête de son LIEUTENANT, un homme qui encaisse trois
+## fois plus qu'un autre et que ses cinq gars entourent. Plus long (deux
+## minutes), plus rare (il faut la porte, donc quatre-vingts de respect), et
+## payé en conséquence : c'est ce que le palier allié donne d'autre que l'aide
+## en combat et le râtelier.
+##
+## ⚠ UNE MISSION OCCUPE LA MÊME PLACE QU'UN CONTRAT : on n'a qu'un travail en
+## main. Sinon on prenait la mission chez soi, puis un contrat à la cabine
+## d'en face, et le tableau de bord ne savait plus quel chrono montrer.
+const DUREE_MISSION := {"mallette": 120.0, "lieutenant": 100.0}
+const PRIME_MISSION := {"mallette": 2200, "lieutenant": 2600}
+const RESPECT_MISSION := 22.0
+const PV_LIEUTENANT := PV_GANG * 3
+## px depuis le tag du rival : la mallette est CHEZ EUX, pas devant chez eux.
+const MALLETTE_PRES := 100.0
+const MALLETTE_LOIN := 200.0
+
 const COMBO_FENETRE := 3.0
 const COMBO_MAX := 4              ## facteur maximum = COMBO_MAX + 1
+## LES BONUS NOMMÉS (§4.3). GTA 2 crie un nom en lettres capitales quand on
+## fait quelque chose d'énorme d'un coup : c'est ce qui manque à un combo, qui
+## ne dit qu'un chiffre. Trois séries, chacune sa fenêtre :
+##  • MEDICAL EMERGENCY : cinq passants ÉCRASÉS en huit secondes — écrasés, pas
+##    abattus : à la roquette, cinq passants d'un coup ne sont pas un exploit ;
+##  • WIPE OUT : trois voitures détruites en six secondes ;
+##  • INSANE STUNT : la chaîne de frôlements au maximum (côté client, qui seul
+##    voit les frôlements ; voir `_compter_les_frolements`).
+## La série se REMET À ZÉRO quand elle paie : sinon le sixième passant
+## rejouerait le bonus, et le septième, et l'annonce ne voudrait plus rien dire.
+const SERIES := {
+	"ecrases": {"nom": "MEDICAL EMERGENCY", "n": 5, "fenetre": 8.0, "prime": 900},
+	"epaves": {"nom": "WIPE OUT", "n": 3, "fenetre": 6.0, "prime": 1200},
+}
 
 var plan: PlanVille
 var gens: Array = []              ## {id,p,d,genre,gang,pv,etat,minuterie,recharge}
@@ -238,6 +301,7 @@ var _rng: RandomNumberGenerator
 var _prochain_id := 1
 var _depuis_crime: Dictionary = {}
 var _combos: Dictionary = {}
+var _series: Dictionary = {}      ## cle -> {ecrases: [instants], epaves: [instants]}
 var _depuis_gens := 0.0
 var _depuis_autos := 0.0
 var _depuis_caisse := 0.0
@@ -352,13 +416,46 @@ func gang_ami(cle: String, gang: int) -> bool:
 func gang_allie(cle: String, gang: int) -> bool:
 	return humeur(cle, gang) == H_ALLIE
 
-## Bouger UNE jauge. `delta` positif fait monter le respect.
+## Bouger UNE jauge. `delta` positif fait monter le respect — et le district
+## reprend l'excédent aux deux rivaux (le triangle).
 func _ajuster_respect(cle: String, gang: int, delta: float) -> void:
 	var jauge := respect_de(cle)
 	var i := posmod(gang, jauge.size())
 	jauge[i] = clamp(float(jauge[i]) + delta, 0.0, 100.0)
 	respect[cle] = jauge
+	if delta > 0.0:
+		_tenir_le_triangle(cle, i)
 	_diffuser_respect(cle)
+
+## Le district de `gang` ne dépasse pas RESPECT_DU_DISTRICT : ce qui déborde
+## est repris aux deux autres, au prorata de ce qu'ils ont — celui qui a le
+## plus paie le plus, et personne ne passe sous zéro. Le Consortium est de
+## tous les districts : on tient les trois.
+func _tenir_le_triangle(cle: String, gang: int) -> void:
+	var jauge := respect_de(cle)
+	var trios: Array = []
+	if gang == PlanVille.CONSORTIUM:
+		trios = PlanVille.TRIOS
+	else:
+		trios = [PlanVille.TRIOS[posmod(int(PlanVille.SECTEUR_DU_GANG[gang]), PlanVille.TRIOS.size())]]
+	for trio in trios:
+		var somme := 0.0
+		for g in trio:
+			somme += float(jauge[int(g)])
+		var trop := somme - RESPECT_DU_DISTRICT
+		if trop <= 0.0:
+			continue
+		var autres: Array = []
+		var ont := 0.0
+		for g in trio:
+			if int(g) != gang:
+				autres.append(int(g))
+				ont += float(jauge[int(g)])
+		if ont <= 0.0:
+			continue
+		for g in autres:
+			jauge[g] = clamp(float(jauge[g]) - trop * float(jauge[g]) / ont, 0.0, 100.0)
+	respect[cle] = jauge
 
 ## Un coup porté à un gang RETOMBE sur ses rivaux : c'est le triangle du
 ## guide (§3.2). Le point compte — voir `PlanVille.rivaux` : le Consortium
@@ -368,10 +465,16 @@ func _repercuter(cle: String, gang: int, ou: Vector2, perte: float, gain: float)
 	var jauge := respect_de(cle)
 	var vise := posmod(gang, jauge.size())
 	jauge[vise] = clamp(float(jauge[vise]) - perte, 0.0, 100.0)
+	respect[cle] = jauge
 	if gain != 0.0:
 		for autre in plan.rivaux(vise, ou):
 			jauge[int(autre)] = clamp(float(jauge[int(autre)]) + gain, 0.0, 100.0)
-	respect[cle] = jauge
+			respect[cle] = jauge
+			# Un mort chez A fait monter B et C : si l'un des deux déborde,
+			# le district reprend — chez A d'abord, qui vient de perdre, et
+			# chez l'autre. Le triangle tient même quand on ne fait que tirer.
+			_tenir_le_triangle(cle, int(autre))
+			jauge = respect_de(cle)
 	_diffuser_respect(cle)
 
 ## LES TROIS BARRES DU DISTRICT, prêtes à peindre : les deux gangs locaux puis
@@ -788,6 +891,9 @@ func _animer_les_gens(delta: float, joueurs: Dictionary) -> void:
 		var vitesse := VITESSE_MARCHE
 		var direction: Vector2 = personne["d"]
 		var proche := _menace_la_plus_proche(personne["p"], joueurs, 520.0)
+		if personne.has("colere"):
+			personne["colere"]["t"] = float(personne["colere"]["t"]) - delta
+		var vengeance := _cible_de_colere(personne, joueurs)
 		# Cherché UNE fois : `_a_epauler` parcourt toute la foule, et l'appeler
 		# dans la condition PUIS dans le corps doublait la facture à chaque
 		# image pour chaque homme de gang allié.
@@ -804,6 +910,12 @@ func _animer_les_gens(delta: float, joueurs: Dictionary) -> void:
 			elif float(personne["minuterie"]) <= 0.0:
 				personne["minuterie"] = _rng.randf_range(1.4, 3.0)
 				direction = Vector2.RIGHT.rotated(_rng.randf() * TAU)
+		elif genre == GANG and not vengeance.is_empty():
+			# La colère du repaire : il charge celui qui a touché aux siens,
+			# quoi qu'en pense sa bannière.
+			vitesse = VITESSE_GANG
+			direction = (Vector2(vengeance["p"]) - personne["p"]).normalized()
+			_tirer_sur(personne, vengeance, delta)
 		elif genre == GANG and not epaule.is_empty():
 			# Allié : il court vers CE QUI VOUS ATTAQUE et lui tire dessus.
 			vitesse = VITESSE_GANG
@@ -1456,6 +1568,11 @@ func abattre_par_id(id: int, cle: String, souffle: float) -> bool:
 		personne["pv"] = int(personne["pv"]) - (3 if souffle > 0.0 else 1)
 		if int(personne["pv"]) <= 0:
 			_abattre(personne, cle, false)
+		elif est_lieutenant(personne) and personne.has("attache"):
+			# Toucher le lieutenant sans l'abattre suffit à sortir le repaire :
+			# il a neuf points de tôle, et pendant les huit balles qui restent,
+			# ses cinq gars ne regardaient pas. Ils regardent.
+			facher_le_repaire(Vector2(personne["attache"]), cle)
 	return true
 
 ## Retire un objet de sa liste par IDENTIFIANT, et libère son maillage. Deux
@@ -1486,7 +1603,13 @@ func _abattre(personne: Dictionary, cle: String, ecrase: bool) -> void:
 		_repercuter(cle, int(personne["gang"]), Vector2(personne["p"]), RESPECT_PERDU, RESPECT_GAGNE)
 		_avancer_nettoyage(cle, int(personne["gang"]))
 		_compter_pour_le_raid(cle, personne)
+		if personne.has("attache"):
+			facher_le_repaire(Vector2(personne["attache"]), cle)
+		if personne.has("lieutenant"):
+			_tomber_le_lieutenant(personne)
 	_compter(cle, Vector2(personne["p"]), int(POINTS[quoi]), quoi, ecrase)
+	if ecrase:
+		_avancer_la_serie(cle, "ecrases", Vector2(personne["p"]))
 	_avancer_frenzy(cle, Vector2(personne["p"]))
 	# Ce qu'il laisse par terre. Un gang armé lâche son arme une fois sur
 	# trois ; un passant, un billet une fois sur six, une trousse une fois sur
@@ -1519,6 +1642,7 @@ func detruire_auto(auto: Dictionary, cle: String) -> void:
 	auto["vitesse"] = 0.0
 	crime(cle, "auto")
 	_compter(cle, Vector2(auto["p"]), int(POINTS["auto"]), "auto", false)
+	_avancer_la_serie(cle, "epaves", Vector2(auto["p"]))
 	emettre("boum", {"x": int(auto["p"].x), "y": int(auto["p"].y)})
 	# Une carcasse brûle : c'est de là que part tout le reste (la propagation,
 	# les pompiers, la fumée qu'on voit de trois rues).
@@ -1545,6 +1669,31 @@ func _compter(cle: String, ou: Vector2, base: int, quoi: String, avec_combo: boo
 		"j": cle, "x": int(ou.x), "y": int(ou.y),
 		"p": base * facteur, "f": facteur, "q": quoi,
 	})
+
+## Une série avance d'un cran ; quand elle atteint son compte dans sa fenêtre,
+## le bonus paie par le guichet commun (`payer`, donc « k » avec `q` =
+## « bonus ») et s'annonce à part (« bonus », avec son nom) — l'annonce est ce
+## qui compte, l'argent vient avec.
+func _avancer_la_serie(cle: String, quelle: String, ou: Vector2) -> void:
+	if cle == "" or not SERIES.has(quelle):
+		return
+	var fiche: Dictionary = SERIES[quelle]
+	var maintenant := float(Time.get_ticks_msec()) / 1000.0
+	var mienne: Dictionary = _series.get(cle, {})
+	var instants: Array = mienne.get(quelle, [])
+	instants.append(maintenant)
+	# On ne garde que ce qui tient dans la fenêtre.
+	var gardes: Array = []
+	for t in instants:
+		if maintenant - float(t) <= float(fiche["fenetre"]):
+			gardes.append(t)
+	if gardes.size() >= int(fiche["n"]):
+		gardes.clear()
+		payer(cle, ou, int(fiche["prime"]), "bonus")
+		emettre("bonus", {"j": cle, "n": String(fiche["nom"]), "m": int(fiche["prime"]),
+			"x": int(ou.x), "y": int(ou.y)})
+	mienne[quelle] = gardes
+	_series[cle] = mienne
 
 ## Élimination d'un joueur par un autre, en arène. Passe par le même chemin
 ## que le reste pour que le tableau et les effets soient identiques.
@@ -1573,6 +1722,119 @@ func arroser(point: Vector2, rayon: float, delta: float) -> void:
 	for f in feux:
 		if Vector2(f["p"]).distance_to(point) <= rayon:
 			f["force"] = float(f["force"]) - delta * 0.85
+
+## LE CANON À EAU (guide §6.2) : au volant d'un camion de pompiers, ESPACE
+## ne tire pas, il ARROSE. Le jet part de la cabine et porte deux cent
+## quarante pixels, dans un cône étroit : il éteint ce qui brûle dedans, et il
+## COUCHE les passants — poussés le long du jet, puis en fuite. Il ne blesse
+## personne : c'est ce qui en fait autre chose qu'une mitrailleuse bleue, et
+## la seule façon de traverser une foule sans l'écraser ni la fâcher.
+##
+## ⚠ Avant, le camion volé était un camion comme un autre : la lance ne
+## servait qu'à l'IA, et « on la voit arroser » n'était vrai nulle part — le
+## feu baissait, sans jet. Le jet est maintenant dessiné chez tout le monde,
+## pour l'IA comme pour le joueur (`arrose`, dans l'instantané et le paquet du
+## joueur).
+const PORTEE_JET := 240.0
+const ANGLE_JET := 0.30            ## rad : le demi-angle du cône
+const POUSSEE_JET := 260.0         ## px/s : ce que le jet fait reculer
+
+func _dans_le_jet(depart: Vector2, axe: Vector2, point: Vector2, marge: float) -> bool:
+	var vers := point - depart
+	var loin := vers.length()
+	if loin < 1.0 or loin > PORTEE_JET + marge:
+		return false
+	return abs(axe.angle_to(vers)) <= ANGLE_JET + marge / max(loin, 1.0)
+
+## Arroser devant soi pendant `delta`. Renvoie ce que le jet a touché — le
+## banc s'en sert, le jeu n'en a pas besoin.
+func arroser_devant(depart: Vector2, angle: float, delta: float) -> Dictionary:
+	var axe := Vector2.RIGHT.rotated(angle)
+	var touches := {"feux": 0, "gens": 0}
+	for f in feux:
+		if _dans_le_jet(depart, axe, f["p"], RAYON_FEU):
+			# Plus fort que la lance de l'IA (0,85) : le joueur vise, lui.
+			f["force"] = float(f["force"]) - delta * 1.3
+			touches["feux"] += 1
+	for personne in gens:
+		if not _dans_le_jet(depart, axe, personne["p"], 12.0):
+			continue
+		# Poussé le long du jet, sans traverser un mur, et en fuite — dans la
+		# direction du jet, pas au hasard : on ne revient pas vers la lance.
+		var degage := plan.degager(Vector2(personne["p"]) + axe * POUSSEE_JET * delta, RAYON_PIETON)
+		personne["p"] = degage[0]
+		personne["etat"] = 1
+		personne["fuite"] = max(float(personne.get("fuite", 0.0)), 1.2)
+		personne["d"] = axe
+		personne["a"] = axe.angle()
+		touches["gens"] += 1
+	return touches
+
+## LE LANCE-FLAMMES (guide §6.2) : la même lance, mais elle crache du feu.
+## Il ne s'achète pas — c'est le PATRON D'UN REPAIRE qui le laisse, la
+## première fois qu'on lui rend une mission : « gardez ça ». Au volant d'un
+## camion de pompiers, `F` bascule eau/feu et ESPACE crache. Dans le cône :
+## les passants grillent (un point de tôle par tiers de seconde), les voitures
+## des autres brûlent (quarante-cinq points par seconde), et un foyer
+## s'allume au bout du jet — qui se propage tout seul ensuite. Ça se voit, et
+## la police le sait : un coup de feu toutes les secondes et demie.
+##
+## ⚠ Il ne touche PAS les autres joueurs : ils ne se blessent qu'en arène, et
+## le feu n'a pas de raison d'être la première arme à passer outre. Un jour,
+## si l'arène le demande.
+const PORTEE_FLAMME := 170.0
+const ANGLE_FLAMME := 0.26
+const GRIL_PAR_SECONDE := 3.0      ## points de tôle par seconde sur un passant
+const BRULURE_AUTO := 45.0         ## points de tôle par seconde sur une voiture
+var lance_flammes: Dictionary = {} ## cle -> vrai : le patron le lui a laissé
+var _depuis_flamme: Dictionary = {}
+
+func a_le_lance_flammes(cle: String) -> bool:
+	return bool(lance_flammes.get(cle, false))
+
+## Cracher devant soi pendant `delta`. Renvoie ce que le feu a touché.
+func enflammer_devant(cle: String, depart: Vector2, angle: float, delta: float) -> Dictionary:
+	var touches := {"gens": 0, "autos": 0, "feux": 0}
+	if not a_le_lance_flammes(cle):
+		return touches
+	var axe := Vector2.RIGHT.rotated(angle)
+	var portee := PORTEE_FLAMME
+	for personne in gens.duplicate():
+		var vers: Vector2 = Vector2(personne["p"]) - depart
+		if vers.length() > portee or abs(axe.angle_to(vers)) > ANGLE_FLAMME:
+			continue
+		# La tôle d'un passant est un entier : on accumule, et chaque point
+		# entier tombe. Sans ça, un delta d'un soixantième ne retirait rien.
+		personne["gril"] = float(personne.get("gril", 0.0)) + delta * GRIL_PAR_SECONDE
+		while float(personne["gril"]) >= 1.0 and int(personne["pv"]) > 0:
+			personne["gril"] = float(personne["gril"]) - 1.0
+			personne["pv"] = int(personne["pv"]) - 1
+		personne["etat"] = 1
+		personne["fuite"] = max(float(personne.get("fuite", 0.0)), 1.5)
+		personne["d"] = axe
+		touches["gens"] += 1
+		if int(personne["pv"]) <= 0:
+			_abattre(personne, cle, false)
+	for auto in autos:
+		if String(auto["pilote"]) == cle or int(auto["genre"]) == EPAVE:
+			continue
+		var vers: Vector2 = Vector2(auto["p"]) - depart
+		if vers.length() > portee + 20.0 or abs(axe.angle_to(vers)) > ANGLE_FLAMME + 0.1:
+			continue
+		auto["pv"] = float(auto["pv"]) - BRULURE_AUTO * delta
+		touches["autos"] += 1
+		if float(auto["pv"]) <= 0.0:
+			detruire_auto(auto, cle)
+	# Un foyer au bout du jet, toutes les six dixièmes : c'est de là que
+	# part l'incendie — et l'alerte, et les pompiers, et la police.
+	_depuis_flamme[cle] = float(_depuis_flamme.get(cle, 9.0)) + delta
+	if float(_depuis_flamme[cle]) >= 0.6:
+		_depuis_flamme[cle] = 0.0
+		allumer(depart + axe * portee * 0.85, 0.45)
+		touches["feux"] += 1
+		crime(cle, "coup_de_feu")
+		paniquer(depart, 340.0, 2.0)
+	return touches
 
 func feu_le_plus_proche(point: Vector2) -> Dictionary:
 	var meilleur: Dictionary = {}
@@ -1700,12 +1962,16 @@ func _conduire_service(auto: Dictionary, delta: float, joueurs: Dictionary) -> v
 	var trouve := false
 	if int(auto["genre"]) == POMPIER:
 		var f := feu_le_plus_proche(auto["p"])
+		auto["arrose"] = false
 		if not f.is_empty():
 			cible = f["p"]
 			trouve = true
 			if Vector2(auto["p"]).distance_to(cible) <= PORTEE_LANCE:
 				arroser(cible, PORTEE_LANCE, delta)
 				auto["service"] = float(auto.get("service", 0.0)) + delta
+				# Le jet se voit : le client le dessine tant que ce drapeau
+				# voyage dans l'instantané.
+				auto["arrose"] = true
 	else:
 		var meilleure := INF
 		for cle in joueurs:
@@ -1750,7 +2016,11 @@ func _conduire_service(auto: Dictionary, delta: float, joueurs: Dictionary) -> v
 ## ⚠ Pourquoi ils comptent : sans eux, une manche de Carnage est un bac à
 ## sable où l'on tourne en rond entre deux contrats. Un colis qui brille à
 ## trois rues donne une RAISON de tourner à droite.
-enum { R_COLIS, R_FRENZY }
+## R_MALLETTE : la mallette d'une mission de repaire. Elle est un ramassage
+## comme un colis — même rayon, même geste, même vocabulaire de « ramasse-moi »
+## — mais elle n'est PAS semée par la ville : c'est `proposer_mission` qui la
+## pose, et `pour` dit à qui elle est.
+enum { R_COLIS, R_FRENZY, R_MALLETTE }
 const COLIS_EN_VILLE := 8         ## ce que la ville garde de colis posés
 const COLIS_OBJECTIF := 10        ## la collection complète, et sa prime
 const PRIME_COLIS := 220
@@ -1798,6 +2068,15 @@ func ramasser_a_cote(id: int, cle: String, ou: Vector2) -> void:
 		if int(r["id"]) != id:
 			continue
 		var genre := int(r["genre"])
+		if genre == R_MALLETTE:
+			# ⚠ LA MALLETTE N'EST À PERSONNE D'AUTRE. Un coéquipier qui la
+			# ramasse pour rendre service la faisait disparaître de la mission
+			# de celui qui l'a prise — et lui, il courait vers un point vide.
+			if String(r.get("pour", "")) != cle:
+				return
+			retirer(ramassages, id)
+			_prendre_la_mallette(cle)
+			return
 		retirer(ramassages, id)
 		if genre == R_COLIS:
 			colis[cle] = int(colis.get(cle, 0)) + 1
@@ -1879,33 +2158,79 @@ const DUREE_HUILE := 26.0
 const DEGAT_MINE := 70.0          ## une voiture n'y survit pas deux fois
 var pieges: Array = []            ## {id, p, genre, par, reste, amorce}
 
-## LA BOMBE (guide §7.2) : elle ne se déclenche pas à distance, elle attend
-## qu'on soit SORTI. C'est le piège à voleur de GTA 2 — on laisse sa voiture
-## ouverte au milieu de la rue, quelqu'un monte, et la rue change de forme.
+## LA BOMBE (guide §7.2) s'arme quand on est SORTI, et elle saute de deux
+## façons — les deux de GTA 2 :
+##  • À DISTANCE : à pied, le klaxon (`H`, qui ne sert à rien sans volant)
+##    est le détonateur. Toutes les voitures qu'on a piégées sautent d'un coup,
+##    où qu'elles soient — c'est ce qui fait de la bombe une arme : on gare
+##    la voiture au milieu d'un repaire, on s'éloigne, on appuie ;
+##  • AU VOL : un autre joueur qui prend le volant la déclenche, et il y
+##    reste. C'est le piège à voleur — on laisse sa voiture ouverte au milieu
+##    de la rue, quelqu'un monte, et la rue change de forme.
+##
+## ⚠ Elle attendait SIX SECONDES puis sautait toute seule. C'était un pétard à
+## retardement, pas une bombe : on n'avait ni le temps de la garer où il faut,
+## ni le choix du moment, et personne ne montait jamais dedans en six
+## secondes. Le guide parle d'une bombe DÉCLENCHÉE, et la touche qui manquait
+## était là depuis le début — un klaxon à pied.
 ##
 ## ⚠ Elle est armée par l'HÔTE et attachée à l'identifiant du VÉHICULE, pas au
 ## joueur : sinon un joueur qui se déconnecte emporterait la bombe avec lui et
-## la voiture piégée resterait piégée pour l'éternité.
-var bombes: Dictionary = {}       ## id de véhicule -> {reste, par}
-const BOMBE_DELAI := 6.0
+## la voiture piégée resterait piégée pour l'éternité. Elle s'oublie avec la
+## voiture : une épave n'a plus rien à faire sauter.
+var bombes: Dictionary = {}       ## id de véhicule -> {par}
 
 func armer_bombe(cle: String, id: int) -> void:
-	bombes[id] = {"reste": BOMBE_DELAI, "par": cle}
+	bombes[id] = {"par": cle}
 
-func _animer_les_bombes(delta: float) -> void:
+## Le détonateur : tout ce que `cle` a piégé saute maintenant. Renvoie combien.
+func declencher_les_bombes(cle: String) -> int:
+	var combien := 0
 	for id in bombes.keys():
-		var fiche: Dictionary = bombes[id]
-		fiche["reste"] = float(fiche["reste"]) - delta
-		if float(fiche["reste"]) > 0.0:
+		if String(bombes[id]["par"]) != cle:
 			continue
 		bombes.erase(id)
-		for auto in autos:
-			if int(auto["id"]) != int(id) or int(auto["genre"]) == EPAVE:
-				continue
-			# Celui qui a posé la bombe marque la voiture : c'est son piège,
-			# même s'il est à trois rues de là quand elle saute.
-			detruire_auto(auto, String(fiche["par"]))
-			break
+		var auto := auto_par_id(int(id))
+		if auto.is_empty() and PlanVille.est_dormante(int(id)):
+			# Une voiture qu'on a laissée là où la ville la garait dort à
+			# nouveau : on la réveille pour la faire sauter, sinon le détonateur
+			# ne fait rien et le joueur croit la bombe éventée.
+			auto = reveiller(int(id))
+		if auto.is_empty() or int(auto["genre"]) == EPAVE:
+			continue
+		# Celui qui a posé la bombe marque la voiture : c'est son piège, même
+		# s'il est à trois rues de là quand elle saute.
+		detruire_auto(auto, cle)
+		combien += 1
+	emettre("deto", {"j": cle, "n": combien})
+	return combien
+
+## Un autre que le poseur prend le volant : la voiture saute sous lui. Vrai
+## si la bombe a parlé — l'appelant n'accorde alors pas le véhicule.
+func _piege_du_volant(cle: String, auto: Dictionary) -> bool:
+	var id := int(auto["id"])
+	if not bombes.has(id):
+		return false
+	var par := String(bombes[id]["par"])
+	if par == cle:
+		# Le poseur remonte dans sa propre voiture : elle ne saute pas, et
+		# elle reste armée pour la prochaine fois qu'il en descend.
+		return false
+	bombes.erase(id)
+	detruire_auto(auto, par)
+	# Cent points de vie : on ne survit pas à une voiture qui explose sous
+	# soi — c'est le seul dégât du jeu qui ne laisse rien au Medicar.
+	emettre("deg", {"j": cle, "d": 100, "k": "bombe"})
+	emettre("deto", {"j": par, "n": 1, "id": id, "vol": cle})
+	return true
+
+## Ce qui reste armé sur une épave ne sert plus à rien : on l'oublie, sinon le
+## détonateur comptait des voitures qui ont déjà brûlé.
+func _animer_les_bombes(_delta: float) -> void:
+	for id in bombes.keys():
+		var auto := auto_par_id(int(id))
+		if not auto.is_empty() and int(auto["genre"]) == EPAVE:
+			bombes.erase(id)
 
 func poser_piege(cle: String, ou: Vector2, genre: int) -> int:
 	if pieges.size() >= PIEGES_MAX:
@@ -2247,6 +2572,14 @@ func train_par_id(id: int) -> Dictionary:
 ## ne perd rien qu'on n'ait déjà perdu.
 const RAID_HOMMES := PAR_REPAIRE       ## tout le monde, pas une partie
 const RAID_DELAI := 22.0               ## s : le temps qu'on a pour finir après le premier
+## LA COLÈRE DU REPAIRE : quand un des hommes du tag tombe, ou qu'un raid
+## s'ouvre, TOUS les hommes du repaire chargent le coupable pendant ce temps —
+## qu'importe ce que leur gang pensait de lui. ⚠ Sans ça, un repaire neutre
+## regardait ses gars mourir un par un sans bouger : on abattait cinq hommes
+## d'affilée sous le tag, ils continuaient à flâner. Un repaire est un lieu
+## qui se défend, pas une rue comme une autre.
+const COLERE_DUREE := 25.0             ## s : le temps qu'ils vous cherchent après le dernier affront
+const COLERE_PORTEE := 700.0           ## px : au-delà, ils vous perdent de vue et rentrent
 const PRIME_RAID := 2600               ## ce que le quartier rapporte une fois pris
 
 ## repaire -> {j, gang} : qui l'a pris. Diffusé, parce que la ville entière
@@ -2280,6 +2613,30 @@ func tenir_le_terrain(cle: String, id: int, ou: Vector2, gang: int) -> void:
 	raids[cle] = {"id": id, "p": ou, "gang": gang, "restants": RAID_HOMMES, "reste": RAID_DELAI}
 	emettre("raid", {"j": cle, "e": "ouvre", "g": gang, "n": RAID_HOMMES,
 		"x": int(ou.x), "y": int(ou.y)})
+	# Un raid qui s'ouvre, c'est le repaire entier qui sort : sinon on tenait
+	# le tag pendant que ses gars faisaient les cent pas autour.
+	facher_le_repaire(ou, cle)
+
+## Tous les hommes attachés à ce tag prennent `cle` en chasse.
+func facher_le_repaire(tag: Vector2, cle: String) -> void:
+	if cle == "":
+		return
+	for personne in gens:
+		if int(personne["genre"]) == GANG and personne.has("attache") and Vector2(personne["attache"]) == tag:
+			personne["colere"] = {"j": cle, "t": COLERE_DUREE}
+
+## L'homme en colère : celui qu'il chasse, s'il est encore là et à portée.
+func _cible_de_colere(personne: Dictionary, joueurs: Dictionary) -> Dictionary:
+	if not personne.has("colere"):
+		return {}
+	var colere: Dictionary = personne["colere"]
+	var cle := String(colere["j"])
+	if float(colere["t"]) <= 0.0 or not joueurs.has(cle) or float(joueurs[cle].get("vie", 100.0)) <= 0.0:
+		return {}
+	var j: Dictionary = joueurs[cle]
+	if Vector2(j["p"]).distance_to(personne["p"]) > COLERE_PORTEE:
+		return {}
+	return {"cle": cle, "p": j["p"], "pied": bool(j.get("pied", true))}
 
 ## Un homme du gang est tombé. Appelée depuis `_abattre`, pour tous les morts —
 ## c'est elle qui décide si celui-là comptait.
@@ -2492,12 +2849,166 @@ func proposer_contrat(cle: String, cabine: int, position: Vector2) -> void:
 
 func _diffuser_contrat(cle: String, etat: String) -> void:
 	var c: Dictionary = contrats.get(cle, {})
-	emettre("ctr", {
+	var charge := {
 		"j": cle, "e": etat,
 		"t": String(c.get("texte", "")), "n": int(c.get("objectif", 0)),
 		"a": int(c.get("fait", 0.0)), "r": int(ceil(float(c.get("reste", 0.0)))),
 		"k": String(c.get("genre", "")), "g": int(c.get("rival", -1)),
-	})
+	}
+	# Une mission de repaire vise un POINT — la mallette, puis le tag où la
+	# rapporter ; le repaire où le lieutenant traîne. Le radar le pointe comme
+	# il pointe une course de taxi. Un contrat de cabine, lui, laisse le client
+	# chercher le repaire ou le garage le plus proche : il n'a pas de point.
+	if c.has("cible"):
+		charge["x"] = int(Vector2(c["cible"]).x)
+		charge["y"] = int(Vector2(c["cible"]).y)
+	emettre("ctr", charge)
+
+# ------------------------------------------------------------ les missions du repaire
+
+## Le patron confie un travail. On est DANS le repaire (donc allié, ou son
+## preneur) ; `ou` est le tag, là où l'on ressort et où l'on rapporte.
+## `voulu` force le genre — le banc s'en sert, le jeu tire.
+func proposer_mission(cle: String, gang: int, ou: Vector2, voulu: String = "") -> void:
+	if cle == "":
+		return
+	var patron := plan.nom_du_gang(gang)
+	if contrats.has(cle):
+		emettre("ctr", {"j": cle, "e": "refuse", "n": 0, "a": 0, "r": 0, "g": gang,
+			"t": "%s : finissez d'abord ce que vous avez en main" % patron})
+		return
+	# ⚠ ON VÉRIFIE LE RESPECT ICI AUSSI, pas seulement à la porte : un repaire
+	# PRIS s'ouvre à son preneur quel que soit le respect, et ses hommes sont
+	# partis — il n'y a plus de patron pour confier quoi que ce soit.
+	if respect_pour(cle, gang) < SEUIL_ALLIE:
+		emettre("ctr", {"j": cle, "e": "refuse", "n": 0, "a": 0, "r": 0, "g": gang,
+			"t": "%s ne confie rien sous %d de respect (vous : %d)" % [
+				patron, int(SEUIL_ALLIE), int(respect_pour(cle, gang))]})
+		return
+	var repaire := _repaire_a_viser(gang, ou, voulu != "")
+	if repaire.is_empty():
+		emettre("ctr", {"j": cle, "e": "refuse", "n": 0, "a": 0, "r": 0, "g": gang,
+			"t": "%s : rien pour vous — leurs rivaux n'ont plus de repaire par ici" % patron})
+		return
+	var rival := int(repaire["gang"])
+	var genre: String = voulu if DUREE_MISSION.has(voulu) else String(["mallette", "lieutenant"][_rng.randi_range(0, 1)])
+	var chez: Vector2 = repaire["p"]
+	var c := {
+		"genre": genre, "employeur": gang, "rival": rival, "fait": 0.0,
+		"reste": float(DUREE_MISSION[genre]), "p": ou, "retour": ou,
+		"prime": int(PRIME_MISSION[genre]), "respect": RESPECT_MISSION,
+	}
+	if genre == "mallette":
+		# La mallette est CHEZ EUX : entre cent et deux cents pixels du tag,
+		# c'est-à-dire au milieu de leurs cinq gars. Posée à trois cents, on
+		# la prenait depuis la rue d'en face sans que personne ne bouge.
+		var objet := {"id": _id(), "genre": R_MALLETTE, "arme": "", "pour": cle,
+			"p": plan.point_de_rue(_rng, chez, MALLETTE_PRES, MALLETTE_LOIN)}
+		ramassages.append(objet)
+		c["objectif"] = 2
+		c["objet"] = int(objet["id"])
+		c["cible"] = objet["p"]
+		c["texte"] = "%s veut la mallette %s — elle est à leur repaire" % [patron, plan.du_gang(rival)]
+	else:
+		# Le lieutenant est un homme du repaire comme les autres — attaché au
+		# tag, donc jamais oublié par la ville, et protégé par la colère de ses
+		# gars quand on le touche — avec trois fois leur tôle. C'est ce qui en
+		# fait une cible et pas un passant de plus.
+		var homme := {
+			"id": _id(), "p": plan.point_de_rue(_rng, chez, 30.0, PlanVille.RAYON_REPAIRE * 0.8),
+			"d": Vector2.RIGHT.rotated(_rng.randf() * TAU),
+			"genre": GANG, "gang": rival, "pv": PV_LIEUTENANT,
+			"etat": 0, "minuterie": _rng.randf_range(0.5, 2.0), "recharge": 0.0, "a": 0.0,
+			"attache": chez, "lieutenant": cle,
+		}
+		gens.append(homme)
+		c["objectif"] = 1
+		c["homme"] = int(homme["id"])
+		c["cible"] = chez
+		c["texte"] = "%s veut la tête du lieutenant %s — il est à leur repaire" % [patron, plan.du_gang(rival)]
+	contrats[cle] = c
+	_diffuser_contrat(cle, "pris")
+
+## Le repaire où la mission envoie. D'abord un RIVAL du trio qui a encore un
+## repaire par ici — un rival dont on a pris le repaire n'a plus de mallette à
+## garder ni de lieutenant à protéger, et pointer un tag vide, c'est deux
+## minutes à tourner autour. À défaut, n'importe quel autre gang qui a un
+## repaire : sur une ville dessinée, les gangs sont posés par île et le trio
+## du secteur n'y veut rien dire. `n_importe_lequel` (le banc, pour une photo)
+## accepte même un repaire du gang employeur — Pikstown, au 11/09, n'a que
+## ceux de La Fonte.
+func _repaire_a_viser(gang: int, ou: Vector2, n_importe_lequel: bool) -> Dictionary:
+	var rivaux: Array = plan.rivaux(gang, ou).duplicate()
+	rivaux.shuffle()
+	for candidat in rivaux:
+		var r: Dictionary = plan.repaire_le_plus_proche(ou, int(candidat))
+		if not r.is_empty() and not repaires_pris.has(int(r["id"])):
+			return r
+	var meilleur := {}
+	var distance := INF
+	for r in plan.lieux_autour(ou, PlanVille.SECTEUR * PlanVille.PAS * 3.0)["repaires"]:
+		var d: float = Vector2(r["p"]).distance_to(ou)
+		if d < 1.0 or repaires_pris.has(int(r["id"])):
+			continue
+		if int(r["gang"]) == gang and not n_importe_lequel:
+			continue
+		# Un autre gang passe avant le même gang, quelle que soit la distance.
+		var poids := d + (1.0e9 if int(r["gang"]) == gang else 0.0)
+		if poids < distance:
+			distance = poids
+			meilleur = r
+	return meilleur
+
+## La mallette est prise : il reste à la rapporter. Et le repaire qu'on vient
+## de fouiller sous leur nez sort au complet — c'est la colère du repaire, la
+## même que pour un des leurs qui tombe.
+func _prendre_la_mallette(cle: String) -> void:
+	var c: Dictionary = contrats.get(cle, {})
+	if c.is_empty() or String(c["genre"]) != "mallette":
+		return
+	c["fait"] = 1.0
+	c["cible"] = c["retour"]
+	c["texte"] = "rapportez la mallette %s" % plan.au_gang(int(c["employeur"]))
+	var r: Dictionary = plan.repaire_le_plus_proche(Vector2(c["cible"]), int(c["rival"]))
+	if not r.is_empty():
+		facher_le_repaire(Vector2(r["p"]), cle)
+	_diffuser_contrat(cle, "avance")
+
+## Le lieutenant est tombé. Appelée depuis `_abattre`, pour tous les morts qui
+## portent la marque.
+##
+## ⚠ PEU IMPORTE QUI A TIRÉ. Un coéquipier qui l'abat à votre place ne vous
+## vole pas la mission : le patron voulait sa tête, il l'a. Compter seulement
+## les balles du preneur, c'était deux joueurs qui se gênent devant le même
+## homme au lieu de se couvrir.
+func _tomber_le_lieutenant(personne: Dictionary) -> void:
+	var pour := String(personne.get("lieutenant", ""))
+	var c: Dictionary = contrats.get(pour, {})
+	if c.is_empty() or String(c["genre"]) != "lieutenant" or int(c.get("homme", -1)) != int(personne["id"]):
+		return
+	c["fait"] = 1.0
+	_solder_contrat(pour, true)
+
+## Chez l'hôte, la marque porte la CLÉ du preneur ; chez un client, elle arrive
+## par l'instantané en simple drapeau. Une seule question pour les deux.
+static func est_lieutenant(personne: Dictionary) -> bool:
+	var marque = personne.get("lieutenant", false)
+	if marque is String:
+		return String(marque) != ""
+	return bool(marque)
+
+## Ce qu'une mission laisse derrière elle quand elle s'arrête, gagnée ou non :
+## une mallette que personne ne viendra plus chercher, un lieutenant qui
+## redevient un homme du repaire comme les autres.
+func _ranger_la_mission(c: Dictionary) -> void:
+	if c.has("objet"):
+		retirer(ramassages, int(c["objet"]))
+	if c.has("homme"):
+		for personne in gens:
+			if int(personne["id"]) == int(c["homme"]):
+				personne.erase("lieutenant")
+				personne["pv"] = min(int(personne["pv"]), PV_GANG)
+				break
 
 func _avancer_contrats(delta: float, joueurs: Dictionary) -> void:
 	for cle in contrats.keys():
@@ -2515,6 +3026,14 @@ func _avancer_contrats(delta: float, joueurs: Dictionary) -> void:
 			if float(c["fait"]) >= float(DUREE_CONTRAT["chasse"]) * 0.6:
 				_solder_contrat(String(cle), true)
 				continue
+		elif String(c["genre"]) == "mallette" and float(c["fait"]) >= 1.0 and joueurs.has(cle):
+			# La mallette en main, on la rapporte SUR LE TAG du patron — à pied
+			# ou au volant, comme un raid : on ne descend pas de voiture pour
+			# poser une mallette, on la jette par la portière.
+			if Vector2(joueurs[cle]["p"]).distance_to(Vector2(c["retour"])) <= PlanVille.RAYON_REPAIRE:
+				c["fait"] = 2.0
+				_solder_contrat(String(cle), true)
+				continue
 
 		if float(c["reste"]) <= 0.0:
 			_solder_contrat(String(cle), false)
@@ -2527,8 +3046,18 @@ func _solder_contrat(cle: String, gagne: bool) -> void:
 		return
 	var position: Vector2 = c.get("p", plan.centre())
 	contrats.erase(cle)
+	_ranger_la_mission(c)
+	if gagne and DUREE_MISSION.has(String(c["genre"])) and not a_le_lance_flammes(cle):
+		# LE PATRON LAISSE LE LANCE-FLAMMES à la première mission rendue (guide
+		# §6.2 : « débloqué par une mission »). Une fois pour toute la manche —
+		# c'est un outil, pas une prime.
+		lance_flammes[cle] = true
+		emettre("lance", {"j": cle})
 	if gagne:
-		_compter(cle, position, int(c.get("prime", PRIME_CONTRAT[String(c["genre"])])), "contrat", false)
+		# ⚠ `.get(clé, défaut)` évalue son défaut même quand la clé est là : une
+		# mission de repaire n'a pas de ligne dans PRIME_CONTRAT, et l'index
+		# direct plantait le solde AVANT de payer.
+		_compter(cle, position, int(c.get("prime", PRIME_CONTRAT.get(String(c["genre"]), 0))), "contrat", false)
 		# Servir un gang le rapproche ET fâche celui qu'on a servi contre lui,
 		# moitié moins fort (guide §3.2). Sans ce second mouvement, on pouvait
 		# enchaîner les contrats des deux camps et finir ami avec tout le
@@ -2653,6 +3182,8 @@ func accorder_vehicule(cle: String, id: int, position: Vector2) -> void:
 		return
 	if Vector2(auto["p"]).distance_to(position) > 120.0:
 		return
+	if _piege_du_volant(cle, auto):
+		return
 	auto["pilote"] = cle
 	auto["garee"] = false
 	if int(auto["genre"]) == PATROUILLE:
@@ -2755,9 +3286,13 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 		# Le CORPS voyage : c'est lui qui donne sa tenue à l'uniforme et la
 		# hauteur de sa jauge de vie. Sans lui, les quatre hommes d'un fourgon
 		# apparaissaient chez les autres joueurs en simples îlotiers.
+		# Le neuvième champ marque le LIEUTENANT d'une mission : le client le
+		# coiffe d'un repère, sinon c'est un homme de gang parmi cinq et le
+		# preneur abat les quatre autres avant de tomber sur le bon.
 		vus_gens.append([int(personne["id"]), int(personne["p"].x), int(personne["p"].y),
 			int(personne["genre"]), int(personne["gang"]), int(personne["pv"]),
-			int(float(personne["a"]) * 100.0), int(personne.get("corps", CORPS_POLICE))])
+			int(float(personne["a"]) * 100.0), int(personne.get("corps", CORPS_POLICE)),
+			1 if personne.has("lieutenant") else 0])
 
 	var vus_autos: Array = []
 	for auto in autos:
@@ -2767,7 +3302,7 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 			int(float(auto["a"]) * 100.0), int(auto["genre"]), int(auto["pv"]),
 			int(auto.get("modele", 0)), 1 if bool(auto.get("garee", false)) else 0,
 			int(auto.get("corps", CORPS_POLICE)), 1 if bool(auto.get("canon", false)) else 0,
-			int(auto.get("teinte", 0))])
+			int(auto.get("teinte", 0)), 1 if bool(auto.get("arrose", false)) else 0])
 
 	var vues_caisses: Array = []
 	for c in caisses:
@@ -2794,7 +3329,8 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 
 	var vus_a_cotes: Array = []
 	for r in ramassages:
-		vus_a_cotes.append([int(r["id"]), int(r["p"].x), int(r["p"].y), int(r["genre"])])
+		vus_a_cotes.append([int(r["id"]), int(r["p"].x), int(r["p"].y), int(r["genre"]),
+			String(r.get("pour", ""))])
 
 	var vus_pieges: Array = []
 	for piege in pieges:
@@ -2874,6 +3410,7 @@ func appliquer_instantane(charge: Dictionary) -> void:
 			"genre": int(entree[3]), "gang": int(entree[4]), "pv": int(entree[5]),
 			"a": float(entree[6]) / 100.0, "d": Vector2.RIGHT, "etat": 0,
 			"corps": int(entree[7]) if entree.size() > 7 else CORPS_POLICE,
+			"lieutenant": (int(entree[8]) == 1) if entree.size() > 8 else false,
 			"minuterie": 0.0, "recharge": 0.0})
 	for entree in charge.get("a", []):
 		if typeof(entree) == TYPE_ARRAY and (entree as Array).size() > 0 and PlanVille.est_dormante(int(entree[0])):
@@ -2887,6 +3424,7 @@ func appliquer_instantane(charge: Dictionary) -> void:
 			"corps": int(entree[8]) if entree.size() > 8 else CORPS_POLICE,
 			"canon": (int(entree[9]) == 1) if entree.size() > 9 else false,
 			"teinte": int(entree[10]) if entree.size() > 10 else 0,
+			"arrose": (int(entree[11]) == 1) if entree.size() > 11 else false,
 			"gang": plan.territoire(Vector2(float(entree[1]), float(entree[2]))),
 			"d": Vector2.RIGHT, "vitesse": 0.0, "pilote": "", "cible": "", "minuterie": 0.0})
 	caisses = _fusionner(caisses, charge.get("c", []), func(entree: Array) -> Dictionary:
@@ -2896,7 +3434,8 @@ func appliquer_instantane(charge: Dictionary) -> void:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2]))})
 	ramassages = _fusionner(ramassages, charge.get("ac", []), func(entree: Array) -> Dictionary:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
-			"genre": int(entree[3]), "arme": ""})
+			"genre": int(entree[3]), "arme": "",
+			"pour": String(entree[4]) if entree.size() > 4 else ""})
 	pieges = _fusionner(pieges, charge.get("pg", []), func(entree: Array) -> Dictionary:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),
 			"genre": int(entree[3]), "par": "", "reste": 9.0, "amorce": 0.0})
@@ -2960,7 +3499,7 @@ func _fusionner(existants: Array, recus, fabrique: Callable) -> Array:
 			# affichée glisse vers elle image par image, sinon un instantané
 			# à huit par seconde donne une ville qui saute.
 			for champ in ["genre", "gang", "pv", "a", "arme", "garee", "cap", "corps", "canon",
-					"s", "sens", "v", "arret", "age", "teinte"]:
+					"s", "sens", "v", "arret", "age", "teinte", "lieutenant", "pour", "arrose"]:
 				if neuf.has(champ):
 					objet[champ] = neuf[champ]
 			objet["cible"] = neuf["p"]

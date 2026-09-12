@@ -22,6 +22,8 @@ func _init() -> void:
 	_huile(carte)
 	_bombe(carte)
 	_plaques(carte)
+	_canon_a_eau(carte)
+	_lance_flammes(carte)
 	print("── %s" % ("TOUT PASSE" if _fautes == 0 else "%d FAUTE(S)" % _fautes))
 	quit(1 if _fautes > 0 else 0)
 
@@ -124,15 +126,59 @@ func _huile(carte: PlanVille) -> void:
 # ------------------------------------------------------------------ la bombe
 
 func _bombe(carte: PlanVille) -> void:
-	print("\n4. LA BOMBE ATTEND QU'ON SOIT SORTI")
+	print("\n4. LA BOMBE SAUTE AU DÉTONATEUR, OU SOUS UN VOLEUR")
 	var ville := _ville(carte)
-	var auto := _une_auto(ville, carte.centre())
+	var ou := carte.centre()
+	var auto := _une_auto(ville, ou)
+	var autre := _une_auto(ville, ou + Vector2(400.0, 0.0))
 	ville.armer_bombe("moi", int(auto["id"]))
-	ville._animer_les_bombes(VilleVivante.BOMBE_DELAI - 1.0)
-	_dire(int(auto["genre"]) != VilleVivante.EPAVE, "elle laisse le temps de s'éloigner")
-	ville._animer_les_bombes(1.2)
-	_dire(int(auto["genre"]) == VilleVivante.EPAVE, "puis la voiture saute")
-	_dire(ville.bombes.is_empty(), "et l'amorce est oubliée")
+	ville.armer_bombe("moi", int(autre["id"]))
+	ville._animer_les_bombes(30.0)
+	_dire(int(auto["genre"]) != VilleVivante.EPAVE and ville.bombes.size() == 2,
+		"armée, elle attend — trente secondes plus tard, rien n'a sauté")
+	# Le poseur remonte dans sa propre voiture : elle ne saute pas.
+	ville.accorder_vehicule("moi", int(auto["id"]), auto["p"])
+	_dire(String(auto["pilote"]) == "moi" and int(auto["genre"]) != VilleVivante.EPAVE and ville.bombes.has(int(auto["id"])),
+		"le poseur remonte dedans sans qu'elle saute, et elle reste armée")
+	auto["pilote"] = ""
+	# Un voleur prend le volant de l'autre : elle saute sous lui.
+	ville.sortants.clear()
+	ville.accorder_vehicule("lui", int(autre["id"]), autre["p"])
+	var tue := false
+	var prevenu := {}
+	for e in ville.sortants:
+		if String(e["e"]) == "deg" and String(e["c"].get("j", "")) == "lui" and int(e["c"].get("d", 0)) >= 100:
+			tue = true
+		if String(e["e"]) == "deto":
+			prevenu = e["c"]
+	_dire(String(autre["pilote"]) == "" and int(autre["genre"]) == VilleVivante.EPAVE,
+		"un voleur prend le volant de l'autre : elle saute, il n'a pas le véhicule")
+	_dire(tue, "et il y reste")
+	_dire(String(prevenu.get("j", "")) == "moi" and String(prevenu.get("vol", "")) == "lui" and int(prevenu.get("id", -1)) == int(autre["id"]),
+		"le poseur en est prévenu, avec le nom du voleur")
+	_dire(not ville.bombes.has(int(autre["id"])), "et l'amorce est oubliée")
+	# Le détonateur : ce qui reste piégé saute d'un coup, où que ce soit.
+	ville.sortants.clear()
+	var loin := _une_auto(ville, ou + Vector2(3000.0, 3000.0))
+	ville.armer_bombe("moi", int(loin["id"]))
+	var combien := ville.declencher_les_bombes("moi")
+	_dire(combien == 2 and int(auto["genre"]) == VilleVivante.EPAVE and int(loin["genre"]) == VilleVivante.EPAVE,
+		"le détonateur : les deux voitures piégées sautent, même à trois mille pixels")
+	_dire(ville.bombes.is_empty() and int(_dernier_deto(ville).get("n", 0)) == 2, "plus rien d'armé, et l'hôte le dit (n = 2)")
+	_dire(ville.declencher_les_bombes("moi") == 0, "appuyer encore ne fait rien sauter")
+	# Une voiture brûlée autrement s'oublie aussi.
+	var brulee := _une_auto(ville, ou + Vector2(0.0, 300.0))
+	ville.armer_bombe("moi", int(brulee["id"]))
+	ville.detruire_auto(brulee, "personne")
+	ville._animer_les_bombes(0.1)
+	_dire(ville.bombes.is_empty(), "une voiture piégée qui brûle autrement ne compte plus")
+
+func _dernier_deto(ville: VilleVivante) -> Dictionary:
+	var trouve := {}
+	for e in ville.sortants:
+		if String(e["e"]) == "deto":
+			trouve = e["c"]
+	return trouve
 
 # ---------------------------------------------------------------- les plaques
 
@@ -172,3 +218,99 @@ func _une_auto(ville: VilleVivante, ou: Vector2) -> Dictionary:
 		"pilote": "", "cible": "", "minuterie": 0.0, "modele": 0, "garee": false}
 	ville.autos.append(auto)
 	return auto
+
+# ------------------------------------------------------------ le canon à eau
+
+## Au volant d'un camion de pompiers, la touche de tir arrose (guide §6.2) :
+## le jet éteint ce qui brûle devant et couche les passants sans les blesser.
+func _canon_a_eau(carte: PlanVille) -> void:
+	print("\n6. LE CANON À EAU ÉTEINT ET COUCHE, SANS BLESSER")
+	var ville := _ville(carte)
+	var ou := carte.centre()
+	# Un feu devant, un feu derrière : seul celui du cône baisse.
+	ville.allumer(ou + Vector2(140.0, 0.0), 1.0)
+	ville.allumer(ou - Vector2(140.0, 0.0), 1.0)
+	var devant: Dictionary = ville.feu_le_plus_proche(ou + Vector2(140.0, 0.0))
+	var derriere: Dictionary = ville.feu_le_plus_proche(ou - Vector2(140.0, 0.0))
+	var force_devant := float(devant["force"])
+	var force_derriere := float(derriere["force"])
+	var touches := ville.arroser_devant(ou, 0.0, 0.5)
+	_dire(int(touches["feux"]) == 1 and float(devant["force"]) < force_devant,
+		"le feu devant baisse (%.2f -> %.2f)" % [force_devant, float(devant["force"])])
+	_dire(float(derriere["force"]) == force_derriere, "celui derrière ne bouge pas")
+	# Trois secondes de lance : il s'éteint.
+	for _t in 6:
+		ville.arroser_devant(ou, 0.0, 0.5)
+	_dire(float(devant["force"]) <= 0.0, "trois secondes de lance, et il est éteint")
+	# Un passant dans le jet est poussé, en fuite, et entier.
+	var passant := _un_passant(ville, ou + Vector2(120.0, 10.0))
+	var pv := int(passant["pv"])
+	var avant: Vector2 = passant["p"]
+	var un_autre := _un_passant(ville, ou + Vector2(120.0, 200.0))
+	var la_bas: Vector2 = un_autre["p"]
+	touches = ville.arroser_devant(ou, 0.0, 0.5)
+	_dire(int(touches["gens"]) == 1 and (passant["p"] as Vector2).x > avant.x + 60.0,
+		"le passant dans le jet recule de %d px" % int((passant["p"] as Vector2).x - avant.x))
+	_dire(float(passant.get("fuite", 0.0)) > 0.0 and Vector2(passant["d"]).x > 0.9,
+		"et il fuit dans le sens du jet")
+	_dire(int(passant["pv"]) == pv, "sans une égratignure")
+	_dire(un_autre["p"] == la_bas, "celui hors du cône n'a rien senti")
+	# La portée : à trois cents pixels, rien.
+	var loin := _un_passant(ville, ou + Vector2(300.0, 0.0))
+	var p_loin: Vector2 = loin["p"]
+	ville.arroser_devant(ou, 0.0, 0.5)
+	_dire(loin["p"] == p_loin, "à trois cents pixels, le jet ne porte plus")
+
+func _un_passant(ville: VilleVivante, ou: Vector2) -> Dictionary:
+	var fiche := {"id": ville._id(), "p": ou, "d": Vector2.RIGHT, "a": 0.0,
+		"genre": VilleVivante.PIETON, "gang": -1, "pv": VilleVivante.PV_PIETON,
+		"etat": 0, "minuterie": 9.0, "recharge": 0.0}
+	ville.gens.append(fiche)
+	return fiche
+
+# ------------------------------------------------------------ le lance-flammes
+
+## Le patron d'un repaire laisse le lance-flammes à la première mission rendue
+## (guide §6.2) ; au volant du camion, la lance crache alors du feu : les
+## passants grillent, les voitures des autres brûlent, un foyer s'allume.
+func _lance_flammes(carte: PlanVille) -> void:
+	print("\n7. LE LANCE-FLAMMES, LAISSÉ PAR LE PATRON")
+	var ville := _ville(carte)
+	var ou := carte.centre()
+	# Sans lui, la lance ne crache rien.
+	var passant := _un_passant(ville, ou + Vector2(100.0, 0.0))
+	var touches := ville.enflammer_devant("moi", ou, 0.0, 0.5)
+	_dire(int(touches["gens"]) == 0 and int(passant["pv"]) == VilleVivante.PV_PIETON,
+		"sans le lance-flammes, la lance ne crache rien")
+	# Une mission rendue, et le patron le laisse.
+	ville.contrats["moi"] = {"genre": "mallette", "employeur": 0, "rival": 3, "fait": 2.0,
+		"reste": 30.0, "p": ou, "retour": ou, "prime": 100, "respect": 1.0, "objectif": 2}
+	ville._solder_contrat("moi", true)
+	var laisse := false
+	for e in ville.sortants:
+		if String(e["e"]) == "lance" and String(e["c"].get("j", "")) == "moi":
+			laisse = true
+	_dire(ville.a_le_lance_flammes("moi") and laisse, "une mission rendue : le patron laisse le lance-flammes, et le dit")
+	ville.sortants.clear()
+	# Le passant dans le cône grille en une seconde ; celui derrière, non.
+	var derriere := _un_passant(ville, ou - Vector2(100.0, 0.0))
+	var mienne := _une_auto(ville, ou + Vector2(120.0, 20.0))
+	mienne["pilote"] = "moi"
+	var sienne := _une_auto(ville, ou + Vector2(130.0, -20.0))
+	var pv_sienne := float(sienne["pv"])
+	var avant := ville.gens.size()
+	for _t in 4:
+		ville.enflammer_devant("moi", ou, 0.0, 0.25)
+	_dire(ville.gens.size() == avant - 1 and derriere in ville.gens, "le passant dans le cône grille en une seconde, celui derrière non")
+	_dire(float(mienne["pv"]) == VilleVivante.PV_AUTO, "sa propre voiture ne brûle pas")
+	_dire(float(sienne["pv"]) < pv_sienne and float(sienne["pv"]) > 0.0,
+		"celle d'un autre chauffe (%d)" % int(sienne["pv"]))
+	for _t in 10:
+		ville.enflammer_devant("moi", ou, 0.0, 0.25)
+	_dire(int(sienne["genre"]) == VilleVivante.EPAVE, "et finit en épave")
+	var foyer := false
+	for f in ville.feux:
+		if Vector2(f["p"]).distance_to(ou) < VilleVivante.PORTEE_FLAMME + 40.0:
+			foyer = true
+	_dire(foyer, "un foyer s'est allumé au bout du jet")
+	_dire(ville.etoiles("moi") >= 1 or float(ville.chaleur.get("moi", 0.0)) > 0.0, "et la police a entendu")

@@ -131,7 +131,7 @@ func _fond_procedural(cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
 				avenue if posmod(kl, PlanVille.AVENUE) == 0 else bitume, largeur_rue)
 
 func _lieux_et_pions(cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
-	# Les lieux à portée : repaires, arènes, garages, cabines.
+	# Les lieux à portée : repaires, arènes, garages, cabines, supérettes.
 	var lieux := carte.lieux_autour(moi, rayon_vue * 1.5)
 	for r in lieux["repaires"]:
 		var ou := _vers_radar(r["p"], centre)
@@ -160,6 +160,14 @@ func _lieux_et_pions(cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
 		if cadre.has_point(ou):
 			_pastille(ou, 4.0, Color("#b070d0"))
 
+	# LA SUPÉRETTE : un carré vert d'eau, pas un rond. À quatre pastilles rondes
+	# dans un cadre de cent pixels, la cinquième couleur ne se distingue plus —
+	# c'est la forme qui fait la différence, pas la teinte.
+	for sp in lieux["superettes"]:
+		var ou := _vers_radar(sp["p"], centre)
+		if cadre.has_point(ou):
+			draw_rect(Rect2(ou - Vector2(3.5, 3.5), Vector2(7, 7)), PlanVille.COULEUR_SUPERETTE, true)
+
 	# La cible du contrat : le repaire du gang à nettoyer ou le garage où livrer.
 	# Dans le cadre, elle clignote ; hors du cadre, une flèche au bord dit où
 	# aller. Un contrat sans cible visible, c'est un chrono qui tourne pendant
@@ -167,7 +175,12 @@ func _lieux_et_pions(cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
 	if not cible.is_empty():
 		var genre := String(cible.get("k", ""))
 		var visee := {}
-		if genre == "nettoyage":
+		# Une cible peut être un POINT tout court : c'est le cas de la course
+		# de taxi, qui n'a ni repaire ni garage à viser. Le reste du dessin ne
+		# change pas — flèche au bord, distance en pâtés.
+		if cible.has("p"):
+			visee = {"p": cible["p"]}
+		elif genre == "nettoyage":
 			visee = carte.repaire_le_plus_proche(moi, int(cible.get("g", -1)))
 		elif genre == "livraison":
 			visee = carte.garage_le_plus_proche(moi)
@@ -218,7 +231,8 @@ func _lieux_et_pions(cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
 	var x := MARGE + 4.0
 	var y := MARGE + COTE + 14.0
 	for entree in [["garage", Palette.SERIE], ["cabine", Palette.AVERTISSEMENT],
-			["arène", Palette.CRITIQUE], ["repaire", Palette.ENCRE]]:
+			["arène", Palette.CRITIQUE], ["repaire", Palette.ENCRE],
+			["supérette", PlanVille.COULEUR_SUPERETTE]]:
 		draw_circle(Vector2(x, y - 4.0), 3.0, entree[1])
 		draw_string(police, Vector2(x + 7.0, y), String(entree[0]),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Palette.ENCRE_DOUCE)

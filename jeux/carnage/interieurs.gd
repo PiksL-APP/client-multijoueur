@@ -191,6 +191,7 @@ const MARQUES := {
 	"coffre": Color("#fab219"),          ## l'argent — Palette.AVERTISSEMENT
 	"garde-robe": Color("#3987e5"),      ## la tenue — Palette.SERIE
 	"armurerie": Color("#d03b3b"),       ## les armes du gang — Palette.CRITIQUE
+	"patron": Color("#ff9d2e"),          ## le travail du repaire — Charte.ORANGE
 	"frigo": Color("#5ad6a8"),           ## les provisions — PlanVille.COULEUR_SUPERETTE
 	"porte": Color("#0ca30c"),           ## la sortie — Palette.BON
 }
@@ -206,6 +207,11 @@ const DESSUS_DU_SOL := 0.054
 static func poser_marques(racine: Node3D, id: String) -> void:
 	for genre in MARQUES:
 		var g := String(genre)
+		# ⚠ Un repaire de gang n'a ni coffre, ni garde-robe, ni frigo — mais il
+		# a un portemanteau dans le couloir, et la marque bleue se posait
+		# dessus : un disque où `F` ne répond pas est un bouton qui ment.
+		if est_repaire(id) and g in ["coffre", "garde-robe", "frigo"]:
+			continue
 		var ou := point_de_poste(id, g)
 		if ou == Vector2.ZERO:
 			continue
@@ -225,6 +231,14 @@ static func poser_marques(racine: Node3D, id: String) -> void:
 static func point_de_poste(id: String, genre: String) -> Vector2:
 	if genre == "porte":
 		return entree(id)
+	# UN POSTE QUI N'EST PAS UN MEUBLE : le patron d'un repaire est un HOMME, et
+	# les hommes ne sont pas dans la liste des meubles. La fiche dit alors où
+	# l'on se tient, en tuiles — et la même règle vaut pour n'importe quel
+	# poste qu'un plan voudra fixer à la main.
+	var fixes: Dictionary = plan(id).get("postes", {})
+	if fixes.has(genre):
+		var fixe: Vector2 = fixes[genre]
+		return fixe if libre(id, fixe) else degager(id, fixe)
 	var p: Dictionary = poste(id, genre)
 	if p.is_empty():
 		return Vector2.ZERO
@@ -1067,6 +1081,14 @@ static func _repaire_du_gang(gang: int) -> Dictionary:
 			[4.60, 0.62, 0],     ## l'armurier, à côté de son râtelier
 			[0.50, 2.35, 3],     ## celui qui surveille l'entrée, dos au mur ouest
 		],
+		# LE PATRON CONFIE DU TRAVAIL (les missions du repaire, `VilleVivante.
+		# proposer_mission`). On se tient À CÔTÉ de celui qui tient la table,
+		# côté canapé — pas devant lui : devant lui, c'est le couloir, et à
+		# soixante centimètres de la porte c'est la porte qui répond à `F`.
+		# ⚠ Ni derrière lui : posée au nord de ses pieds, la marque était cachée
+		# par son propre corps sous la caméra de trois quarts, qui regarde
+		# depuis le sud. On l'a cherchée sur la photo avant de comprendre.
+		"postes": {"patron": Vector2(2.98, 1.52)},
 	}
 
 ## Le plan complet d'un intérieur — dessin, teintes, meubles, lumières.

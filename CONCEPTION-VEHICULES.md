@@ -188,6 +188,55 @@ godot --headless -s outils/flotte.gd              # les mouillages et la navigat
   (services publics), **tank et Pacifier** (militaires), **tow truck, hot dog
   van, ice-cream van** (utilitaires). Le bus et la limousine existent en voxels,
   pas dans le kit.
-- Le **lance-flammes monté** et le **canon à eau orientable** du camion de
-  pompiers (§6.2) : nos pompiers éteignent tout seuls, le joueur ne tient jamais
-  la lance.
+- ~~Le **lance-flammes monté** et le **canon à eau** du camion de pompiers
+  (§6.2)~~ — **faits le 11/09**, voir « Le camion de pompiers » plus bas.
+
+## Le camion de pompiers : la lance se tient (§6.2)
+
+Au volant du camion (gabarit 18), ESPACE ne tire pas : il **arrose**. Le jet
+part du toit de la cabine et porte deux cent quarante pixels dans un cône
+étroit (`VilleVivante.arroser_devant`) : il éteint ce qui brûle dedans et
+**couche les passants** — poussés le long du jet, puis en fuite dans son sens
+— sans blesser personne. C'est ce qui en fait autre chose qu'une mitrailleuse
+bleue, et la seule façon de traverser une foule sans l'écraser ni la fâcher.
+Le camion de la ville arrose avec le même jet, visible chez tout le monde
+(`arrose`, douzième champ de l'instantané) ; celui d'un autre joueur aussi
+(`je` dans son paquet : 1 eau, 2 feu).
+
+**Le lance-flammes** est laissé par le patron d'un repaire à la première
+mission rendue (`CONCEPTION-REPAIRES-DE-GANG.md`). `F` au volant bascule la
+lance eau/feu — une touche de plus, c'était une de trop ; l'affaire du lieu,
+en pleine rue au volant du camion, c'est la lance. Le feu porte cent
+soixante-dix pixels : les passants grillent (trois points de tôle par
+seconde, accumulés, car leur tôle est un entier), les voitures des autres
+brûlent (quarante-cinq par seconde), un foyer s'allume au bout du jet toutes
+les six dixièmes — et c'est de là que part l'incendie, l'alerte, les
+pompiers, la police (un coup de feu à chaque foyer). Il ne touche pas les
+autres joueurs : ils ne se blessent qu'en arène.
+
+⚠ **« On la voit arroser » n'était vrai nulle part** : le feu baissait sous
+la lance de l'IA, sans jet. Le jet est des gouttes en cubes (`jet_d_eau`,
+cent quarante, une seconde) lancées à trente unités par seconde sous vingt de
+gravité : l'arc retombe à vingt et une unités, la portée de la simulation est
+à vingt-quatre — ce qu'on voit tomber est ce qui mouille. `local_coords` est
+à faux : les gouttes parties restent où elles sont quand le camion tourne,
+sinon tout le jet pivotait d'un bloc, comme un bâton bleu accroché au capot.
+Les flammes (`flammes_de_lance`) sont plus grosses, plus lentes, MONTENT au
+lieu de retomber, passent du jaune au rouge puis à la fumée, unshaded — et
+portent une lumière orange au bout, pour la nuit.
+
+**Là où le jet retombe, la rue le montre** : une éclaboussure (un émetteur
+posé dans le monde, au point de chute, pas sur le camion — elle reste où l'eau
+tombe) et une **flaque** tous les sept dixièmes, disque sombre et translucide
+avec un reflet de ciel au milieu, qui s'efface en douze secondes. Sur la
+chaussée seulement : sur l'herbe, l'eau s'en va dans la terre, et un disque
+gris sur une pelouse se lisait comme une tache de boue. Vingt-quatre flaques
+au plus. Sans elles, l'eau disparaissait dans le bitume comme si elle n'y
+était jamais tombée.
+
+⚠ **Le souffle de la lance est synthétisé** (deux passe-bas sur du bruit
+blanc, en boucle, comme la pluie de `meteo.gd`) ; le feu prend
+`lance_flammes.ogg`, relancé tant qu'on tient.
+
+Bancs : `outils/atelier.gd` §6 (l'eau) et §7 (le feu) ; photo :
+`--banc-modele=18 [--banc-feu]` dans une manche solo.

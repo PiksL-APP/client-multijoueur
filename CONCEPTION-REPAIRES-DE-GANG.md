@@ -140,6 +140,149 @@ La prise voyage dans l'instantané (deux entiers par repaire) : les trois autres
 joueurs voient le tag changer de camp, et le banc le vérifie en appliquant
 l'instantané à une seconde ville.
 
+## Les hommes du repaire réagissent : la colère
+
+Les cinq gars qui traînent autour du tag (`_peupler_les_repaires`, ceux qui ont
+une `attache`) obéissaient à la même règle que n'importe quel homme de gang dans
+la rue : ils ne tirent que si leur **gang** vous chasse. Tant que le gang était
+neutre, on pouvait donc en abattre cinq d'affilée sous leur propre tag, et les
+survivants continuaient à flâner autour du cadavre de leurs copains. Un repaire
+se lisait comme une rue un peu plus peuplée.
+
+Depuis le 11/09, un repaire **se défend**. Deux gestes le mettent en colère :
+
+- **abattre un des siens** (`_abattre` appelle `facher_le_repaire` dès que le
+  mort porte une `attache`) ;
+- **ouvrir un raid** en se tenant sur le tag (`tenir_le_terrain`, juste après
+  l'événement « raid ouvre »).
+
+Tous les hommes attachés à ce tag reçoivent alors `colere = {j: cle, t: 25 s}`
+et, dans `_animer_les_gens`, cette branche passe **avant** celle de l'allié et
+celle du gang hostile : ils chargent le coupable à `VITESSE_GANG` et lui tirent
+dessus, quoi que leur bannière pense de lui par ailleurs. La colère retombe seule
+(le compteur descend à chaque image), et elle s'éteint aussi si le coupable est
+mort, parti, ou trop loin (`COLERE_PORTEE`, 700 px) — ils ne traversent pas la
+ville pour vous retrouver, ils défendent *leur* coin.
+
+⚠ **C'est le repaire qui se fâche, pas le gang.** Le respect ne bouge que par
+les règles habituelles (tuer un homme de gang coûte ce qu'il coûtait). Un gang
+neutre dont on a saigné le repaire vous laisse tranquille trois rues plus loin —
+c'est ce qui distingue une rixe locale du palier « vous chasse », et ce qui fait
+que la jauge garde un sens.
+
+⚠ **La colère ne connaît pas les alliés.** Un allié qui abat un des hommes du
+repaire (par une balle perdue, ou une bombe) se fait charger comme un autre :
+on n'a pas ajouté d'exception, parce qu'un repaire qui pardonne à celui qui
+vient de tuer un de ses gars n'est pas un repaire. Vingt-cinq secondes plus
+tard, tout est oublié, et le palier allié reprend ses droits.
+
+Pendant un raid, la colère est rafraîchie par les morts eux-mêmes : chaque homme
+tombé remet 25 s à ceux qui restent. C'est ce qui donne au raid sa forme — les
+cinq sortent ensemble à l'ouverture, et le dernier vous court encore après.
+
+Le banc (`outils/respect.gd`, chapitre 7) pose un repaire d'un gang neutre,
+abat un homme, vérifie que ses copains prennent le tireur en chasse et se
+rapprochent (273 px → 81 px en deux secondes de simulation), puis que la colère
+retombée à zéro les calme.
+
+## Le patron confie du travail : les missions du repaire
+
+Une cabine confie un travail de rue — trois hommes, une voiture, deux étoiles
+— et le paie en une minute. Le repaire, jusqu'ici, ne confiait rien : on y
+entrait pour le râtelier et on ressortait. Depuis le 11/09, **celui qui tient
+la table** a du travail pour ceux qui ont mérité la porte. On se tient au bout
+de la table (la marque **orange** au sol, `postes.patron` dans la fiche), `F`,
+et le patron donne l'une des deux missions :
+
+| mission | ce qu'on fait | durée | prime | respect |
+|---|---|---|---|---|
+| **la mallette** | elle est posée **chez un rival**, à cent ou deux cents pixels de son tag, au milieu de ses gars. On la ramasse comme un colis, puis on la **rapporte sur le tag du patron** — à pied ou au volant | 120 s | 2 200 $ | +22 chez le patron, −11 chez le rival |
+| **le lieutenant** | un homme du repaire rival, **trois fois plus dur** (9 points de tôle), attaché à son tag, coiffé d'une flèche orange. On l'abat | 100 s | 2 600 $ | idem |
+
+Plus long qu'un contrat, plus rare (il faut la porte, donc quatre-vingts de
+respect), et payé en conséquence : c'est ce que le palier allié donne d'autre
+que l'aide en combat et le râtelier. Deux genres seulement, à dessein — un
+troisième qui ressemblerait à un contrat de cabine n'aurait pas sa place ici.
+
+⚠ **Une mission occupe la même place qu'un contrat.** On n'a qu'un travail en
+main : `contrats[cle]`, le même dictionnaire, les mêmes `_avancer_contrats`,
+`_solder_contrat`, le même événement `ctr`. Sinon on prenait la mission chez
+soi, puis un contrat à la cabine d'en face, et le tableau de bord ne savait
+plus quel chrono montrer. La ligne du HUD dit **MISSION** au lieu de CONTRAT,
+c'est la seule différence visible.
+
+⚠ **La mission vise un POINT, le contrat non.** Un contrat de cabine laisse le
+client chercher le repaire ou le garage le plus proche ; une mission envoie
+`x, y` dans `ctr` — la mallette, puis le tag où la rapporter ; le repaire du
+lieutenant — et le radar le pointe comme il pointe une course de taxi.
+
+⚠ **La mallette n'est à personne d'autre.** Un coéquipier qui passe dessus ne
+la ramasse pas (`pour` porte la clé du preneur, dans l'instantané aussi) :
+sinon il la faisait disparaître de la mission de celui qui l'a prise, qui
+courait vers un point vide. **Le lieutenant, lui, tombe pour tout le monde** :
+un coéquipier qui l'abat à votre place ne vous vole pas la mission — le patron
+voulait sa tête, il l'a. Compter seulement les balles du preneur, c'était deux
+joueurs qui se gênent devant le même homme au lieu de se couvrir.
+
+⚠ **Prendre la mallette, ou toucher le lieutenant, sort le repaire au
+complet.** C'est la colère du repaire (plus haut), branchée sur `ramasser` et
+sur `abattre_par_id` : avant, on fouillait le repaire d'un gang neutre sous
+son nez et personne ne bougeait ; et le lieutenant, avec ses neuf points, se
+laissait cribler pendant que ses gars regardaient.
+
+⚠ **Le rival visé est celui qui a encore un repaire par ici.** Un rival dont
+on a pris le repaire n'a plus de mallette à garder ni de lieutenant à
+protéger, et pointer un tag vide, c'est deux minutes à tourner autour. À
+défaut d'un rival du trio, n'importe quel autre gang qui a un repaire fait
+l'affaire : **sur une ville dessinée, les gangs sont posés par île et le trio
+du secteur n'y veut rien dire.** Et s'il n'y a rien, le patron le dit (« leurs
+rivaux n'ont plus de repaire par ici ») plutôt que de confier une mission
+impossible.
+
+⚠ **Pikstown, au 11/09, n'a que les repaires de La Fonte** : les ponts relient
+les îles, `_classer` n'en voit qu'une, et toute la terre est à un seul gang.
+Une mission y est donc refusée tant que les gangs ne sont pas répartis — le
+banc photo (`--banc-mission`) accepte un repaire du même gang pour pouvoir
+photographier quand même. C'est un chantier de la carte, pas des missions.
+
+⚠ **`.get(clé, défaut)` évalue son défaut.** `PRIME_CONTRAT[genre]` en défaut
+de `c.get("prime", …)` plantait le solde d'une mission — qui a sa prime, mais
+pas de ligne dans PRIME_CONTRAT — avant de payer. Le banc l'a vu à la
+première mission gagnée.
+
+Ce qu'une mission laisse derrière elle quand elle s'arrête, gagnée ou perdue
+(`_ranger_la_mission`) : la mallette est ramassée par la ville, le lieutenant
+redevient un homme du repaire comme les autres, à trois points de tôle.
+
+**Et le patron laisse le lance-flammes** (guide §6.2 : « débloqué par une
+mission ») à la première mission rendue, une fois pour toute la manche —
+c'est un outil, pas une prime. Au volant d'un camion de pompiers, `F` bascule
+la lance eau/feu et ESPACE crache : les passants grillent, les voitures des
+autres brûlent, un foyer s'allume au bout du jet. Détail :
+`CONCEPTION-VEHICULES.md` (le camion de pompiers) et `outils/atelier.gd` §7.
+
+### Ce qu'on voit
+
+- **la marque orange** au bout de la table, à côté du patron. ⚠ Posée devant
+  lui, à soixante centimètres de la porte, c'est la porte qui répondait à
+  `F` ; posée derrière lui, son propre corps la cachait sous la caméra de
+  trois quarts. On l'a cherchée sur la photo avant de comprendre ;
+- **la mallette** : une valise fauve à fermoirs de laiton, couchée (un
+  rectangle vu de dessus), sur un anneau et un disque orange qui luit. ⚠ Le
+  premier essai était en cuir sombre et en classe `LUMIERE` : sous le soleil,
+  un bloc noir — `LUMIERE` est la classe des fenêtres allumées, que le shader
+  remplace par du verre sombre le jour ;
+- **le lieutenant** : un disque orange qui bat à ses pieds, une flèche orange
+  À PLAT au-dessus de sa tête, qui pointe vers le bas de l'écran. ⚠ Debout,
+  dans le plan vertical, la caméra de soixante-douze degrés n'en voyait que
+  la tranche ; en voxels éclairés, elle rendait un T brun. Elle est unshaded
+  et couchée, et elle se lit ;
+- ⚠ **les anneaux sont posés à 0,6, pas au ras du sol** : sur Pikstown, le
+  trottoir est une dalle que `hauteur_en` ne compte pas, et un anneau à cinq
+  centimètres est DANS la dalle. Même leçon que les flaques des lampadaires —
+  les anneaux des colis, des caisses et du Frenzy ont encore ce défaut sur
+  la ville dessinée.
+
 ## Le râtelier : un meuble qui n'existait pas
 
 Kenney est un kit de **meubles** — il n'a pas d'arme. Une bibliothèque ouverte
@@ -159,8 +302,14 @@ dedans — c'est précisément la silhouette qui fait le meuble.
 ## Les bancs
 
 ```bash
-godot --headless --path . -s outils/respect.gd     # chapitre 5 : les repaires
-godot --headless --path . -s outils/marche.gd      # praticabilité des 15 intérieurs
+godot --headless --path . -s outils/respect.gd     # chapitre 5 : les repaires, 7 : la colère
+godot --headless --path . -s outils/missions.gd    # chapitre 6 : les missions du repaire
+godot --headless --path . -s outils/marche.gd      # praticabilité des 15 intérieurs, patron compris
+./outils/chez_soi.sh repaire2                      # l'intérieur EN JEU, avec ses marques
+./outils/voir.sh "d:mallette,d:lieutenant"         # la valise et le repère, en vitrine
+# la mission en ville, photographiée (le pilote est tenu à côté de la cible) :
+xvfb-run -a godot --path . --rendering-driver opengl3 --solo --banc-jeu=carnage --manche=10 \
+  --banc-position=repaire:3 --banc-mission=mallette --photo=/tmp/vues
 ./outils/vitrine.sh repaire2 "" "" "" pantin       # le repaire du Lierre, à l'échelle
 ./outils/vitrine.sh repaire4 "" "" "" pantin       # celui des Néons, pour comparer
 python3 outils/ratelier.py                         # refabriquer le meuble
@@ -184,12 +333,16 @@ sept gangs, et les deux armes du jeu vendues quelque part.
 
 ## Ce qui reste
 
-- **Y déclencher une mission de gang.** Les contrats passent toujours par les
-  cabines ; un repaire pourrait en donner de plus longs, ou de plus rares.
-- **Les faire réagir.** Les trois hommes sont plantés en animation de repos.
-  Se retourner quand on entre, ou s'écarter du râtelier, demanderait de les
-  faire vivre — et donc de les rendre solides, donc de rouvrir la question du
-  passage dans six tuiles.
+- **Répartir les gangs de Pikstown** (la carte) : tant que toute la terre est
+  à La Fonte, le patron n'a personne à envoyer chez qui que ce soit.
+- **Une troisième mission** qui ne soit ni une mallette ni une tête — un
+  convoi à escorter, par exemple — demanderait une voiture de l'hôte qui suit
+  le joueur, ce qui n'existe pas encore.
+- **Faire réagir ceux de l'intérieur.** Dehors, les hommes du tag se
+  défendent (la colère, plus haut) ; dedans, les trois hommes restent plantés
+  en animation de repos. Se retourner quand on entre, ou s'écarter du
+  râtelier, demanderait de les faire vivre — et donc de les rendre solides,
+  donc de rouvrir la question du passage dans six tuiles.
 - **Le territoire ne change pas de main.** Le repaire est pris, le tag est à
   vos couleurs, mais les pâtés autour restent peints de la bannière du gang
   chassé : `territoire_du_pate` est procédural, et le faire mentir demanderait

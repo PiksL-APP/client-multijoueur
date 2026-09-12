@@ -29,9 +29,11 @@ func _tirage() -> void:
 		comptes[t] = int(comptes.get(t, 0)) + 1
 	for t in MeteoCarnage.NOMS.size():
 		print("   %-11s %4d créneaux sur 2000" % [MeteoCarnage.nom_du_temps(t), int(comptes.get(t, 0))])
-	_dire(comptes.size() == MeteoCarnage.NOMS.size(), "les cinq temps sortent")
+	_dire(comptes.size() == MeteoCarnage.NOMS.size(), "les six temps sortent")
 	_dire(int(comptes.get(MeteoCarnage.CLAIR, 0)) > int(comptes.get(MeteoCarnage.ORAGE, 0)) * 2,
 		"le beau temps est au moins deux fois plus fréquent que l'orage")
+	_dire(int(comptes.get(MeteoCarnage.NEIGE, 0)) < int(comptes.get(MeteoCarnage.PLUIE, 0)),
+		"et la neige est plus rare que la pluie")
 	# Deux machines, le même créneau : le même temps — c'est ce qui dispense
 	# la météo de passer par le réseau.
 	var pareil := true
@@ -72,7 +74,7 @@ func _force() -> void:
 	_dire(float(j["orage"]) == 1.0 and float(j["pluie"]) == 1.0, "--meteo=orage : orage et pluie à fond, tout de suite")
 	_dire(MeteoCarnage.indice_du_temps("brouillard") == MeteoCarnage.BROUILLARD
 		and MeteoCarnage.indice_du_temps("pluie") == MeteoCarnage.PLUIE, "les noms se relisent")
-	_dire(MeteoCarnage.indice_du_temps("neige") == -1, "un nom inconnu rend -1 (et le ciel reste à l'horloge)")
+	_dire(MeteoCarnage.indice_du_temps("grele") == -1, "un nom inconnu rend -1 (et le ciel reste à l'horloge)")
 	MeteoCarnage.meteo_forcee = -1
 
 func _bruit() -> void:

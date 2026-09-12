@@ -514,6 +514,9 @@ func _preparer_lieux() -> void:
 				genre = "cabines"
 			elif car == "+" and not vus.has(id):
 				genre = "hopitaux"
+			elif car == "S" and not vus.has(id):
+				# Le supermarché du dessin est la supérette du jeu (faim et soif).
+				genre = "superettes"
 			elif car == "M" and _bord_de_rue(c) and _loin(derniers["planques"], c, 36):
 				genre = "planques"
 				lieu = {"prix": PRIX_PLANQUE[posmod(id, PRIX_PLANQUE.size())]}
@@ -526,7 +529,7 @@ func _preparer_lieux() -> void:
 			if genre == "": continue
 			# Un bâtiment de plusieurs cases : une seule fiche, ancrée sur sa
 			# première case (la plus au nord-ouest).
-			if car in "$+":
+			if car in "$+S":
 				var bloc := _bloc_de(c)
 				for b in bloc: vus[b.y * cases_x + b.x] = true
 				var somme := Vector2.ZERO
@@ -538,7 +541,7 @@ func _preparer_lieux() -> void:
 			if derniers.has(genre): derniers[genre].append(c)
 			var s := _secteur_de(p)
 			if not _lieux_par_secteur.has(s):
-				_lieux_par_secteur[s] = {"garages": [], "cabines": [], "arenes": [], "repaires": [], "hopitaux": [], "planques": []}
+				_lieux_par_secteur[s] = {"garages": [], "cabines": [], "arenes": [], "repaires": [], "hopitaux": [], "planques": [], "superettes": []}
 			_lieux_par_secteur[s][genre].append(lieu)
 
 func _bord_de_rue(c: Vector2i) -> bool:
@@ -580,10 +583,10 @@ func _bloc_de(c: Vector2i) -> Array:
 func _lieux_du_secteur(secteur: Vector2i) -> Dictionary:
 	_preparer_lieux()
 	return _lieux_par_secteur.get(secteur,
-		{"garages": [], "cabines": [], "arenes": [], "repaires": [], "hopitaux": [], "planques": []})
+		{"garages": [], "cabines": [], "arenes": [], "repaires": [], "hopitaux": [], "planques": [], "superettes": []})
 
 func lieux_autour(point: Vector2, rayon: float) -> Dictionary:
-	var resultat := {"garages": [], "cabines": [], "arenes": [], "repaires": [], "hopitaux": [], "planques": []}
+	var resultat := {"garages": [], "cabines": [], "arenes": [], "repaires": [], "hopitaux": [], "planques": [], "superettes": []}
 	var s0 := _secteur_de(point - Vector2(rayon, rayon))
 	var s1 := _secteur_de(point + Vector2(rayon, rayon))
 	for sy in range(s0.y, s1.y + 1):

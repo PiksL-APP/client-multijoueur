@@ -210,8 +210,18 @@ var carte: PlanVille
 var ville: VilleVivante
 var _ambiance: Array = []            ## [WorldEnvironment, soleil, lune], réglés à l'heure du village
 var _meteo: MeteoCarnage = null      ## le temps qu'il fait, lu sur l'horloge universelle comme l'heure
+var _depuis_lueurs := 0.0            ## cadence de la recherche des lampadaires de Pikstown
+var _depuis_explosion_banc := 1.0    ## `--banc-explosion`
+var _mission_banc := ""              ## `--banc-mission=mallette|lieutenant` : le genre demandé
+var _depuis_mission_banc := 1.5      ## s avant de la demander — la ville doit exister
 var _morceaux: Dictionary = {}       ## Vector2i -> MorceauVille, les morceaux bâtis ou en chantier
 var _chantier: MorceauVille = null   ## le morceau en cours de construction, une étape par image
+## ⚠ LE DÉCOR EST CELUI DE LA VILLE DESSINÉE. `VilleMorcelee` bâtit Pikstown par
+## morceaux de seize cases autour d'un point, une passe par image — le même
+## objet que l'éditeur. Les `MorceauVille` voxel restent déclarés pour la casse
+## et les voitures dormantes, qui n'ont pas encore leur équivalent dessiné :
+## leur dictionnaire reste vide, et tout ce qui le parcourt ne fait rien.
+var _ville_dessinee: VilleMorcelee = null
 var _cachees: Dictionary = {}        ## id dormante -> vrai : déjà effacée de sa nappe
 
 # ------------------------------------------------------- le joueur local
@@ -302,6 +312,8 @@ var _pause_ouverte := false
 var _pause_vue: Control
 var _superette_en_cours := -1
 var _superette_ouverte := false
+var _planque_ouverte := false        ## le menu du coffre, chez soi
+var _planque_vue: Control = null
 var _superette_vue: Control
 
 # ------------------------------------------------------------ le train
@@ -340,6 +352,10 @@ const SOIN := 400
 ## mécanique ne démarre jamais.
 const SAISIE := 1.0
 const SAISIE_SANS_PLANQUE := 0.5
+## Ce qu'une planque cache SANS coffre-fort : sous le matelas, pas plus. C'est
+## ce qui donne au premier travail (le coffre, 1 800 $) un sens qu'il n'avait
+## pas — il était payé pour rien, et le menu le montrait bien.
+const MATELAS := 4000
 
 var _pied := false
 var _vehicule := 0
@@ -409,6 +425,7 @@ const RAYON_FROLEMENT := 54.0      ## au-delà, ce n'est plus un frôlement
 const FENETRE_CASCADE := 3.0       ## secondes pour enchaîner
 const PRIME_FROLEMENT := 90
 const CASCADE_MAX := 5
+const PRIME_INSANE_STUNT := 600    ## le bonus nommé quand la chaîne est au maximum (§4.3)
 var _froles: Dictionary = {}       ## id d'auto -> temps du dernier frôlement
 var _cascade := 0
 var _cascade_reste := 0.0
@@ -427,11 +444,34 @@ var _cabine_en_cours := -1
 var _contrat: Dictionary = {}
 var _depuis_sirene := 0.0
 var _depuis_klaxon := 0.0
+var _bombes_posees: Array = []     ## id des voitures qu'on a piégées et qui n'ont pas encore sauté
+## LE CANON À EAU (guide §6.2) : au volant d'un camion de pompiers, ESPACE
+## arrose au lieu de tirer. `_jet` est vrai tant qu'on tient la touche.
+const MODELE_POMPIER := 18         ## `FormesCarnage.MODELES_VOITURES[18]` : le camion de pompiers
+const CADENCE_JET := 0.2           ## s entre deux « jet » sur le réseau
+var _jet := false
+var _depuis_jet := 0.0
+var _jet_son: AudioStreamPlayer = null
+## LE LANCE-FLAMMES (§6.2) : laissé par le patron d'un repaire à la première
+## mission rendue. `_lance_feu` : la lance est basculée sur le feu.
+var _lance_flammes := false
+var _lance_feu := false
+var _depuis_son_de_flamme := 0.0
+## Là où le jet retombe : l'éclaboussure (un émetteur posé dans le monde) et
+## les flaques qu'il laisse, qui s'effacent.
+var _eclaboussure: CPUParticles3D = null
+var _depuis_flaque_d_eau := 0.0
+var _flaques_d_eau: Array = []     ## {noeud, t, t0}
+const FLAQUES_D_EAU_MAX := 24
+const DUREE_FLAQUE_D_EAU := 12.0
+const PORTEE_CHUTE_DU_JET := 205.0 ## px : où l'arc du jet retombe (21 unités)
+var _klaxon_avant := false         ## pour ne déclencher le détonateur qu'au FRONT de H
 var _depuis_battement := 0.0
 var _depuis_derapage := 0.0
 var _depuis_pas := 0.0
 var _depuis_radio := 0.0
 var _cible_contrat: Dictionary = {}
+var _repaire_visite: Dictionary = {}   ## le tag par lequel on est entré chez un gang : {id, p, gang}
 var _contrat_duree := 0.0            ## durée initiale du contrat en main, pour le sablier du HUD
 var _radar: Control
 var _plan_image: Image                ## la carte entière, un pixel par tuile, peinte par lots
@@ -470,7 +510,7 @@ func duree_manche() -> float:
 	return DUREE
 
 func aide() -> String:
-	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · F : affaires (planque, hôpital) · G : manger ou boire · V : vue subjective · H : klaxon · TAB : carte · ÉCHAP : pause et sortie de la ville · caisse = arme, trousse ou billet · colis doré = à ramasser · crâne rouge = Kill Frenzy · au volant d'un taxi, F prend et dépose un client · garage bleu = étoiles effacées, et un sur deux est un ATELIER (F sur une pastille) · cabine verte/jaune/rouge = contrat (la couleur dit ce qu'il faut de respect) · tag de gang au sol = son repaire, il ouvre à 80 de respect (armurerie) · maison violette = planque à acheter · croix blanche = hôpital · dalle verte SUPÉRETTE = à manger et à boire (le frigo de la planque les garde) · quai GARE = le train, E pour monter quand il est à l'arrêt · dalle CASSE au bord de la voie = F broie la voiture contre de l'argent et une arme"
+	return "Z/S : avancer et freiner · Q/D : tourner · ESPACE : tirer · E : monter ou descendre · F : affaires (planque, hôpital) · G : manger ou boire · V : vue subjective · H : klaxon (à pied : le détonateur) · TAB : carte · ÉCHAP : pause et sortie de la ville · caisse = arme, trousse ou billet · colis doré = à ramasser · crâne rouge = Kill Frenzy · au volant d'un taxi, F prend et dépose un client · garage bleu = étoiles effacées, et un sur deux est un ATELIER (F sur une pastille) · cabine verte/jaune/rouge = contrat (la couleur dit ce qu'il faut de respect) · tag de gang au sol = son repaire, il ouvre à 80 de respect (armurerie) · maison violette = planque à acheter · croix blanche = hôpital · dalle verte SUPÉRETTE = à manger et à boire (le frigo de la planque les garde) · quai GARE = le train, E pour monter quand il est à l'arrêt · dalle CASSE au bord de la voie = F broie la voiture contre de l'argent et une arme"
 
 # ------------------------------------------------------- mise en place
 
@@ -481,7 +521,11 @@ func preparer() -> void:
 	# (`duree_forcee`), sinon il ne rendrait jamais la main.
 	sans_limite = Partie.duree_forcee <= 0.0
 	_rng.randomize()
-	carte = PlanVille.new(code)
+	# ⚠ LA VILLE EST DESSINÉE, PLUS TIRÉE. `PlanDessine` répond aux mêmes
+	# questions que `PlanVille`, mais depuis le dessin de Pikstown : c'est
+	# elle qu'on joue. La procédurale reste dans le dépôt pour le hub et les
+	# vitrines ; ici, plus personne ne la voit.
+	carte = PlanDessine.new(code)
 	ville = VilleVivante.new(carte, _rng)
 
 	_planter_decor()
@@ -517,6 +561,19 @@ func preparer() -> void:
 				elif String(argument).ends_with("pont"):
 					# `--banc-position=pont` : sur un tablier, l'eau des deux côtés.
 					_position = carte.un_pont()
+				elif String(argument).contains("=repaire"):
+					# `--banc-position=repaire[:n]` : devant le n-ième tag le plus
+					# proche du centre (le plus proche sans `:n`). C'est de là que
+					# partent les missions du repaire — et `:n` permet d'en
+					# photographier une ailleurs que sous le même arbre.
+					var rang := 0
+					if String(argument).contains("repaire:"):
+						rang = int(String(argument).split("repaire:")[1])
+					var proches: Array = carte.lieux_autour(_position, PlanVille.SECTEUR * PlanVille.PAS * 3.0)["repaires"]
+					proches.sort_custom(func(a, b): return Vector2(a["p"]).distance_to(_position) < Vector2(b["p"]).distance_to(_position))
+					if not proches.is_empty():
+						var r: Dictionary = proches[clamp(rang, 0, proches.size() - 1)]
+						_position = carte.point_de_rue(_rng, r["p"], 60.0, 140.0)
 				elif String(argument).ends_with("superette"):
 					# `--banc-position=superette` : devant une boutique. Les
 					# supérettes se tirent par secteur, on ne peut donc pas
@@ -561,6 +618,20 @@ func preparer() -> void:
 		# ne peut pas photographier est une vue qu'on ne juge pas.
 		if "--banc-subjectif" in OS.get_cmdline_args():
 			_subjectif = true
+		for argument in OS.get_cmdline_args():
+			if String(argument).begins_with("--banc-mission="):
+				_mission_banc = String(argument).substr(15)
+			# `--banc-modele=18` : partir au volant d'une carrosserie du kit
+			# plutôt que de la Volvo — c'est ainsi qu'on photographie le canon
+			# à eau du camion de pompiers, que le pilote ne volerait jamais.
+			elif String(argument).begins_with("--banc-modele="):
+				_modele_vehicule = int(String(argument).substr(14))
+			# `--banc-feu` : le lance-flammes du patron, sans la mission — pour
+			# photographier les flammes (avec `--banc-modele=18`).
+			elif String(argument) == "--banc-feu":
+				_lance_flammes = true
+				_lance_feu = true
+				ville.lance_flammes[Session.cle] = true
 	_vehicule = ID_VOITURE_DEPART + place
 	_pied = false
 	# La manche commence AU VOLANT : la radio s'allume avec elle, sur la
@@ -568,8 +639,8 @@ func preparer() -> void:
 	# en marche — `Partie.demarrer` vient de le couper.
 	_allumer_la_radio(_modele_vehicule)
 
-	_corps_auto = FormesCarnage.voiture(_ma_couleur(), Session.pseudo)
-	_corps_auto.add_child(FormesCarnage.echappement(-2.4))
+	_corps_auto = _batir_voiture_de(_modele_vehicule, _ma_couleur(), Session.pseudo, _teinte)
+	_corps_auto.add_child(FormesCarnage.echappement(-2.4 if _modele_vehicule < 0 else -2.2))
 	FormesCarnage.projecteurs(_corps_auto, 2.2)
 	monde().add_child(_corps_auto)
 
@@ -644,7 +715,7 @@ func preparer() -> void:
 	# lots pendant la manche, incrustée au milieu de l'écran tant qu'on tient la
 	# touche. C'est la carte de GTA 2 : l'île, la rivière, la voie ferrée, les
 	# quartiers, et où l'on est.
-	_plan_image = Image.create(PlanVille.COLONNES, PlanVille.LIGNES, false, Image.FORMAT_RGB8)
+	_plan_image = Image.create(carte.colonnes(), carte.lignes(), false, Image.FORMAT_RGB8)
 	_plan_image.fill(PlanVille.CARTE_EAU)
 	_plan_texture = ImageTexture.create_from_image(_plan_image)
 	_plan_vue = Control.new()
@@ -680,7 +751,9 @@ func preparer() -> void:
 	# Le temps de mise en place, toujours : dans le navigateur, une préparation
 	# qui bloque le fil principal plusieurs secondes fait tomber le socket.
 	print("[carnage] ville prête en %d ms — %d morceaux, %d fiches en cache" % [
-		Time.get_ticks_msec() - chrono, _morceaux.size(), carte.fiches_en_cache()])
+		Time.get_ticks_msec() - chrono,
+		_ville_dessinee.morceaux_batis() if _ville_dessinee else _morceaux.size(),
+		carte.fiches_en_cache()])
 
 	# `--banc-feu=N` : allumer N foyers autour du départ. Un incendie ne se
 	# commande pas au pilote automatique, et c'est ce qu'il faut photographier.
@@ -780,53 +853,20 @@ func _planter_decor() -> void:
 ## bâtir un d'un bloc en pleine course ferait une saccade au passage de chaque
 ## rue.
 func _diffuser_la_ville(entiers: int = 0) -> void:
-	# Un pâté sali par une casse se remaille : UN par image, tous morceaux
-	# confondus, pour qu'une roquette ne coûte jamais plus qu'un maillage.
-	if _chantier == null:
-		for cle in _morceaux:
-			if (_morceaux[cle] as MorceauVille).rafraichir():
-				break
-	if _chantier != null and entiers == 0:
-		if _chantier.avancer():
-			_chantier = null
-		return
-	var cote := PlanVille.MORCEAU * PlanVille.PAS
-	var m0 := Vector2i(int(floor((_position.x - PORTEE_MORCEAU) / cote)), int(floor((_position.y - PORTEE_MORCEAU) / cote)))
-	var m1 := Vector2i(int(floor((_position.x + PORTEE_MORCEAU) / cote)), int(floor((_position.y + PORTEE_MORCEAU) / cote)))
-	var manquants: Array = []
-	for my in range(m0.y, m1.y + 1):
-		for mx in range(m0.x, m1.x + 1):
-			var cle := Vector2i(mx, my)
-			if _morceaux.has(cle):
-				continue
-			var rect := Rect2(Vector2(mx, my) * cote, Vector2(cote, cote))
-			var plus_proche := Vector2(clamp(_position.x, rect.position.x, rect.end.x),
-				clamp(_position.y, rect.position.y, rect.end.y))
-			if plus_proche.distance_to(_position) <= PORTEE_MORCEAU:
-				manquants.append([plus_proche.distance_squared_to(_position), cle])
-	manquants.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
-	for i in min(max(entiers, 1), manquants.size()):
-		var cle: Vector2i = manquants[i][1]
-		var morceau := MorceauVille.new()
-		monde().add_child(morceau)
-		_morceaux[cle] = morceau
+	if _ville_dessinee == null:
+		_ville_dessinee = VilleMorcelee.new()
+		_ville_dessinee.par_image = 1
+		_ville_dessinee.regler((carte as PlanDessine).fiche_ville, "pikstown", 2)
+		monde().add_child(_ville_dessinee)
 		if entiers > 0:
-			morceau.batir(carte, cle, ville.reveillees, ville.detruits)
-		else:
-			morceau.commencer(carte, cle, ville.reveillees, ville.detruits)
-			_chantier = morceau
-	# On ne libère qu'un morceau par image aussi : libérer neuf nœuds de mille
-	# instances d'un coup se sent autant que les bâtir.
-	for cle in _morceaux.keys():
-		var rect := Rect2(Vector2(cle) * cote, Vector2(cote, cote))
-		var plus_proche := Vector2(clamp(_position.x, rect.position.x, rect.end.x),
-			clamp(_position.y, rect.position.y, rect.end.y))
-		if plus_proche.distance_to(_position) > LIBERATION:
-			if _morceaux[cle] == _chantier:
-				_chantier = null
-			(_morceaux[cle] as Node3D).queue_free()
-			_morceaux.erase(cle)
-			break
+			# Le départ : les morceaux autour du joueur d'un coup, comme
+			# l'éditeur le fait autour de son pivot. Les suivants viennent à
+			# un par image pendant le décompte.
+			_ville_dessinee.suivre(_en3d(_position))
+			for k in entiers * VilleMorcelee.PASSES.size():
+				_ville_dessinee._process(0.0)
+			return
+	_ville_dessinee.suivre(_en3d(_position))
 
 ## Un lot de pâtés de la carte par image, puis les lieux secteur par secteur.
 ## Cent vingt pâtés, c'est trois mille pixels et autant de tests d'eau : une
@@ -835,8 +875,8 @@ func _diffuser_la_ville(entiers: int = 0) -> void:
 const PATES_PAR_IMAGE := 120
 
 func _peindre_le_plan() -> void:
-	var total := PlanVille.pates_x() * PlanVille.pates_y()
-	var secteurs := (PlanVille.COLONNES / PlanVille.SECTEUR) * (PlanVille.LIGNES / PlanVille.SECTEUR)
+	var total := carte.nombre_de_pates()
+	var secteurs := (carte.colonnes() / PlanVille.SECTEUR) * (carte.lignes() / PlanVille.SECTEUR)
 	if _plan_pate < total:
 		for i in PATES_PAR_IMAGE:
 			if _plan_pate >= total:
@@ -849,7 +889,7 @@ func _peindre_le_plan() -> void:
 		for i in 3:
 			if _plan_secteur >= secteurs:
 				break
-			var par_ligne := PlanVille.COLONNES / PlanVille.SECTEUR
+			var par_ligne := carte.colonnes() / PlanVille.SECTEUR
 			carte.peindre_secteur(_plan_image, Vector2i(posmod(_plan_secteur, par_ligne), _plan_secteur / par_ligne))
 			_plan_secteur += 1
 		if _plan_secteur >= secteurs:
@@ -861,7 +901,7 @@ func _peindre_le_plan() -> void:
 func _dessiner_le_plan() -> void:
 	var taille := _plan_vue.size
 	var hauteur: float = taille.y * 0.68
-	var largeur: float = hauteur * float(PlanVille.COLONNES) / float(PlanVille.LIGNES)
+	var largeur: float = hauteur * float(carte.colonnes()) / float(carte.lignes())
 	# Un peu au-dessus du milieu : la légende passe sous la carte sans mordre
 	# sur la ligne d'état du bas.
 	var cadre := Rect2((taille - Vector2(largeur, hauteur)) * 0.5 - Vector2(0.0, taille.y * 0.05), Vector2(largeur, hauteur))
@@ -930,7 +970,7 @@ func _casser_dans_le_decor(id: int, locale: int) -> void:
 	var parti := morceau.casser(id, locale)
 	if parti.is_empty():
 		return
-	if (parti["p"] as Vector3).distance_to(Decor.vers3d(_position)) > 120.0:
+	if (parti["p"] as Vector3).distance_to(_en3d(_position)) > 120.0:
 		return
 	var couleur: Color = parti["c"]
 	for i in 5:
@@ -976,6 +1016,8 @@ func simuler_local(delta: float) -> void:
 			_basculer_la_triche()
 		elif _superette_ouverte:
 			_basculer_la_superette()
+		elif _planque_ouverte:
+			_basculer_la_planque()
 		else:
 			_basculer_la_pause()
 	if _pause_ouverte:
@@ -989,6 +1031,8 @@ func simuler_local(delta: float) -> void:
 	# LA SUPÉRETTE, même règle : la ville tourne derrière, le joueur est figé.
 	if _superette_ouverte:
 		_naviguer_dans_la_superette()
+	if _planque_ouverte:
+		_naviguer_dans_la_planque()
 
 	_depuis_portiere = max(0.0, _depuis_portiere - delta)
 	# ⚠ Le délai se teste AVANT de lire la touche : `action_declenchee` consomme
@@ -1014,6 +1058,7 @@ func simuler_local(delta: float) -> void:
 	elif _pied:
 		_marcher(delta)
 		_tirer(delta)
+		_detoner()
 	else:
 		_conduire(delta)
 		_klaxonner(delta)
@@ -1040,6 +1085,7 @@ func simuler_local(delta: float) -> void:
 			"tr": 1 if _train >= 0 else 0,
 			"mg": 1 if bool(_mods.get("mitrailleuse", false)) else 0,
 			"tc": 0 if _teinte == Color.WHITE else _teinte.to_rgba32(),
+			"je": (2 if _lance_feu else 1) if _jet else 0,
 		})
 
 	if not est_hote():
@@ -1243,14 +1289,17 @@ func _basculer_portiere() -> void:
 		_vider_les_evenements()
 	# La peinture reste sur la carrosserie, pas sur le joueur.
 	_teinte = Color.WHITE
-	# LA BOMBE part avec la voiture qu'on laisse : c'est le seul moment où elle
-	# s'arme, et c'est ce qui en fait un piège et pas une arme.
+	# LA BOMBE s'arme avec la voiture qu'on laisse : c'est le seul moment où
+	# elle s'arme. Ensuite, `H` à pied la fait sauter — ou le premier qui
+	# prend le volant.
 	if bool(_mods.get("bombe", false)):
 		canal.envoyer("bombe", {"id": id_rendu})
 		if est_hote():
 			ville.armer_bombe(Session.cle, id_rendu)
 			_vider_les_evenements()
-		_dire_affaire("bombe amorcée — éloignez-vous")
+		if not id_rendu in _bombes_posees:
+			_bombes_posees.append(id_rendu)
+		_dire_affaire("bombe armée — %s à pied pour la faire sauter" % Reglages.nom_de_touche("klaxon"))
 	# Le reste du matériel reste avec la carrosserie : on descend les mains
 	# vides, comme on est monté.
 	_mods = {}
@@ -1455,7 +1504,7 @@ func _conduire(delta: float) -> void:
 		# fermés, pas assez pour que la voiture parte seule — l'huile de
 		# l'atelier reste le vrai piège.
 		if _meteo != null:
-			adherence *= 1.0 - 0.18 * _meteo.pluie
+			adherence *= 1.0 - 0.18 * _meteo.pluie - 0.28 * _meteo.neige
 		_glisse = _glisse.slerp(cap, clamp(delta * adherence, 0.0, 1.0)).normalized()
 	_position += _glisse * _vitesse * delta
 	_crisser(delta, cap)
@@ -1485,7 +1534,7 @@ func _marquer_le_bitume(delta: float) -> void:
 	var cote := Vector2(-direction.y, direction.x)
 	for signe in [-1.0, 1.0]:
 		var roue: Vector2 = _position - direction * 16.0 + cote * signe * 12.0
-		var ou := Decor.vers3d(roue, 0.02)
+		var ou := _en3d(roue, 0.02)
 		var base := Basis(Vector3.UP, -_angle).scaled(Vector3(abs(_vitesse) * 0.045 * Decor.ECHELLE + 0.3, 1.0, 0.55))
 		_traces.set_instance_transform(_trace_suivante, Transform3D(base, ou))
 		_traces.set_instance_color(_trace_suivante, Color(0, 0, 0, 0.85))
@@ -1511,7 +1560,27 @@ func _crisser(delta: float, cap: Vector2) -> void:
 	Sons.jouer("derapage", _rng.randf_range(0.92, 1.1),
 		-22.0 + min(10.0, ecart * 22.0))
 
+## LE DÉTONATEUR (guide §7.2). À pied, le klaxon ne sert à rien — c'est donc
+## lui qui fait sauter les voitures qu'on a piégées, toutes à la fois, où
+## qu'elles soient. On appuie, pas on tient : un klaxon se module, un
+## détonateur se déclenche, et tenir la touche ne doit pas refaire sauter ce
+## qu'on piègera dans dix secondes.
+func _detoner() -> void:
+	var tenu := Commandes.klaxon()
+	var front := tenu and not _klaxon_avant
+	_klaxon_avant = tenu
+	if not front or _hors_service > 0.0 or _dedans != "":
+		return
+	if _bombes_posees.is_empty():
+		_dire_affaire("rien à faire sauter")
+		return
+	canal.envoyer("deto", {})
+	if est_hote():
+		ville.declencher_les_bombes(Session.cle)
+		_vider_les_evenements()
+
 func _klaxonner(delta: float) -> void:
+	_klaxon_avant = Commandes.klaxon()
 	_depuis_klaxon -= delta
 	if _hors_service > 0.0 or not Commandes.klaxon() or _depuis_klaxon > 0.0:
 		return
@@ -1571,7 +1640,7 @@ func _heurter_les_murs() -> void:
 		# tranche lesquels, comme pour les balles.
 		var impact := _position + direction * RAYON_VOITURE
 		var gerbe := FormesCarnage.etincelles()
-		gerbe.position = Decor.vers3d(impact, 1.0)
+		gerbe.position = _en3d(impact, 1.0)
 		monde().add_child(gerbe)
 		_eclats.append({"noeud": gerbe, "v": Vector3.ZERO, "t": 0.8, "t0": 0.8, "lumiere": true})
 		if est_hote():
@@ -1767,15 +1836,15 @@ func _surveiller_les_affaires(_delta: float) -> void:
 				if Commandes.affaire_declenchee():
 					_entrer_chez_soi(planque)
 			else:
-				var suivante := _amelioration_suivante()
+				# Au volant, on DÉPOSE seulement ; les travaux se choisissent au
+				# coffre, dans le menu de la planque — on ne paie pas un garage
+				# depuis le trottoir sans savoir ce qu'il garde.
 				if _argent > 0:
 					_affaire = "F : déposer $%d" % _argent
-				elif suivante != "":
-					_affaire = "F : %s — $%d" % [_libelle_amelioration(suivante), int(PlanVille.PRIX_AMELIORATION[suivante])]
 				else:
-					_affaire = "chez vous — $%d à l'abri" % _banque
+					_affaire = "chez vous — $%d à l'abri · entrez pour les travaux" % _banque
 				if Commandes.affaire_declenchee():
-					_traiter_chez_soi(suivante)
+					_traiter_chez_soi("")
 		else:
 			_affaire = "planque d'un autre"
 		if planque != _planque_en_cours:
@@ -1821,6 +1890,7 @@ func _surveiller_les_affaires(_delta: float) -> void:
 		if du_gang >= VilleVivante.SEUIL_ALLIE or a_nous:
 			_affaire = "F : entrer %s" % ("chez vous" if a_nous else "chez %s" % carte.nom_du_gang(chez))
 			if Commandes.affaire_declenchee():
+				_repaire_visite = repaire
 				_entrer_dans_le_repaire(chez)
 		elif ville.humeur(Session.cle, chez) == VilleVivante.H_VUE:
 			# LE RAID (§3). Se tenir là SUFFIT : ils tirent déjà, le compteur
@@ -1856,6 +1926,15 @@ func _surveiller_les_affaires(_delta: float) -> void:
 			_affaire = "F : %s (%d)" % ["mine" if quoi == "mines" else "huile", int(_mods[quoi])]
 			if Commandes.affaire_declenchee():
 				_larguer(quoi)
+		elif not _pied and _modele_vehicule == MODELE_POMPIER and _lance_flammes:
+			# Au volant du camion de pompiers, quand on a le lance-flammes du
+			# patron : `F` bascule la lance — eau ou feu. Une touche de plus,
+			# c'était une de trop ; l'affaire du lieu, ici, c'est la lance.
+			_affaire = "F : lance à %s" % ("eau" if _lance_feu else "feu")
+			if Commandes.affaire_declenchee():
+				_lance_feu = not _lance_feu
+				_dire_affaire("lance à %s" % ("feu" if _lance_feu else "eau"))
+				Sons.jouer("portail", 1.1, -10.0)
 	_hopital_en_cours = hopital
 
 ## Le garage sous les roues, s'il vend des modifications. On redemande la
@@ -2118,6 +2197,16 @@ func _acheter_a_l_armurerie(gang: int) -> void:
 	_dire_affaire("%s — %s" % [String(ARMES[quoi]["nom"]).to_lower(), String(etal["mot"])])
 	Sons.jouer("depart", 0.9, -8.0)
 
+## Demander du travail au patron. Même chemin qu'une cabine : le client
+## annonce, l'hôte décide (le respect, le rival, le genre), et la réponse —
+## « pris » ou « refuse » — revient par l'événement `ctr`, comme un contrat.
+func _demander_une_mission(gang: int) -> void:
+	var tag: Vector2 = _repaire_visite.get("p", _position)
+	canal.envoyer("mission", {"g": gang, "x": int(tag.x), "y": int(tag.y)})
+	if est_hote():
+		ville.proposer_mission(Session.cle, gang, tag)
+		_vider_les_evenements()
+
 func _sortir_de_chez_soi() -> void:
 	# ⚠ ON NE SORT PAS SA VOITURE DU GARAGE D'UN AUTRE. La même fonction sert
 	# maintenant aux repaires de gang : sans ce drapeau, quitter le repaire des
@@ -2200,17 +2289,15 @@ func _affaires_dedans() -> void:
 		and _dedans_p.distance_to(au_frigo) < PORTEE_COFFRE
 	var pres_de_la_porte := _dedans_p.distance_to(Interieurs.entree(_dedans)) < PORTEE_PORTE
 	if pres_du_coffre:
-		var suivante := _amelioration_suivante()
-		if _argent > 0:
-			_affaire = "F : déposer $%d au coffre" % _argent
-		elif suivante != "":
-			_affaire = "F : %s — $%d" % [_libelle_amelioration(suivante), int(PlanVille.PRIX_AMELIORATION[suivante])]
-		else:
-			_affaire = "$%d à l'abri" % _banque
+		# LE COFFRE OUVRE UN MENU (`ui/planque.gd`) : déposer, retirer, et les
+		# trois travaux avec leur prix et ce qu'ils font. ⚠ Avant, `F`
+		# déposait puis achetait « le prochain » travail sans le nommer : on
+		# payait cinq mille dollars un garage sans savoir ce qu'il gardait.
+		_affaire = "F : le coffre — $%d sur soi, $%d à l'abri" % [_argent, _banque]
 		if _banque > 0:
 			_affaire += "   ·   E : retirer $%d" % _banque
-		if Commandes.affaire_declenchee():
-			_traiter_chez_soi(suivante)
+		if Commandes.affaire_declenchee() and not _planque_ouverte:
+			_basculer_la_planque()
 		elif _banque > 0 and Commandes.action_declenchee():
 			_retirer_du_coffre()
 	elif pres_de_la_porte:
@@ -2256,6 +2343,9 @@ func _affaires_au_repaire() -> void:
 	var pres_du_ratelier: bool = au_ratelier != Vector2.ZERO \
 		and _dedans_p.distance_to(au_ratelier) < PORTEE_COFFRE
 	var pres_de_la_porte := _dedans_p.distance_to(Interieurs.entree(_dedans)) < PORTEE_PORTE
+	var au_patron := Interieurs.point_de_poste(_dedans, "patron")
+	var pres_du_patron: bool = au_patron != Vector2.ZERO \
+		and _dedans_p.distance_to(au_patron) < PORTEE_COFFRE
 	if pres_de_la_porte:
 		# LA PORTE PASSE AVANT LE RÂTELIER, comme chez soi : dans une pièce de
 		# six tuiles, un poste qu'on ne peut pas quitter est un piège.
@@ -2268,8 +2358,19 @@ func _affaires_au_repaire() -> void:
 			int(etal["prix"])]
 		if Commandes.affaire_declenchee():
 			_acheter_a_l_armurerie(gang)
+	elif pres_du_patron:
+		# LES MISSIONS DU REPAIRE (§3). Le patron, au bout de la table, confie
+		# ce qu'une cabine ne confie pas : la mallette d'un rival, ou la tête
+		# de son lieutenant. Un seul travail en main à la fois — la ligne le
+		# dit, plutôt que de laisser `F` répondre par un refus.
+		if _contrat.is_empty():
+			_affaire = "F : le patron a du travail pour vous"
+			if Commandes.affaire_declenchee():
+				_demander_une_mission(gang)
+		else:
+			_affaire = "le patron attend que vous finissiez ce que vous avez en main"
 	else:
-		_affaire = "chez %s — le râtelier est au fond" % carte.nom_du_gang(gang)
+		_affaire = "chez %s — le râtelier est au fond, le patron à la table" % carte.nom_du_gang(gang)
 
 ## RANGER AU FRIGO : tout ce qu'on porte, d'un coup. Un menu de quantités dans
 ## un jeu qui se joue à quatre touches ne se lit pas — et on ne vient pas chez
@@ -2357,8 +2458,8 @@ func _habiller(porteur: Node3D, cle: String) -> void:
 ## (`Interieurs.pour_quartier`), donc la réponse est la même chez tout le monde
 ## et rien ne circule sur le réseau.
 func _logement_ici() -> String:
-	var pate := PlanVille.pate_de(int(_position.x / PlanVille.PAS), int(_position.y / PlanVille.PAS))
-	return Interieurs.pour_quartier(carte.quartier_du_pate(pate))
+	# ⚠ Par la carte, pas par la grille : sur Pikstown, un « pâté » est une case.
+	return Interieurs.pour_quartier(carte.quartier(_position))
 
 func _nom_du_logement() -> String:
 	return String(Interieurs.CATALOGUE[_logement_ici()]["nom"])
@@ -2376,16 +2477,26 @@ func _acheter_la_planque(id: int, prix: int) -> void:
 	Sons.jouer("portail", 1.0, -6.0)
 	canal.envoyer("planque", {"j": Session.cle, "i": id})
 
+## Ce qu'on peut encore déposer : tout avec le coffre-fort, ce qui reste sous
+## le matelas sans lui.
+func _place_au_coffre() -> int:
+	if bool(_ameliorations["coffre"]):
+		return _argent
+	return clampi(MATELAS - _banque, 0, _argent)
+
 func _traiter_chez_soi(suivante: String) -> void:
 	if _argent > 0:
-		var depose := _argent
+		var depose := _place_au_coffre()
+		if depose <= 0:
+			_dire_affaire("le matelas est plein ($%d) — il faut le coffre-fort" % MATELAS)
+			return
 		_banque += depose
-		_argent = 0
-		_dire_affaire("$%d à l'abri" % depose)
+		_argent -= depose
+		_dire_affaire("$%d à l'abri" % depose if _argent == 0 else "$%d à l'abri — le matelas est plein" % depose)
 		Sons.jouer("depart", 1.4, -8.0)
 		return
 	if suivante == "":
-		_dire_affaire("rien à améliorer ici")
+		_dire_affaire("rien à déposer — les travaux se paient au coffre, à l'intérieur")
 		return
 	var prix := int(PlanVille.PRIX_AMELIORATION[suivante])
 	if _banque < prix:
@@ -2442,6 +2553,15 @@ func _encaisser_argent(montant: int) -> void:
 
 func _tirer(delta: float) -> void:
 	_recharge = max(0.0, _recharge - delta)
+	# Au volant d'un camion de pompiers, la touche de tir tient la LANCE : on
+	# n'a pas de touche à lui donner, et un camion qui tire à la mitraillette
+	# n'est pas un camion de pompiers.
+	if not _pied and _modele_vehicule == MODELE_POMPIER:
+		_arroser(delta)
+		return
+	if _jet:
+		_jet = false
+		_regler_le_bruit_du_jet()
 	# Au volant, la mitrailleuse de bord passe DEVANT l'arme de poing : elle a
 	# ses propres munitions (infinies) et sa propre cadence.
 	var montee := not _pied and bool(_mods.get("mitrailleuse", false))
@@ -2468,6 +2588,80 @@ func _tirer(delta: float) -> void:
 	if _munitions == 0 and not montee:
 		_reprendre_le_pistolet()
 
+## ARROSER : le jet éteint ce qui brûle devant et couche les passants, sans
+## blesser personne. L'hôte l'applique à chaque image pour son propre camion,
+## et cinq fois par seconde pour ceux des autres (`jet` sur le réseau).
+func _arroser(delta: float) -> void:
+	var veut: bool = Commandes.tir() and _hors_service <= 0.0
+	# Sans le lance-flammes du patron, la lance ne crache que de l'eau.
+	if not _lance_flammes:
+		_lance_feu = false
+	if veut != _jet:
+		_jet = veut
+		_regler_le_bruit_du_jet()
+	if not veut:
+		return
+	var depart := _position + Vector2.RIGHT.rotated(_angle) * 44.0
+	if _lance_feu:
+		# Le feu s'entend : le son du kit, relancé tant qu'on tient.
+		_depuis_son_de_flamme -= delta
+		if _depuis_son_de_flamme <= 0.0:
+			_depuis_son_de_flamme = 0.9
+			Sons.jouer("lance_flammes", _rng.randf_range(0.95, 1.05), -9.0)
+	if est_hote():
+		if _lance_feu:
+			ville.enflammer_devant(Session.cle, depart, _angle, delta)
+		else:
+			ville.arroser_devant(depart, _angle, delta)
+	_depuis_jet -= delta
+	if _depuis_jet <= 0.0:
+		_depuis_jet = CADENCE_JET
+		canal.envoyer("jet", {"x": int(depart.x), "y": int(depart.y), "a": snapped(_angle, 0.01),
+			"f": 1 if _lance_feu else 0})
+
+## Le souffle de la lance : un bruit blanc filtré, en boucle, comme la pluie —
+## fabriqué une fois, joué tant qu'on arrose.
+func _regler_le_bruit_du_jet() -> void:
+	if not _jet or _lance_feu:
+		if _jet_son != null and _jet_son.playing:
+			_jet_son.stop()
+		return
+	if _jet_son == null:
+		_jet_son = AudioStreamPlayer.new()
+		_jet_son.stream = _bruit_de_jet()
+		_jet_son.bus = "Effets" if AudioServer.get_bus_index("Effets") >= 0 else "Master"
+		_jet_son.volume_db = -14.0
+		add_child(_jet_son)
+	if not _jet_son.playing:
+		_jet_son.play()
+
+func _bruit_de_jet() -> AudioStreamWAV:
+	var taux := 22050
+	var n := taux * 2
+	var octets := PackedByteArray()
+	octets.resize(n * 2)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 17
+	var doux := 0.0
+	var moyen := 0.0
+	for i in n:
+		var blanc := rng.randf_range(-1.0, 1.0)
+		# Deux passe-bas : un souffle grave et un chuintement plus clair —
+		# de l'eau sous pression, pas de la pluie.
+		doux += (blanc - doux) * 0.05
+		moyen += (blanc - moyen) * 0.35
+		var v := clampf(doux * 1.4 + (moyen - doux) * 0.9, -1.0, 1.0)
+		octets.encode_s16(i * 2, int(v * 28000.0))
+	var flux := AudioStreamWAV.new()
+	flux.format = AudioStreamWAV.FORMAT_16_BITS
+	flux.mix_rate = taux
+	flux.stereo = false
+	flux.data = octets
+	flux.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	flux.loop_begin = 0
+	flux.loop_end = n
+	return flux
+
 func _reprendre_le_pistolet() -> void:
 	_arme = "pistolet"
 	_munitions = -1
@@ -2477,7 +2671,7 @@ func _creer_projectile(depart: Vector2, angle: float, arme: String, par: String)
 	var couleur: Color = fiche["couleur"]
 	var noeud := Decor.sphere(0.5 if arme != "roquette" else 0.9, couleur, false)
 	noeud.material_override = Decor.matiere_lumineuse(couleur, 1.25)
-	noeud.position = Decor.vers3d(depart, 1.4)
+	noeud.position = _en3d(depart, 1.4)
 	monde().add_child(noeud)
 	_projectiles.append({
 		"p": depart, "v": Vector2.RIGHT.rotated(angle) * float(fiche["vitesse"]),
@@ -2510,7 +2704,7 @@ func _avancer_projectiles(delta: float) -> void:
 				_effet_explosion(tir["p"])
 			(tir["noeud"] as Node3D).queue_free()
 			continue
-		(tir["noeud"] as Node3D).position = Decor.vers3d(tir["p"], 1.4)
+		(tir["noeud"] as Node3D).position = _en3d(tir["p"], 1.4)
 		restants.append(tir)
 	_projectiles = restants
 
@@ -2590,6 +2784,10 @@ func _ramasser_les_a_cotes() -> void:
 	for r in ville.ramassages:
 		if (r["p"] as Vector2).distance_to(_position) > PORTEE_A_COTE:
 			continue
+		# La mallette d'un coéquipier n'est pas à nous : on passe dessus sans
+		# rien dire, sinon on la demandait à l'hôte à chaque image.
+		if int(r["genre"]) == VilleVivante.R_MALLETTE and String(r.get("pour", "")) != Session.cle:
+			continue
 		canal.envoyer("acote", {"id": int(r["id"]), "x": int(_position.x), "y": int(_position.y)})
 		if est_hote():
 			ville.ramasser_a_cote(int(r["id"]), Session.cle, _position)
@@ -2621,12 +2819,23 @@ func _compter_les_frolements() -> void:
 		_cascade = min(_cascade + 1, CASCADE_MAX) if _cascade_reste > 0.0 else 1
 		_cascade_reste = FENETRE_CASCADE
 		var prime := PRIME_FROLEMENT * _cascade
-		canal.envoyer("payer", {"m": prime, "q": "cascade",
+		var quoi := "cascade"
+		# INSANE STUNT (§4.3) : la chaîne au maximum. Le bonus s'ajoute à la
+		# prime du frôlement et s'annonce en capitales — puis la chaîne repart
+		# de un, sinon chaque frôlement suivant serait un INSANE STUNT de plus.
+		if _cascade >= CASCADE_MAX:
+			prime += PRIME_INSANE_STUNT
+			quoi = "bonus"
+			_cascade = 0
+			_annoncer("INSANE STUNT — $%d" % PRIME_INSANE_STUNT, Palette.SERIE, 3.2)
+			Sons.jouer("bonus", 1.0, -6.0)
+		canal.envoyer("payer", {"m": prime, "q": quoi,
 			"x": int(_position.x), "y": int(_position.y)})
 		if est_hote():
-			ville.payer(Session.cle, _position, prime, "cascade")
+			ville.payer(Session.cle, _position, prime, quoi)
 			_vider_les_evenements()
-		_dire_affaire("frôlement ×%d" % _cascade if _cascade > 1 else "frôlement")
+		if quoi == "cascade":
+			_dire_affaire("frôlement ×%d" % _cascade if _cascade > 1 else "frôlement")
 		Sons.jouer("derapage", 1.2, -13.0)
 		return
 
@@ -2651,7 +2860,7 @@ func _codes_de_triche() -> Array:
 ## rendait les commandes alors qu'un autre était encore ouvert, et l'on
 ## conduisait à travers l'écran. Un seul endroit fait la somme.
 func _regler_la_saisie() -> void:
-	Commandes.saisie = _pause_ouverte or _triche_ouverte or _superette_ouverte
+	Commandes.saisie = _pause_ouverte or _triche_ouverte or _superette_ouverte or _planque_ouverte
 
 func _basculer_la_triche() -> void:
 	_triche_ouverte = not _triche_ouverte
@@ -3121,6 +3330,11 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 				ville.proposer_contrat(String(charge.get("cle", "")), int(charge.get("i", 0)),
 					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))))
 				_vider_les_evenements()
+		"mission":
+			if est_hote():
+				ville.proposer_mission(String(charge.get("cle", "")), int(charge.get("g", -1)),
+					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))))
+				_vider_les_evenements()
 		"garage":
 			if est_hote():
 				ville.repeindre(String(charge.get("cle", "")))
@@ -3130,6 +3344,45 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 				ville.poser_piege(String(charge.get("cle", "")),
 					Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
 					int(charge.get("g", 0)))
+				_vider_les_evenements()
+		"jet":
+			if est_hote():
+				var ou_jet := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
+				if int(charge.get("f", 0)) == 1:
+					ville.enflammer_devant(String(charge.get("cle", "")), ou_jet,
+						float(charge.get("a", 0.0)), CADENCE_JET)
+				else:
+					ville.arroser_devant(ou_jet, float(charge.get("a", 0.0)), CADENCE_JET)
+				_vider_les_evenements()
+		"lance":
+			if String(charge.get("j", "")) == Session.cle:
+				_lance_flammes = true
+				_annoncer("LE PATRON VOUS LAISSE LE LANCE-FLAMMES", Palette.AVERTISSEMENT, 3.2)
+				_dire_affaire("lance-flammes : au volant d'un camion de pompiers, F bascule la lance")
+				Sons.jouer("bonus", 1.0, -8.0)
+				if Commandes.pilote_automatique:
+					print("[banc] lance-flammes reçu")
+		"deto":
+			if charge.has("n"):
+				# La réponse de l'hôte : ce qui a sauté — au détonateur, ou
+				# sous un voleur (`vol`).
+				if String(charge.get("j", "")) == Session.cle:
+					if charge.has("id"):
+						_bombes_posees.erase(int(charge["id"]))
+					else:
+						_bombes_posees.clear()
+					if charge.has("vol"):
+						_annoncer("VOTRE VOITURE PIÉGÉE A EU %s" % String(joueurs.get(String(charge["vol"]), {}).get("pseudo", "quelqu'un")).to_upper(),
+							Palette.AVERTISSEMENT, 3.0)
+					elif int(charge.get("n", 0)) > 0:
+						_annoncer("BOUM — %d voiture(s)" % int(charge["n"]), Palette.AVERTISSEMENT, 2.4)
+					else:
+						_dire_affaire("plus rien à faire sauter")
+				if Commandes.pilote_automatique:
+					print("[banc] détonateur de %s : %d" % [String(charge.get("j", "")), int(charge.get("n", 0))])
+			elif est_hote():
+				# La demande d'un client.
+				ville.declencher_les_bombes(String(charge.get("cle", "")))
 				_vider_les_evenements()
 		"bombe":
 			if est_hote():
@@ -3217,6 +3470,15 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 			_effet_gain(Vector2(float(charge.get("x", 0)), float(charge.get("y", 0))),
 				int(charge.get("p", 0)), int(charge.get("f", 1)), tueur,
 				String(charge.get("q", "")))
+		"bonus":
+			# UN BONUS NOMMÉ (§4.3) : le nom en capitales au milieu de l'écran,
+			# pour celui qui l'a fait ; les autres n'ont que le « k » et son
+			# effet de gain — un bonus qui s'annonce chez tout le monde
+			# ressemble à une publicité.
+			if String(charge.get("j", "")) == Session.cle:
+				_annoncer("%s — $%d" % [String(charge.get("n", "")), int(charge.get("m", 0))],
+					Palette.SERIE, 3.2)
+				Sons.jouer("bonus", 1.0, -6.0)
 		"saisie":
 			# Un joueur s'est fait ramasser : sa fortune baisse d'autant.
 			if est_hote():
@@ -3328,11 +3590,21 @@ func _appliquer(evenement: String, charge: Dictionary) -> void:
 				Sons.jouer("choc", 0.75, -14.0)
 			else:
 				_contrat = {"t": String(charge.get("t", "")), "n": int(charge.get("n", 0)),
-					"a": int(charge.get("a", 0)), "r": float(charge.get("r", 0))}
+					"a": int(charge.get("a", 0)), "r": float(charge.get("r", 0)),
+					"k": String(charge.get("k", ""))}
 				_contrat_duree = max(_contrat_duree if int(charge.get("a", 0)) > 0 else 0.0, float(charge.get("r", 0)))
 				_cible_contrat = {"k": String(charge.get("k", "")), "g": int(charge.get("g", -1))}
+				# Une mission de repaire vise un POINT (la mallette, puis le
+				# tag ; le repaire du lieutenant) : le radar le pointe tel quel.
+				if charge.has("x"):
+					_cible_contrat["p"] = Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
 				if etat == "pris":
 					Sons.jouer("portail", 1.3, -9.0)
+				elif etat == "avance" and String(charge.get("k", "")) == "mallette":
+					# La mallette en main : un son qui dit « c'est pris », pas
+					# celui d'un compte qui avance.
+					Sons.jouer("depart", 1.1, -8.0)
+					_annoncer("LA MALLETTE — rapportez-la", Palette.AVERTISSEMENT, 2.4)
 		"klx":
 			var ou := Vector2(float(charge.get("x", 0)), float(charge.get("y", 0)))
 			var loin: float = ou.distance_to(_position)
@@ -3431,7 +3703,7 @@ func _recevoir_joueur(charge: Dictionary) -> void:
 		var pseudo := String(joueurs.get(cle, {}).get("pseudo", ""))
 		var couleur := Palette.couleur_joueur(place)
 		var auto := FormesCarnage.voiture(couleur, pseudo)
-		auto.position = Decor.vers3d(cible)
+		auto.position = _en3d(cible)
 		monde().add_child(auto)
 		# Le personnage d'un autre joueur : celui que le salon annonce, sinon
 		# celui que son identifiant désigne — le calcul est le même chez tous,
@@ -3456,6 +3728,8 @@ func _recevoir_joueur(charge: Dictionary) -> void:
 	a["eperon"] = int(charge.get("ep", 0)) == 1
 	a["train"] = int(charge.get("tr", 0)) == 1
 	a["mitrailleuse"] = int(charge.get("mg", 0)) == 1
+	a["arrose"] = int(charge.get("je", 0)) >= 1
+	a["flambe"] = int(charge.get("je", 0)) == 2
 	# Arrivé en retard, on n'a pas vu le « pris » : la voiture qu'il conduit
 	# sort quand même de sa nappe.
 	var w := int(charge.get("w", 0))
@@ -3474,7 +3748,7 @@ func _recevoir_joueur(charge: Dictionary) -> void:
 			Palette.couleur_joueur(int(joueurs.get(cle, {}).get("place", 1))),
 			String(joueurs.get(cle, {}).get("pseudo", "")),
 			Color.hex(teinte_recue) if teinte_recue != 0 else Color.WHITE)
-		neuf.position = Decor.vers3d(cible)
+		neuf.position = _en3d(cible)
 		monde().add_child(neuf)
 		a["auto"] = neuf
 
@@ -3510,6 +3784,8 @@ func _tomber() -> void:
 	# un menu de supérette pendant qu'on se relevait dans la rue.
 	if _superette_ouverte:
 		_basculer_la_superette()
+	if _planque_ouverte:
+		_basculer_la_planque()
 	if _pause_ouverte:
 		_basculer_la_pause()
 	# La police ramasse ce qu'on avait sur soi — et l'arme, sauf si on a un
@@ -3599,7 +3875,11 @@ func _effet_gain(position: Vector2, points: int, facteur: int, cle: String, quoi
 	# Ce qui se GAGNE sonne comme une prime, pas comme un choc : les à-côtés
 	# de la phase 9 (colis, collection, frenzy, course, cascade) rejoignent la
 	# liste — sans ça, ramasser un colis faisait le bruit d'une tôle froissée.
-	if quoi in ["argent", "contrat", "colis", "collection", "frenzy", "course", "cascade"]:
+	if quoi == "bonus":
+		# Le bonus nommé sonne déjà chez celui qui l'a fait (« bonus ») : ici,
+		# rien de plus qu'un chiffre qui monte — pas deux fanfares.
+		pass
+	elif quoi in ["argent", "contrat", "colis", "collection", "frenzy", "course", "cascade"]:
 		Sons.jouer("bonus", 1.0, -10.0)
 	elif quoi == "pieton" and not _pied:
 		Sons.jouer("ecrase_pieton", _rng.randf_range(0.9, 1.1), -6.0)
@@ -3621,7 +3901,7 @@ func _effet_gain(position: Vector2, points: int, facteur: int, cle: String, quoi
 		# centaines de maillages.
 		var flaque := Decor.cylindre(_rng.randf_range(1.1, 1.9), 0.08,
 			Palette.CRITIQUE.darkened(0.72), false)
-		flaque.position = Decor.vers3d(position, 0.05)
+		flaque.position = _en3d(position, 0.05)
 		flaque.rotation.y = _rng.randf() * TAU
 		monde().add_child(flaque)
 		_taches.append(flaque)
@@ -3630,14 +3910,14 @@ func _effet_gain(position: Vector2, points: int, facteur: int, cle: String, quoi
 
 	for i in 10:
 		var eclat := Decor.sphere(_rng.randf_range(0.18, 0.42), Palette.CRITIQUE, false)
-		eclat.position = Decor.vers3d(position, 1.0)
+		eclat.position = _en3d(position, 1.0)
 		monde().add_child(eclat)
 		var direction := Vector3(_rng.randf_range(-1, 1), _rng.randf_range(1.4, 3.2), _rng.randf_range(-1, 1))
 		_eclats.append({"noeud": eclat, "v": direction * _rng.randf_range(6, 14), "t": 1.0, "t0": 1.0})
 
 	var mention := Decor.etiquette("+%d%s" % [points, ("  x%d" % facteur) if facteur > 1 else ""],
 		couleur, 44)
-	mention.position = Decor.vers3d(position, 3.0)
+	mention.position = _en3d(position, 3.0)
 	monde().add_child(mention)
 	_eclats.append({"noeud": mention, "v": Vector3(0, 7.0, 0), "t": 1.1, "t0": 1.1, "texte": true})
 
@@ -3654,7 +3934,7 @@ func _effet_broyage(position: Vector2) -> void:
 	_secousse = max(_secousse, 0.32)
 	for noeud in _compacteurs:
 		var machine: Node3D = noeud
-		if Decor.vers3d(position).distance_to(machine.position) > 40.0:
+		if _en3d(position).distance_to(machine.position) > 40.0:
 			continue
 		for k in 2:
 			var machoire := machine.get_node_or_null("Machoire%d" % k) as Node3D
@@ -3666,6 +3946,32 @@ func _effet_broyage(position: Vector2) -> void:
 			anim.tween_property(machoire, "position:x", vers, 0.35)
 			anim.tween_interval(0.5)
 			anim.tween_property(machoire, "position:x", depart, 0.7)
+
+## LES LAMPADAIRES DE PIKSTOWN ÉCLAIRENT. La ville dessinée les pose sans
+## lumière ; toutes les deux secondes on parcourt ce qu'elle a bâti, on
+## reconnaît les luminaires à leur maillage et on leur accroche une flaque au
+## sol — une fois chacun (une méta le marque). Sans ça, la nuit de Pikstown
+## était un écran d'encre où l'on ne distinguait plus la rue du trottoir.
+func _eclairer_les_lampadaires_dessines(delta: float) -> void:
+	if _ville_dessinee == null:
+		return
+	_depuis_lueurs -= delta
+	if _depuis_lueurs > 0.0:
+		return
+	_depuis_lueurs = 2.0
+	var maillages := FormesCarnage.maillages_de_lampadaires()
+	if maillages.is_empty():
+		return
+	var neuves := 0
+	for n in _ville_dessinee.find_children("*", "MeshInstance3D", true, false):
+		var mi := n as MeshInstance3D
+		if mi.has_meta("lueur") or not (mi.mesh in maillages):
+			continue
+		mi.set_meta("lueur", true)
+		mi.add_child(FormesCarnage.lueur_de_lampadaire(mi.mesh))
+		neuves += 1
+	if Commandes.pilote_automatique and neuves > 0:
+		print("[banc] %d lampadaire(s) de Pikstown allumé(s) (%d maillages de luminaire connus)" % [neuves, maillages.size()])
 
 ## LE TONNERRE. Pas de fichier de tonnerre dans le dossier des sons : c'est la
 ## grande explosion, ralentie de moitié — plus grave, plus longue, elle roule
@@ -3687,7 +3993,7 @@ func _effet_explosion(position: Vector2, ampleur: float = 1.0) -> void:
 	# La bouffée de feu, et un éclair orange sur les façades autour : au
 	# crépuscule, une explosion doit ÉCLAIRER, pas seulement projeter des éclats.
 	var bouffee := FormesCarnage.explosion()
-	bouffee.position = Decor.vers3d(position, 1.0)
+	bouffee.position = _en3d(position, 1.0)
 	monde().add_child(bouffee)
 	bouffee.finished.connect(bouffee.queue_free)
 	var eclair := OmniLight3D.new()
@@ -3695,13 +4001,33 @@ func _effet_explosion(position: Vector2, ampleur: float = 1.0) -> void:
 	eclair.light_energy = 4.0
 	eclair.omni_range = 30.0
 	eclair.shadow_enabled = false
-	eclair.position = Decor.vers3d(position, 3.0)
+	eclair.position = _en3d(position, 3.0)
 	monde().add_child(eclair)
 	_eclats.append({"noeud": eclair, "v": Vector3.ZERO, "t": 0.5, "t0": 0.5, "lumiere": true})
+	# L'ONDE DE CHOC : un anneau au sol qui s'ouvre en un tiers de seconde. Vu
+	# de dessus, c'est elle qui donne la TAILLE de l'explosion — les éclats
+	# qui montent se lisent mal à la verticale, un cercle qui grandit, oui.
+	var onde := FormesCarnage.racine_anneau(2.0, Color(1.0, 0.8, 0.5), 0.5)
+	onde.position = _en3d(position, 0.2)
+	onde.scale = Vector3.ONE * 0.4
+	monde().add_child(onde)
+	_eclats.append({"noeud": onde, "v": Vector3.ZERO, "t": 0.34, "t0": 0.34, "lumiere": true,
+		"onde": 5.5 * ampleur + 1.5})
+	# LA TRACE : un rond noir qui reste au sol jusqu'à la fin de la manche,
+	# comme les flaques des passants — une ville où l'on s'est battu doit le
+	# montrer. Même plafond que les taches.
+	var trace := Decor.cylindre(_rng.randf_range(2.4, 3.4) * (0.6 + 0.4 * ampleur), 0.07,
+		Color(0.07, 0.065, 0.06), false)
+	trace.position = _en3d(position, 0.06)
+	trace.rotation.y = _rng.randf() * TAU
+	monde().add_child(trace)
+	_taches.append(trace)
+	if _taches.size() > 80:
+		(_taches.pop_front() as Node3D).queue_free()
 	for i in 18:
 		var eclat := Decor.sphere(_rng.randf_range(0.3, 0.7), Palette.SERIEUX, false)
 		eclat.material_override = Decor.matiere_lumineuse(Palette.SERIEUX, 1.2)
-		eclat.position = Decor.vers3d(position, 1.2)
+		eclat.position = _en3d(position, 1.2)
 		monde().add_child(eclat)
 		var direction := Vector3(_rng.randf_range(-1, 1), _rng.randf_range(0.6, 2.4), _rng.randf_range(-1, 1))
 		_eclats.append({"noeud": eclat, "v": direction * _rng.randf_range(14, 26), "t": 0.7, "t0": 0.7})
@@ -3711,7 +4037,7 @@ func _effet_depart_de_coup(position: Vector2, angle: float) -> void:
 	# et l'erreur qui en sort ne parle que d'un « nom de variable attendu ».
 	var lueur := Decor.sphere(0.3, Palette.AVERTISSEMENT, false)
 	lueur.material_override = Decor.matiere_lumineuse(Palette.AVERTISSEMENT, 1.4)
-	lueur.position = Decor.vers3d(position + Vector2.RIGHT.rotated(angle) * 22.0, 1.4)
+	lueur.position = _en3d(position + Vector2.RIGHT.rotated(angle) * 22.0, 1.4)
 	monde().add_child(lueur)
 	var vers := Vector2.RIGHT.rotated(angle)
 	_eclats.append({"noeud": lueur, "v": Vector3(vers.x, 0.0, vers.y) * 34.0, "t": 0.22, "t0": 0.22})
@@ -3726,6 +4052,11 @@ func _animer_effets(delta: float) -> void:
 			continue
 		var v: Vector3 = e["v"]
 		noeud.position += v * delta
+		if e.has("onde"):
+			# L'anneau s'ouvre vite puis freine, et s'éteint avec le temps.
+			var p := 1.0 - float(e["t"]) / float(e["t0"])
+			var ouverture: float = 0.4 + float(e["onde"]) * (1.0 - (1.0 - p) * (1.0 - p))
+			noeud.scale = Vector3(ouverture, 1.0, ouverture)
 		if e.has("tourne"):
 			# Un débris tourne sur lui-même en vol, et s'arrête au sol.
 			var w: Vector3 = e["tourne"]
@@ -3763,7 +4094,44 @@ func rafraichir_scene(delta: float) -> void:
 		MatieresCarnage.regler_heure(_ambiance[0], _ambiance[1], _ambiance[2], MatieresCarnage.nuit())
 		# Le temps qu'il fait retouche l'heure : après elle, jamais avant.
 		if _meteo != null:
-			_meteo.appliquer(delta, _ambiance[0], _ambiance[1], MatieresCarnage.nuit())
+			_meteo.appliquer(delta, _ambiance[0], _ambiance[1], MatieresCarnage.nuit(),
+				Decor.vers3d(_position))
+	_eclairer_les_lampadaires_dessines(delta)
+	# `--banc-mission=mallette|lieutenant` : le patron du repaire le plus
+	# proche confie la mission demandée (le respect est mis au palier allié
+	# pour ça), puis le pilote est TENU à côté de la cible, moteur coupé — la
+	# mallette et le lieutenant sont chez un rival, à des rues d'ici, et un
+	# pilote qui tourne au hasard ne les croiserait jamais avant la photo.
+	if _mission_banc != "" and est_hote():
+		_depuis_mission_banc -= delta
+		if _depuis_mission_banc <= 0.0 and _contrat.is_empty() and ville.contrats.is_empty():
+			var r: Dictionary = carte.repaire_le_plus_proche(_position, -1)
+			if not r.is_empty():
+				ville._ajuster_respect(Session.cle, int(r["gang"]), 100.0)
+				ville.proposer_mission(Session.cle, int(r["gang"]), Vector2(r["p"]), _mission_banc)
+				_vider_les_evenements()
+				print("[banc] mission %s demandée chez %s" % [_mission_banc, carte.nom_du_gang(int(r["gang"]))])
+		if _cible_contrat.has("p"):
+			# On se tient à côté de la CHOSE, pas du tag : sur une ville
+			# dessinée, le tag est le centre d'un immeuble, et ses hommes sont
+			# dans la rue d'à côté, derrière la façade — la photo ne montrait
+			# qu'un toit.
+			var chose: Vector2 = _cible_contrat["p"]
+			for r in ville.ramassages:
+				if int(r["genre"]) == VilleVivante.R_MALLETTE:
+					chose = r["p"]
+			for personne in ville.gens:
+				if VilleVivante.est_lieutenant(personne):
+					chose = personne["p"]
+			_position = chose + Vector2(-40.0, -120.0)
+			_vitesse = 0.0
+	# `--banc-explosion` : une explosion à côté du pilote toutes les deux
+	# secondes, pour la photographier — le char n'en offre pas sur commande.
+	if Commandes.pilote_automatique and "--banc-explosion" in OS.get_cmdline_args():
+		_depuis_explosion_banc -= delta
+		if _depuis_explosion_banc <= 0.0:
+			_depuis_explosion_banc = 1.0
+			_effet_explosion(_position + Vector2(70.0, 40.0), 1.0)
 	# Les vrais phares ne s'allument que la nuit, et les bords de l'écran
 	# rougissent le temps d'une secousse.
 	if _corps_auto != null:
@@ -3777,6 +4145,7 @@ func rafraichir_scene(delta: float) -> void:
 	_placer_les_helicos(delta)
 	_placer_les_trains(delta)
 	_animer_effets(delta)
+	_animer_les_flaques_d_eau(delta)
 	_placer_camera(delta)
 	_animer_les_feux(delta)
 	_animer_les_cabines()
@@ -3785,6 +4154,7 @@ func rafraichir_scene(delta: float) -> void:
 	_sentir_le_quartier()
 	_rafraichir_contrat(delta)
 	_rafraichir_radar()
+	_rafraichir_l_aide()
 	_rafraichir_banniere(delta)
 
 ## Le nom du quartier quand on en change. Trois secondes, puis plus rien : une
@@ -3873,7 +4243,7 @@ func _animer_les_feux(delta: float) -> void:
 		var noeud: Node3D = _brasiers.get(id)
 		if noeud == null:
 			noeud = FormesCarnage.brasier()
-			noeud.position = Decor.vers3d(ou, 0.6)
+			noeud.position = _en3d(ou, 0.6)
 			monde().add_child(noeud)
 			_brasiers[id] = noeud
 		FormesCarnage.regler_brasier(noeud, float(f["force"]), temps + float(id))
@@ -4002,7 +4372,8 @@ func _alerte_contrat() -> Dictionary:
 		avance = "  %d/%d" % [int(_contrat["a"]), int(_contrat["n"])]
 	var restant := float(_contrat["r"])
 	return {
-		"texte": "CONTRAT  %s%s   %ds" % [String(_contrat["t"]).to_upper(), avance, int(ceil(restant))],
+		"texte": "%s  %s%s   %ds" % ["MISSION" if String(_contrat.get("k", "")) in ["mallette", "lieutenant"] else "CONTRAT",
+			String(_contrat["t"]).to_upper(), avance, int(ceil(restant))],
 		"couleur": Palette.CRITIQUE if restant <= 8.0 else Palette.AVERTISSEMENT,
 		"part": restant / _contrat_duree if _contrat_duree > 0.0 else -1.0,
 	}
@@ -4014,9 +4385,12 @@ func _placer_le_joueur(delta: float) -> void:
 	_corps_auto.visible = not _pied and _hors_service <= 0.0 and not _subjectif
 	_corps_pied.visible = _pied and not _subjectif \
 		and (_hors_service <= 0.0 or fmod(_hors_service, 0.3) > 0.15)
+	# Hors du bloc « au volant » : descendu du camion, l'éclaboussure doit
+	# s'éteindre, et c'est cette fonction qui le sait.
+	_mouiller_la_rue(delta)
 
 	if _corps_auto.visible:
-		_corps_auto.position = Decor.vers3d(_position, 0.0)
+		_corps_auto.position = _en3d(_position, 0.0)
 		_corps_auto.rotation.y = -_angle
 		# Assiette : la voiture pique du nez au freinage et se cabre à
 		# l'accélération. Trois degrés suffisent à faire sentir la masse.
@@ -4028,6 +4402,7 @@ func _placer_le_joueur(delta: float) -> void:
 		var buffle := _corps_auto.get_node_or_null("Buffle") as MeshInstance3D
 		if buffle:
 			buffle.visible = _eperon > 0.0
+		FormesCarnage.regler_le_jet(_corps_auto, _jet, _lance_feu)
 		# Au volant d'une voiture de police volée, le gyrophare tourne aussi :
 		# c'est ce qui la rend reconnaissable — et voyante.
 		if _genre_vehicule == VilleVivante.PATROUILLE:
@@ -4051,7 +4426,7 @@ func _placer_le_joueur(delta: float) -> void:
 			Interieurs.poser_pantin(_corps_pied, _dedans_p, "joueur", Interieurs.SOUS_SOL)
 		else:
 			_corps_pied.scale = Vector3.ONE
-			_corps_pied.position = Decor.vers3d(_position, 0.0)
+			_corps_pied.position = _en3d(_position, 0.0)
 		_corps_pied.rotation.y = -_angle
 		_demarche(_corps_pied, "walk" if abs(_vitesse) > 1.0 else "idle")
 		_regler_jauge(_corps_pied, _vie / VIE_MAX)
@@ -4066,7 +4441,7 @@ func _placer_les_autres() -> void:
 		auto.visible = au_volant
 		pieton.visible = a_pied
 		if au_volant:
-			auto.position = Decor.vers3d(a["p"])
+			auto.position = _en3d(a["p"])
 			auto.rotation.y = -float(a["a"])
 			var gyro := auto.get_node_or_null("Gyrophare")
 			if gyro:
@@ -4079,14 +4454,16 @@ func _placer_les_autres() -> void:
 			# Sans elle, on voyait une voiture de gang volée repasser désarmée
 			# — et l'on apprenait à se fier à une silhouette qui ment.
 			FormesCarnage.armer_la_voiture(auto, bool(a.get("mitrailleuse", false)))
+			FormesCarnage.regler_le_jet(auto, bool(a.get("arrose", false)), bool(a.get("flambe", false)))
 			_regler_jauge(auto, float(a["vie"]) / VIE_MAX)
 		if a_pied:
-			pieton.position = Decor.vers3d(a["p"])
+			pieton.position = _en3d(a["p"])
 			pieton.rotation.y = -float(a["a"])
 			_demarche(pieton, "walk" if abs(float(a.get("v", 0.0))) > 1.0 else "idle")
 			_regler_jauge(pieton, float(a["vie"]) / VIE_MAX)
 
 func _placer_la_foule() -> void:
+	var temps := Time.get_ticks_msec() / 1000.0
 	for personne in ville.gens:
 		var noeud = personne.get("noeud")
 		if noeud == null:
@@ -4108,12 +4485,13 @@ func _placer_la_foule() -> void:
 		corps.visible = (personne["p"] as Vector2).distance_to(_position) <= PORTEE_RENDU
 		if not corps.visible:
 			continue
-		corps.position = Decor.vers3d(personne["p"])
+		corps.position = _en3d(personne["p"])
 		# Le personnage en cubes regarde +X, comme les voitures.
 		corps.rotation.y = -float(personne.get("a", 0.0))
 		_demarche(corps, "walk")
 		_regler_jauge(corps, float(int(personne["pv"])) / float(_pv_max_de(personne)))
 		_regler_humeur(personne, corps)
+		_marquer_le_lieutenant(personne, corps, temps)
 
 ## La tête d'un habitant : les hommes de main ont les leurs, les flics la
 ## leur, les passants huit visages tirés de leur identifiant. Tirer sur
@@ -4137,7 +4515,81 @@ func _couleur_de(personne: Dictionary) -> Color:
 				FormesCarnage.TENUES_CORPS.size() - 1)]
 	return Palette.ENCRE_DOUCE
 
+## LE LIEUTENANT D'UNE MISSION porte un repère : un anneau orange qui bat au
+## sol et une flèche qui flotte au-dessus de sa tête, dans la couleur du poste
+## du patron. Sans lui, c'est un homme de gang parmi cinq, et le preneur abat
+## les quatre autres avant de tomber sur le bon — ce qui fâche le repaire pour
+## rien. Le repère se retire quand la marque tombe (mission finie).
+func _marquer_le_lieutenant(personne: Dictionary, corps: Node3D, temps: float) -> void:
+	var repere := corps.get_node_or_null("Lieutenant") as Node3D
+	if not VilleVivante.est_lieutenant(personne):
+		if repere != null:
+			repere.queue_free()
+		return
+	if repere == null:
+		repere = FormesCarnage.repere_de_lieutenant()
+		corps.add_child(repere)
+	# La flèche ne tourne pas avec l'homme : elle pointe toujours vers le bas
+	# de l'écran, c'est-à-dire vers lui.
+	repere.rotation.y = -corps.rotation.y
+	var chevron := repere.get_node_or_null("Chevron") as Node3D
+	if chevron != null:
+		chevron.position.y = 6.0 + sin(temps * 3.0) * 0.4
+	var anneau := repere.get_node_or_null("Anneau") as Node3D
+	if anneau != null:
+		anneau.scale = Vector3.ONE * (1.0 + 0.12 * sin(temps * 5.0))
+
+## LÀ OÙ LE JET RETOMBE, la rue le montre : des gouttes qui giclent, et une
+## flaque qui reste douze secondes. Sans ça, l'eau disparaissait dans le
+## bitume comme si elle n'y était jamais tombée.
+func _mouiller_la_rue(delta: float) -> void:
+	var arrose: bool = _jet and not _lance_feu and _corps_auto.visible
+	if _eclaboussure == null:
+		if not arrose:
+			return
+		_eclaboussure = FormesCarnage.eclaboussure()
+		monde().add_child(_eclaboussure)
+	_eclaboussure.emitting = arrose
+	if not arrose:
+		return
+	var chute := _position + Vector2.RIGHT.rotated(_angle) * PORTEE_CHUTE_DU_JET
+	_eclaboussure.position = _en3d(chute, 0.4)
+	_depuis_flaque_d_eau -= delta
+	if _depuis_flaque_d_eau > 0.0:
+		return
+	_depuis_flaque_d_eau = 0.7
+	# Sur la chaussée seulement : sur l'herbe, l'eau s'en va dans la terre, et
+	# un disque gris sur une pelouse se lisait comme une tache de boue.
+	if not carte.sur_la_chaussee(chute):
+		return
+	var flaque := FormesCarnage.flaque_d_eau(_rng.randf_range(2.2, 3.4))
+	# À 0,6 et pas au ras : la dalle du trottoir de Pikstown (voir les anneaux).
+	flaque.position = _en3d(chute + Vector2(_rng.randf_range(-20.0, 20.0), _rng.randf_range(-20.0, 20.0)), 0.6)
+	monde().add_child(flaque)
+	_flaques_d_eau.append({"noeud": flaque, "t": DUREE_FLAQUE_D_EAU, "t0": DUREE_FLAQUE_D_EAU})
+	if _flaques_d_eau.size() > FLAQUES_D_EAU_MAX:
+		((_flaques_d_eau.pop_front() as Dictionary)["noeud"] as Node3D).queue_free()
+
+func _animer_les_flaques_d_eau(delta: float) -> void:
+	var restantes: Array = []
+	for f in _flaques_d_eau:
+		f["t"] = float(f["t"]) - delta
+		var noeud: Node3D = f["noeud"]
+		if float(f["t"]) <= 0.0:
+			noeud.queue_free()
+			continue
+		var reste: float = clamp(float(f["t"]) / float(f["t0"]), 0.0, 1.0)
+		for nom in ["Mouille", "Reflet"]:
+			var partie := noeud.get_node_or_null(String(nom)) as MeshInstance3D
+			if partie != null and partie.material_override is StandardMaterial3D:
+				var m := partie.material_override as StandardMaterial3D
+				m.albedo_color.a = (0.5 if nom == "Mouille" else 0.35) * reste
+		restantes.append(f)
+	_flaques_d_eau = restantes
+
 func _pv_max_de(personne: Dictionary) -> int:
+	if VilleVivante.est_lieutenant(personne):
+		return VilleVivante.PV_LIEUTENANT
 	if int(personne["genre"]) == VilleVivante.FLIC:
 		return int(VilleVivante.CORPS[clamp(int(personne.get("corps", 0)), 0,
 			VilleVivante.CORPS.size() - 1)]["pv"])
@@ -4190,7 +4642,7 @@ func _placer_les_autos() -> void:
 		auto["epave_vue"] = genre == VilleVivante.EPAVE
 		var corps: Node3D = noeud
 		corps.visible = proche
-		corps.position = Decor.vers3d(auto["p"])
+		corps.position = _en3d(auto["p"])
 		corps.rotation.y = -float(auto["a"])
 		# Une voiture à l'arrêt a ses phares éteints : allumés, on la prend
 		# pour une voiture qui arrive.
@@ -4205,6 +4657,10 @@ func _placer_les_autos() -> void:
 		if genre == VilleVivante.PATROUILLE:
 			FormesCarnage.clignoter_gyrophare(corps, Time.get_ticks_msec() / 1000.0,
 				not bool(auto.get("garee", false)))
+		# Le camion de pompiers de la ville arrose pour de vrai : le jet qu'on
+		# voit est celui que la simulation applique (`arrose`).
+		if genre == VilleVivante.POMPIER or bool(auto.get("arrose", false)):
+			FormesCarnage.regler_le_jet(corps, bool(auto.get("arrose", false)))
 		_regler_jauge(corps, float(auto["pv"]) / PV_VOITURE)
 
 func _placer_les_objets() -> void:
@@ -4216,7 +4672,7 @@ func _placer_les_objets() -> void:
 				else ARMES.get(arme, ARMES["pistolet"])["couleur"])
 			monde().add_child(noeud)
 			caisse["noeud"] = noeud
-		(noeud as Node3D).position = Decor.vers3d(caisse["p"])
+		(noeud as Node3D).position = _en3d(caisse["p"])
 		var objet := (noeud as Node3D).get_node_or_null("Objet") as Node3D
 		if objet:
 			objet.rotation.y = temps * 1.3
@@ -4228,16 +4684,18 @@ func _placer_les_objets() -> void:
 	for r in ville.ramassages:
 		var noeud_r = r.get("noeud")
 		if noeud_r == null:
-			noeud_r = FormesCarnage.colis() if int(r["genre"]) == VilleVivante.R_COLIS \
-				else FormesCarnage.icone_frenzy()
+			match int(r["genre"]):
+				VilleVivante.R_COLIS: noeud_r = FormesCarnage.colis()
+				VilleVivante.R_MALLETTE: noeud_r = FormesCarnage.mallette()
+				_: noeud_r = FormesCarnage.icone_frenzy()
 			monde().add_child(noeud_r)
 			r["noeud"] = noeud_r
-		(noeud_r as Node3D).position = Decor.vers3d(r["p"])
+		(noeud_r as Node3D).position = _en3d(r["p"])
 		var tourne := (noeud_r as Node3D).get_node_or_null("Objet") as Node3D
 		if tourne:
-			var vite := 1.2 if int(r["genre"]) == VilleVivante.R_COLIS else 2.6
+			var vite := 2.6 if int(r["genre"]) == VilleVivante.R_FRENZY else 1.2
 			tourne.rotation.y = temps * vite
-			tourne.position.y = (1.5 if int(r["genre"]) == VilleVivante.R_COLIS else 1.8) \
+			tourne.position.y = (1.8 if int(r["genre"]) == VilleVivante.R_FRENZY else 1.5) \
 				+ sin(temps * 2.0 + float(int(r["id"]))) * 0.24
 
 	# LES PIÈGES. La mine clignote — un objet qui blesse doit se signaler, même
@@ -4250,7 +4708,7 @@ func _placer_les_objets() -> void:
 				else FormesCarnage.flaque_huile()
 			monde().add_child(noeud_p)
 			piege["noeud"] = noeud_p
-		(noeud_p as Node3D).position = Decor.vers3d(piege["p"])
+		(noeud_p as Node3D).position = _en3d(piege["p"])
 		var oeil := (noeud_p as Node3D).get_node_or_null("Oeil") as Node3D
 		if oeil:
 			oeil.visible = fmod(temps, 0.6) > 0.3
@@ -4261,7 +4719,7 @@ func _placer_les_objets() -> void:
 			noeud = FormesCarnage.barrage()
 			monde().add_child(noeud)
 			b["noeud"] = noeud
-		(noeud as Node3D).position = Decor.vers3d(b["p"])
+		(noeud as Node3D).position = _en3d(b["p"])
 		var gyro := (noeud as Node3D).get_node_or_null("Gyro") as Node3D
 		if gyro:
 			gyro.visible = fmod(temps, 0.7) > 0.35
@@ -4289,7 +4747,7 @@ func _placer_les_helicos(delta: float) -> void:
 		if not est_hote():
 			h["p"] = (h["p"] as Vector2).lerp(h.get("cible", h["p"]) if h.get("cible", "") is Vector2 else h["p"], clamp(delta * 8.0, 0, 1))
 		var corps: Node3D = noeud
-		corps.position = Decor.vers3d(h["p"])
+		corps.position = _en3d(h["p"])
 		var cellule := corps.get_node_or_null("Cellule") as Node3D
 		if cellule:
 			cellule.rotation.y = -float(h.get("cap", 0.0))
@@ -4423,6 +4881,128 @@ func _quitter_la_ville() -> void:
 
 ## Ouvrir et fermer la boutique. Même mécanique que le menu de triche : la
 ## ville continue de tourner derrière, le joueur seul est figé.
+## LE MENU DE LA PLANQUE. Le catalogue se recopie à chaque image : déposer
+## change le coffre, acheter change les travaux, et un menu qui ne se met à
+## jour qu'à la fermeture ment pendant tout l'achat.
+func _basculer_la_planque() -> void:
+	_planque_ouverte = not _planque_ouverte
+	_regler_la_saisie()
+	if _planque_ouverte:
+		if _planque_vue == null:
+			_planque_vue = Control.new()
+			_planque_vue.set_anchors_preset(Control.PRESET_FULL_RECT)
+			_planque_vue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_planque_vue.set_script(load("res://ui/planque.gd"))
+			interface().add_child(_planque_vue)
+		_planque_vue.choix = 0
+		_planque_vue.message = ""
+		Sons.jouer("porte", 1.0, -10.0)
+	elif _planque_vue != null:
+		_planque_vue.queue_free()
+		_planque_vue = null
+		Sons.jouer("porte", 0.8, -12.0)
+
+const EFFETS_TRAVAUX := {
+	"coffre": "sans lui, le matelas ne cache que $%d" % MATELAS,
+	"arsenal": "on ne perd plus son arme en mourant",
+	"garage": "la voiture ramenée ici vous attend après la mort",
+}
+
+func _lignes_de_la_planque() -> Array:
+	var liste: Array = [
+		{"cle": "depot", "nom": "déposer",
+			"effet": "mettre son argent à l'abri" if bool(_ameliorations["coffre"]) else "sous le matelas — $%d au plus" % MATELAS,
+			"etat": "depot" if _place_au_coffre() > 0 else "rien", "couleur": Palette.BON},
+		{"cle": "retrait", "nom": "retirer", "effet": "reprendre tout ce qu'il y a au coffre",
+			"etat": "retrait" if _banque > 0 else "rien", "couleur": Palette.AVERTISSEMENT},
+	]
+	var precedent := ""
+	for cle in ["coffre", "arsenal", "garage"]:
+		var prix := int(PlanVille.PRIX_AMELIORATION[cle])
+		var etat := "achat"
+		if bool(_ameliorations[cle]):
+			etat = "fait"
+		elif precedent != "" and not bool(_ameliorations[precedent]):
+			etat = "apres:" + precedent
+		elif _banque < prix:
+			etat = "manque:%d" % (prix - _banque)
+		liste.append({"cle": cle, "nom": _libelle_amelioration(cle), "effet": String(EFFETS_TRAVAUX[cle]),
+			"prix": prix, "etat": etat, "couleur": Palette.SERIE})
+		precedent = cle
+	return liste
+
+func _naviguer_dans_la_planque() -> void:
+	if _planque_vue == null:
+		return
+	var liste := _lignes_de_la_planque()
+	_planque_vue.lignes = liste
+	_planque_vue.argent = _argent
+	_planque_vue.banque = _banque
+	# Le pilote du banc dépose et achète ce qu'il peut, puis referme : c'est
+	# la seule façon d'exercer le coffre dans une manche sans clavier.
+	if Commandes.pilote_automatique:
+		for l in liste:
+			if String(l["etat"]) in ["depot", "achat"]:
+				_valider_a_la_planque(String(l["cle"]))
+		_basculer_la_planque()
+		return
+	if _front_de_triche(KEY_UP):
+		_planque_vue.choix = posmod(int(_planque_vue.choix) - 1, liste.size())
+	if _front_de_triche(KEY_DOWN):
+		_planque_vue.choix = posmod(int(_planque_vue.choix) + 1, liste.size())
+	if _front_de_triche(KEY_ENTER) or _front_de_triche(KEY_KP_ENTER) or _front_de_triche(KEY_SPACE):
+		_valider_a_la_planque(String(liste[int(_planque_vue.choix)]["cle"]))
+	if _front_de_triche(KEY_ESCAPE):
+		_basculer_la_planque()
+	_planque_vue.queue_redraw()
+
+func _valider_a_la_planque(cle: String) -> void:
+	match cle:
+		"depot":
+			if _argent <= 0:
+				_planque_vue.message = "rien à déposer"
+				_planque_vue.message_couleur = Palette.AVERTISSEMENT
+				return
+			var depose := _place_au_coffre()
+			if depose <= 0:
+				_planque_vue.message = "le matelas est plein ($%d) — il faut le coffre-fort" % MATELAS
+				_planque_vue.message_couleur = Palette.AVERTISSEMENT
+				return
+			_banque += depose
+			_argent -= depose
+			_planque_vue.message = "$%d à l'abri" % depose if _argent == 0 else "$%d à l'abri — le matelas est plein" % depose
+			_planque_vue.message_couleur = Palette.BON
+			Sons.jouer("depart", 1.4, -8.0)
+		"retrait":
+			if _banque <= 0:
+				_planque_vue.message = "le coffre est vide"
+				_planque_vue.message_couleur = Palette.AVERTISSEMENT
+				return
+			var sorti := _banque
+			_retirer_du_coffre()
+			_planque_vue.message = "$%d repris — ne vous faites pas descendre" % sorti
+			_planque_vue.message_couleur = Palette.AVERTISSEMENT
+		_:
+			if bool(_ameliorations.get(cle, true)):
+				_planque_vue.message = "déjà installé"
+				_planque_vue.message_couleur = Charte.ENCRE_FAIBLE
+				return
+			# L'ordre des travaux tient : le coffre d'abord, puis l'arsenal.
+			if _amelioration_suivante() != cle:
+				_planque_vue.message = "d'abord : %s" % _libelle_amelioration(_amelioration_suivante())
+				_planque_vue.message_couleur = Palette.AVERTISSEMENT
+				return
+			var prix := int(PlanVille.PRIX_AMELIORATION[cle])
+			if _banque < prix:
+				_planque_vue.message = "il manque $%d au coffre — déposez d'abord" % (prix - _banque)
+				_planque_vue.message_couleur = Palette.AVERTISSEMENT
+				return
+			_banque -= prix
+			_ameliorations[cle] = true
+			_planque_vue.message = "%s installé" % _libelle_amelioration(cle)
+			_planque_vue.message_couleur = Palette.BON
+			Sons.jouer("portail", 1.2, -6.0)
+
 func _basculer_la_superette() -> void:
 	_superette_ouverte = not _superette_ouverte
 	_regler_la_saisie()
@@ -4509,7 +5089,7 @@ func _placer_les_trains(delta: float) -> void:
 		_quais_poses = true
 		for abscisse in ville.gares():
 			var quai := FormesCarnage.quai()
-			quai.position = Decor.vers3d(ville.point_de_voie(float(abscisse)))
+			quai.position = _en3d(ville.point_de_voie(float(abscisse)))
 			quai.rotation.y = -ville.cap_de_voie()
 			monde().add_child(quai)
 		# LES CASSES vivent au bord de la même voie : c'est la seule bande de
@@ -4518,7 +5098,7 @@ func _placer_les_trains(delta: float) -> void:
 		# comme eux — une fois, à partir du code de la manche.
 		for c in ville.casses():
 			var machine := FormesCarnage.compacteur()
-			machine.position = Decor.vers3d(Vector2(c["p"]))
+			machine.position = _en3d(Vector2(c["p"]))
 			machine.rotation.y = -ville.cap_de_voie()
 			monde().add_child(machine)
 			_compacteurs.append(machine)
@@ -4533,7 +5113,7 @@ func _placer_les_trains(delta: float) -> void:
 		var s_vue := float(t["s"]) + float(t["sens"]) * float(t["v"]) * float(t["age"])
 		var tete := ville.point_de_voie(s_vue)
 		var rame: Node3D = noeud
-		rame.position = Decor.vers3d(tete)
+		rame.position = _en3d(tete)
 		# La rame est bâtie vers -X depuis sa tête : tournée du cap de la voie
 		# elle recule, tournée du cap opposé elle avance. C'est `sens` qui
 		# tranche — et sans lui la motrice poussait le convoi une fois sur deux.
@@ -4680,6 +5260,13 @@ func _regler_jauge(porteur: Node3D, part: float) -> void:
 func _dedans3d(p: Vector2, hauteur: float = 0.0) -> Vector3:
 	return Interieurs.SOUS_SOL + Vector3(p.x * Interieurs.ECHELLE, hauteur, p.y * Interieurs.ECHELLE)
 
+## ⚠ LE SOL A UNE ALTITUDE. La simulation reste en deux dimensions — c'est
+## tout `VilleVivante` — mais le rendu pose chaque chose à la hauteur du sol
+## sous elle : voiture, piéton, éclat, flaque, caméra. Sans ça, on roulait
+## dans la colline et les toits du bas de la ville passaient sous les roues.
+func _en3d(p: Vector2, hauteur: float = 0.0) -> Vector3:
+	return Decor.vers3d(p, hauteur + (carte.hauteur_en(p) if carte != null else 0.0))
+
 # ------------------------------------------------------ la vue subjective
 #
 ## LA PREMIÈRE PERSONNE. Carnage se joue de haut, à soixante-douze degrés : on
@@ -4721,7 +5308,7 @@ func _basculer_la_vue() -> void:
 func oeil() -> Array:
 	var haut := HAUTEUR_OEIL_PIED if _pied else HAUTEUR_OEIL_AUTO
 	var devant := Vector2.RIGHT.rotated(_angle)
-	var ou := Decor.vers3d(_position + devant * AVANCE_OEIL, haut)
+	var ou := _en3d(_position + devant * AVANCE_OEIL, haut)
 	return [ou, ou + Decor.vers3d(devant * 40.0, -1.5)]
 
 func _placer_camera(delta: float) -> void:
@@ -4754,7 +5341,8 @@ func _placer_camera(delta: float) -> void:
 	var distance: float = DISTANCE_PIED if _pied else DISTANCE_AUTO + RECUL_VITESSE * clamp(abs(_vitesse) / VITESSE_MAX, 0.0, 1.0)
 	# Un peu d'avance dans le sens de la marche : on regarde où l'on va.
 	var avance := Vector2.RIGHT.rotated(_angle) * _vitesse * 0.22 if not _pied else Vector2.ZERO
-	var vise := Decor.viser(_camera, _position + avance, INCLINAISON, distance)
+	var vise := Decor.viser(_camera, _position + avance, INCLINAISON, distance) \
+		+ Vector3(0.0, carte.hauteur_en(_position), 0.0)
 	if _secousse > 0.0:
 		_secousse = max(0.0, _secousse - delta * 2.0)
 		vise += Vector3(_rng.randf_range(-1, 1), _rng.randf_range(-1, 1), 0) * _secousse * 2.5
@@ -4849,7 +5437,15 @@ func fiche_joueur() -> Dictionary:
 			puces.append({"texte": "%s ×%d" % [quoi, int(_mods[quoi])],
 				"couleur": Color("#d0402c") if quoi == "mines" else Color("#6a5a7a")})
 	if bool(_mods.get("bombe", false)):
-		puces.append({"texte": "bombe armée", "couleur": Color("#e07a3c")})
+		puces.append({"texte": "bombe à bord", "couleur": Color("#e07a3c")})
+	if _lance_flammes and not _pied and _modele_vehicule == MODELE_POMPIER:
+		puces.append({"texte": "lance à %s" % ("feu" if _lance_feu else "eau"), "couleur": Color("#e07a3c") if _lance_feu else Color("#6ab0e0")})
+	if not _bombes_posees.is_empty():
+		# Le détonateur, tant qu'une voiture piégée attend : sans la puce, on
+		# oubliait qu'on l'avait, et la voiture sautait sous un passant trois
+		# rues plus loin sans qu'on sache pourquoi.
+		puces.append({"texte": "détonateur : %s à pied (×%d)" % [Reglages.nom_de_touche("klaxon"), _bombes_posees.size()],
+			"couleur": Color("#e07a3c")})
 	if _pied:
 		var auto := ville.vehicule_proche(_position, PORTEE_ENTREE)
 		puces.append({"texte": "E : monter" if not auto.is_empty() else "à pied", "couleur": Palette.AVERTISSEMENT if not auto.is_empty() else Palette.ENCRE_DOUCE})
@@ -4867,13 +5463,30 @@ func fiche_joueur() -> Dictionary:
 ## dans les options du hub lisait quand même « Z S » ici, et cherchait la
 ## panne dans le jeu. `Reglages.nom_de_touche` rend le nom GRAVÉ sur son
 ## clavier — « Z » sur un AZERTY là où le moteur dit « W ».
+## La ligne d'aide change avec ce qu'on tient : ESPACE « arrose » au volant
+## d'un camion de pompiers, H est « le détonateur » à pied quand une voiture
+## piégée attend. Elle n'est rebâtie que quand l'état change — pas à chaque
+## image, pour six chaînes qu'on n'a pas besoin de rallouer.
+var _aide_etat := ""
+func _rafraichir_l_aide() -> void:
+	if _hud == null:
+		return
+	var etat := "%s/%d/%d/%s" % [str(_pied), _modele_vehicule, _bombes_posees.size(), str(_lance_feu)]
+	if etat == _aide_etat:
+		return
+	_aide_etat = etat
+	_hud.aide = aide_touches()
+
 func aide_touches() -> Array:
 	var t := func(action: String) -> String: return Reglages.nom_de_touche(action)
 	return [
 		["%s %s" % [t.call("avancer"), t.call("reculer")], "avancer, freiner"],
 		["%s %s" % [t.call("gauche"), t.call("droite")], "tourner"],
-		[t.call("tir"), "tirer"],
+		[t.call("tir"), ("cracher le feu" if _lance_feu else "arroser") if not _pied and _modele_vehicule == MODELE_POMPIER else "tirer"],
 		[t.call("action"), "monter, descendre"],
-		[t.call("klaxon"), "klaxon"],
+		# À pied, le klaxon est le détonateur — mais seulement si l'on a
+		# quelque chose à faire sauter : sinon le cabochon promet une bombe
+		# qu'on n'a pas.
+		[t.call("klaxon"), "détonateur" if _pied and not _bombes_posees.is_empty() else "klaxon"],
 		[t.call("carte"), "carte"],
 	]

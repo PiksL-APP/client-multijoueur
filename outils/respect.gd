@@ -26,6 +26,7 @@ func _init() -> void:
 	_repaires(carte)
 	_voitures_de_gang(carte)
 	_le_raid(carte)
+	_le_triangle(carte)
 
 	print("── %s" % ("TOUT PASSE" if _fautes == 0 else "%d FAUTE(S)" % _fautes))
 	quit(1 if _fautes > 0 else 0)
@@ -112,8 +113,11 @@ func _paliers(carte: PlanVille) -> void:
 		if g != 0 and not (g in amis):
 			lointain = g
 			break
-	_dire(ville.respect_pour(moi, lointain) == VilleVivante.RESPECT_DEPART,
-		"%s, d'un autre district, n'en sait rien" % carte.nom_du_gang(lointain))
+	# ⚠ Il en sait quelque chose depuis le triangle : le Consortium, qui vient
+	# de gagner quinze, est aussi de SON district, et ce district ne dépasse
+	# pas cent cinquante — il paie sa part (7,5), pas la mort elle-même.
+	_dire(ville.respect_pour(moi, lointain) == VilleVivante.RESPECT_DEPART - 7.5,
+		"%s, d'un autre district, ne bouge que par le Consortium (%d)" % [carte.nom_du_gang(lointain), int(ville.respect_pour(moi, lointain))])
 
 	# Le haut de l'échelle.
 	ville._ajuster_respect(moi, 1, 40.0)
@@ -505,6 +509,28 @@ func _le_raid(carte: PlanVille) -> void:
 		else:
 			pris = _dernier(ville, "raid")
 	_dire(String(pris.get("e", "")) == "pris", "au dernier, le repaire tombe")
+
+	# LA COLÈRE DU REPAIRE : un homme du tag qui tombe met tous ses camarades
+	# aux trousses du tueur — même chez un gang qui le tolérait.
+	var ville3 := VilleVivante.new(carte, rng)
+	var gars: Array = []
+	for k in 3:
+		var g := _quelqu_un(ville3, VilleVivante.GANG, ou + Vector2(30.0 * float(k), 40.0), chez)
+		g["attache"] = ou
+		gars.append(g)
+	_dire(not ville3.gang_hostile(moi, chez), "un repaire d'un gang neutre")
+	var joueurs3 := {moi: {"p": ou + Vector2(300.0, 0.0), "vie": 100.0, "pied": true, "d": Vector2.RIGHT}}
+	var d_avant: float = Vector2(gars[1]["p"]).distance_to(joueurs3[moi]["p"])
+	ville3._abattre(gars[0], moi, false)
+	_dire(gars[1].has("colere") and String(gars[1]["colere"]["j"]) == moi,
+		"un des siens tombe : les autres le prennent en chasse")
+	for _i in 20:
+		ville3._animer_les_gens(0.1, joueurs3)
+	_dire(Vector2(gars[1]["p"]).distance_to(joueurs3[moi]["p"]) < d_avant - 40.0,
+		"et ils chargent (%.0f -> %.0f px)" % [d_avant, Vector2(gars[1]["p"]).distance_to(joueurs3[moi]["p"])])
+	gars[1]["colere"]["t"] = 0.0
+	ville3._animer_les_gens(0.1, joueurs3)
+	_dire(ville3._cible_de_colere(gars[1], joueurs3).is_empty(), "la colère retombe avec le temps")
 	_dire(ville.repaire_pris_par(id) == moi, "et il est à nous")
 	_dire(ville.raid_de(moi).is_empty(), "le raid se referme")
 
@@ -536,3 +562,78 @@ func _le_raid(carte: PlanVille) -> void:
 	var copie := VilleVivante.new(carte, rng)
 	copie.appliquer_instantane(ville.instantane({moi: {"p": ou}}))
 	_dire(copie.repaire_pris_par(id) == moi, "l'instantané le dit aux autres joueurs")
+
+# ------------------------------------------------------- le triangle de rivalité
+
+## Le respect d'un district est une quantité fixe (150) : ce qu'un gang vous
+## donne au-delà, il le prend à ses deux rivaux. On ne peut pas être couvert
+## par deux gangs du même district — et le Consortium compte partout.
+func _le_triangle(carte: PlanVille) -> void:
+	print("\n8. LE TRIANGLE DE RIVALITÉ : CENT CINQUANTE POINTS PAR DISTRICT")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 31
+	var ville := VilleVivante.new(carte, rng)
+	var moi := "moi"
+	var trio: Array = PlanVille.TRIOS[0]
+	var a := int(trio[0])
+	var b := int(trio[1])
+	var c := int(trio[2])
+	var somme := func() -> float:
+		return ville.respect_pour(moi, a) + ville.respect_pour(moi, b) + ville.respect_pour(moi, c)
+	_dire(is_equal_approx(somme.call(), VilleVivante.RESPECT_DU_DISTRICT),
+		"au départ, le district vaut %d" % int(somme.call()))
+
+	# Un gain chez A : B et C paient, au prorata.
+	ville._ajuster_respect(moi, a, 30.0)
+	_dire(ville.respect_pour(moi, a) == 80.0 and is_equal_approx(somme.call(), VilleVivante.RESPECT_DU_DISTRICT),
+		"+30 chez %s : le district reste à %d (%s %d, %s %d)" % [carte.nom_du_gang(a), int(somme.call()),
+			carte.nom_du_gang(b), int(ville.respect_pour(moi, b)), carte.nom_du_gang(c), int(ville.respect_pour(moi, c))])
+	_dire(ville.respect_pour(moi, b) == 35.0 and ville.respect_pour(moi, c) == 35.0,
+		"à parts égales quand ils avaient autant")
+
+	# Deux alliés dans le même district : impossible.
+	ville._ajuster_respect(moi, b, 999.0)
+	var allies := 0
+	for g in trio:
+		if ville.gang_allie(moi, int(g)):
+			allies += 1
+	_dire(ville.respect_pour(moi, b) == 100.0 and allies == 1,
+		"%s à cent : %s retombe à %d — un seul gang vous couvre par district" % [
+			carte.nom_du_gang(b), carte.nom_du_gang(a), int(ville.respect_pour(moi, a))])
+	_dire(ville.respect_pour(moi, a) + ville.respect_pour(moi, c) <= 50.0 + 0.001,
+		"et les deux autres se partagent cinquante")
+
+	# Les pertes sont libres : le district peut descendre sous cent cinquante.
+	var ou := _un_pate_de(carte, b)
+	for _m in 4:
+		ville._repercuter(moi, b, ou, VilleVivante.RESPECT_PERDU, 0.0)
+	_dire(somme.call() < VilleVivante.RESPECT_DU_DISTRICT - 40.0,
+		"quatre morts chez %s sans contrepartie : le district tombe à %d" % [carte.nom_du_gang(b), int(somme.call())])
+
+	# Le Consortium est de tous les districts : à cent chez lui, chaque
+	# district ne laisse que cinquante à ses locaux.
+	var ville2 := VilleVivante.new(carte, rng)
+	ville2._ajuster_respect(moi, PlanVille.CONSORTIUM, 999.0)
+	var partout := true
+	for t in PlanVille.TRIOS:
+		var locaux := ville2.respect_pour(moi, int(t[0])) + ville2.respect_pour(moi, int(t[1]))
+		partout = partout and locaux <= 50.0 + 0.001
+	_dire(partout, "le Consortium à cent : cinquante pour les locaux de chacun des trois districts")
+	# Et le courtiser ne se fait qu'aux dépens des locaux — l'inverse aussi :
+	# sa jauge est une, où qu'il soit, et c'est une PENTE, pas une falaise.
+	var avant_c := ville2.respect_pour(moi, PlanVille.CONSORTIUM)
+	ville2._ajuster_respect(moi, int(PlanVille.TRIOS[1][0]), 13.0)
+	var apres_c := ville2.respect_pour(moi, PlanVille.CONSORTIUM)
+	_dire(apres_c < avant_c and avant_c - apres_c <= 13.0,
+		"un contrat chez %s (+13), et le Consortium redescend de %d, pas plus" % [
+			carte.nom_du_gang(int(PlanVille.TRIOS[1][0])), int(avant_c - apres_c)])
+
+	# Un mort tient le triangle aussi : B et C gagnent, mais jamais au-delà.
+	var ville3 := VilleVivante.new(carte, rng)
+	ville3._ajuster_respect(moi, b, 45.0)    # 95 : allié
+	ville3._ajuster_respect(moi, c, 45.0)    # le district reprend chez a et b
+	var avant := ville3.respect_pour(moi, a) + ville3.respect_pour(moi, b) + ville3.respect_pour(moi, c)
+	ville3._repercuter(moi, a, _un_pate_de(carte, a), VilleVivante.RESPECT_PERDU, VilleVivante.RESPECT_GAGNE)
+	var apres := ville3.respect_pour(moi, a) + ville3.respect_pour(moi, b) + ville3.respect_pour(moi, c)
+	_dire(apres <= VilleVivante.RESPECT_DU_DISTRICT + 0.001 and apres <= avant + 0.001,
+		"un mort chez %s fait monter les rivaux, sans jamais dépasser le plafond (%d)" % [carte.nom_du_gang(a), int(apres)])

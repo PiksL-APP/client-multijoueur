@@ -343,11 +343,15 @@ func _un(id: String, dessiner: bool) -> int:
 	# entier et criait donc « PAS DE ARMURERIE » dans les huit appartements le
 	# jour où le râtelier est devenu un poste — quinze fautes d'un coup, aucune
 	# vraie, et un banc qui crie pour rien n'est plus lu.
-	var attendus: Array = ["armurerie"] if Interieurs.est_repaire(id) \
+	var attendus: Array = ["armurerie", "patron"] if Interieurs.est_repaire(id) \
 		else ["coffre", "garde-robe", "frigo"]
 	for genre in attendus:
 		var g := String(genre)
 		var poste: Dictionary = Interieurs.poste(id, g)
+		# Le patron n'est pas un meuble : la fiche fixe son poste en tuiles
+		# (`postes`), et c'est ce point-là qu'il faut atteindre.
+		if poste.is_empty() and Interieurs.plan(id).get("postes", {}).has(g):
+			poste = {"p": Interieurs.point_de_poste(id, g), "nom": "poste fixé", "r": 0, "t": 1.0}
 		if poste.is_empty():
 			print("  ⚠ PAS DE %s dans ce plan" % g.to_upper())
 			fautes += 1
