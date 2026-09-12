@@ -13,6 +13,8 @@ extends Node3D
 ## in the current scope », et l'écran entier refusait de se charger. Un preload
 ## se résout par CHEMIN : il n'a besoin de personne.
 const COLLINE := preload("res://commun/ville2/generateur_colline.gd")
+const BANLIEUE := preload("res://commun/ville2/generateur_banlieue.gd")
+const INDUSTRIE := preload("res://commun/ville2/generateur_industrie.gd")
 
 var _images := 0
 var _attendre := 10
@@ -67,6 +69,10 @@ func _ready() -> void:
 		ville = GenerateurPlage.generer(int(_arg("graine", "2")))
 	elif _arg("temoin", "centre") == "colline":
 		ville = COLLINE.generer(int(_arg("graine", "3")))
+	elif _arg("temoin", "centre") == "banlieue":
+		ville = BANLIEUE.generer(int(_arg("graine", "4")))
+	elif _arg("temoin", "centre") == "industrie":
+		ville = INDUSTRIE.generer(int(_arg("graine", "5")))
 	else:
 		ville = GenerateurCentre.generer(int(_arg("graine", "1")))
 	var json := _arg("json", "")
