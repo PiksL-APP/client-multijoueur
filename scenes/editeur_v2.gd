@@ -27,6 +27,14 @@ extends Ecran
 ## Caméra : clic droit tenu = orbite, molette = zoom, clic milieu ou
 ## Maj + clic = déplacer, flèches / ZQSD = déplacer, Début = tout voir.
 
+## ⚠ UN `preload`, PAS LE NOM DE CLASSE. `class_name` ne se résout qu'à travers
+## `.godot/global_script_class_cache.cfg`, que `godot --headless --import` NE
+## RÉÉCRIT PAS : seul l'éditeur le fait. Un générateur tout neuf compilait donc
+## au bureau et tombait en ligne — « Identifier "GenerateurColline" not declared
+## in the current scope », et l'écran entier refusait de se charger. Un preload
+## se résout par CHEMIN : il n'a besoin de personne.
+const COLLINE := preload("res://commun/ville2/generateur_colline.gd")
+
 const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
 const PALIER := Ville2.PALIER
@@ -174,7 +182,7 @@ func demarrer() -> void:
 		_ville = GenerateurPlage.generer(2)
 		_chemin = "res://cartes/temoin-plage.json"
 	elif temoin == "colline":
-		_ville = GenerateurColline.generer(3)
+		_ville = COLLINE.generer(3)
 		_chemin = "res://cartes/temoin-colline.json"
 	elif temoin == "centre":
 		_ville = GenerateurCentre.generer(1)

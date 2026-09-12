@@ -6,6 +6,14 @@ extends Node3D
 ##
 ##   ./outils/photo_v2.sh /tmp/v.png --vue=oblique --vise=20,20 --recul=18
 
+## ⚠ UN `preload`, PAS LE NOM DE CLASSE. `class_name` ne se résout qu'à travers
+## `.godot/global_script_class_cache.cfg`, que `godot --headless --import` NE
+## RÉÉCRIT PAS : seul l'éditeur le fait. Un générateur tout neuf compilait donc
+## au bureau et tombait en ligne — « Identifier "GenerateurColline" not declared
+## in the current scope », et l'écran entier refusait de se charger. Un preload
+## se résout par CHEMIN : il n'a besoin de personne.
+const COLLINE := preload("res://commun/ville2/generateur_colline.gd")
+
 var _images := 0
 var _attendre := 10
 var _sortie := "/tmp/ville2.png"
@@ -58,7 +66,7 @@ func _ready() -> void:
 	elif _arg("temoin", "centre") == "plage":
 		ville = GenerateurPlage.generer(int(_arg("graine", "2")))
 	elif _arg("temoin", "centre") == "colline":
-		ville = GenerateurColline.generer(int(_arg("graine", "3")))
+		ville = COLLINE.generer(int(_arg("graine", "3")))
 	else:
 		ville = GenerateurCentre.generer(int(_arg("graine", "1")))
 	var json := _arg("json", "")
