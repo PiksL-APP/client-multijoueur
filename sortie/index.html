@@ -240,7 +240,7 @@ html, body { margin: 0; padding: 0; border: 0; background: #05040a; overflow: hi
     <div style="width:min(880px,100%); max-height:100%; display:flex; flex-direction:column; gap:clamp(12px,1.4vw,20px); padding:clamp(20px,2.4vw,36px); background:linear-gradient(180deg, rgba(16,10,26,.94) 0%, rgba(8,6,14,.96) 100%); border:1px solid rgba(255,255,255,.14); box-shadow:0 40px 90px rgba(0,0,0,.7), 0 0 0 1px rgba(255,46,166,.12) inset">
       <div>
         <div style="font-family:'Archivo Black',sans-serif; font-size:clamp(24px,2.6vw,44px); line-height:1; text-transform:uppercase; color:#fff">Options</div>
-        <div style="margin-top:8px; font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(12px,1.15vw,17px); letter-spacing:.1em; color:rgba(255,255,255,.6)">Le son, l'image, les touches. Tout est gard&eacute; sur cette machine.</div>
+        <div style="margin-top:8px; font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(12px,1.15vw,17px); letter-spacing:.1em; color:rgba(255,255,255,.6)">Le son, l'image, la souris, les touches. Tout est gard&eacute; sur cette machine.</div>
         <div style="margin-top:14px; height:2px; background:linear-gradient(90deg,#7b2ff7,#ff2ea6 50%,#22e3f2)"></div>
       </div>
 
@@ -290,6 +290,22 @@ html, body { margin: 0; padding: 0; border: 0; background: #05040a; overflow: hi
 
         <sc-if value="{{ isTabKeys }}">
           <div style="display:flex; flex-direction:column; gap:clamp(10px,1.2vw,16px)">
+            <div style="display:flex; flex-direction:column; gap:8px">
+              <div style="display:flex; align-items:baseline; justify-content:space-between; gap:16px">
+                <span style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(14px,1.35vw,21px); letter-spacing:.08em; color:#fff">Souris &mdash; vitesse du regard en vue subjective</span>
+                <span style="font-family:'Archivo Black',sans-serif; font-size:clamp(13px,1.2vw,18px); color:#ff9d2e">{{ mouseLabel }}</span>
+              </div>
+              <input type="range" min="20" max="300" step="10" value="{{ mouse }}" onChange="{{ onMouse }}" style="width:100%; accent-color:#ff2ea6; height:18px; cursor:pointer">
+              <div style="font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(11px,1.05vw,16px); line-height:1.45; color:rgba(255,255,255,.5)">La touche V passe &agrave; hauteur d'homme et la souris regarde. Se r&egrave;gle aussi en ville, dans la pause (&Eacute;chap), sans en sortir.</div>
+            </div>
+            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:20px">
+              <div style="min-width:0">
+                <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:clamp(14px,1.35vw,21px); letter-spacing:.08em; color:#fff">{{ invert.label }}</div>
+                <div style="margin-top:4px; font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(11px,1.05vw,16px); line-height:1.4; color:rgba(255,255,255,.5)">{{ invert.desc }}</div>
+              </div>
+              <button onClick="{{ invert.onClick }}" style="{{ invert.trackStyle }}"><span style="{{ invert.knobStyle }}"></span></button>
+            </div>
+            <div style="height:1px; background:rgba(255,255,255,.1)"></div>
             <div style="font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:clamp(12px,1.15vw,17px); line-height:1.45; color:rgba(255,255,255,.5)">Cliquez sur une touche puis appuyez sur la nouvelle. Les fl&egrave;ches du clavier restent toujours actives pour se d&eacute;placer.</div>
             <sc-for list="{{ binds }}" as="b" hint-placeholder-count="6">
               <div style="display:flex; align-items:center; justify-content:space-between; gap:20px">
@@ -321,6 +337,7 @@ html, body { margin: 0; padding: 0; border: 0; background: #05040a; overflow: hi
 window.PK = {
 	pct: 0,
 	pret: false,
+	enJeu: false,          // vrai dès que la main est passée au moteur
 	depart: null,          // {pseudo, personnage, jeu} — lu par le moteur
 	fonds: [
 		"kit/uploads/Loading1.jpg", "kit/uploads/Loading2.jpg", "kit/uploads/Loading3.jpg",
@@ -330,6 +347,14 @@ window.PK = {
 	entrer: function (choix) {
 		if (window.PK.sonner) { window.PK.sonner("special"); }
 		window.PK.depart = choix;
+		// ⚠ LE KIT NE LIT PLUS LE CLAVIER une fois la main passée au moteur. Son
+		// écouteur `keydown` restait branché sur `window`, caché sous la toile :
+		// ÉCHAP en jeu (la pause) refermait son écran de départ, puis les
+		// flèches et ENTRÉE du menu de pause — ou du menu de triche — faisaient
+		// défiler SON menu, jusqu'à « Quitter »… et la page partait sur
+		// piks-l.com au milieu d'une manche. piks-l.com, c'est le « Quitter »
+		// de l'accueil, et rien d'autre.
+		window.PK.enJeu = true;
 		// La page rend aussi la main sur le son : le thème est joué ici, et
 		// deux musiques qui se superposent s'entendent tout de suite.
 		var piste = document.querySelector('#pk-kit audio');
@@ -417,7 +442,7 @@ var PK_FONDS = window.PK.fonds;
 		else if (e.key.length === 1) { sonner("frappe"); }
 	}, true);
 	window.addEventListener("keydown", function (e) {
-		if (kit.style.display === "none") { return; }
+		if (window.PK.enJeu || kit.style.display === "none") { return; }
 		if (e.key === "ArrowUp") { sonner("haut"); }
 		else if (e.key === "ArrowDown") { sonner("bas"); }
 		else if (e.key === "ArrowLeft") { sonner("gauche"); }
@@ -437,6 +462,9 @@ class Component extends DCLogic {
     options: false, tab: "son", capturing: null,
     start: false, session: false, pseudo: "", char: 0, table: 1,
     master: 100, music: 100, sfx: 100, effects: true, shadows: true, fullscreen: false, res: 100,
+    // La souris de la vue subjective : un facteur en pour cent sur la
+    // sensibilité de base du moteur (20 à 300), et le haut/bas inversé ou non.
+    mouse: 100, invertY: false,
     keys: ["W", "S", "A", "D", "Espace", "Maj", "E", "M"] };
   flipBox = () => this.setState(s => ({ flipped: !s.flipped }));
 
@@ -450,7 +478,7 @@ class Component extends DCLogic {
     ["Avancer", "W"], ["Reculer", "S"], ["Aller à gauche", "A"], ["Aller à droite", "D"],
     ["Sauter", "Espace"], ["Sprint", "Maj"], ["Interagir", "E"], ["Carte", "M"]
   ];
-  defaults = { master: 100, music: 100, sfx: 100, effects: true, shadows: true, fullscreen: false, res: 100 };
+  defaults = { master: 100, music: 100, sfx: 100, effects: true, shadows: true, fullscreen: false, res: 100, mouse: 100, invertY: false };
 
   // Les 55 logos de carton (outils/logos.py → outils/cartons.py) : le nom, l'image, la phrase.
   // L'indice est celui que le moteur reçoit dans PK.entrer({personnage}) — même ordre que modeles/cartons/cartons.json.
@@ -519,6 +547,9 @@ class Component extends DCLogic {
   };
 
   onKey = (e) => {
+    // En jeu, le clavier est au moteur : le kit est caché et n'a plus rien à
+    // faire des touches (voir `PK.entrer`).
+    if (window.PK.enJeu) return;
     if (this.state.start) {
       if (e.key === "Escape") this.setState({ start: false, session: false });
       return;
@@ -541,6 +572,30 @@ class Component extends DCLogic {
     if (e.key === "ArrowDown") { e.preventDefault(); this.setState(s => ({ sel: (s.sel + 1) % this.menu.length })); }
     if (e.key === "ArrowUp") { e.preventDefault(); this.setState(s => ({ sel: (s.sel - 1 + this.menu.length) % this.menu.length })); }
     if (e.key === "Enter") { e.preventDefault(); this.activate(this.state.sel); }
+  };
+
+  // Une bascule (le rail et son bouton), pour le graphisme comme pour la
+  // souris : le même dessin aux deux endroits, ou l'onglet des touches aurait
+  // eu l'air d'une autre page.
+  toggle = (k, label, desc) => {
+    const on = !!this.state[k];
+    return {
+      label, desc,
+      onClick: () => this.setState({ [k]: !on }),
+      trackStyle: {
+        flex: "0 0 auto", width: 54, height: 28, padding: 3, borderRadius: 999, cursor: "pointer",
+        border: "1px solid " + (on ? "#ff2ea6" : "rgba(255,255,255,.2)"),
+        background: on ? "rgba(255,46,166,.3)" : "rgba(255,255,255,.06)",
+        display: "flex", justifyContent: on ? "flex-end" : "flex-start", alignItems: "center",
+        transition: "all .18s ease"
+      },
+      knobStyle: {
+        display: "block", width: 20, height: 20, borderRadius: "50%",
+        background: on ? "#fff" : "rgba(255,255,255,.5)",
+        boxShadow: on ? "0 0 12px rgba(255,46,166,.9)" : "none",
+        transition: "all .18s ease"
+      }
+    };
   };
 
   setVol = (key) => (e) => {
@@ -652,6 +707,7 @@ class Component extends DCLogic {
           general: this.state.master, musique: this.state.music, effets_son: this.state.sfx,
           effets: this.state.effects, ombres: this.state.shadows,
           finesse: this.state.res, plein_ecran: this.state.fullscreen,
+          souris: this.state.mouse, souris_inversee: this.state.invertY,
           touches: this.state.keys
         });
       },
@@ -707,29 +763,14 @@ class Component extends DCLogic {
         ["effects", "Effets d'image", "Le flou de bascule du menu et le halo des néons de Pikstown."],
         ["shadows", "Ombres portées", "Dans le menu comme en ville. Le premier réglage à couper si ça saccade."],
         ["fullscreen", "Plein écran", "Lance Piks Theft Auto sur tout l'écran."]
-      ].map(([k, label, desc]) => {
-        const on = !!this.state[k];
-        return {
-          label, desc,
-          onClick: () => this.setState({ [k]: !on }),
-          trackStyle: {
-            flex: "0 0 auto", width: 54, height: 28, padding: 3, borderRadius: 999, cursor: "pointer",
-            border: "1px solid " + (on ? "#ff2ea6" : "rgba(255,255,255,.2)"),
-            background: on ? "rgba(255,46,166,.3)" : "rgba(255,255,255,.06)",
-            display: "flex", justifyContent: on ? "flex-end" : "flex-start", alignItems: "center",
-            transition: "all .18s ease"
-          },
-          knobStyle: {
-            display: "block", width: 20, height: 20, borderRadius: "50%",
-            background: on ? "#fff" : "rgba(255,255,255,.5)",
-            boxShadow: on ? "0 0 12px rgba(255,46,166,.9)" : "none",
-            transition: "all .18s ease"
-          }
-        };
-      }),
+      ].map(([k, label, desc]) => this.toggle(k, label, desc)),
       res: this.state.res,
       resLabel: this.state.res + " %",
       onRes: (e) => this.setState({ res: Number(e.target.value) }),
+      mouse: this.state.mouse,
+      mouseLabel: this.state.mouse + " %",
+      onMouse: (e) => this.setState({ mouse: Number(e.target.value) }),
+      invert: this.toggle("invertY", "Inverser le haut et le bas de la souris", "Pousser la souris baisse le regard, comme un manche."),
       binds: this.defaultKeys.map(([label], i) => {
         const cap = this.state.capturing === i;
         return {
@@ -797,7 +838,7 @@ class Component extends DCLogic {
 
 <script src="index.js"></script>
 <script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":48803216,"index.wasm":38057390},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":49918588,"index.wasm":38057390},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 
