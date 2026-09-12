@@ -16,6 +16,10 @@ extends RefCounted
 ## ses conteneurs et ses cargos. AU MILIEU DE LA PLAGE : la jetée, son bar et
 ## sa grande roue.
 
+## Les courbes larges et le rond-point (cahier § 5) : brique commune, appelée
+## par `preload` — un `class_name` neuf n'existe pas dans l'export web.
+const ANGLES := preload("res://commun/ville2/angles.gd")
+
 const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
 
@@ -37,6 +41,17 @@ const FOND_PORT := -7.0
 const X_JETEE := 11
 const J_JETEE_BOUT := 33
 const TABLIER := 3.4                   ## la hauteur du tablier au-dessus de la mer
+
+## Ce qui traîne sur le sable, et les cailloux du rivage : le kit nature en a
+## de quoi ne jamais répéter deux fois la même chose.
+const SUR_LE_SABLE := ["nature/grass_leafs", "nature/plant_flatShort", "nature/log",
+	"nature/campfire_stones", "nature/campfire_logs", "nature/path_wood",
+	"nature/platform_beach", "nature/pot_small"]
+## 0 = à l'échelle du kit (une pièce de sol), sinon la hauteur voulue.
+const H_SUR_LE_SABLE := [1.2, 0.9, 1.4, 1.0, 1.0, 0.0, 0.0, 1.4]
+const CAILLOUX := ["nature/rock_smallA", "nature/rock_smallD", "nature/rock_smallFlatB",
+	"nature/stone_smallB", "nature/stone_smallFlatC", "nature/rock_largeA",
+	"nature/rock_largeC", "nature/stone_largeE"]
 
 const PRENOMS := ["du Phare", "des Mouettes", "de la Plage", "des Dunes", "du Large",
 	"des Régates", "de l'Ancre", "du Ponton", "des Filets", "de la Criée"]
@@ -64,6 +79,12 @@ static func generer(graine := 2, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_terrain(v, alea)
 	_quartiers(v)
 	var xs := _rues(v, taille)
+	v.rasteriser()
+	# ⚠ LES VIRAGES S'ARRONDISSENT AVANT LES MAISONS. Une courbe large mange
+	# quatre cases ; si les lots sont déjà posés il n'en reste aucune de libre —
+	# sur huit épingles de la colline, deux seulement s'arrondissaient. Arrondi
+	# d'abord, le carré est marqué PRIS et le lotisseur le contourne tout seul.
+	ANGLES.arrondir(v, alea, 0.7)
 	v.rasteriser()
 	_lots(v, alea, xs, taille)
 	v.rasteriser()
@@ -230,21 +251,62 @@ static func _la_plage(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i) 
 			if j <= float(J_SABLE) + 0.2: continue
 			var z := j * CASE
 			var t := alea.randf()
-			if t < 0.30:
+			if t < 0.26:
 				v.ajouter_objet("parasol" if k % 2 == 0 else "parasol_b", x, z, alea.randf() * TAU)
-			elif t < 0.42:
-				v.ajouter_objet("res://modeles/kenney/nature/rock_smallA.glb", x, z, alea.randf() * TAU, 1.6)
-			elif t < 0.50:
+			elif t < 0.36:
+				v.ajouter_objet(CAILLOUX[alea.randi() % CAILLOUX.size()], x, z,
+					alea.randf() * TAU, alea.randf_range(1.2, 2.4))
+			elif t < 0.44:
 				v.ajouter_objet("banc", x, z, alea.randf() * TAU)
+			elif t < 0.50:
+				# LE SABLE N'EST PAS QUE DU SABLE (kit nature) : touffes d'oyat,
+				# caillebotis, troncs, feux de camp. Les pièces de SOL se posent
+				# à l'échelle du kit (elles pavent la case) ; le reste prend une
+				# hauteur voulue.
+				var n := alea.randi() % SUR_LE_SABLE.size()
+				v.ajouter_objet(SUR_LE_SABLE[n], x, z, alea.randf() * TAU,
+					float(H_SUR_LE_SABLE[n]))
+	# ⚠ UNE SEULE TENTE, ET PAS UNE RANGÉE DE CABINES. La tente du kit nature
+	# fait 17 unités de large et 11 de haut posée telle quelle : à l'échelle,
+	# c'est un chapiteau. Une rangée de chapiteaux barrait la plage (« enlève
+	# les tentes ou mets-en une seule devant un feu de camp, elles sont
+	# beaucoup trop grosses », client, 12/09). Il en reste UNE, ramenée à
+	# quatre unités de haut, avec son feu de camp et ses deux troncs — un
+	# bivouac, pas un camping.
+	var camp_x := float(mini(taille.x - 8, X_PORT - 9)) * CASE * 0.42
+	var camp_z := float(J_SABLE + 1) * CASE + 6.0
+	v.ajouter_objet("nature/tent_smallClosed", camp_x, camp_z, PI * 0.75, 4.0)
+	v.ajouter_objet("nature/campfire_stones", camp_x + 9.0, camp_z + 7.0, 0.0, 1.0)
+	v.ajouter_objet("nature/log", camp_x + 2.0, camp_z + 12.0, 0.4, 1.3)
+	v.ajouter_objet("nature/log", camp_x + 16.0, camp_z + 4.0, 1.9, 1.3)
+	# Les barques tirées au sec, en haut de plage.
+	# ⚠ UNE HAUTEUR VOULUE, JAMAIS L'ÉCHELLE DU KIT POUR UN BATEAU. Le pack
+	# nautique est dessiné en unités de jeu, pas en cases : `boat-row-small`
+	# posé « tel quel » sortait à cent unités de long — deux barques géantes en
+	# travers de la plage. Mise à l'échelle par la hauteur, la coque retrouve
+	# sa taille.
+	for k in 5:
+		var bx := alea.randf_range(4.0, float(mini(taille.x - 4, X_PORT - 5))) * CASE
+		v.ajouter_objet("nature/canoe", bx,
+			float(J_SABLE + 2) * CASE + alea.randf() * CASE,
+			alea.randf_range(-0.5, 0.5) + PI * 0.5, 3.2)
 	# Le poste de secours, au débouché de la jetée.
 	v.ajouter_lot("pavillons/building-type-k", (X_JETEE - 3) * 2, (J_SABLE + 1) * 2,
 		KitVille2.emprise_tournee("pavillons/building-type-k", 0).x,
 		KitVille2.emprise_tournee("pavillons/building-type-k", 0).y, 0, "secours")
-	# Les rochers du bout de plage, côté port.
+	# LA POINTE ROCHEUSE du bout de plage, côté port : de vraies falaises du kit
+	# (mesurées : `cliff_rock` fait une case de large et une case de haut), pas
+	# seulement des cailloux grossis.
 	for k in 14:
 		var x := float(X_PORT - 2) * CASE + alea.randf_range(-10.0, 34.0)
 		var z := float(J_SABLE + 1) * CASE + alea.randf_range(0.0, 5.0 * CASE)
-		v.ajouter_objet("res://modeles/kenney/nature/rock_largeA.glb", x, z, alea.randf() * TAU, alea.randf_range(2.2, 4.0))
+		v.ajouter_objet(CAILLOUX[alea.randi() % CAILLOUX.size()], x, z,
+			alea.randf() * TAU, alea.randf_range(2.2, 4.0))
+	for k in 4:
+		var x := float(X_PORT - 3) * CASE + float(k) * CASE * 0.8
+		var z := float(J_SABLE + 3 + (k % 2)) * CASE
+		v.ajouter_objet("nature/cliff_large_rock" if k % 2 == 0 else "nature/cliff_half_rock",
+			x, z, float(alea.randi() % 4) * PI * 0.5, alea.randf_range(5.0, 9.0))
 	# Les bouées du chenal, alignées sur la sortie de la jetée.
 	for k in 5:
 		v.ajouter_objet("bateau:bouee" if k % 2 == 0 else "bateau:bouee_drapeau",

@@ -35,7 +35,8 @@ static func border(v: Ville2, r: Rect2i, alea: RandomNumberGenerator, choix: Arr
 					continue
 				var e := KitVille2.emprise_tournee(m, q)
 				var hy := hy0 if cote == "n" else hy1 - e.y
-				if libre(occupe, hx, hy, e) and alea.randf() < densite:
+				if libre(occupe, hx, hy, e) and terrain_libre(v, hx, hy, e) \
+						and alea.randf() < densite:
 					prendre(occupe, hx, hy, e)
 					v.ajouter_lot(m, hx, hy, e.x, e.y, q, genre)
 				hx += e.x
@@ -48,7 +49,8 @@ static func border(v: Ville2, r: Rect2i, alea: RandomNumberGenerator, choix: Arr
 					continue
 				var e := KitVille2.emprise_tournee(m, q)
 				var hx := hx0 if cote == "o" else hx1 - e.x
-				if libre(occupe, hx, hy, e) and alea.randf() < densite:
+				if libre(occupe, hx, hy, e) and terrain_libre(v, hx, hy, e) \
+						and alea.randf() < densite:
 					prendre(occupe, hx, hy, e)
 					v.ajouter_lot(m, hx, hy, e.x, e.y, q, genre)
 					hy += e.y
@@ -76,8 +78,32 @@ static func aligner(v: Ville2, alea: RandomNumberGenerator, choix: Array, cote: 
 			# Une file tournée vers le sud ou l'est se cale sur son bord loin.
 			if cote == "s": hy = depart.y - e.y
 			if cote == "e": hx = depart.x - e.x
-			v.ajouter_lot(m, hx, hy, e.x, e.y, q, genre)
+			if terrain_libre(v, hx, hy, e):
+				v.ajouter_lot(m, hx, hy, e.x, e.y, q, genre)
 		k += pas + ecart
+
+## ⚠ LE SOL DÉCIDE, ET IL NE DÉCIDAIT RIEN. Ni `border` ni `aligner` ne
+## regardaient la carte : une rangée posée en travers d'un lacet plantait ses
+## maisons SUR la chaussée (« je vois beaucoup de bâtiments sur les routes »,
+## client, 12/09). Un lot ne se pose que sur des cases à terre, sans route,
+## sans grosse pièce, sans autre lot — et toutes AU MÊME PALIER (cahier § 4 :
+## « pas de pente sous les quartiers bâtis »).
+##
+## À appeler AVANT `ajouter_lot`, jamais après : `lot_sur()` ne connaît que les
+## lots de la dernière rastérisation.
+static func terrain_libre(v: Ville2, hx: int, hy: int, e: Vector2i) -> bool:
+	if v.carte == null: return true
+	var palier := -9999
+	for b in e.y:
+		for a in e.x:
+			var c := Vector2i(floori(float(hx + a) * 0.5), floori(float(hy + b) * 0.5))
+			if not v.dedans(c) or not v.terre(c): return false
+			if v.carte.route(c) or v.carte.case_prise(c): return false
+			if v.lot_sur(c) >= 0: return false
+			var p := v.carte.palier(c)
+			if palier == -9999: palier = p
+			elif p != palier: return false
+	return true
 
 ## Le modèle dont la FAÇADE (sa largeur une fois tournée) tient dans
 ## `longueur` demi-cases.

@@ -13,6 +13,10 @@ extends RefCounted
 ## Tout est piloté par une graine et des curseurs ; relancer avec la même
 ## graine redonne la même ville.
 
+## Les courbes larges et le rond-point (cahier § 5) : brique commune, appelée
+## par `preload` — un `class_name` neuf n'existe pas dans l'export web.
+const ANGLES := preload("res://commun/ville2/angles.gd")
+
 const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
 
@@ -99,6 +103,25 @@ static func generer(graine := 1, taille := Vector2i(40, 40), curseurs := {}) -> 
 
 	# 4. La voie ferrée : le long du bord nord, à une case de la première rue.
 	v.rail.append({"points": [Vector2i(0, 1), Vector2i(taille.x - 1, 1)], "niveau": 0})
+	v.rasteriser()
+
+	# 4 bis. LE ROND-POINT ET LES COURBES LARGES (cahier § 5), AVANT LES LOTS :
+	# une grosse pièce mange trois cases sur trois, et un immeuble déjà posé
+	# dessus la ferait refuser. Le rond-point va au croisement d'avenues le plus
+	# loin de la place — au centre il y a déjà la fontaine, et deux ronds-points
+	# à trois cases l'un de l'autre feraient un circuit.
+	var loin := Vector2i(-1, -1)
+	var mieux := -1.0
+	for ax in avenues_x:
+		for ay in avenues_y:
+			var d := Vector2(float(ax), float(ay)).distance_to(
+				Vector2(float(place.position.x), float(place.position.y)))
+			if d > mieux:
+				mieux = d
+				loin = Vector2i(int(ax), int(ay))
+	if loin.x >= 0:
+		ANGLES.rond_point(v, loin)
+	ANGLES.arrondir(v, alea, 0.8)
 	v.rasteriser()
 
 	# 5. Les lots, pâté par pâté.
@@ -292,10 +315,19 @@ static func _la_place(v: Ville2, place: Rect2i, alea: RandomNumberGenerator) -> 
 	for s in [-1.0, 1.0]:
 		var px: float = cx + float(s) * 2.6 * CASE
 		v.objets.append({"m": "pelouse", "x": px, "z": cz, "r": 0.0, "h": 0.0, "w": 2.2 * CASE, "d": 1.6 * CASE})
-		v.ajouter_objet("monument", px, cz, 0.0)
+		v.ajouter_objet("monument" if s < 0.0 else "statue", px, cz, 0.0)
 		for k in 4:
 			var a := PI * 0.25 + PI * 0.5 * float(k)
 			v.ajouter_objet("buisson", px + cos(a) * 0.9 * CASE, cz + sin(a) * 0.6 * CASE, alea.randf() * TAU)
+		# UN MASSIF DE FLEURS ET UNE ALLÉE DE DALLES (kit nature) : une pelouse
+		# nue est un tapis vert, pas un jardin.
+		for k in 10:
+			v.ajouter_objet(FLEURS[alea.randi() % FLEURS.size()],
+				px + alea.randf_range(-1.0, 1.0) * CASE,
+				cz + alea.randf_range(-0.7, 0.7) * CASE, alea.randf() * TAU, 0.9)
+		for k in 5:
+			v.ajouter_objet("nature/path_stone", px - CASE + float(k) * 0.5 * CASE,
+				cz + 0.75 * CASE, 0.0)
 	# Les terrasses (cahier § 8 : « activités : bancs, terrasses ») le long du
 	# côté est, face à l'avenue : parasols du kit et bancs, deux rangs.
 	var xe := (float(place.end.x) - 0.7) * CASE
@@ -359,6 +391,16 @@ static func _la_gare(v: Ville2, gare: Rect2i, alea: RandomNumberGenerator) -> vo
 
 ## Feux aux carrefours d'avenues, stops aux petites rues, lampadaires à chaque
 ## coin, arbres d'alignement le long des avenues, plaques de rue (§ 5).
+## Les arbres d'alignement et le petit mobilier de trottoir : deux tirages
+## dans le kit élargi plutôt que deux modèles en dur.
+## Les fleurs des massifs — le kit nature en a neuf, on en prend six.
+const FLEURS := ["nature/flower_redA", "nature/flower_redC", "nature/flower_yellowB",
+	"nature/flower_yellowC", "nature/flower_purpleA", "nature/flower_purpleC"]
+
+const ALIGNEMENT := ["arbre_oak", "arbre_rond", "arbre", "arbre_plateau", "arbre_fin",
+	"nature/tree_pineRoundC"]
+const TROTTOIR := ["poubelle", "borne", "buisson_grand", "pot", "herbes"]
+
 static func _mobilier(v: Ville2, alea: RandomNumberGenerator, avenues_x: Array, avenues_y: Array) -> void:
 	var carte := v.carte
 	var coins := [Vector2(1, 1), Vector2(-1, 1), Vector2(-1, -1), Vector2(1, -1)]
@@ -402,9 +444,19 @@ static func _mobilier(v: Ville2, alea: RandomNumberGenerator, avenues_x: Array, 
 				for s in [-1.0, 1.0]:
 					var bord: Vector2 = centre + normale * float(s) * BORD * CASE
 					if avenue and (i + j) % 2 == 0:
-						v.ajouter_objet("arbre_oak" if alea.randf() < 0.5 else "arbre_rond", bord.x, bord.y, alea.randf() * TAU)
+						# ⚠ UNE AVENUE N'EST PAS PLANTÉE D'UN SEUL ARBRE. Deux
+						# essences en alternance, c'est un décor ; le kit nature
+						# en a trois cents, on en prend six.
+						v.ajouter_objet(ALIGNEMENT[alea.randi() % ALIGNEMENT.size()],
+							bord.x, bord.y, alea.randf() * TAU)
 					elif pair and s > 0.0:
-						v.ajouter_objet("lampadaire", bord.x, bord.y, (PI * 0.5 if selon_x else 0.0) + (PI if s > 0 else 0.0))
+						var lampe := "lampadaire_double" if avenue else "lampadaire"
+						v.ajouter_objet(lampe, bord.x, bord.y,
+							(PI * 0.5 if selon_x else 0.0) + (PI if s > 0 else 0.0))
+					elif (i + j) % 7 == 0 and s < 0.0 and not avenue:
+						# Un peu de vie de trottoir : poubelle, borne, cabine.
+						v.ajouter_objet(TROTTOIR[alea.randi() % TROTTOIR.size()],
+							bord.x, bord.y, alea.randf() * TAU)
 
 ## Quelques voitures garées le long des rues, contre le trottoir, dans le sens
 ## de la rue — « stationnement modéré » (§ 8).

@@ -28,6 +28,10 @@ extends RefCounted
 ## ils descendent en herbe et en rochers, et c'est là qu'on voit que la
 ## colline est une colline et non un escalier.
 
+## Les courbes larges et le rond-point (cahier § 5) : brique commune, appelée
+## par `preload` — un `class_name` neuf n'existe pas dans l'export web.
+const ANGLES := preload("res://commun/ville2/angles.gd")
+
 const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
 const PALIER := Ville2.PALIER
@@ -37,21 +41,24 @@ const PALIER := Ville2.PALIER
 ## est plus étroite que celle d'en dessous : c'est ce qui donne une silhouette
 ## de colline plutôt qu'un gâteau de mariage.
 const TERRASSES := [
-	{"j0": 21, "j1": 25, "i0": 4, "i1": 36, "p": 3, "route": 23},
-	{"j0": 16, "j1": 20, "i0": 6, "i1": 34, "p": 6, "route": 18},
-	{"j0": 11, "j1": 15, "i0": 8, "i1": 32, "p": 9, "route": 13},
-	{"j0": 6, "j1": 10, "i0": 11, "i1": 29, "p": 12, "route": 8},
-	{"j0": 2, "j1": 5, "i0": 14, "i1": 26, "p": 15, "route": 4},
+	{"j0": 21, "j1": 25, "i0": 4, "i1": 36, "p": 4, "route": 23},
+	{"j0": 16, "j1": 20, "i0": 6, "i1": 34, "p": 8, "route": 18},
+	{"j0": 11, "j1": 15, "i0": 8, "i1": 32, "p": 12, "route": 13},
+	{"j0": 6, "j1": 10, "i0": 11, "i1": 29, "p": 16, "route": 8},
+	{"j0": 2, "j1": 5, "i0": 14, "i1": 26, "p": 20, "route": 4},
 ]
 
 ## LA VILLE BASSE : tout ce qui est au sud de la première terrasse.
 const J_BASSE := 26
-## ⚠ TROIS PALIERS D'UNE TERRASSE À L'AUTRE, pas deux. À deux (dix unités,
-## cinq mètres), le coteau passait entièrement derrière les maisons : vue du
-## ciel comme depuis la ville basse, la colline ressemblait à une plaine. À
-## trois, le mur de soutènement se voit, la vue se gagne, et le sommet est à
-## soixante-quinze unités — trente-sept mètres, la « colline de 30-50 m avec
-## vue sur la baie » du cahier (§ 4).
+## ⚠ QUATRE PALIERS D'UNE TERRASSE À L'AUTRE — VINGT UNITÉS, LA HAUTEUR EXACTE
+## D'UN BLOC DE FALAISE KENNEY. Mesuré : `cliff_rock` fait 20 × 20 × 3,4 unités,
+## `cliff_block` 20³, `cliff_blockHalf` 20 × 10 × 20, `cliff_blockQuarter`
+## 20 × 5 × 20 — le kit nature est bâti sur la CASE, avec des marches d'un
+## palier. Une terrasse d'une case de haut se pare donc de vraies falaises,
+## posées à l'échelle du kit, sans étirement. (À trois paliers il fallait les
+## mettre à l'échelle : 15 unités de haut, donc 15 de large, et une fente tous
+## les cinq.) Le sommet est à cent unités — cinquante mètres, le haut de la
+## fourchette du cahier (§ 4).
 const PENTE_FLANC := 0.85              ## la descente du flanc, en palier par case
 
 ## LES LACETS : la route monte par les extrémités, alternativement à l'est et
@@ -113,9 +120,17 @@ static func generer(graine := 3, taille := Vector2i(40, 40), curseurs := {}) -> 
 	var montee := _routes(v)
 	_marches(v, montee)
 	v.rasteriser()
+	# ⚠ LES VIRAGES S'ARRONDISSENT AVANT LES MAISONS. Une courbe large mange
+	# quatre cases ; si les lots sont déjà posés il n'en reste aucune de libre —
+	# sur huit épingles de la colline, deux seulement s'arrondissaient. Arrondi
+	# d'abord, le carré est marqué PRIS et le lotisseur le contourne tout seul.
+	ANGLES.arrondir(v, alea)
+	v.rasteriser()
 	_lots(v, alea)
 	v.rasteriser()
+	_falaises(v, alea)
 	_escaliers(v)
+	_sentiers(v, alea)
 	_nature(v, alea)
 	_details(v, alea)
 	return v
@@ -248,7 +263,6 @@ static func _marches(v: Ville2, cases: Array) -> void:
 	for k in cases.size():
 		var c: Vector2i = cases[k]
 		v.poser_terre(c, float(vise[k]) * PALIER)
-		v.poser_matiere(c, Ville2.M_DALLE)
 		# Le bord de la chaussée suit la chaussée : sans ça, un lacet posé en
 		# travers du talus a une roue en l'air et l'autre dans l'herbe.
 		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
@@ -302,6 +316,37 @@ static func _lots(v: Ville2, alea: RandomNumberGenerator) -> void:
 ## l'opposé du demi-tour de la route, on pose une volée de marches du kit —
 ## c'est le raccourci, et c'est aussi ce qui prouve que le mur de soutènement
 ## est franchissable à pied (cahier § 4).
+## LES NEZ DE TERRASSE, EN VRAIES FALAISES. Le rendu pose déjà un mur de
+## soutènement (une boîte) sous chaque case plate ; en ville c'est du béton et
+## c'est juste. Hors ville, le cahier demande des ROCHERS — et le kit nature a
+## exactement ça : un panneau de falaise d'une case de large et d'une case de
+## haut, plus ses pièces de coin et de lèvre. On les pose devant le mur, qui
+## reste derrière pour boucher, et la terrasse cesse d'être un gâteau en béton.
+const FALAISES := ["nature/cliff_rock", "nature/cliff_rock", "nature/cliff_stone",
+	"nature/cliff_waterfall_rock", "nature/cliff_cave_rock"]
+
+static func _falaises(v: Ville2, alea: RandomNumberGenerator) -> void:
+	for t in TERRASSES:
+		var j := int(t["j1"])
+		var y := float(t["p"]) * PALIER
+		var b := bornes(t, j)
+		for i in range(b.x, b.y + 1):
+			var c := Vector2i(i, j)
+			# Sous la chaussée, le béton du rendu : une route ne sort pas d'une
+			# falaise. Sous l'herbe, la falaise.
+			if v.carte != null and (v.carte.route(c) or v.lot_sur(c) >= 0): continue
+			if not v.dedans(Vector2i(i, j + 1)): continue
+			var m: String = FALAISES[alea.randi() % FALAISES.size()]
+			# Le panneau regarde le sud (vers le vide) ; sa base est une case
+			# sous le plateau, sa lèvre affleure donc le bord de la terrasse.
+			v.ajouter_objet(m, (float(i) + 0.5) * CASE, (float(j) + 1.0) * CASE - 1.2, 0.0)
+			v.objets[v.objets.size() - 1]["y_abs"] = y - CASE
+			# Une lèvre de rocher au ras du plateau, une case sur trois.
+			if (i + j) % 3 == 0:
+				v.ajouter_objet("nature/cliff_top_rock", (float(i) + 0.5) * CASE,
+					(float(j) + 1.0) * CASE - 2.6, 0.0)
+				v.objets[v.objets.size() - 1]["y_abs"] = y - CASE
+
 static func _escaliers(v: Ville2) -> void:
 	for k in range(TERRASSES.size() - 1):
 		var bas: Dictionary = TERRASSES[k]
@@ -313,17 +358,41 @@ static func _escaliers(v: Ville2) -> void:
 		var j := int(haut["j1"])
 		var y_bas := float(bas["p"]) * PALIER
 		var y_haut := float(haut["p"]) * PALIER
-		# ⚠ UNE SEULE PIÈCE, MISE À LA HAUTEUR DU MUR. `cliff_steps_stone` est
-		# un bloc d'une case de haut : posé tel quel sur un mur de deux paliers
-		# il dépasserait de moitié. Mis à l'échelle par sa hauteur, il devient
-		# une volée étroite qui tient exactement entre les deux terrasses.
-		var haute := y_haut - y_bas
-		v.ajouter_objet("nature/cliff_steps_stone", (float(i) + 0.5) * CASE,
-			(float(j) + 1.0) * CASE, 0.0, haute, "#b4b2ab")
-		v.objets[v.objets.size() - 1]["y_abs"] = y_bas
+		# ⚠ À L'ÉCHELLE DU KIT, SANS ÉTIREMENT. `cliff_steps_rock` mesure
+		# exactement une case de haut (20 unités) : c'est la hauteur d'une
+		# terrasse. Posé tel quel, il tombe pile entre les deux niveaux — c'est
+		# pour ça que les terrasses font quatre paliers et pas trois.
+		v.ajouter_objet("nature/cliff_steps_rock", (float(i) + 0.5) * CASE,
+			(float(j) + 1.0) * CASE - 2.0, 0.0)
+		v.objets[v.objets.size() - 1]["y_abs"] = y_haut - CASE
 		v.ajouter_objet("lampadaire_parc", (float(i) + 0.5) * CASE - 8.0,
 			(float(j) + 0.2) * CASE, 0.0)
 		v.objets[v.objets.size() - 1]["y_abs"] = y_haut
+
+## LES SENTIERS. Le kit nature a des tuiles de chemin d'une case exactement
+## (`ground_pathStraight`, `Bend`, `Corner`, mesurées 20 × 1 × 20) : de quoi
+## tracer à travers l'herbe ce que la route en lacets ne dessert pas. Un sentier
+## part de chaque escalier et rejoint la route de la terrasse du dessous — c'est
+## le raccourci du piéton, et ça donne à l'herbe une raison d'être traversée.
+static func _sentiers(v: Ville2, alea: RandomNumberGenerator) -> void:
+	for k in range(TERRASSES.size() - 1):
+		var bas: Dictionary = TERRASSES[k]
+		var haut: Dictionary = TERRASSES[k + 1]
+		var a_l_est: bool = int(LACETS[k]["x"]) > 20
+		var i: int = int(haut["i0"]) + 3 if a_l_est else int(haut["i1"]) - 3
+		# Du pied de l'escalier jusqu'à la rue de la terrasse du dessous.
+		for j in range(int(haut["j1"]) + 1, int(bas["route"])):
+			var c := Vector2i(i, j)
+			if not v.dedans(c): continue
+			if v.carte != null and (v.carte.route(c) or v.lot_sur(c) >= 0): continue
+			var m := "nature/ground_pathStraight"
+			if j == int(bas["route"]) - 1: m = "nature/ground_pathEnd"
+			v.ajouter_objet(m, (float(i) + 0.5) * CASE, (float(j) + 0.5) * CASE, 0.0)
+			# Deux ou trois pierres plates le long du sentier.
+			if alea.randf() < 0.4:
+				v.ajouter_objet("nature/stone_smallFlatB",
+					(float(i) + alea.randf_range(-0.35, 1.35)) * CASE,
+					(float(j) + alea.randf()) * CASE, alea.randf() * TAU, 0.9)
 
 ## LA VÉGÉTATION. Les pins tiennent la crête et les flancs raides, les feuillus
 ## bordent les routes des terrasses, les rochers sortent là où la pente est

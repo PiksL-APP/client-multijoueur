@@ -49,6 +49,18 @@ static func matiere() -> StandardMaterial3D:
 
 ## L'altitude d'un COIN de grille — le coin nord-ouest de la case (i, j).
 ## Voir l'avertissement en tête de fichier : une case plate impose la sienne.
+## L'altitude du DESSUS d'une case plate, celle sur laquelle la tuile est
+## posée. Le rendu pose une chaussée au palier arrondi et une dalle à son sol
+## exact : la nappe doit suivre la même règle, sinon elle perce la tuile.
+## De combien la nappe passe SOUS la tuile du kit : assez pour que la tuile
+## gagne toujours, assez peu pour que la rainure reste bouchée.
+const SOUS_LA_TUILE := 0.12
+
+static func hauteur_plate(ville: Ville2, c: Vector2i) -> float:
+	if ville.carte != null and ville.carte.route(c):
+		return float(ville.carte.palier(c)) * Ville2.PALIER
+	return ville.sol(c)
+
 static func hauteur_coin(ville: Ville2, i: int, j: int) -> float:
 	var haut := -1.0e9
 	var somme := 0.0
@@ -58,7 +70,9 @@ static func hauteur_coin(ville: Ville2, i: int, j: int) -> float:
 			var c := Vector2i(i - 1 + di, j - 1 + dj)
 			if not ville.dedans(c): continue
 			if ville.plate(c):
-				haut = maxf(haut, ville.sol(c))
+				# Une chaussée est posée au palier ARRONDI (c'est la tuile du
+				# kit qui commande) ; une autre case plate suit son sol exact.
+				haut = maxf(haut, hauteur_plate(ville, c))
 			else:
 				somme += ville.sol(c)
 				n += 1
@@ -79,7 +93,15 @@ static func couleur_coin(ville: Ville2, i: int, j: int) -> Color:
 			n += 1
 	return somme / float(n) if n > 0 else COULEURS[Ville2.M_HERBE]
 
+## ⚠ LA NAPPE PREND LA COULEUR DE CE QUI EST POSÉ DESSUS. Sous une chaussée,
+## elle est de la couleur du BITUME ; partout ailleurs, de celle de sa matière.
+## Sans ça, le cheveu qui reste au joint de deux tuiles laisse voir du gris
+## clair au milieu du noir : un liseré, et la route se lit en dalles séparées.
+const TEINTE_BITUME := Color("#79808f")
+
 static func _couleur_case(ville: Ville2, c: Vector2i) -> Color:
+	if ville.carte != null and ville.carte.route(c):
+		return TEINTE_BITUME
 	if not ville.terre(c):
 		# Le fond marin : sable près du bord, vase au large.
 		var p := clampf(-ville.sol(c) / FOND_PROFOND, 0.0, 1.0)
@@ -126,7 +148,28 @@ static func maillage(ville: Ville2, zone: Rect2i) -> ArrayMesh:
 	for j in range(zone.position.y, zone.end.y):
 		for i in range(zone.position.x, zone.end.x):
 			var c := Vector2i(i, j)
-			if not ville.dedans(c) or ville.plate(c): continue
+			if not ville.dedans(c): continue
+			# ⚠ LE SOL EST CONTINU, CASES PLATES COMPRISES. Première version :
+			# la nappe s'arrêtait au bord des tuiles, et l'on voyait le VIDE
+			# dans la rainure entre deux tuiles du kit (leur dessus est biseauté
+			# de deux centièmes) — « aucune route n'est collée, on voit l'écart
+			# entre deux routes » (client, 12/09). Le même trou expliquait les
+			# triangles sombres au bord des lacets.
+			#
+			# ⚠⚠ MAIS UNE CASE PLATE A SES QUATRE COINS À ELLE, PAS LES COINS
+			# SOUDÉS. Soudés, le coin d'une rampe voisine tirait la nappe vers
+			# le haut et elle passait PAR-DESSUS la chaussée : le lacet
+			# disparaissait sous l'herbe. Une case plate reçoit donc un carré
+			# plat, posé un cheveu sous la tuile, dans la couleur de son sol.
+			if ville.plate(c):
+				var y := hauteur_plate(ville, c) - SOUS_LA_TUILE
+				var teinte := _couleur_case(ville, c)
+				var k0 := sommets.size()
+				for p in [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]:
+					sommets.append(Vector3((float(i) + p.x) * CASE, y, (float(j) + p.y) * CASE))
+					couleurs.append(teinte)
+				indices.append_array([k0, k0 + 1, k0 + 2, k0, k0 + 2, k0 + 3])
+				continue
 			var a: int = coin.call(i, j)
 			var b: int = coin.call(i + 1, j)
 			var d: int = coin.call(i + 1, j + 1)

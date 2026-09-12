@@ -13,6 +13,11 @@ extends RefCounted
 ## route que `CarteVille.tuile()` désigne — la table de pavage mesurée au banc.
 ## Les tuiles AJOURÉES (voir `CarteVille.AJOUREES`) reçoivent une dalle dessous.
 
+## ⚠ `preload` ET PAS LE NOM DE CLASSE : un `class_name` créé après coup
+## n'existe pas dans l'export web (il n'est inscrit que dans le cache de
+## l'éditeur, que le workflow d'export ne régénère pas).
+const ANGLES := preload("res://commun/ville2/angles.gd")
+
 const CASE := Ville2.CASE
 const PALIER := Ville2.PALIER
 const ROUTES := "res://modeles/kenney/routes/"
@@ -66,24 +71,46 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 			if not carte.terre(c) or not ville.plate(c): continue
 			var y := float(carte.palier(c)) * PALIER
 			var centre := Vector3((float(i) + 0.5) * CASE, y, (float(j) + 0.5) * CASE)
+			# ⚠ PLUS DE DALLE DE BOUCHAGE SOUS LES TUILES AJOURÉES. Le maillage
+			# du terrain couvre désormais les cases plates : il passe sous la
+			# tuile, bouche sa rainure et remplit ses coins ouverts, de la
+			# couleur du sol. Une dalle de plus par case ne servirait qu'à
+			# poser du béton dans l'herbe — et à doubler le nombre de tuiles.
 			if carte.case_prise(c):
-				# La grosse pièce dessine elle-même ; ses cases ajourées
-				# gardent une dalle pour ne pas voir la mer.
-				if not carte.case_couverte(c):
-					_tuile(racine, "tile-low", centre - Vector3(0, EPAISSEUR_TUILE, 0), 0)
 				continue
 			if carte.route(c):
 				var f: Array = carte.tuile(c)
 				var nom := String(f[0])
 				nom = _variante_avenue(ville, c, nom)
-				if CarteVille.AJOUREES.has(nom):
-					_tuile(racine, "tile-low", centre - Vector3(0, EPAISSEUR_TUILE, 0), 0)
+				nom = _variante_campagne(ville, c, nom)
 				_tuile(racine, nom, centre, int(f[1]))
 				# Les voies rapides sont bordées de glissières.
 				if ville.genre_de_route(c) == Ville2.R_VOIE_RAPIDE and CarteVille.BARRIERES.has(nom):
 					_tuile(racine, String(CarteVille.BARRIERES[nom]), centre, int(f[1]))
 			else:
 				_tuile(racine, _dalle_de(ville, c), centre, 0, TEINTE_DALLE)
+
+## LES TUILES DE CAMPAGNE (demande du client, 12/09 : « road-bend plutôt que
+## road-bend-sidewalk sur l'herbe »). Le kit a deux dessins pour le même
+## raccord : l'un remplit son carré d'un trottoir, l'autre n'est que la bande
+## de chaussée. En ville le trottoir est juste ; dans un champ il fait une
+## place de village autour d'un virage.
+const NUES := {
+	"road-bend-sidewalk": "road-bend", "road-bend-square": "road-bend",
+	"road-curve-pavement": "road-curve",
+	"road-straight-half": "road-straight",
+}
+
+static func _variante_campagne(ville: Ville2, c: Vector2i, nom: String) -> String:
+	if not NUES.has(nom): return nom
+	if not ANGLES.a_la_campagne(ville, c): return nom
+	return String(NUES[nom])
+
+## La couleur du sol d'une case : le béton en ville, la matière du terrain
+## dehors — c'est ce qui va sous une tuile ajourée.
+static func _teinte_du_sol(ville: Ville2, c: Vector2i) -> Color:
+	if not ANGLES.a_la_campagne(ville, c): return TEINTE_DALLE
+	return TerrainV2.COULEURS.get(ville.matiere_de(c), TEINTE_DALLE)
 
 ## LES PASSAGES PIÉTONS (cahier § 5 : « feux tricolores aux carrefours
 ## d'avenues », § 8 : « piétons sur les passages »). Sur une avenue, un
@@ -93,11 +120,11 @@ static func _variante_avenue(ville: Ville2, c: Vector2i, nom: String) -> String:
 	if ville.genre_de_route(c) != Ville2.R_AVENUE: return nom
 	if nom.begins_with("road-crossroad"): return "road-crossroad-path"
 	if nom.begins_with("road-intersection"): return "road-intersection-path"
-	if nom == "road-straight":
-		for d in CarteVille.COTES:
-			var m := ville.carte.masque(c + d)
-			if ville.carte.route(c + d) and m != 5 and m != 10 and m != 0:
-				return "road-crossing"
+	# ⚠ AUCUN PASSAGE PIÉTON À CÔTÉ D'UN CARREFOUR : IL EN A DÉJÀ (demande du
+	# client, 12/09). Les tuiles `-path` du kit — celles qu'on pose sur les
+	# carrefours et les T d'avenue — portent leurs propres passages sur chacun
+	# de leurs bras. En ajouter un sur la case d'à côté, c'était traverser deux
+	# fois la même rue à deux mètres d'intervalle.
 	return nom
 
 ## Quelle dalle sous une case pavée sans rue : le trottoir du kit. Les cases
@@ -150,7 +177,16 @@ static func _poser_ouvrages(racine: Node3D, ville: Ville2, zone: Rect2i) -> void
 const TEINTE_BETON := Color("#b4b2ab")
 const TEINTE_ROCHE := Color("#9b978e")
 const EPAISSEUR_MUR := 1.2
-const MUR_MINI := 0.35                 ## en dessous, ça ne se voit pas
+## De combien une tuile déborde de sa case pour couvrir le biseau de sa voisine.
+const RECOUVREMENT := 1.0
+## ⚠ LE SEUIL DOIT ÊTRE PLUS GRAND QUE L'ÉPAISSEUR D'UNE TUILE. À 0,35 il était
+## plus PETIT que les 0,4 d'une dalle du kit : sur un sol parfaitement plat,
+## chaque case se trouvait « plus haute » que sa voisine et se bordait d'un
+## muret de béton. Vu du ciel, la ville entière était quadrillée de liserés
+## clairs — ce que le client a lu comme « aucune route n'est collée, on voit
+## l'écart entre deux routes » (12/09). Un mur ne se justifie qu'à partir
+## d'une vraie marche.
+const MUR_MINI := 1.2
 
 static func _poser_soutenements(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 	for j in range(zone.position.y, zone.end.y):
@@ -171,10 +207,16 @@ static func _poser_soutenements(racine: Node3D, ville: Ville2, zone: Rect2i) -> 
 			# on le construit en DEUX DEMI-MURS pour épouser la pente au lieu
 			# de faire une marche.
 			var vers_le_haut := _sens_de_la_rampe(ville, c)
+			# ⚠ UNE RAMPE SE BORDE TOUJOURS, MÊME POUR UN RIEN. Sa tuile monte
+			# d'un palier au-dessus de sa propre case : sous la moitié haute, il
+			# n'y a rien, et l'on voyait le ciel par deux triangles sombres de
+			# part et d'autre de chaque lacet. Le seuil ordinaire (qui évite de
+			# border chaque case d'un sol plat) ne s'applique donc pas à elle.
+			var seuil: float = 0.05 if vers_le_haut != Vector2i.ZERO else MUR_MINI
 			for d in CarteVille.COTES:
 				var v: Vector2i = c + d
 				var bas := _pied_du_mur(ville, v)
-				if haut - bas < MUR_MINI: continue
+				if haut - bas < seuil: continue
 				var teinte: Color = TEINTE_BETON if en_ville else TEINTE_ROCHE
 				if vers_le_haut == Vector2i.ZERO or d == -vers_le_haut:
 					_mur(racine, i, j, d, bas, haut, 1.0, 0.0, teinte)
@@ -228,7 +270,9 @@ static func _pied_du_mur(ville: Ville2, v: Vector2i) -> float:
 	for dj in 2:
 		for di in 2:
 			bas = minf(bas, TerrainV2.hauteur_coin(ville, v.x + di, v.y + dj))
-	return bas - 0.25
+	# ⚠ PAS DE MARGE ICI. Les 0,25 unités que ce mur creusait « pour être sûr »
+	# suffisaient, sur un sol plat, à déclencher un muret par case.
+	return bas
 
 # ------------------------------------------------------------------ les lots
 
@@ -621,7 +665,18 @@ static func _tuile(parent: Node3D, nom: String, ou: Vector3, quarts: int, teinte
 	var n := MeshInstance3D.new()
 	n.mesh = FormesCarnage.maillage_kenney(chemin, 0.0, Vector3.AXIS_X, 0.0)
 	n.material_override = _matiere(chemin, teinte)
-	n.transform = Transform3D(Basis(Vector3.UP, PI * 0.5 * float(quarts)).scaled(Vector3.ONE * CASE), ou)
+	# ⚠ LA TUILE DÉBORDE DE SA CASE, EXPRÈS. Une tuile Kenney mesure exactement
+	# une case (mesuré : 1,0000 x 1,0000, centrée sur son origine) — donc deux
+	# tuiles voisines se touchent pile. Mais leur dessus est BISEAUTÉ : le
+	# chanfrein de l'une plus celui de l'autre font, vu du ciel, un LISERÉ CLAIR
+	# à chaque joint, et toute la ville se lit comme un damier de dalles
+	# séparées (« aucune route n'est collée, on voit l'écart entre deux
+	# routes », client, 12/09). Un chouïa d'échelle en plus et le biseau d'une
+	# tuile passe SOUS le dessus plat de sa voisine : le joint disparaît, sans
+	# rien déplacer et sans z-fighting — le chanfrein est plus bas que la face
+	# qui le couvre.
+	n.transform = Transform3D(Basis(Vector3.UP, PI * 0.5 * float(quarts)).scaled(
+		Vector3.ONE * CASE * RECOUVREMENT), ou)
 	n.set_meta("tuile", nom)
 	_noter(chemin)
 	parent.add_child(n)
