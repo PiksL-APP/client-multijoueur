@@ -113,8 +113,27 @@ const PROPS := {
 	"monument": {"m": "nature/statue_column", "h": 9.0},
 	"auvent": {"m": "batiments/detail-awning", "h": 0.0},
 	"auvent_large": {"m": "batiments/detail-awning-wide", "h": 0.0},
-	"parasol": {"m": "batiments/detail-parasol-a", "h": 3.0},
+	"parasol": {"m": "batiments/detail-parasol-a", "h": 4.2},
+	"parasol_b": {"m": "batiments/detail-parasol-b", "h": 4.2},
 	"conteneur": {"m": "industriel/shipping-container-a", "h": 0.0},
+}
+
+## LES BATEAUX (cahier § 3) : modèle, longueur voulue en unités, et le tirant
+## d'eau — de combien la coque descend sous la ligne de flottaison. Les coques
+## du Watercraft Pack sont toutes longues selon Z (mesuré) : on les tourne pour
+## les aligner sur leur quai.
+const BATEAUX := {
+	"barque": {"m": "bateaux/boat-row-large", "l": 7.0, "tirant": 0.5},
+	"peche": {"m": "bateaux/boat-fishing-small", "l": 12.0, "tirant": 1.2},
+	"voilier": {"m": "bateaux/boat-sail-a", "l": 13.0, "tirant": 1.2},
+	"vedette": {"m": "bateaux/boat-speed-a", "l": 10.0, "tirant": 0.8},
+	"vedette_b": {"m": "bateaux/boat-speed-c", "l": 9.0, "tirant": 0.8},
+	"remorqueur": {"m": "bateaux/boat-tug-a", "l": 14.0, "tirant": 1.4},
+	"cargo": {"m": "bateaux/ship-cargo-a", "l": 62.0, "tirant": 4.0},
+	"cargo_b": {"m": "bateaux/ship-cargo-b", "l": 62.0, "tirant": 4.0},
+	"paquebot": {"m": "bateaux/ship-ocean-liner-small", "l": 78.0, "tirant": 5.0},
+	"bouee": {"m": "bateaux/buoy", "l": 2.6, "tirant": 0.6},
+	"bouee_drapeau": {"m": "bateaux/buoy-flag", "l": 3.4, "tirant": 0.6},
 }
 
 ## Les voitures garées : Car Kit Kenney et modèles du client, longueur voulue.

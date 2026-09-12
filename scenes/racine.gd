@@ -133,6 +133,11 @@ static func _arguments_depuis_url(arguments: PackedStringArray) -> PackedStringA
 			# ligne de commande, `--ecran=` marche sans passer par ici.
 			"ecran": copie.append("--ecran=" + String(paire[1]))
 			"lieu": copie.append("--lieu=" + String(paire[1]))
+			# L'éditeur de la ville v2 : `?ecran=editeur2&carte=temoin-plage`
+			# ouvre directement une autre carte, et `&temoin=plage` engendre un
+			# témoin neuf sans passer par un fichier.
+			"carte": copie.append("--carte=res://cartes/" + String(paire[1]) + ".json")
+			"temoin": copie.append("--temoin=" + String(paire[1]))
 			"onglet": copie.append("--onglet=" + String(paire[1]))
 	return copie
 

@@ -45,6 +45,7 @@ static func batir(ville: Ville2, zone: Rect2i = Rect2i(), passes: int = P_TOUT,
 	if zone.size == Vector2i.ZERO:
 		zone = Rect2i(Vector2i.ZERO, ville.taille)
 	if passes & P_SOLS:
+		_poser_terrain(racine, ville, zone)
 		_poser_sols(racine, ville, zone)
 		_poser_ouvrages(racine, ville, zone)
 	if passes & P_LOTS: _poser_lots(racine, ville, zone)
@@ -59,7 +60,9 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 	for j in range(zone.position.y, zone.end.y):
 		for i in range(zone.position.x, zone.end.x):
 			var c := Vector2i(i, j)
-			if not carte.terre(c): continue
+			# Une case de terrain (herbe, sable, terre, roche) est portée par le
+			# maillage continu, pas par une dalle du kit.
+			if not carte.terre(c) or not ville.plate(c): continue
 			var y := float(carte.palier(c)) * PALIER
 			var centre := Vector3((float(i) + 0.5) * CASE, y, (float(j) + 0.5) * CASE)
 			if carte.case_prise(c):
@@ -96,15 +99,30 @@ static func _variante_avenue(ville: Ville2, c: Vector2i, nom: String) -> String:
 				return "road-crossing"
 	return nom
 
-## Quelle dalle sous une case sans rue : le trottoir du kit en ville, la
-## pelouse ailleurs (un parc, un jardin).
-static func _dalle_de(ville: Ville2, c: Vector2i) -> String:
-	var lot := ville.lot_sur(c)
-	if lot >= 0:
-		return "tile-low"
-	match ville.genre_du_quartier(c):
-		Ville2.Q_PARC: return "tile-low"     # TODO pelouse du Nature Kit
-		_: return "tile-low"
+## Quelle dalle sous une case pavée sans rue : le trottoir du kit. Les cases
+## de terrain ne passent pas par ici (voir `_poser_terrain`).
+static func _dalle_de(_ville: Ville2, _c: Vector2i) -> String:
+	return "tile-low"
+
+# ------------------------------------------------------------------ le terrain
+
+## LE TERRAIN CONTINU ET LA MER, en deux maillages par morceau (voir
+## `TerrainV2`). Un morceau entièrement pavé n'en produit aucun.
+static func _poser_terrain(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
+	var sol := TerrainV2.maillage(ville, zone)
+	if sol != null:
+		var n := MeshInstance3D.new()
+		n.mesh = sol
+		n.material_override = TerrainV2.matiere()
+		n.set_meta("modele", "terrain")
+		racine.add_child(n)
+	var mer := TerrainV2.maillage_eau(ville, zone)
+	if mer != null:
+		var n := MeshInstance3D.new()
+		n.mesh = mer
+		n.material_override = MatieresCarnage.eau()
+		n.set_meta("modele", "eau")
+		racine.add_child(n)
 
 static func _poser_ouvrages(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 	var carte := ville.carte
@@ -146,7 +164,14 @@ static func _poser_objets(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 		var z := float(o["z"])
 		var c := Vector2i(floori(x / CASE), floori(z / CASE))
 		if not zone.has_point(c): continue
-		var y := float(ville.carte.palier(c)) * PALIER + EPAISSEUR_TUILE
+		# ⚠ L'ALTITUDE VIENT DU SOL RÉEL. Sur une case plate c'est le palier de
+		# la tuile ; sur du terrain c'est le maillage interpolé — sinon un arbre
+		# planté sur une dune s'enfonce d'un côté et flotte de l'autre.
+		var y := (float(ville.carte.palier(c)) * PALIER + EPAISSEUR_TUILE) if ville.plate(c) \
+			else TerrainV2.hauteur_en(ville, x, z)
+		# `y_abs` : une altitude IMPOSÉE, pour ce qui n'est pas posé au sol —
+		# le bar et les lampadaires d'une jetée sont sur son tablier.
+		if o.has("y_abs"): y = float(o["y_abs"])
 		poser_objet(racine, String(o["m"]), Vector3(x, y, z), float(o.get("r", 0.0)),
 			float(o.get("h", 0.0)), String(o.get("c", "")), o)
 
@@ -156,6 +181,19 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 		hauteur := 0.0, teinte := "", fiche_objet := {}) -> void:
 	if modele == "pelouse":
 		_pelouse(parent, ou, float(fiche_objet.get("w", CASE)), float(fiche_objet.get("d", CASE)))
+		return
+	if modele == "plateforme":
+		# Le tablier se compte AU-DESSUS DE LA MER, pas au-dessus du fond :
+		# une jetée est plate, le fond ne l'est pas.
+		_plateforme(parent, ou, tourne, float(fiche_objet.get("w", CASE)),
+			float(fiche_objet.get("d", CASE)),
+			TerrainV2.NIVEAU_MER + float(fiche_objet.get("y", 2.5)) - ou.y)
+		return
+	if modele == "roue":
+		_grande_roue(parent, ou, tourne, float(fiche_objet.get("w", 40.0)))
+		return
+	if modele.begins_with("bateau:"):
+		_bateau(parent, modele.trim_prefix("bateau:"), ou, tourne)
 		return
 	if modele == "pub":
 		_panneau(parent, ou + Vector3(0, float(fiche_objet.get("y", 0.0)), 0), tourne,
@@ -325,6 +363,118 @@ static func _panneau(parent: Node3D, ou: Vector3, tour: float, large: float, hau
 	toile.transform = Transform3D(base, ou + Vector3(0, mi_h, 0) + base * Vector3(0, 0, ep * 0.5 + 0.06))
 	toile.set_meta("modele", "pub")
 	parent.add_child(toile)
+
+# ------------------------------------------------------------------ le bord de mer
+
+## UNE PLATEFORME SUR PILOTIS : le tablier d'une jetée ou d'un ponton. Le
+## tablier est posé à `y` au-dessus du niveau de la mer, les pilotis
+## descendent jusqu'au fond — c'est ce qui fait qu'une jetée a l'air POSÉE sur
+## l'eau et non peinte dessus.
+const TEINTE_TABLIER := Color("#c9c3b4")
+const TEINTE_PILOTIS := Color("#6b5a44")
+
+static func _plateforme(parent: Node3D, ou: Vector3, tourne: float, largeur: float,
+		profondeur: float, y: float) -> void:
+	var base := Basis(Vector3.UP, tourne)
+	var haut := ou + Vector3(0, y, 0)
+	_boite_tournee(parent, base, Vector3(largeur, 0.7, profondeur), haut, TEINTE_TABLIER)
+	# Un pilotis tous les six unités le long de la jetée, par paires.
+	var n := maxi(2, int(profondeur / 6.0))
+	var fond := TerrainV2.NIVEAU_MER - 3.0
+	var hauteur := (haut.y - 0.35) - fond
+	for k in n:
+		var t := (float(k) + 0.5) / float(n) - 0.5
+		for s in [-1.0, 1.0]:
+			var p := haut + base * Vector3(s * (largeur * 0.5 - 0.9), 0, t * profondeur)
+			_boite_tournee(parent, base, Vector3(0.9, hauteur, 0.9),
+				Vector3(p.x, fond + hauteur * 0.5, p.z), TEINTE_PILOTIS)
+
+## LA GRANDE ROUE (cahier § 3 : « une jetée avec bar et grande roue »). Le kit
+## n'en a pas : deux jantes, des rayons, des nacelles et deux jambes en A.
+const TEINTE_ROUE := Color("#e8e4dc")
+const NACELLES := [Color("#ff2f86"), Color("#ff9040"), Color("#2fe0d0"), Color("#ffe14d")]
+
+static func _grande_roue(parent: Node3D, ou: Vector3, tourne: float, diametre: float) -> void:
+	var base := Basis(Vector3.UP, tourne)
+	var r := diametre * 0.5
+	var moyeu := ou + Vector3(0, r + 3.0, 0)
+	# Les deux jambes : un A de chaque côté du moyeu.
+	for s in [-1.0, 1.0]:
+		for t in [-1.0, 1.0]:
+			var pied := ou + base * Vector3(t * r * 0.45, 0, s * 3.2)
+			var haut := moyeu + base * Vector3(0, 0, s * 1.6)
+			_poutre(parent, pied, haut, 1.2, TEINTE_PILOTIS)
+	# Les deux jantes et leurs rayons.
+	var pas := 16
+	for s in [-1.0, 1.0]:
+		var centre := moyeu + base * Vector3(0, 0, s * 1.6)
+		for k in pas:
+			var a := TAU * float(k) / float(pas)
+			var b := TAU * float(k + 1) / float(pas)
+			var pa := centre + base * Vector3(cos(a) * r, sin(a) * r, 0)
+			var pb := centre + base * Vector3(cos(b) * r, sin(b) * r, 0)
+			_poutre(parent, pa, pb, 0.6, TEINTE_ROUE)
+			if k % 2 == 0:
+				_poutre(parent, centre, pa, 0.4, TEINTE_ROUE)
+	# Les nacelles, accrochées au bord.
+	for k in pas:
+		var a := TAU * float(k) / float(pas)
+		var p := moyeu + base * Vector3(cos(a) * r, sin(a) * r, 0)
+		_boite_tournee(parent, base, Vector3(2.4, 2.0, 3.4), p - Vector3(0, 1.6, 0),
+			NACELLES[k % NACELLES.size()])
+
+## Une poutre entre deux points : une boîte orientée le long du segment.
+static func _poutre(parent: Node3D, a: Vector3, b: Vector3, section: float, teinte: Color) -> void:
+	var d := b - a
+	var l := d.length()
+	if l < 0.01: return
+	var axe := d / l
+	var cote := Vector3.UP.cross(axe)
+	if cote.length_squared() < 1.0e-6: cote = Vector3.RIGHT
+	cote = cote.normalized()
+	var base := Basis(cote, axe, cote.cross(axe)).orthonormalized()
+	_boite_tournee(parent, base, Vector3(section, l, section), a + d * 0.5, teinte)
+
+static func _boite_tournee(parent: Node3D, base: Basis, dims: Vector3, ou: Vector3, teinte: Color) -> void:
+	if _cube == null:
+		_cube = BoxMesh.new()
+		_cube.size = Vector3.ONE
+	var n := MeshInstance3D.new()
+	n.mesh = _cube
+	n.material_override = _teinte_unie(teinte)
+	# ⚠ L'ÉCHELLE AVANT LA ROTATION (voir `_panneau`) : `Basis.scaled()` met à
+	# l'échelle dans le monde, et une poutre en biais sortait de travers.
+	n.transform = Transform3D(base * Basis.from_scale(dims), ou)
+	parent.add_child(n)
+
+static var _unies: Dictionary = {}
+
+static func _teinte_unie(teinte: Color) -> StandardMaterial3D:
+	var cle := teinte.to_html()
+	if _unies.has(cle): return _unies[cle]
+	var m := StandardMaterial3D.new()
+	m.albedo_color = teinte
+	m.roughness = 0.9
+	_unies[cle] = m
+	return m
+
+## UN BATEAU À FLOT : la coque posée à la ligne de flottaison, enfoncée de son
+## tirant d'eau. Sans le tirant, une coque flottait deux mètres au-dessus de
+## la mer, et un cargo avait l'air d'un jouet posé sur une vitre.
+static func _bateau(parent: Node3D, nom: String, ou: Vector3, tourne: float) -> void:
+	var fiche: Dictionary = KitVille2.BATEAUX.get(nom, {})
+	if fiche.is_empty(): return
+	var chemin := KitVille2.chemin(String(fiche["m"]))
+	if not ResourceLoader.exists(chemin): return
+	var n := MeshInstance3D.new()
+	# Les coques sont longues selon Z : on demande la longueur sur cet axe.
+	n.mesh = FormesCarnage.maillage_kenney(chemin, float(fiche["l"]), Vector3.AXIS_Z, 0.0)
+	n.material_override = _matiere(chemin, Color.WHITE)
+	n.transform = Transform3D(Basis(Vector3.UP, tourne),
+		Vector3(ou.x, TerrainV2.NIVEAU_MER - float(fiche["tirant"]), ou.z))
+	n.set_meta("modele", "bateau:" + nom)
+	_noter(chemin)
+	parent.add_child(n)
 
 ## Une pelouse : un plan vert, posé un rien au-dessus de la dalle.
 const TEINTE_PELOUSE := Color("#5d9a3c")

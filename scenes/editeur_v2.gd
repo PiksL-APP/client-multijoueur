@@ -114,13 +114,33 @@ func demarrer() -> void:
 	monde().add_child(_camera)
 	_camera.make_current()
 
-	_ville = Ville2.charger(_chemin)
-	if _ville.taille == Vector2i(40, 40) and _ville.lots.is_empty() and _ville.routes.is_empty():
+	# `--temoin=plage` (ou `?temoin=plage`) engendre un témoin neuf plutôt que
+	# de lire un fichier : c'est la façon la plus courte de REGARDER ce que le
+	# générateur vient de produire, sans rien enregistrer.
+	var temoin := ""
+	for a2 in OS.get_cmdline_args():
+		if a2.begins_with("--temoin="): temoin = a2.trim_prefix("--temoin=")
+	if temoin == "plage":
+		_ville = GenerateurPlage.generer(2)
+		_chemin = "res://cartes/temoin-plage.json"
+	elif temoin == "centre":
 		_ville = GenerateurCentre.generer(1)
+	else:
+		_ville = Ville2.charger(_chemin)
+		if _ville.lots.is_empty() and _ville.routes.is_empty():
+			_ville = GenerateurCentre.generer(1)
 	_morceaux = MorceauxV2.new()
+	# ⚠ PAS `tout()` ICI. Bâtir seize cents cases d'un bloc fige l'onglet
+	# plusieurs secondes dans le navigateur, et l'utilisateur croit que la page
+	# a planté. `suivre()` remplit la file, `_process` la vide une passe par
+	# image : la ville paraît morceau par morceau, et la page répond tout du
+	# long.
+	_morceaux.par_image = 2
 	_morceaux.regler(_ville, 99)
 	monde().add_child(_morceaux)
-	_morceaux.tout()
+	_morceaux.suivre(Vector3(float(_ville.taille.x) * CASE * 0.5, 0, float(_ville.taille.y) * CASE * 0.5))
+	if "--essai" in OS.get_cmdline_args() or _photo_sortie != "":
+		_morceaux.tout()
 
 	_apercu = Node3D.new()
 	monde().add_child(_apercu)

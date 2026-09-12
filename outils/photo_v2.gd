@@ -55,6 +55,8 @@ func _ready() -> void:
 	var chemin := _arg("carte", "")
 	if chemin != "":
 		ville = Ville2.charger(chemin)
+	elif _arg("temoin", "centre") == "plage":
+		ville = GenerateurPlage.generer(int(_arg("graine", "2")))
 	else:
 		ville = GenerateurCentre.generer(int(_arg("graine", "1")))
 	var json := _arg("json", "")

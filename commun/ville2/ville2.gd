@@ -37,6 +37,12 @@ const R_RUE := "rue"
 const R_AVENUE := "avenue"
 const R_VOIE_RAPIDE := "voie_rapide"
 
+## LA MATIÈRE DU SOL d'une case (cahier § 4). `M_DALLE` est le trottoir du kit,
+## posé à plat : c'est le sol de la ville, et c'est le défaut. Les autres sont
+## du TERRAIN CONTINU — un maillage lissé qui suit l'altitude des cases et se
+## soude aux tuiles plates du kit sur leurs bords.
+enum { M_DALLE, M_HERBE, M_SABLE, M_TERRE, M_ROCHE }
+
 ## Les genres de quartier du cahier (§ 3).
 const Q_CENTRE := "centre"
 const Q_PLAGE := "plage"
@@ -56,6 +62,7 @@ var taille := Vector2i(40, 40)
 var altitude := PackedFloat32Array()   ## le sol, en unités 3D
 var eau := PackedByteArray()           ## 1 : de l'eau
 var quartier_de := PackedInt32Array()  ## l'indice dans `quartiers`, −1 : aucun
+var matiere := PackedByteArray()       ## la matière du sol (M_DALLE par défaut)
 var quartiers: Array = []              ## [{nom, genre, gang}]
 var routes: Array = []                 ## [{genre, nom, points: [Vector2i], niveau}]
 var ouvrages: Array = []               ## [{t, i, j, q, w, h}]
@@ -86,6 +93,8 @@ func redimensionner(t: Vector2i) -> void:
 	eau.fill(0)
 	quartier_de.resize(n)
 	quartier_de.fill(-1)
+	matiere.resize(n)
+	matiere.fill(M_DALLE)
 
 # ------------------------------------------------------------------ cases
 
@@ -112,6 +121,21 @@ func poser_terre(c: Vector2i, y: float) -> void:
 func poser_eau(c: Vector2i) -> void:
 	if not dedans(c): return
 	eau[indice(c)] = 1
+
+func matiere_de(c: Vector2i) -> int:
+	return int(matiere[indice(c)]) if dedans(c) else M_DALLE
+
+func poser_matiere(c: Vector2i, m: int) -> void:
+	if dedans(c):
+		matiere[indice(c)] = m
+
+## Vrai si la case est PLATE : une tuile du kit y est posée (rue, ouvrage) ou
+## un bâtiment s'y tient. Le terrain continu ne la couvre pas — il s'y soude.
+func plate(c: Vector2i) -> bool:
+	if not dedans(c) or not terre(c): return false
+	if matiere_de(c) == M_DALLE: return true
+	if carte != null and (carte.route(c) or carte.case_prise(c)): return true
+	return lot_sur(c) >= 0
 
 func quartier_en(c: Vector2i) -> int:
 	return quartier_de[indice(c)] if dedans(c) else -1
@@ -173,7 +197,10 @@ func centre_du_lot(l: Dictionary) -> Vector3:
 	var cx := (float(l["x"]) + float(l["w"]) * 0.5) * DEMI
 	var cz := (float(l["y"]) + float(l["h"]) * 0.5) * DEMI
 	var c := Vector2i(floori(cx / CASE), floori(cz / CASE))
-	return Vector3(cx, float(palier(c)) * PALIER, cz)
+	# ⚠ L'ALTITUDE EXACTE, PAS LE PALIER ARRONDI. En ville les deux sont
+	# égales ; sur une plage en pente, `palier()` arrondit à cinq unités et le
+	# poste de secours flottait à un mètre au-dessus du sable.
+	return Vector3(cx, sol(c), cz)
 
 ## Les cases (entières) que couvre un lot.
 static func cases_du_lot(l: Dictionary) -> Array:
@@ -266,10 +293,12 @@ func vers_json() -> String:
 	for b in eau: e.append(int(b))
 	var q: Array = []
 	for b in quartier_de: q.append(int(b))
+	var mt: Array = []
+	for b in matiere: mt.append(int(b))
 	return JSON.stringify({
 		"version": VERSION, "nom": nom, "graine": graine,
 		"taille": [taille.x, taille.y], "case": CASE, "palier": PALIER,
-		"altitude": alt, "eau": e, "quartier_de": q, "quartiers": quartiers,
+		"altitude": alt, "eau": e, "quartier_de": q, "matiere": mt, "quartiers": quartiers,
 		"routes": rts, "ouvrages": ouvrages, "lots": lots, "objets": objets,
 		"lieux": lieux, "rail": rl, "gares": gares,
 	})
@@ -289,6 +318,8 @@ static func depuis_json(texte: String) -> Ville2:
 	for k in mini(e.size(), v.eau.size()): v.eau[k] = int(e[k])
 	var q: Array = brut.get("quartier_de", [])
 	for k in mini(q.size(), v.quartier_de.size()): v.quartier_de[k] = int(q[k])
+	var mt: Array = brut.get("matiere", [])
+	for k in mini(mt.size(), v.matiere.size()): v.matiere[k] = int(mt[k])
 	v.quartiers = Array(brut.get("quartiers", []))
 	for r in Array(brut.get("routes", [])):
 		var pts: Array = []
