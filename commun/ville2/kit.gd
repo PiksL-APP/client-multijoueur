@@ -97,24 +97,24 @@ const PROPS := {
 	"lampadaire_double": {"m": "urbain/light-square-double", "h": 5.6, "c": "#5a5f68"},
 	"lampadaire_parc": {"m": "urbain/light-curved", "h": 4.0, "c": "#5a5f68"},
 	"feu": {"m": "urbain/traffic-light", "h": 4.4},
-	"stop": {"m": "routes/road-sign-stop", "h": 3.4},
-	"plaque": {"m": "routes/road-sign-street", "h": 3.4},
-	"poubelle": {"m": "urbain/dumpster", "h": 1.5},
-	"benne": {"m": "urbain/dumpster", "h": 2.4},
-	"borne": {"m": "urbain/construction-barrier", "h": 1.2},
-	"cone": {"m": "urbain/construction-cone", "h": 0.9},
+	"stop": {"m": "routes/road-sign-stop", "h": 2.40},
+	"plaque": {"m": "routes/road-sign-street", "h": 2.60},
+	"poubelle": {"m": "urbain/dumpster", "h": 1.10},
+	"benne": {"m": "urbain/dumpster", "h": 1.60},
+	"borne": {"m": "urbain/construction-barrier", "h": 0.90},
+	"cone": {"m": "urbain/construction-cone", "h": 0.60},
 	"arbre": {"m": "nature/tree_default", "h": 7.6},
 	"arbre_oak": {"m": "nature/tree_oak", "h": 6.4},
 	"arbre_rond": {"m": "nature/tree_fat", "h": 6.0},
 	"arbre_petit": {"m": "nature/tree_oak", "h": 5.2},
 	"palmier": {"m": "nature/tree_palm", "h": 8.0},
-	"buisson": {"m": "nature/plant_bushDetailed", "h": 1.5},
-	"banc": {"m": "nature/bench", "h": 1.3},
-	"monument": {"m": "nature/statue_column", "h": 9.0},
+	"buisson": {"m": "nature/plant_bushDetailed", "h": 0.90},
+	"banc": {"m": "nature/bench", "h": 0.85},
+	"monument": {"m": "nature/statue_column", "h": 4.50},
 	"auvent": {"m": "batiments/detail-awning", "h": 0.0},
 	"auvent_large": {"m": "batiments/detail-awning-wide", "h": 0.0},
-	"parasol": {"m": "batiments/detail-parasol-a", "h": 4.2},
-	"parasol_b": {"m": "batiments/detail-parasol-b", "h": 4.2},
+	"parasol": {"m": "batiments/detail-parasol-a", "h": 2.50},
+	"parasol_b": {"m": "batiments/detail-parasol-b", "h": 2.50},
 	"conteneur": {"m": "industriel/shipping-container-a", "h": 0.0},
 
 	# LE KIT NATURE AU COMPLET (demande du client, 12/09 : « le kit nature
@@ -133,33 +133,33 @@ const PROPS := {
 	"arbre_fin": {"m": "nature/tree_thin", "h": 9.5},
 	"palmier_haut": {"m": "nature/tree_palmTall", "h": 11.0},
 	"palmier_courbe": {"m": "nature/tree_palmBend", "h": 9.0},
-	"cactus": {"m": "nature/cactus_tall", "h": 5.0},
-	"buisson_petit": {"m": "nature/plant_bushSmall", "h": 1.0},
-	"buisson_grand": {"m": "nature/plant_bushLarge", "h": 2.2},
-	"herbes": {"m": "nature/grass_large", "h": 1.4},
-	"touffe": {"m": "nature/grass", "h": 1.0},
-	"fleurs_rouges": {"m": "nature/flower_redA", "h": 0.9},
-	"fleurs_jaunes": {"m": "nature/flower_yellowB", "h": 0.9},
-	"fleurs_violettes": {"m": "nature/flower_purpleC", "h": 0.9},
-	"champignon": {"m": "nature/mushroom_red", "h": 1.0},
-	"champignons": {"m": "nature/mushroom_tanGroup", "h": 1.1},
-	"souche": {"m": "nature/stump_round", "h": 1.2},
-	"tronc": {"m": "nature/log", "h": 1.3},
-	"tas_de_bois": {"m": "nature/log_stack", "h": 2.0},
+	"cactus": {"m": "nature/cactus_tall", "h": 2.20},
+	"buisson_petit": {"m": "nature/plant_bushSmall", "h": 0.55},
+	"buisson_grand": {"m": "nature/plant_bushLarge", "h": 1.30},
+	"herbes": {"m": "nature/grass_large", "h": 0.70},
+	"touffe": {"m": "nature/grass", "h": 0.45},
+	"fleurs_rouges": {"m": "nature/flower_redA", "h": 0.45},
+	"fleurs_jaunes": {"m": "nature/flower_yellowB", "h": 0.45},
+	"fleurs_violettes": {"m": "nature/flower_purpleC", "h": 0.45},
+	"champignon": {"m": "nature/mushroom_red", "h": 0.25},
+	"champignons": {"m": "nature/mushroom_tanGroup", "h": 0.30},
+	"souche": {"m": "nature/stump_round", "h": 0.50},
+	"tronc": {"m": "nature/log", "h": 0.45},
+	"tas_de_bois": {"m": "nature/log_stack", "h": 1.00},
 	"rocher": {"m": "nature/rock_largeA", "h": 5.0},
 	"rocher_b": {"m": "nature/rock_largeD", "h": 5.6},
 	"rocher_haut": {"m": "nature/rock_tallA", "h": 8.5},
-	"caillou": {"m": "nature/rock_smallA", "h": 1.4},
-	"pierre_plate": {"m": "nature/stone_smallFlatA", "h": 0.8},
-	"cloture": {"m": "nature/fence_simple", "h": 1.6},
-	"cloture_planches": {"m": "nature/fence_planks", "h": 1.8},
-	"portail": {"m": "nature/fence_gate", "h": 2.2},
-	"pot": {"m": "nature/pot_large", "h": 1.6},
-	"statue": {"m": "nature/statue_head", "h": 6.0},
-	"obelisque": {"m": "nature/statue_obelisk", "h": 8.0},
-	"tente": {"m": "nature/tent_detailedClosed", "h": 3.0},
-	"feu_de_camp": {"m": "nature/campfire_stones", "h": 1.0},
-	"nenuphar": {"m": "nature/lily_large", "h": 0.4},
+	"caillou": {"m": "nature/rock_smallA", "h": 0.70},
+	"pierre_plate": {"m": "nature/stone_smallFlatA", "h": 0.30},
+	"cloture": {"m": "nature/fence_simple", "h": 1.10},
+	"cloture_planches": {"m": "nature/fence_planks", "h": 1.20},
+	"portail": {"m": "nature/fence_gate", "h": 1.60},
+	"pot": {"m": "nature/pot_large", "h": 0.80},
+	"statue": {"m": "nature/statue_head", "h": 3.60},
+	"obelisque": {"m": "nature/statue_obelisk", "h": 5.00},
+	"tente": {"m": "nature/tent_detailedClosed", "h": 2.20},
+	"feu_de_camp": {"m": "nature/campfire_stones", "h": 0.45},
+	"nenuphar": {"m": "nature/lily_large", "h": 0.15},
 	"escalier_pierre": {"m": "nature/cliff_steps_stone", "h": 0.0},
 }
 
@@ -230,7 +230,7 @@ static func mesurer(modele: String) -> Vector3:
 			var b := m.get_aabb().size
 			# Les modèles du client sont déjà en unités du jeu ; ceux des kits
 			# sont en unités Kenney, c'est-à-dire en cases.
-			boite = b / CASE if est_du_client(chemin) else b
+			boite = b * echelle_libre(chemin) / CASE
 	_mesures[modele] = boite
 	return boite
 
@@ -243,6 +243,44 @@ static func echelle(modele: String) -> float:
 	if PIKSL.has(modele):
 		return float((PIKSL[modele] as Dictionary).get("echelle", 1.0))
 	return 1.0 if est_du_client(modele) else CASE
+
+## ⚠ LE KIT NATURE A DEUX ÉCHELLES, PAS UNE — mesuré sur ses 330 .glb.
+##
+## Ses pièces de TERRAIN pavent la case, comme le reste des kits Kenney :
+## `cliff_block` fait 1 × 1 × 1 unité, `ground_pathStraight` 1 × 0,05 × 1,
+## `bridge_wood` 1,04 × 0,4 × 1,04. Une unité Kenney = une case = 20 unités de
+## jeu, et tout va bien.
+##
+## Ses ACCESSOIRES, eux, sont dessinés pour le petit bonhomme du kit, pas pour
+## la case : un banc fait 0,47 unité de haut, une clôture 0,345, un champignon
+## 0,203, un arbre 1,708. Posés « à l'échelle du kit », ça donne un banc de
+## NEUF MÈTRES, une clôture de sept et un champignon de quatre — et c'est
+## exactement ce que le client a vu dans l'éditeur : « toutes les fences et les
+## fleurs champignon etc sont énormes comparé au personnage » (12/09).
+##
+## La palette de l'éditeur pose N'IMPORTE QUEL modèle du dossier, sans hauteur
+## voulue : sans cette règle, tout le kit nature sort vingt fois trop grand.
+## Le facteur vient des rapports mesurés sur les accessoires dont on connaît la
+## bonne taille (arbre 7,6 m / 1,708 = 4,45 ; clôture 1,10 / 0,345 = 3,19 ;
+## tente 2,20 / 0,561 = 3,92 ; banc 0,85 / 0,47 = 1,81) — le kit est stylisé,
+## les rapports ne sont pas constants, on prend la médiane. Les générateurs,
+## eux, imposent une hauteur exacte via `PROPS` : cette règle ne les concerne
+## pas, elle rattrape ce qui est posé à la main.
+const FAMILLES_DE_TERRAIN := ["cliff_", "ground_", "bridge_", "path_", "platform_",
+	"crops_dirt"]
+const ECHELLE_NATURE := 3.2
+
+## Le facteur d'un modèle posé SANS hauteur voulue (`h` nul) : comme
+## `echelle()`, sauf pour les accessoires du kit nature.
+static func echelle_libre(chemin_ou_modele: String) -> float:
+	var e := echelle(chemin_ou_modele)
+	if e != CASE: return e
+	if not chemin_ou_modele.contains("nature/"): return e
+	var nom := chemin_ou_modele.get_file().trim_suffix(".glb")
+	if nom == "": nom = chemin_ou_modele.get_slice("nature/", 1)
+	for f in FAMILLES_DE_TERRAIN:
+		if nom.begins_with(f): return e
+	return ECHELLE_NATURE
 
 ## TOUS LES MODÈLES POSABLES, chemins `res://…`, variantes comprises. La liste
 ## vient de `ModelesDuKit` (écrite par `outils/modeles.sh`) : `DirAccess` ne
@@ -269,15 +307,25 @@ static func catalogue() -> Array[String]:
 ## nomme ses familles. Les modèles sans préfixe tombent dans « divers ».
 const SEUIL_RAYON := 60
 
+## ⚠ LE NOM DE LA FAMILLE EST CELUI DU DOSSIER, SANS LE KIT DEVANT. « nature »,
+## « batiments », « voitures » — pas « kenney/nature ». Le client range par
+## CATÉGORIE, et le kit d'origine ne l'intéresse pas : deux dossiers de nature
+## venus de deux kits sont la même étagère.
 static func famille(chemin_modele: String) -> String:
-	var nom := chemin_modele.trim_prefix("res://modeles/").trim_suffix(".glb")
-	var bouts := nom.split("/")
-	var dossier := "divers"
-	if bouts.size() >= 3: dossier = "%s/%s" % [bouts[0], bouts[1]]
-	elif bouts.size() == 2: dossier = String(bouts[0])
+	var dossier := categorie(chemin_modele)
 	if _gros.is_empty(): _compter()
 	if not _gros.has(dossier): return dossier
-	return "%s · %s" % [dossier, _rayon(String(bouts[bouts.size() - 1]))]
+	var fichier := chemin_modele.get_file().get_basename()
+	return "%s · %s" % [dossier, _rayon(fichier)]
+
+## La catégorie d'un modèle : le dernier dossier de son chemin. C'est elle qui
+## fait l'étagère dans l'éditeur.
+static func categorie(chemin_modele: String) -> String:
+	var nom := chemin_modele.trim_prefix("res://modeles/").trim_suffix(".glb")
+	var bouts := nom.split("/")
+	if bouts.size() >= 3: return String(bouts[1])
+	if bouts.size() == 2: return String(bouts[0])
+	return "divers"
 
 static var _gros: Dictionary = {}
 
@@ -285,11 +333,7 @@ static func _compter() -> void:
 	_gros = {"—": true}
 	var n: Dictionary = {}
 	for m in catalogue():
-		var nom := String(m).trim_prefix("res://modeles/").trim_suffix(".glb")
-		var bouts := nom.split("/")
-		var d := "divers"
-		if bouts.size() >= 3: d = "%s/%s" % [bouts[0], bouts[1]]
-		elif bouts.size() == 2: d = String(bouts[0])
+		var d := categorie(String(m))
 		n[d] = int(n.get(d, 0)) + 1
 	for d in n:
 		if int(n[d]) > SEUIL_RAYON: _gros[d] = true

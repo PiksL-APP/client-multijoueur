@@ -25,8 +25,14 @@ extends RefCounted
 ## LA COUPE, du sud au nord : la ville basse (palier 0), puis cinq terrasses
 ## qui montent jusqu'au palier 10 — cinquante unités, vingt-cinq mètres de
 ## dénivelé sur trente cases. Les flancs est et ouest ne sont PAS terrassés :
-## ils descendent en herbe et en rochers, et c'est là qu'on voit que la
-## colline est une colline et non un escalier.
+## ils descendent EN PENTE LISSÉE, en herbe et en rochers, et c'est là qu'on
+## voit que la colline est une colline et non un escalier.
+##
+## ⚠ LE RELIEF NE SE FRANCHIT QU'AUX NEZ DE TERRASSE. Partout ailleurs le sol
+## varie continûment. C'est ce qui garde les objets AU SOL : une case qui
+## tombe d'un bloc entier d'un bord à l'autre n'a pas de hauteur unique, donc
+## l'arbre qu'on y pose flotte d'un côté ou s'enterre de l'autre (« enlève tes
+## dénivelés dans la montagne, sinon les objets flottent », client, 12/09).
 
 ## Les courbes larges et le rond-point (cahier § 5) : brique commune, appelée
 ## par `preload` — un `class_name` neuf n'existe pas dans l'export web.
@@ -103,10 +109,15 @@ const SOUS_BOIS := ["nature/flower_redA", "nature/flower_redC", "nature/flower_y
 	"nature/mushroom_red", "nature/mushroom_redGroup", "nature/mushroom_tanGroup",
 	"nature/stump_round", "nature/stump_squareDetailed", "nature/log", "nature/log_large",
 	"nature/stone_smallFlatA", "nature/stone_smallFlatC", "nature/rock_smallFlatB"]
-## Les hauteurs voulues, dans le même ordre que `SOUS_BOIS` : une fleur fait
-## une unité, un tronc couché deux, une souche une et demie.
-const H_SOUS_BOIS := [0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 1.0, 1.1, 1.1, 1.4, 1.5, 1.3, 1.8,
-	0.7, 0.8, 0.9]
+## ⚠ EN MÈTRES, ET UNE UNITÉ FAIT UN MÈTRE (le joueur en fait 1,75, une
+## voiture 4,75 de long). Ces hauteurs étaient toutes autour de 1,0 « parce
+## que ça se voit mieux » : ça faisait des champignons d'un mètre et des
+## fleurs à hauteur de genou (« toutes les fleurs, champignons etc. sont
+## énormes comparé au personnage », client, 12/09). Une fleur des champs fait
+## 45 cm, un champignon 25, une souche un demi-mètre, un tronc couché la
+## largeur de son fût. Dans le même ordre que `SOUS_BOIS`.
+const H_SOUS_BOIS := [0.45, 0.45, 0.45, 0.45, 0.45, 0.45, 0.22, 0.28, 0.28, 0.55, 0.60,
+	0.50, 0.75, 0.25, 0.28, 0.32]
 
 static func generer(graine := 3, taille := Vector2i(40, 40), curseurs := {}) -> Ville2:
 	var v := Ville2.new(taille)
@@ -166,6 +177,17 @@ static func _terrain(v: Ville2) -> void:
 		for j in range(int(t["j0"]), int(t["j1"]) + 1):
 			var b := bornes(t, j)
 			for d in range(1, 10):
+				# ⚠ LES DEUX FLANCS DESCENDENT PAREIL, ET EN PENTE LISSÉE.
+				# L'essai du 12/09 faisait tomber le flanc OUEST en marches
+				# d'une case entière, habillées de falaises du kit, pour
+				# trancher entre « tout le terrain en blocs du kit nature » et
+				# « maillage lissé, kit sur les cassures ». Le client a tranché
+				# le jour même : « enlève tes dénivelés dans la montagne, sinon
+				# les objets flottent ». C'est le nœud du problème — un arbre
+				# posé au milieu d'une case qui tombe de vingt unités d'un bord
+				# à l'autre ne peut être ni au ras du haut ni au ras du bas. La
+				# pente lissée n'a pas ce défaut : le sol y varie CONTINÛMENT,
+				# donc `TerrainV2.hauteur_en` place chaque objet pile dessus.
 				_flanc(v, Vector2i(b.x - d, j), float(t["p"]) - float(d) * PENTE_FLANC)
 				_flanc(v, Vector2i(b.y + d, j), float(t["p"]) - float(d) * PENTE_FLANC)
 	# Le versant nord, derrière le sommet : la colline retombe vers le bord.
@@ -392,7 +414,7 @@ static func _sentiers(v: Ville2, alea: RandomNumberGenerator) -> void:
 			if alea.randf() < 0.4:
 				v.ajouter_objet("nature/stone_smallFlatB",
 					(float(i) + alea.randf_range(-0.35, 1.35)) * CASE,
-					(float(j) + alea.randf()) * CASE, alea.randf() * TAU, 0.9)
+					(float(j) + alea.randf()) * CASE, alea.randf() * TAU, 0.30)
 
 ## LA VÉGÉTATION. Les pins tiennent la crête et les flancs raides, les feuillus
 ## bordent les routes des terrasses, les rochers sortent là où la pente est
@@ -410,10 +432,10 @@ static func _nature(v: Ville2, alea: RandomNumberGenerator) -> void:
 				# Un talus raide : des rochers, et rien qui pousse droit.
 				if alea.randf() < 0.55:
 					v.ajouter_objet(ROCHERS[alea.randi() % ROCHERS.size()], x, z,
-						alea.randf() * TAU, alea.randf_range(3.0, 7.5))
+						alea.randf() * TAU, alea.randf_range(1.2, 3.2))
 				elif alea.randf() < 0.4:
 					v.ajouter_objet("nature/stone_smallFlatB", x, z,
-						alea.randf() * TAU, alea.randf_range(0.6, 1.2))
+						alea.randf() * TAU, alea.randf_range(0.25, 0.45))
 				continue
 			if h > PALIER * 10.0:
 				if alea.randf() < 0.42:
@@ -424,7 +446,7 @@ static func _nature(v: Ville2, alea: RandomNumberGenerator) -> void:
 					alea.randf() * TAU, alea.randf_range(6.0, 9.0))
 			elif alea.randf() < 0.34:
 				v.ajouter_objet(BUISSONS[alea.randi() % BUISSONS.size()], x, z,
-					alea.randf() * TAU, alea.randf_range(1.2, 2.4))
+					alea.randf() * TAU, alea.randf_range(0.70, 1.40))
 			elif alea.randf() < 0.45:
 				# LE SOUS-BOIS : deux ou trois petites choses par case, jamais
 				# au même endroit. C'est ce qui se voit à pied.

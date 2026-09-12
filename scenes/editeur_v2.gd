@@ -497,13 +497,25 @@ func _interface() -> void:
 	_familles = OptionButton.new()
 	_familles.add_item(FAMILLE_RACCOURCIS)
 	_familles.add_item(FAMILLE_TOUT)
+	# ⚠ UNE ÉTAGÈRE PAR CATÉGORIE, ET SES RAYONS EN DESSOUS (demande du client,
+	# 12/09 : « range-moi les objets par catégories, tout nature dans un dossier
+	# nature »). « nature » montre les 330 modèles du dossier ; « nature · tree »
+	# n'en montre que les arbres. Les deux sont dans la liste, la catégorie
+	# d'abord.
 	var vues: Dictionary = {}
 	for m in KitVille2.catalogue():
-		vues[KitVille2.famille(m)] = true
-	var noms_familles: Array = vues.keys()
-	noms_familles.sort()
-	for f in noms_familles:
-		_familles.add_item(String(f))
+		var cat := KitVille2.categorie(m)
+		if not vues.has(cat): vues[cat] = {}
+		var fam := KitVille2.famille(m)
+		if fam != cat: (vues[cat] as Dictionary)[fam] = true
+	var cats: Array = vues.keys()
+	cats.sort()
+	for cat in cats:
+		_familles.add_item(String(cat))
+		var rayons: Array = (vues[cat] as Dictionary).keys()
+		rayons.sort()
+		for r in rayons:
+			_familles.add_item(String(r))
 	# ⚠ AUCUN FOCUS SUR LES LISTES. Une liste qui a le clavier avale les
 	# flèches : on croyait déplacer la caméra, on faisait défiler le catalogue.
 	_familles.focus_mode = Control.FOCUS_NONE
@@ -822,9 +834,12 @@ func _remplir_palette() -> void:
 	else:
 		source = KitVille2.catalogue().duplicate()
 		if f != FAMILLE_TOUT:
+			var par_categorie := not f.contains("·")
 			var gardes: Array = []
 			for m in source:
-				if KitVille2.famille(String(m)) == f: gardes.append(m)
+				var va := KitVille2.categorie(String(m)) if par_categorie \
+					else KitVille2.famille(String(m))
+				if va == f: gardes.append(m)
 			source = gardes
 	for m in source:
 		var nom := _nom_lisible(String(m))
@@ -1317,7 +1332,7 @@ func _selectionner() -> void:
 		elif _ville.carte.route(_case):
 			for k in _ville.routes.size():
 				if _case in Ville2.cases_de_route(_ville.routes[k]):
-					_selection = {"genre": "route", "k": k}
+					_selection = {"genre": "route", "k": k, "c": _case}
 					var r: Dictionary = _ville.routes[k]
 					_dire("Route : %s « %s » (%d points) — Suppr efface." % [r["genre"], r["nom"], (r["points"] as Array).size()])
 					break
@@ -1391,6 +1406,45 @@ func _poser_le_glisse() -> void:
 	_rebatir(touchees)
 	_dire("Déplacé. (Ctrl+Z annule)")
 
+## Coupe la route `k` sur la case `c` : le tracé devient deux tracés, l'un
+## avant la case, l'autre après. Rend les cases à rebâtir.
+##
+## ⚠ ON RECONSTRUIT DEPUIS LA LISTE DES CASES, PAS DEPUIS LES SOMMETS. Les
+## sommets d'une route sont des points de grille reliés par des coudes ; retirer
+## une case au milieu d'un coude ne se dit pas avec des sommets. La liste des
+## cases, elle, est exacte : on la coupe, et chaque morceau se redécrit par ses
+## changements de direction.
+func _couper_la_route(k: int, c: Vector2i) -> Array:
+	var route: Dictionary = _ville.routes[k]
+	var cases := Ville2.cases_de_route(route)
+	var genre := String(route["genre"])
+	var nom := String(route.get("nom", ""))
+	var niveau := int(route.get("niveau", 0))
+	_ville.routes.remove_at(k)
+	var morceau: Array = []
+	var morceaux: Array = []
+	for cc in cases:
+		if cc == c:
+			if morceau.size() >= 2: morceaux.append(morceau)
+			morceau = []
+			continue
+		morceau.append(cc)
+	if morceau.size() >= 2: morceaux.append(morceau)
+	for m in morceaux:
+		_ville.ajouter_route(genre, _sommets_de(m), nom, niveau)
+	return cases
+
+## Les sommets d'une suite de cases : le premier, chaque changement de
+## direction, et le dernier.
+func _sommets_de(cases: Array) -> Array:
+	var points: Array = [cases[0]]
+	for i in range(1, cases.size() - 1):
+		var avant: Vector2i = cases[i] - cases[i - 1]
+		var apres: Vector2i = cases[i + 1] - cases[i]
+		if avant != apres: points.append(cases[i])
+	points.append(cases[cases.size() - 1])
+	return points
+
 func _case_de(x: float, z: float) -> Vector2i:
 	return Vector2i(floori(x / CASE), floori(z / CASE))
 
@@ -1433,8 +1487,12 @@ func _supprimer_selection() -> void:
 			touchees = Ville2.cases_du_lot(_ville.lots[int(_selection["k"])])
 			_ville.lots.remove_at(int(_selection["k"]))
 		"route":
-			touchees = Ville2.cases_de_route(_ville.routes[int(_selection["k"])])
-			_ville.routes.remove_at(int(_selection["k"]))
+			# ⚠ ON EFFACE UN BOUT DE RUE, PAS LA RUE (demande du client, 12/09 :
+			# « quand j'essaye de supprimer un bout de rue ça me sélectionne
+			# toute la rue »). La case visée est ôtée du tracé, qui se coupe en
+			# deux morceaux de part et d'autre ; effacer le dernier bout efface
+			# la rue, ce qui est la seule façon d'en finir avec elle.
+			touchees = _couper_la_route(int(_selection["k"]), Vector2i(_selection.get("c", _case)))
 	_selection = {}
 	_cadre.visible = false
 	_rebatir(touchees)

@@ -28,7 +28,19 @@ const J_AVENUE := 17                   ## l'avenue du bord de mer
 const J_PROMENADE := 18                ## la promenade pavée, une case
 const J_SABLE := 19                    ## le haut de plage
 const J_RIVAGE := 24                   ## la ligne d'eau
-const PENTE_PLAGE := -0.30             ## par case : cinq cases pour 1,5 unité
+## ⚠ LA PLAGE EST PLATE, SAUF SON BOUT. Elle descendait de bout en bout, une
+## demi-unité par case : une pente douce, invisible sur une capture — mais
+## TOUT CE QU'ON Y POSE FLOTTE OU S'ENTERRE. Un objet est posé au point qu'on
+## lui donne, et le maillage du sol, lui, est interpolé entre les quatre coins
+## de la case : sur un sol qui penche, les deux ne se rejoignent qu'au centre
+## exact. « Fais en sorte que sur la plage ce soit juste le bout qui soit en
+## dénivelé, sinon les objets flottent » (client, 12/09) — et il a raison, le
+## haut de plage d'une vraie plage est plat, c'est l'estran qui plonge.
+##
+## Le sable reste donc à zéro depuis `J_SABLE`, et seules les `CASES_ESTRAN`
+## dernières cases avant l'eau descendent — là où l'on ne pose rien.
+const CASES_ESTRAN := 2
+const PENTE_ESTRAN := -0.75            ## par case : deux cases pour 1,5 unité
 const PENTE_FOND := -0.95              ## le fond de la mer, par case
 const FOND_MAX := -11.0
 
@@ -47,8 +59,10 @@ const TABLIER := 3.4                   ## la hauteur du tablier au-dessus de la 
 const SUR_LE_SABLE := ["nature/grass_leafs", "nature/plant_flatShort", "nature/log",
 	"nature/campfire_stones", "nature/campfire_logs", "nature/path_wood",
 	"nature/platform_beach", "nature/pot_small"]
-## 0 = à l'échelle du kit (une pièce de sol), sinon la hauteur voulue.
-const H_SUR_LE_SABLE := [1.2, 0.9, 1.4, 1.0, 1.0, 0.0, 0.0, 1.4]
+## ⚠ 0 = à l'échelle du kit (une pièce de sol) ; SINON UNE HAUTEUR EN MÈTRES,
+## une unité valant un mètre. Une touffe d'oyat fait 50 cm, pas 1,20 (« faut
+## faire attention que chaque objet ne soit pas énorme », client, 12/09).
+const H_SUR_LE_SABLE := [0.50, 0.40, 0.50, 0.30, 0.45, 0.0, 0.0, 0.50]
 const CAILLOUX := ["nature/rock_smallA", "nature/rock_smallD", "nature/rock_smallFlatB",
 	"nature/stone_smallB", "nature/stone_smallFlatC", "nature/rock_largeA",
 	"nature/rock_largeC", "nature/stone_largeE"]
@@ -128,8 +142,13 @@ static func _terrain(v: Ville2, _alea: RandomNumberGenerator) -> void:
 			if float(j) < bord:
 				var y := 0.0
 				if j >= J_SABLE:
-					# Le haut de plage part de zéro et descend jusqu'à l'eau.
-					y = float(j - J_SABLE + 1) * PENTE_PLAGE
+					# LE HAUT DE PLAGE EST PLAT ; seul l'estran plonge, sur les
+					# deux dernières cases avant l'eau. `bord` ondule, donc
+					# l'estran ondule avec lui : on compte les cases DEPUIS LA
+					# LIGNE D'EAU, pas depuis une rangée fixe.
+					var reste := bord - float(j)
+					if reste < float(CASES_ESTRAN):
+						y = (float(CASES_ESTRAN) - reste) * PENTE_ESTRAN
 				v.poser_terre(c, y)
 				if j >= J_SABLE:
 					v.poser_matiere(c, Ville2.M_SABLE)
@@ -247,7 +266,11 @@ static func _la_plage(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i) 
 		var bord := _rivage(i)
 		for k in 3:
 			var x := (float(i) + alea.randf()) * CASE
-			var j := float(J_SABLE) + alea.randf() * (bord - float(J_SABLE) - 0.8)
+			# ⚠ RIEN SUR L'ESTRAN : c'est la seule bande qui penche encore, et
+			# c'est là que les parasols flottaient. On s'arrête au pied de la
+			# pente, une marge de sécurité en plus.
+			var j := float(J_SABLE) + alea.randf() \
+				* (bord - float(J_SABLE) - float(CASES_ESTRAN) - 0.3)
 			if j <= float(J_SABLE) + 0.2: continue
 			var z := j * CASE
 			var t := alea.randf()
@@ -255,7 +278,7 @@ static func _la_plage(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i) 
 				v.ajouter_objet("parasol" if k % 2 == 0 else "parasol_b", x, z, alea.randf() * TAU)
 			elif t < 0.36:
 				v.ajouter_objet(CAILLOUX[alea.randi() % CAILLOUX.size()], x, z,
-					alea.randf() * TAU, alea.randf_range(1.2, 2.4))
+					alea.randf() * TAU, alea.randf_range(0.40, 1.00))
 			elif t < 0.44:
 				v.ajouter_objet("banc", x, z, alea.randf() * TAU)
 			elif t < 0.50:
@@ -275,10 +298,10 @@ static func _la_plage(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i) 
 	# bivouac, pas un camping.
 	var camp_x := float(mini(taille.x - 8, X_PORT - 9)) * CASE * 0.42
 	var camp_z := float(J_SABLE + 1) * CASE + 6.0
-	v.ajouter_objet("nature/tent_smallClosed", camp_x, camp_z, PI * 0.75, 4.0)
-	v.ajouter_objet("nature/campfire_stones", camp_x + 9.0, camp_z + 7.0, 0.0, 1.0)
-	v.ajouter_objet("nature/log", camp_x + 2.0, camp_z + 12.0, 0.4, 1.3)
-	v.ajouter_objet("nature/log", camp_x + 16.0, camp_z + 4.0, 1.9, 1.3)
+	v.ajouter_objet("nature/tent_smallClosed", camp_x, camp_z, PI * 0.75, 2.20)
+	v.ajouter_objet("nature/campfire_stones", camp_x + 9.0, camp_z + 7.0, 0.0, 0.45)
+	v.ajouter_objet("nature/log", camp_x + 2.0, camp_z + 12.0, 0.4, 0.50)
+	v.ajouter_objet("nature/log", camp_x + 16.0, camp_z + 4.0, 1.9, 0.50)
 	# Les barques tirées au sec, en haut de plage.
 	# ⚠ UNE HAUTEUR VOULUE, JAMAIS L'ÉCHELLE DU KIT POUR UN BATEAU. Le pack
 	# nautique est dessiné en unités de jeu, pas en cases : `boat-row-small`
@@ -289,7 +312,7 @@ static func _la_plage(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i) 
 		var bx := alea.randf_range(4.0, float(mini(taille.x - 4, X_PORT - 5))) * CASE
 		v.ajouter_objet("nature/canoe", bx,
 			float(J_SABLE + 2) * CASE + alea.randf() * CASE,
-			alea.randf_range(-0.5, 0.5) + PI * 0.5, 3.2)
+			alea.randf_range(-0.5, 0.5) + PI * 0.5, 0.75)
 	# Le poste de secours, au débouché de la jetée.
 	v.ajouter_lot("pavillons/building-type-k", (X_JETEE - 3) * 2, (J_SABLE + 1) * 2,
 		KitVille2.emprise_tournee("pavillons/building-type-k", 0).x,
@@ -301,7 +324,7 @@ static func _la_plage(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i) 
 		var x := float(X_PORT - 2) * CASE + alea.randf_range(-10.0, 34.0)
 		var z := float(J_SABLE + 1) * CASE + alea.randf_range(0.0, 5.0 * CASE)
 		v.ajouter_objet(CAILLOUX[alea.randi() % CAILLOUX.size()], x, z,
-			alea.randf() * TAU, alea.randf_range(2.2, 4.0))
+			alea.randf() * TAU, alea.randf_range(1.20, 2.60))
 	for k in 4:
 		var x := float(X_PORT - 3) * CASE + float(k) * CASE * 0.8
 		var z := float(J_SABLE + 3 + (k % 2)) * CASE

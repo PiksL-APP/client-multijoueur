@@ -375,9 +375,13 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 		n.mesh = FormesCarnage.maillage_kenney(chemin, h, Vector3.AXIS_Y, 0.0)
 		n.transform = Transform3D(Basis(Vector3.UP, tourne), ou)
 	else:
-		# À l'échelle du kit (auvents, conteneurs…).
+		# À l'échelle du kit (auvents, conteneurs, dalles de sentier…).
+		# ⚠ PAS `CASE` EN DUR : les accessoires du kit nature sont dessinés pour
+		# le bonhomme du kit, pas pour la case — à 20, un champignon fait quatre
+		# mètres. `KitVille2.echelle_libre` fait le tri (voir son commentaire).
 		n.mesh = FormesCarnage.maillage_kenney(chemin, 0.0, Vector3.AXIS_X, 0.0)
-		n.transform = Transform3D(Basis(Vector3.UP, tourne).scaled(Vector3.ONE * CASE), ou)
+		n.transform = Transform3D(Basis(Vector3.UP, tourne).scaled(
+			Vector3.ONE * KitVille2.echelle_libre(chemin)), ou)
 	n.material_override = _matiere(chemin, couleur)
 	n.set_meta("modele", modele)
 	_noter(chemin)

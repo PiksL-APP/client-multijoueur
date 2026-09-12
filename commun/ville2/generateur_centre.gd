@@ -324,7 +324,7 @@ static func _la_place(v: Ville2, place: Rect2i, alea: RandomNumberGenerator) -> 
 		for k in 10:
 			v.ajouter_objet(FLEURS[alea.randi() % FLEURS.size()],
 				px + alea.randf_range(-1.0, 1.0) * CASE,
-				cz + alea.randf_range(-0.7, 0.7) * CASE, alea.randf() * TAU, 0.9)
+				cz + alea.randf_range(-0.7, 0.7) * CASE, alea.randf() * TAU, 0.45)
 		for k in 5:
 			v.ajouter_objet("nature/path_stone", px - CASE + float(k) * 0.5 * CASE,
 				cz + 0.75 * CASE, 0.0)
@@ -504,13 +504,26 @@ const PUB_HAUT_MAX := 28.0             ## le haut : au-delà, on ne le lit plus
 ## ⚠ LE PANNEAU SORT DU MUR. Une descente d'eau Kenney dépasse de ~0,6 unité :
 ## à ras du mur, elle barrait l'affiche de haut en bas.
 const PUB_DEBORD := 1.55
+## ⚠ DEUX PANNEAUX NE SE TIENNENT PAS COMPAGNIE (demande du client, 12/09 :
+## « il y a trop de pub côte à côte, ça devrait être plus disparate »). Un par
+## pâté ne suffisait pas : deux pâtés voisins en posaient deux à quinze mètres
+## l'un de l'autre, de part et d'autre du même carrefour. On garde donc une
+## distance FRANCHE entre deux affiches, quel que soit le pâté.
+const PUB_ECART := 96.0                ## presque cinq cases
 
 ## ⚠ UN PANNEAU PAR PÂTÉ, PAS UN PAR IMMEUBLE. Sans cette règle, chaque
 ## immeuble d'une même rue prenait le sien : trois panneaux côte à côte sur
 ## trois toits voisins, et la ville se lisait comme un bord de périphérique.
+## Vrai si aucune affiche n'est plantée à moins de `PUB_ECART` d'ici.
+static func _assez_loin(poses: Array, x: float, z: float) -> bool:
+	for p in poses:
+		if (p as Vector2).distance_to(Vector2(x, z)) < PUB_ECART: return false
+	return true
+
 static func _panneaux_pub(v: Ville2, alea: RandomNumberGenerator, _avenues_x: Array, _avenues_y: Array,
 		pas: int = 5) -> void:
 	var image := 0
+	var poses: Array = []              ## où l'on a déjà planté, pour les espacer
 	var pris: Dictionary = {}          ## une pose par case visée : jamais deux face à face
 	var toit_du_pate: Dictionary = {}  ## un panneau de toit par pâté
 	var mur_du_pate: Dictionary = {}   ## un panneau mural par pâté
@@ -530,9 +543,11 @@ static func _panneaux_pub(v: Ville2, alea: RandomNumberGenerator, _avenues_x: Ar
 		var devant := ici + facade
 		var pate := Vector2i(floori(float(ici.x) / float(pas)), floori(float(ici.y) / float(pas)))
 		if v.genre_de_route(devant) == Ville2.R_AVENUE and t.y >= PUB_TOIT_MIN and t.y <= PUB_TOIT_MAX \
-				and not pris.has(devant) and not toit_du_pate.has(pate) and alea.randf() < 0.8:
+				and not pris.has(devant) and not toit_du_pate.has(pate) \
+				and _assez_loin(poses, centre.x, centre.z) and alea.randf() < 0.55:
 			pris[devant] = true
 			toit_du_pate[pate] = true
+			poses.append(Vector2(centre.x, centre.z))
 			var mur_f := (t.x if q % 2 == 0 else t.z) * CASE
 			var large := minf(mur_f * 0.82, PUB_LARGE_MAX)
 			v.objets.append({"m": "pub", "x": centre.x, "z": centre.z, "r": _vers(facade),
@@ -554,9 +569,11 @@ static func _panneaux_pub(v: Ville2, alea: RandomNumberGenerator, _avenues_x: Ar
 			if face == ici: continue
 			if not v.carte.route(face) or v.lot_sur(face) >= 0: continue
 			if pris.has(face) or mur_du_pate.has(pate): continue
-			if alea.randf() > 0.5: continue
+			if not _assez_loin(poses, centre.x, centre.z): continue
+			if alea.randf() > 0.45: continue
 			pris[face] = true
 			mur_du_pate[pate] = true
+			poses.append(Vector2(centre.x, centre.z))
 			var large := minf(mur * 0.7, PUB_LARGE_MAX)
 			var haut := large * 9.0 / 16.0
 			# Le bas à hauteur d'étage, le haut plafonné : un panneau à
