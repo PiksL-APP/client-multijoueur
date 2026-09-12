@@ -46,7 +46,13 @@ func _ready() -> void:
 	# solo au banc, comme `--lieu=` le fait pour les pièces du hub.
 	var ecran := _argument(arguments, "--ecran")
 	if ecran != "" and ECRANS.has(ecran):
-		aller_a(ecran, {})
+		# ⚠ LES ARGUMENTS NE TRAVERSENT PAS TOUT SEULS. Dans le navigateur, la
+		# ligne de commande est VIDE : `_arguments_depuis_url` fabrique une
+		# copie que RACINE lit, mais `OS.get_cmdline_args()` reste vide pour
+		# tout le monde. Un écran qui relisait la ligne de commande lui-même
+		# (l'éditeur v2 et son `--carte=`) ne voyait donc jamais rien, et
+		# ouvrait sa carte par défaut. On lui passe la liste dans `donnees`.
+		aller_a(ecran, _donnees_de(arguments))
 		return
 	if "--banc" in arguments:
 		_banc_d_essai()
@@ -140,6 +146,18 @@ static func _arguments_depuis_url(arguments: PackedStringArray) -> PackedStringA
 			"temoin": copie.append("--temoin=" + String(paire[1]))
 			"onglet": copie.append("--onglet=" + String(paire[1]))
 	return copie
+
+## Tous les `--clef=valeur` de la ligne de commande, rangés en dictionnaire
+## (`--carte=x` devient `{"carte": "x"}`). C'est ce que reçoit l'écran ouvert
+## par `--ecran=`, et c'est la SEULE façon pour lui de connaître l'URL.
+static func _donnees_de(arguments: PackedStringArray) -> Dictionary:
+	var d: Dictionary = {}
+	for a in arguments:
+		if not a.begins_with("--"): continue
+		var k := a.find("=")
+		if k < 0: continue
+		d[a.substr(2, k - 2)] = a.substr(k + 1)
+	return d
 
 static func _argument(arguments: PackedStringArray, nom: String, defaut: String = "") -> String:
 	for a in arguments:

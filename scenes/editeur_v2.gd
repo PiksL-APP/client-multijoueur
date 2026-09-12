@@ -18,6 +18,12 @@ extends Ecran
 ##   - Ctrl+Z / Ctrl+Y, Ctrl+S enregistre (dans `res://cartes/` au bureau,
 ##     dans `user://cartes/` au navigateur), P photographie.
 ##
+## LA PALETTE montre TOUS les modèles du dossier `modeles/`, variantes
+## comprises — filtrés par famille et par recherche — et le modèle choisi
+## tourne dans un aperçu 3D à côté. « Pose libre » lève les refus (rue, eau,
+## lot) pour retoucher à la main ; Page haut / Page bas décalent l'objet en
+## hauteur, ce qui permet de poser sur une jetée ou un toit.
+##
 ## Caméra : clic droit tenu = orbite, molette = zoom, clic milieu ou
 ## Maj + clic = déplacer, flèches / ZQSD = déplacer, Début = tout voir.
 
@@ -27,12 +33,19 @@ const PALIER := Ville2.PALIER
 
 enum { OUTIL_SELECTION, OUTIL_ROUTE, OUTIL_LOT, OUTIL_OBJET, OUTIL_TERRAIN, OUTIL_EAU }
 const NOMS_OUTILS := ["Sélection", "Route", "Bâtiment", "Objet", "Terrain", "Eau"]
+const RACCOURCIS_OUTILS := ["S", "R", "B", "O", "T", "W"]
 const GENRES_ROUTE := [Ville2.R_RUE, Ville2.R_AVENUE, Ville2.R_VOIE_RAPIDE]
 
-## Les objets proposés, dans l'ordre de la palette.
-const OBJETS := ["lampadaire", "lampadaire_parc", "feu", "stop", "plaque", "arbre", "arbre_oak",
-	"arbre_rond", "palmier", "buisson", "banc", "poubelle", "benne", "borne", "cone", "monument",
-	"voitures/sedan", "voitures/taxi", "voitures/van", "voitures/police"]
+## LES RACCOURCIS DE LA PALETTE : les props que les générateurs posent, avec
+## leur hauteur réglée. Ils ouvrent la liste, avant le catalogue complet.
+const RACCOURCIS := ["lampadaire", "lampadaire_parc", "lampadaire_double", "feu", "stop", "plaque",
+	"arbre", "arbre_oak", "arbre_rond", "arbre_petit", "palmier", "buisson", "banc", "poubelle",
+	"benne", "borne", "cone", "monument", "parasol", "parasol_b", "auvent", "auvent_large",
+	"conteneur", "pelouse",
+	"voitures/sedan", "voitures/sedan-sports", "voitures/taxi", "voitures/van", "voitures/police",
+	"voitures/ambulance", "voitures/firetruck", "voitures/garbage-truck", "voitures/truck"]
+const FAMILLE_TOUT := "— tout —"
+const FAMILLE_RACCOURCIS := "★ raccourcis"
 
 const TEINTE_GRILLE := Color(1, 1, 1, 0.18)
 const TEINTE_OK := Color("#2fe0d0")
@@ -73,7 +86,24 @@ var _refaire: Array[String] = []
 var _etat: Label
 var _titre: Label
 var _palette: ItemList
+var _cartes: OptionButton
+var _familles: OptionButton
+var _recherche: LineEdit
+var _libre: CheckBox
+var _apercu3d: SubViewport
+var _apercu_noeud: MeshInstance3D
+var _apercu_nom: Label
+var _compteur: Label
+var _aide: Label
+var _info: RichTextLabel
+var _champ_rayon: SpinBox
+var _champ_decalage: SpinBox
+var _boutons_outils: Array[Button] = []
+var _liste: Array[String] = []          ## ce que la palette montre en ce moment
+var _decalage := 0.0                    ## la hauteur ajoutée à l'objet posé
+var _tourne_apercu := 0.0
 var _photo_sortie := ""
+var _manque := ""                       ## la carte demandée et introuvable
 
 # ------------------------------------------------------------------ mise en place
 
@@ -82,9 +112,14 @@ func _ready() -> void:
 		demarrer()
 
 func demarrer() -> void:
+	# ⚠ `donnees` D'ABORD, LA LIGNE DE COMMANDE ENSUITE. Dans le navigateur la
+	# ligne de commande est vide : c'est `scenes/racine.gd` qui lit l'URL et
+	# nous passe ses paramètres ici. Au bureau, les deux disent la même chose.
 	for a in OS.get_cmdline_args():
 		if a.begins_with("--carte="): _chemin = a.trim_prefix("--carte=")
 		if a.begins_with("--cliche="): _photo_sortie = a.trim_prefix("--cliche=")
+	if donnees.has("carte"): _chemin = String(donnees["carte"])
+	if donnees.has("cliche"): _photo_sortie = String(donnees["cliche"])
 	var amb: Array = MatieresCarnage.ambiance()
 	for n in amb:
 		monde().add_child(n)
@@ -117,7 +152,7 @@ func demarrer() -> void:
 	# `--temoin=plage` (ou `?temoin=plage`) engendre un témoin neuf plutôt que
 	# de lire un fichier : c'est la façon la plus courte de REGARDER ce que le
 	# générateur vient de produire, sans rien enregistrer.
-	var temoin := ""
+	var temoin := String(donnees.get("temoin", ""))
 	for a2 in OS.get_cmdline_args():
 		if a2.begins_with("--temoin="): temoin = a2.trim_prefix("--temoin=")
 	if temoin == "plage":
@@ -127,7 +162,12 @@ func demarrer() -> void:
 		_ville = GenerateurCentre.generer(1)
 	else:
 		_ville = Ville2.charger(_chemin)
+		# ⚠ LE REPLI DOIT SE VOIR. Une carte absente du paquet rendait une
+		# ville vide, on repliait sur le générateur du centre… et l'écran
+		# montrait le centre en silence : impossible de distinguer « la carte
+		# demandée n'existe pas » de « elle est arrivée ».
 		if _ville.lots.is_empty() and _ville.routes.is_empty():
+			_manque = _chemin
 			_ville = GenerateurCentre.generer(1)
 	_morceaux = MorceauxV2.new()
 	# ⚠ PAS `tout()` ICI. Bâtir seize cents cases d'un bloc fige l'onglet
@@ -148,10 +188,11 @@ func demarrer() -> void:
 	_cadre.visible = false
 	monde().add_child(_cadre)
 	_poser_grille()
-	_pivot = Vector3(float(_ville.taille.x) * CASE * 0.5, 0, float(_ville.taille.y) * CASE * 0.5)
-	_distance = float(maxi(_ville.taille.x, _ville.taille.y)) * CASE * 0.9
-	_placer_camera()
+	_tout_voir()
 	_interface()
+	if _manque != "":
+		_dire("⚠ « %s » introuvable dans le paquet — c'est le centre qui s'affiche." % _manque)
+		return
 	_dire("Ville « %s » — %d lots, %d objets, %d routes. R route · B bâtiment · O objet · T terrain · W eau · S sélection · Ctrl+S enregistre" % [
 		_ville.nom, _ville.lots.size(), _ville.objets.size(), _ville.routes.size()])
 	if "--essai" in OS.get_cmdline_args():
@@ -217,86 +258,483 @@ func _essai() -> void:
 	print("[essai] annulé : %d lots" % _ville.lots.size())
 	_annuler()
 	_annuler()
+	# ⚠ LE BANC N'ÉCRIT PAS SUR LA CARTE QU'IL A OUVERTE. Il l'a couverte de
+	# ses gestes d'essai : enregistrée en place, elle partait au dépôt.
+	_chemin = "user://essai_editeur.json"
 	_enregistrer()
 	print("[essai] %s — %d ms" % [_etat.text, Time.get_ticks_msec() - t0])
-	_choisir_outil(OUTIL_ROUTE)
+	# La palette : on montre le catalogue complet et un modèle choisi, pour que
+	# la capture du banc dise si l'aperçu 3D marche.
+	_choisir_outil(OUTIL_OBJET)
+	for k in _familles.item_count:
+		if _familles.get_item_text(k).begins_with("kenney/batiments"):
+			_familles.select(k)
+			break
+	_remplir_palette()
+	_objet_choisi = 14
+	_palette.select(mini(14, _palette.item_count - 1))
+	_maj_apercu()
+	print("[essai] palette : %d modèles, aperçu « %s »" % [_palette.item_count, _apercu_nom.text])
+	_choisir_outil(OUTIL_OBJET)
 	_case = Vector2i(10, 38)
 	_point = Vector3(10.5 * CASE, 0, 38.5 * CASE)
 	_montrer_apercu()
 	if _photo_sortie != "":
 		_photographier()
 
+# ------------------------------------------------------------------ l'interface
+
+## L'INTERFACE EST CELLE D'UN LOGICIEL, pas d'un menu de jeu (demande du
+## client, 12/09) : une BARRE D'OUTILS en haut, un DOCK à gauche (les outils
+## et leurs réglages), un DOCK à droite (le catalogue et l'aperçu), une BARRE
+## D'ÉTAT en bas, et la vue 3D au milieu. C'est la disposition de Godot, et
+## ce n'est pas un hasard : elle laisse la vue au centre, toujours visible,
+## pendant que les panneaux bordent l'écran.
+##
+## ⚠ CHAQUE PANNEAU ARRÊTE LA SOURIS (`MOUSE_FILTER_STOP`) et le centre la
+## LAISSE PASSER (`IGNORE`). C'est ce qui fait que la molette fait défiler la
+## liste des modèles quand on est dessus, et zoome la carte quand on est sur
+## la vue — et non les deux à la fois.
+
+const LARGE_GAUCHE := 190
+const LARGE_DROITE := 272
+const C_BARRE := Color("#1b1f27")
+const C_DOCK := Color("#23283286")
+const C_TRAIT := Color("#3a4150")
+const C_ACCENT := Color("#2fe0d0")
+
 func _interface() -> void:
 	var couche := interface()
-	var panneau := PanelContainer.new()
-	panneau.position = Vector2(12, 12)
-	panneau.custom_minimum_size = Vector2(260, 0)
-	var boite := VBoxContainer.new()
-	panneau.add_child(boite)
+	var racine := VBoxContainer.new()
+	racine.set_anchors_preset(Control.PRESET_FULL_RECT)
+	racine.add_theme_constant_override("separation", 0)
+	racine.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	couche.add_child(racine)
+
+	# ---- la barre d'outils du haut : le fichier et la carte
+	var haut := _panneau(C_BARRE)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 6)
+	haut.add_child(hb)
 	_titre = Label.new()
-	_titre.text = "ÉDITEUR — ville v2"
-	boite.add_child(_titre)
-	var outils := HBoxContainer.new()
-	boite.add_child(outils)
-	for k in NOMS_OUTILS.size():
-		var b := Button.new()
-		b.text = NOMS_OUTILS[k]
-		b.pressed.connect(func() -> void: _choisir_outil(k))
-		outils.add_child(b)
-	_palette = ItemList.new()
-	_palette.custom_minimum_size = Vector2(240, 320)
-	_palette.item_selected.connect(_palette_choisie)
-	boite.add_child(_palette)
-	var actions := HBoxContainer.new()
-	boite.add_child(actions)
-	for paire in [["Enregistrer", _enregistrer], ["Annuler", _annuler], ["Refaire", _refaire_geste], ["Photo", _photographier]]:
+	_titre.text = "  PIKS  ·  ÉDITEUR DE VILLE  "
+	_titre.add_theme_color_override("font_color", C_ACCENT)
+	hb.add_child(_titre)
+	hb.add_child(_separateur())
+	var etiquette_carte := Label.new()
+	etiquette_carte.text = "Carte"
+	hb.add_child(etiquette_carte)
+	_cartes = OptionButton.new()
+	_cartes.custom_minimum_size.x = 190
+	for nom in _cartes_du_dossier():
+		_cartes.add_item(nom)
+	for k in _cartes.item_count:
+		if _cartes.get_item_text(k) == _chemin.get_file().get_basename():
+			_cartes.select(k)
+	_cartes.item_selected.connect(_changer_de_carte)
+	hb.add_child(_cartes)
+	hb.add_child(_separateur())
+	for paire in [["Enregistrer", _enregistrer], ["Annuler", _annuler],
+			["Refaire", _refaire_geste], ["Photo", _photographier], ["Tout voir", _tout_voir]]:
 		var b := Button.new()
 		b.text = String(paire[0])
+		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(paire[1])
-		actions.add_child(b)
-	couche.add_child(panneau)
+		hb.add_child(b)
+	var pousse := Control.new()
+	pousse.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pousse.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hb.add_child(pousse)
+	_compteur = Label.new()
+	hb.add_child(_compteur)
+	racine.add_child(haut)
+
+	# ---- le milieu : dock gauche, vue, dock droit
+	var milieu := HBoxContainer.new()
+	milieu.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	milieu.add_theme_constant_override("separation", 0)
+	milieu.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	racine.add_child(milieu)
+
+	# ---- dock gauche : les outils, puis leurs réglages
+	var gauche := _panneau(C_DOCK)
+	gauche.custom_minimum_size.x = LARGE_GAUCHE
+	var gb := VBoxContainer.new()
+	gb.add_theme_constant_override("separation", 4)
+	gauche.add_child(gb)
+	gb.add_child(_entete("Outils"))
+	var groupe := ButtonGroup.new()
+	_boutons_outils.clear()
+	for k in NOMS_OUTILS.size():
+		var b := Button.new()
+		b.text = "%s   %s" % [RACCOURCIS_OUTILS[k], NOMS_OUTILS[k]]
+		b.toggle_mode = true
+		b.button_group = groupe
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.focus_mode = Control.FOCUS_NONE
+		b.button_pressed = k == _outil
+		b.pressed.connect(func() -> void: _choisir_outil(k))
+		gb.add_child(b)
+		_boutons_outils.append(b)
+	gb.add_child(_entete("Réglages"))
+	_libre = CheckBox.new()
+	_libre.text = "Pose libre"
+	_libre.tooltip_text = "Ignore les refus : rue, eau, lot déjà posé."
+	_libre.focus_mode = Control.FOCUS_NONE
+	gb.add_child(_libre)
+	gb.add_child(_ligne_reglage("Pinceau", _regle_rayon(), "cases"))
+	gb.add_child(_ligne_reglage("Hauteur", _regle_decalage(), "unités"))
+	gb.add_child(_entete("Sélection"))
+	_info = RichTextLabel.new()
+	_info.fit_content = true
+	_info.custom_minimum_size.y = 70
+	_info.bbcode_enabled = false
+	_info.text = "rien"
+	gb.add_child(_info)
+	milieu.add_child(gauche)
+
+	# ---- le centre : la vue 3D, que la souris traverse
+	var vue := Control.new()
+	vue.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vue.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	milieu.add_child(vue)
+
+	# ---- dock droit : le catalogue et l'aperçu
+	var droite := _panneau(C_DOCK)
+	droite.custom_minimum_size.x = LARGE_DROITE
+	var db := VBoxContainer.new()
+	db.add_theme_constant_override("separation", 4)
+	droite.add_child(db)
+	db.add_child(_entete("Modèles"))
+	_familles = OptionButton.new()
+	_familles.add_item(FAMILLE_RACCOURCIS)
+	_familles.add_item(FAMILLE_TOUT)
+	var vues: Dictionary = {}
+	for m in KitVille2.catalogue():
+		vues[KitVille2.famille(m)] = true
+	var noms_familles: Array = vues.keys()
+	noms_familles.sort()
+	for f in noms_familles:
+		_familles.add_item(String(f))
+	_familles.item_selected.connect(func(_k: int) -> void: _remplir_palette())
+	db.add_child(_familles)
+	_recherche = LineEdit.new()
+	_recherche.placeholder_text = "chercher…"
+	_recherche.clear_button_enabled = true
+	_recherche.text_changed.connect(func(_t: String) -> void: _remplir_palette())
+	db.add_child(_recherche)
+	_palette = ItemList.new()
+	_palette.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_palette.custom_minimum_size.y = 200
+	_palette.item_selected.connect(_palette_choisie)
+	db.add_child(_palette)
+	db.add_child(_entete("Aperçu"))
+	var cadre := SubViewportContainer.new()
+	cadre.custom_minimum_size = Vector2(LARGE_DROITE - 16, 170)
+	cadre.stretch = true
+	cadre.mouse_filter = Control.MOUSE_FILTER_STOP
+	_apercu3d = SubViewport.new()
+	_apercu3d.own_world_3d = true
+	_apercu3d.transparent_bg = false
+	_apercu3d.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	cadre.add_child(_apercu3d)
+	db.add_child(cadre)
+	_apercu_nom = Label.new()
+	_apercu_nom.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_apercu_nom.custom_minimum_size.y = 34
+	db.add_child(_apercu_nom)
+	milieu.add_child(droite)
+
+	# ---- la barre d'état
+	var bas := _panneau(C_BARRE)
+	var bb := HBoxContainer.new()
+	bas.add_child(bb)
 	_etat = Label.new()
-	_etat.position = Vector2(12, 0)
-	_etat.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_etat.offset_top = -30
-	_etat.offset_left = 12
-	_etat.autowrap_mode = TextServer.AUTOWRAP_WORD
-	couche.add_child(_etat)
+	_etat.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_etat.clip_text = true
+	_etat.add_theme_color_override("font_color", Color("#d7dde8"))
+	bb.add_child(_etat)
+	_aide = Label.new()
+	_aide.text = "  clic droit : tourner · molette : zoom · Maj+clic : déplacer"
+	_aide.add_theme_color_override("font_color", Color("#8d95a6"))
+	bb.add_child(_aide)
+	racine.add_child(bas)
+
+	_monter_apercu()
 	_remplir_palette()
+	_maj_compteur()
+
+## Un panneau de dock : un fond plein, une bordure, et la souris qui S'ARRÊTE.
+func _panneau(couleur: Color) -> PanelContainer:
+	var p := PanelContainer.new()
+	var f := StyleBoxFlat.new()
+	f.bg_color = couleur
+	f.border_color = C_TRAIT
+	f.set_border_width_all(1)
+	f.content_margin_left = 8
+	f.content_margin_right = 8
+	f.content_margin_top = 6
+	f.content_margin_bottom = 6
+	p.add_theme_stylebox_override("panel", f)
+	p.mouse_filter = Control.MOUSE_FILTER_STOP
+	return p
+
+## ⚠ PAS DE `font_size` RÉDUIT SUR CES TITRES. La police du projet est une
+## police à pixels : sous sa taille de dessin, ses hautes lettres passent
+## au-dessus de la boîte de ligne et le titre sort rogné par le haut.
+func _entete(texte: String) -> Label:
+	var l := Label.new()
+	l.text = texte.to_upper()
+	l.add_theme_color_override("font_color", C_ACCENT)
+	l.custom_minimum_size.y = 24
+	l.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	return l
+
+func _separateur() -> VSeparator:
+	return VSeparator.new()
+
+## Une ligne « étiquette — réglage — unité », comme l'inspecteur de Godot.
+func _ligne_reglage(nom: String, champ: Control, unite: String) -> HBoxContainer:
+	var h := HBoxContainer.new()
+	var l := Label.new()
+	l.text = nom
+	l.custom_minimum_size.x = 62
+	h.add_child(l)
+	champ.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(champ)
+	var u := Label.new()
+	u.text = unite
+	u.add_theme_color_override("font_color", Color("#8d95a6"))
+	h.add_child(u)
+	return h
+
+func _regle_rayon() -> SpinBox:
+	_champ_rayon = SpinBox.new()
+	_champ_rayon.min_value = 1
+	_champ_rayon.max_value = 8
+	_champ_rayon.value = _rayon_terrain
+	_champ_rayon.value_changed.connect(func(v: float) -> void:
+		_rayon_terrain = int(v)
+		_montrer_apercu())
+	return _champ_rayon
+
+func _regle_decalage() -> SpinBox:
+	_champ_decalage = SpinBox.new()
+	_champ_decalage.min_value = -40
+	_champ_decalage.max_value = 200
+	_champ_decalage.step = 0.5
+	_champ_decalage.value = _decalage
+	_champ_decalage.value_changed.connect(func(v: float) -> void: _decalage = v)
+	return _champ_decalage
+
+## Le compte de la barre du haut : ce que porte la ville en ce moment.
+func _maj_compteur() -> void:
+	if _compteur == null or _ville == null: return
+	_compteur.text = "%d lots · %d objets · %d routes · %d × %d cases   " % [
+		_ville.lots.size(), _ville.objets.size(), _ville.routes.size(),
+		_ville.taille.x, _ville.taille.y]
+
+## Ce que dit le dock de gauche sur ce qui est sélectionné.
+func _maj_info() -> void:
+	if _info == null: return
+	if _selection.is_empty():
+		_info.text = "rien"
+		return
+	var k := int(_selection["k"])
+	match String(_selection["genre"]):
+		"objet":
+			var o: Dictionary = _ville.objets[k]
+			_info.text = "objet\n%s\nx %.0f  z %.0f" % [_nom_lisible(String(o["m"])),
+				float(o["x"]), float(o["z"])]
+		"lot":
+			var l: Dictionary = _ville.lots[k]
+			_info.text = "bâtiment\n%s\n%d × %d demi-cases, %d quart(s)" % [
+				_nom_lisible(String(l["m"])), int(l["w"]), int(l["h"]), int(l["q"])]
+		"route":
+			var r: Dictionary = _ville.routes[k]
+			_info.text = "route\n%s\n%s, %d points" % [String(r["nom"]), String(r["genre"]),
+				(r["points"] as Array).size()]
+
+# ------------------------------------------------------------------ l'aperçu 3D
+
+## LA PETITE FENÊTRE 3D. Un `SubViewport` avec SON PROPRE monde : sans
+## `own_world_3d`, l'aperçu montrerait la ville entière, et la ville
+## recevrait la lumière de l'aperçu.
+func _monter_apercu() -> void:
+	var lumiere := DirectionalLight3D.new()
+	lumiere.rotation_degrees = Vector3(-45.0, -40.0, 0)
+	lumiere.light_energy = 1.5
+	lumiere.light_color = Color("#fff3dc")
+	_apercu3d.add_child(lumiere)
+	var monde_env := WorldEnvironment.new()
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color("#1f2733")
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color("#9fb0c4")
+	env.ambient_light_energy = 0.8
+	monde_env.environment = env
+	_apercu3d.add_child(monde_env)
+	var pivot := Node3D.new()
+	pivot.name = "Pivot"
+	_apercu3d.add_child(pivot)
+	_apercu_noeud = MeshInstance3D.new()
+	pivot.add_child(_apercu_noeud)
+	var cam := Camera3D.new()
+	cam.name = "Camera"
+	_apercu3d.add_child(cam)
+	cam.make_current()
+
+## Montre le modèle choisi, cadré sur sa boîte : un lampadaire et un
+## gratte-ciel doivent remplir la fenêtre autant l'un que l'autre.
+func _maj_apercu() -> void:
+	if _apercu_noeud == null: return
+	var m := _modele_lot() if _outil == OUTIL_LOT else _modele_objet()
+	if _outil == OUTIL_ROUTE: m = ""
+	if m == "":
+		_apercu_noeud.mesh = null
+		_apercu_nom.text = ""
+		return
+	var chemin := _chemin_de(m)
+	if chemin == "" or not ResourceLoader.exists(chemin):
+		_apercu_noeud.mesh = null
+		_apercu_nom.text = m + " (pas un modèle)"
+		return
+	var maillage := FormesCarnage.maillage_kenney(chemin, 0.0, Vector3.AXIS_X, 0.0)
+	_apercu_noeud.mesh = maillage
+	_apercu_noeud.material_override = FormesCarnage.matiere_kenney(chemin)
+	var boite := maillage.get_aabb()
+	var rayon := maxf(0.001, boite.size.length() * 0.5)
+	# Le modèle est recentré en X et Z et posé sur y = 0 : on vise son milieu.
+	_apercu_noeud.position = Vector3(0, -boite.size.y * 0.5, 0)
+	var cam := _apercu3d.get_node("Camera") as Camera3D
+	cam.near = rayon * 0.01
+	cam.far = rayon * 20.0
+	cam.position = Vector3(0, rayon * 0.55, rayon * 2.4)
+	cam.look_at(Vector3.ZERO, Vector3.UP)
+	# ⚠ UN RACCOURCI N'A PAS D'EMPRISE, IL A UNE HAUTEUR. « lampadaire » n'est
+	# pas un modèle mais une fiche du catalogue : mesuré comme un bâtiment, il
+	# sortait à « 1,0 × 1,0 × 1,0 case », ce qui ne veut rien dire.
+	var fiche: Dictionary = KitVille2.PROPS.get(m, {})
+	if not fiche.is_empty():
+		_apercu_nom.text = "%s — %s, %.1f unité(s) de haut" % [m,
+			KitVille2.nom_court(chemin), float(fiche.get("h", 0.0))]
+		return
+	var t := KitVille2.mesurer(m)
+	_apercu_nom.text = "%s — %.1f × %.1f × %.1f cases (%.0f × %.0f × %.0f unités)" % [
+		_nom_lisible(m), t.x, t.y, t.z, t.x * CASE, t.y * CASE, t.z * CASE]
+
+func _process(delta: float) -> void:
+	if _apercu3d == null: return
+	var pivot := _apercu3d.get_node_or_null("Pivot") as Node3D
+	if pivot != null and _apercu_noeud != null and _apercu_noeud.mesh != null:
+		_tourne_apercu += delta * 0.6
+		pivot.rotation.y = _tourne_apercu
+
+## Les cartes livrées dans `res://cartes/`. ⚠ `DirAccess` ne voit pas les
+## mêmes noms dans un paquet exporté qu'au bureau : au navigateur on lit la
+## liste écrite dans `cartes/index.json`, qui est engendrée avec les cartes.
+func _cartes_du_dossier() -> Array:
+	var noms: Array = []
+	var index := FileAccess.get_file_as_string("res://cartes/index.json")
+	if index != "":
+		var brut = JSON.parse_string(index)
+		if typeof(brut) == TYPE_ARRAY:
+			for n in brut: noms.append(String(n))
+	if noms.is_empty():
+		var d := DirAccess.open("res://cartes")
+		if d != null:
+			for f in d.get_files():
+				if f.ends_with(".json") and f != "index.json":
+					noms.append(f.get_basename())
+	noms.sort()
+	return noms
+
+func _changer_de_carte(k: int) -> void:
+	var nom := _cartes.get_item_text(k)
+	_chemin = "res://cartes/%s.json" % nom
+	var v := Ville2.charger(_chemin)
+	if v.lots.is_empty() and v.routes.is_empty():
+		_dire("Carte « %s » illisible." % nom)
+		return
+	_pile.clear()
+	_refaire.clear()
+	_recharger(v.vers_json())
+	_tout_voir()
+	_maj_compteur()
+	_dire("Ville « %s » — %d lots, %d objets, %d routes." % [_ville.nom, _ville.lots.size(),
+		_ville.objets.size(), _ville.routes.size()])
 
 func _remplir_palette() -> void:
 	_palette.clear()
-	match _outil:
-		OUTIL_LOT:
-			for m in KitVille2.BATIMENTS.keys():
-				_palette.add_item(String(m))
-			for m in KitVille2.PIKSL.keys():
-				_palette.add_item(String(m))
-			_palette.select(mini(_lot_choisi, _palette.item_count - 1))
-		OUTIL_OBJET:
-			for m in OBJETS:
-				_palette.add_item(String(m))
-			_palette.select(mini(_objet_choisi, _palette.item_count - 1))
-		OUTIL_ROUTE:
-			for g in GENRES_ROUTE:
-				_palette.add_item(String(g))
-			_palette.select(_genre_route)
-		_:
-			pass
-	_palette.visible = _palette.item_count > 0
+	_liste.clear()
+	if _outil == OUTIL_ROUTE:
+		for g in GENRES_ROUTE:
+			_liste.append(String(g))
+			_palette.add_item(String(g))
+		_palette.select(clampi(_genre_route, 0, _palette.item_count - 1))
+		_palette.visible = true
+		_maj_apercu()
+		return
+	# ⚠ LA PALETTE RESTE VISIBLE MÊME HORS POSE. Le client veut VOIR le
+	# catalogue et son aperçu ; la cacher dès qu'on prend l'outil Sélection
+	# revenait à lui retirer la moitié de l'écran.
+	var f := _familles.get_item_text(_familles.selected).get_slice(" (", 0)
+	var cherche := _recherche.text.strip_edges().to_lower()
+	var source: Array = []
+	if f == FAMILLE_RACCOURCIS:
+		source = RACCOURCIS.duplicate()
+	else:
+		source = KitVille2.catalogue().duplicate()
+		if f != FAMILLE_TOUT:
+			var gardes: Array = []
+			for m in source:
+				if KitVille2.famille(String(m)) == f: gardes.append(m)
+			source = gardes
+	for m in source:
+		var nom := _nom_lisible(String(m))
+		if cherche != "" and not nom.to_lower().contains(cherche): continue
+		_liste.append(String(m))
+		_palette.add_item(nom)
+	_palette.visible = true
+	var choisi: int = _lot_choisi if _outil == OUTIL_LOT else _objet_choisi
+	if _palette.item_count > 0:
+		_palette.select(clampi(choisi, 0, _palette.item_count - 1))
+	_familles.set_item_text(_familles.selected,
+		"%s (%d)" % [f.get_slice(" (", 0), _palette.item_count])
+	_maj_apercu()
+
+## Le nom montré dans la liste : le nom de fichier pour un modèle, le mot du
+## catalogue pour un raccourci.
+func _nom_lisible(m: String) -> String:
+	if m.begins_with("res://"): return KitVille2.nom_court(m)
+	return m
+
+## Le chemin `res://…` d'une entrée de la palette (un raccourci passe par son
+## catalogue de props).
+func _chemin_de(m: String) -> String:
+	if m.begins_with("res://"): return m
+	var fiche: Dictionary = KitVille2.PROPS.get(m, {})
+	if not fiche.is_empty(): return KitVille2.chemin(String(fiche["m"]))
+	if m == "pelouse": return ""
+	return KitVille2.chemin(m)
 
 func _palette_choisie(k: int) -> void:
 	match _outil:
 		OUTIL_LOT: _lot_choisi = k
 		OUTIL_OBJET: _objet_choisi = k
 		OUTIL_ROUTE: _genre_route = k
+	_maj_apercu()
 	_montrer_apercu()
 
 func _choisir_outil(k: int) -> void:
 	_finir_route(false)
 	_outil = k
+	if k < _boutons_outils.size() and not _boutons_outils[k].button_pressed:
+		_boutons_outils[k].button_pressed = true
 	_selection = {}
 	_cadre.visible = false
+	_maj_info()
 	_remplir_palette()
 	_montrer_apercu()
 	_dire("Outil : " + NOMS_OUTILS[k])
@@ -331,9 +769,40 @@ func _poser_grille() -> void:
 
 # ------------------------------------------------------------------ la caméra
 
+## LE RECUL QUI TIENT LA CARTE ENTIÈRE. Avec un champ de 50°, il faut à peu
+## près un côté et quart de distance pour cadrer un carré de ce côté.
+func _recul_maxi() -> float:
+	return float(maxi(_ville.taille.x, _ville.taille.y)) * CASE * 1.15
+
+func _recul_mini() -> float:
+	return CASE * 1.5
+
 func _placer_camera() -> void:
+	_distance = clampf(_distance, _recul_mini(), _recul_maxi())
+	# ⚠ LE PIVOT RESTE AU-DESSUS DE LA CARTE. On peut regarder un peu au-delà
+	# du bord — c'est utile pour poser contre la lisière — mais pas partir à
+	# l'infini et perdre la ville de vue.
+	var marge := CASE * 6.0
+	_pivot.x = clampf(_pivot.x, -marge, float(_ville.taille.x) * CASE + marge)
+	_pivot.z = clampf(_pivot.z, -marge, float(_ville.taille.y) * CASE + marge)
+	_pivot.y = 0.0
 	var d := Vector3(sin(_azimut) * cos(_inclinaison), sin(_inclinaison), cos(_azimut) * cos(_inclinaison)) * _distance
 	_camera.look_at_from_position(_pivot + d, _pivot, Vector3.UP)
+	# ⚠ LES DOCKS MANGENT L'ÉCRAN. La caméra rend la vue ENTIÈRE, docks
+	# compris : cadrée sur le milieu de la fenêtre, la ville se retrouve à
+	# moitié sous le panneau de droite. On décale donc la caméra de la moitié
+	# de la différence des deux docks, en unités du monde à cette distance.
+	var ecran := get_viewport().get_visible_rect().size
+	if ecran.y > 1.0:
+		var par_pixel := 2.0 * _distance * tan(deg_to_rad(_camera.fov) * 0.5) / ecran.y
+		_camera.global_position += _camera.global_transform.basis.x \
+			* (float(LARGE_DROITE) - float(LARGE_GAUCHE)) * 0.5 * par_pixel
+
+## Cadrer toute la carte — le bouton de la barre et la touche Début.
+func _tout_voir() -> void:
+	_pivot = Vector3(float(_ville.taille.x) * CASE * 0.5, 0, float(_ville.taille.y) * CASE * 0.5)
+	_distance = _recul_maxi()
+	_placer_camera()
 
 func _viser() -> void:
 	var origine := _camera.project_ray_origin(_souris)
@@ -363,7 +832,13 @@ func _sur_plan(origine: Vector3, dir: Vector3, y: float):
 
 # ------------------------------------------------------------------ l'entrée
 
-func _input(ev: InputEvent) -> void:
+## ⚠ `_unhandled_input`, PAS `_input`. `_input` passe AVANT l'interface : la
+## molette au-dessus de la liste des modèles zoomait la carte au lieu de faire
+## défiler la liste, et taper « route » dans la recherche déclenchait les
+## outils R, O, U, T, E. En `_unhandled_input`, un panneau qui arrête la souris
+## et un champ qui a le clavier ont servi les premiers ; on ne reçoit que ce
+## qui tombe sur la vue.
+func _unhandled_input(ev: InputEvent) -> void:
 	if ev is InputEventMouseMotion:
 		var m := ev as InputEventMouseMotion
 		_souris = m.position
@@ -387,11 +862,16 @@ func _input(ev: InputEvent) -> void:
 		match b.button_index:
 			MOUSE_BUTTON_WHEEL_UP:
 				if b.pressed:
-					_distance = maxf(60.0, _distance * 0.88)
+					_distance = maxf(_recul_mini(), _distance * 0.88)
 					_placer_camera()
 			MOUSE_BUTTON_WHEEL_DOWN:
 				if b.pressed:
-					_distance = minf(6000.0, _distance * 1.14)
+					# ⚠ LE DÉZOOM A UNE BUTÉE. Sans elle, une roulette un peu
+					# vive envoyait la caméra à six mille unités : la ville
+					# devenait un point, et il fallait « Tout voir » pour la
+					# retrouver. On ne recule pas plus loin que ce qu'il faut
+					# pour tenir la carte entière à l'écran.
+					_distance = minf(_recul_maxi(), _distance * 1.14)
 					_placer_camera()
 			MOUSE_BUTTON_RIGHT:
 				if b.pressed and _outil == OUTIL_ROUTE and not _trace.is_empty():
@@ -448,12 +928,18 @@ func _touche(k: InputEventKey) -> void:
 			_quarts = posmod(_quarts - 1, 4)
 			_tourner_selection(-1)
 			_montrer_apercu()
+		KEY_PAGEUP:
+			_decalage += 1.0
+			if _champ_decalage != null: _champ_decalage.value = _decalage
+		KEY_PAGEDOWN:
+			_decalage -= 1.0
+			if _champ_decalage != null: _champ_decalage.value = _decalage
 		KEY_PLUS, KEY_KP_ADD, KEY_EQUAL:
 			_rayon_terrain = mini(8, _rayon_terrain + 1)
-			_dire("Rayon du pinceau : %d" % _rayon_terrain)
+			if _champ_rayon != null: _champ_rayon.value = _rayon_terrain
 		KEY_MINUS, KEY_KP_SUBTRACT:
 			_rayon_terrain = maxi(1, _rayon_terrain - 1)
-			_dire("Rayon du pinceau : %d" % _rayon_terrain)
+			if _champ_rayon != null: _champ_rayon.value = _rayon_terrain
 		KEY_ENTER, KEY_KP_ENTER:
 			_finir_route(true)
 		KEY_ESCAPE:
@@ -465,9 +951,7 @@ func _touche(k: InputEventKey) -> void:
 		KEY_P:
 			_photographier()
 		KEY_HOME:
-			_pivot = Vector3(float(_ville.taille.x) * CASE * 0.5, 0, float(_ville.taille.y) * CASE * 0.5)
-			_distance = float(maxi(_ville.taille.x, _ville.taille.y)) * CASE * 0.9
-			_placer_camera()
+			_tout_voir()
 		KEY_LEFT: _deplacer(Vector3(-1, 0, 0))
 		KEY_RIGHT: _deplacer(Vector3(1, 0, 0))
 		KEY_UP: _deplacer(Vector3(0, 0, -1))
@@ -536,9 +1020,14 @@ func _oter_lots_sur(cases: Array) -> int:
 	_ville.lots = restants
 	return otes
 
+## ⚠ UN LOT EST TOUJOURS UN CHEMIN. Un raccourci de la palette (« lampadaire »)
+## n'a de sens que pour un OBJET, qui sait sa hauteur voulue ; posé comme lot,
+## il partait en `res://modeles/kenney/lampadaire.glb` — un fichier qui
+## n'existe pas. On le ramène donc à son modèle.
 func _modele_lot() -> String:
-	var noms: Array = KitVille2.BATIMENTS.keys() + KitVille2.PIKSL.keys()
-	return String(noms[clampi(_lot_choisi, 0, noms.size() - 1)])
+	if _liste.is_empty(): return ""
+	var m := _liste[clampi(_lot_choisi, 0, _liste.size() - 1)]
+	return m if m.begins_with("res://") else _chemin_de(m)
 
 ## Le coin du lot fantôme, en demi-cases, centré sous la souris.
 func _coin_lot(m: String) -> Vector2i:
@@ -548,6 +1037,8 @@ func _coin_lot(m: String) -> Vector2i:
 	return Vector2i(hx, hy)
 
 func _lot_possible(m: String, coin: Vector2i) -> bool:
+	if m == "": return false
+	if _libre != null and _libre.button_pressed: return true
 	var e := KitVille2.emprise_tournee(m, _quarts)
 	var essai := {"x": coin.x, "y": coin.y, "w": e.x, "h": e.y}
 	for c in Ville2.cases_du_lot(essai):
@@ -573,9 +1064,12 @@ func _poser_lot() -> void:
 	_dire("Posé : %s (%d x %d demi-cases)." % [m, e.x, e.y])
 
 func _modele_objet() -> String:
-	return OBJETS[clampi(_objet_choisi, 0, OBJETS.size() - 1)]
+	if _liste.is_empty(): return ""
+	return _liste[clampi(_objet_choisi, 0, _liste.size() - 1)]
 
 func _objet_possible(m: String, c: Vector2i) -> bool:
+	if m == "": return false
+	if _libre != null and _libre.button_pressed: return true
 	if not _ville.terre(c): return false
 	if _ville.carte.route(c) and not m.begins_with("voitures/"): return false
 	if _ville.lot_sur(c) >= 0: return false
@@ -587,9 +1081,13 @@ func _poser_objet() -> void:
 		_dire("Impossible ici : une rue, l'eau ou un bâtiment.")
 		return
 	_empiler()
-	_ville.ajouter_objet(m, snappedf(_point.x, 1.0), snappedf(_point.z, 1.0), PI * 0.5 * float(_quarts))
+	var o := {"m": m, "x": snappedf(_point.x, 0.5), "z": snappedf(_point.z, 0.5),
+		"r": PI * 0.5 * float(_quarts), "h": 0.0}
+	if absf(_decalage) > 0.01:
+		o["y_abs"] = TerrainV2.hauteur_en(_ville, float(o["x"]), float(o["z"])) + _decalage
+	_ville.objets.append(o)
 	_rebatir([_case])
-	_dire("Posé : %s." % m)
+	_dire("Posé : %s%s." % [_nom_lisible(m), "" if absf(_decalage) < 0.01 else " (+%.1f)" % _decalage])
 
 func _sculpter(monte: bool) -> void:
 	_empiler()
@@ -674,6 +1172,7 @@ func _montrer_cadre() -> void:
 	_cadre.mesh = _rectangle(r, TEINTE_SELECTION)
 	_cadre.position = Vector3(0, y + 0.9, 0)
 	_cadre.visible = true
+	_maj_info()
 
 func _supprimer_selection() -> void:
 	if _selection.is_empty(): return
@@ -788,6 +1287,7 @@ func _rectangle(r: Rect2, teinte: Color) -> Mesh:
 func _rebatir(cases: Array) -> void:
 	_morceaux.refaire(cases)
 	_montrer_apercu()
+	_maj_compteur()
 
 func _empiler() -> void:
 	_pile.append(_ville.vers_json())
@@ -813,7 +1313,7 @@ func _recharger(json: String) -> void:
 	_selection = {}
 	_cadre.visible = false
 	_morceaux.regler(_ville, 99)
-	_morceaux.tout()
+	_morceaux.suivre(Vector3(float(_ville.taille.x) * CASE * 0.5, 0, float(_ville.taille.y) * CASE * 0.5))
 	_poser_grille()
 
 func _chemin_d_enregistrement() -> String:

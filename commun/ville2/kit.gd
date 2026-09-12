@@ -155,21 +155,76 @@ const PIKSL := {
 }
 
 ## La taille d'un modèle EN CASES (largeur X, hauteur Y, profondeur Z).
+##
+## ⚠ LES TABLES NE COUVRENT PAS TOUT. `BATIMENTS` et `PIKSL` sont les modèles
+## que les générateurs posent ; l'éditeur, lui, laisse poser N'IMPORTE QUEL
+## modèle du dossier `modeles/`. Pour ceux-là on MESURE la boîte du maillage,
+## une fois, et on la garde : sans ça un modèle hors table valait une case sur
+## une case, et son lot était trop petit pour lui.
+static var _mesures: Dictionary = {}
+
 static func taille(modele: String) -> Vector3:
 	if PIKSL.has(modele):
 		var f: Dictionary = PIKSL[modele]
 		var t: Array = f["taille"]
 		var e := float(f.get("echelle", 1.0)) / CASE
 		return Vector3(float(t[0]) * e, float(t[1]) * e, float(t[2]) * e)
-	var t: Array = BATIMENTS.get(modele, [1.0, 1.0, 1.0])
-	return Vector3(float(t[0]), float(t[1]), float(t[2]))
+	if BATIMENTS.has(modele):
+		var t2: Array = BATIMENTS[modele]
+		return Vector3(float(t2[0]), float(t2[1]), float(t2[2]))
+	return mesurer(modele)
+
+## La boîte d'un modèle, en cases, mesurée sur son maillage.
+static func mesurer(modele: String) -> Vector3:
+	if _mesures.has(modele): return _mesures[modele]
+	var boite := Vector3.ONE
+	var chemin := chemin(modele)
+	if ResourceLoader.exists(chemin):
+		var m := FormesCarnage.maillage_kenney(chemin, 0.0, Vector3.AXIS_X, 0.0)
+		if m.get_surface_count() > 0:
+			var b := m.get_aabb().size
+			# Les modèles du client sont déjà en unités du jeu ; ceux des kits
+			# sont en unités Kenney, c'est-à-dire en cases.
+			boite = b / CASE if est_du_client(chemin) else b
+	_mesures[modele] = boite
+	return boite
+
+static func est_du_client(chemin_ou_modele: String) -> bool:
+	return chemin_ou_modele.contains("/piksl/") or chemin_ou_modele.begins_with("piksl/")
 
 ## Le facteur à appliquer au maillage brut pour le poser dans le monde : une
 ## unité Kenney = une case ; un modèle du client est déjà en unités du jeu.
 static func echelle(modele: String) -> float:
 	if PIKSL.has(modele):
 		return float((PIKSL[modele] as Dictionary).get("echelle", 1.0))
-	return CASE
+	return 1.0 if est_du_client(modele) else CASE
+
+## TOUS LES MODÈLES POSABLES, chemins `res://…`, variantes comprises. La liste
+## vient de `ModelesDuKit` (écrite par `outils/modeles.sh`) : `DirAccess` ne
+## voit pas les mêmes noms dans un paquet exporté. Le voxel est exclu — le
+## client l'a abandonné le 12/09.
+static var _catalogue: Array[String] = []
+
+static func catalogue() -> Array[String]:
+	if not _catalogue.is_empty(): return _catalogue
+	for m in ModelesDuKit.TOUS:
+		var nom := String(m)
+		if nom.begins_with("voxel/") or nom.begins_with("personnages/") or nom.begins_with("creatures/"):
+			continue
+		_catalogue.append("res://modeles/" + nom + ".glb")
+	return _catalogue
+
+## La famille d'un modèle, telle qu'elle paraît dans la liste déroulante :
+## `kenney/batiments`, `piksl`, `voitures`…
+static func famille(chemin_modele: String) -> String:
+	var nom := chemin_modele.trim_prefix("res://modeles/").trim_suffix(".glb")
+	var bouts := nom.split("/")
+	if bouts.size() >= 3: return "%s/%s" % [bouts[0], bouts[1]]
+	if bouts.size() == 2: return String(bouts[0])
+	return "divers"
+
+static func nom_court(chemin_modele: String) -> String:
+	return chemin_modele.get_file().get_basename()
 
 ## L'emprise d'un modèle en DEMI-cases, arrondie au-dessus, AVANT rotation.
 static func emprise(modele: String) -> Vector2i:
