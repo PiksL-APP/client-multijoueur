@@ -47,6 +47,7 @@ static func batir(ville: Ville2, zone: Rect2i = Rect2i(), passes: int = P_TOUT,
 	if passes & P_SOLS:
 		_poser_terrain(racine, ville, zone)
 		_poser_sols(racine, ville, zone)
+		_poser_soutenements(racine, ville, zone)
 		_poser_ouvrages(racine, ville, zone)
 	if passes & P_LOTS: _poser_lots(racine, ville, zone)
 	if passes & P_OBJETS: _poser_objets(racine, ville, zone)
@@ -134,6 +135,52 @@ static func _poser_ouvrages(racine: Node3D, ville: Ville2, zone: Rect2i) -> void
 		var centre := Vector3((float(coin.x) + float(t.x) * 0.5) * CASE, y,
 			(float(coin.y) + float(t.y) * 0.5) * CASE)
 		_tuile(racine, String(o["t"]), centre, int(o["q"]))
+
+# ------------------------------------------------------------------ les soutènements
+
+## LES MURS DE SOUTÈNEMENT (cahier § 4 : « béton en ville, rochers hors
+## ville »). Une case PLATE — une dalle, une rue, un lot — est un plateau : son
+## bord donne sur le vide dès que la voisine est plus basse. Sans mur, on voit
+## la tranche d'une dalle de deux centimètres flotter au-dessus du terrain, et
+## le quai d'un port a l'air posé sur l'eau.
+##
+## ⚠ LE MUR DESCEND JUSQU'À LA VOISINE, PAS D'UNE HAUTEUR FIXE. Contre un
+## terrain il s'arrête au sol ; contre la mer il plonge sous la nappe, sinon on
+## voit le dessous du quai à travers l'eau.
+const TEINTE_BETON := Color("#b4b2ab")
+const TEINTE_ROCHE := Color("#9b978e")
+const EPAISSEUR_MUR := 1.2
+const MUR_MINI := 0.35                 ## en dessous, ça ne se voit pas
+
+static func _poser_soutenements(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
+	for j in range(zone.position.y, zone.end.y):
+		for i in range(zone.position.x, zone.end.x):
+			var c := Vector2i(i, j)
+			if not ville.dedans(c) or not ville.plate(c): continue
+			var haut := ville.sol(c) + EPAISSEUR_TUILE
+			var en_ville := ville.matiere_de(c) == Ville2.M_DALLE
+			for d in CarteVille.COTES:
+				var v: Vector2i = c + d
+				var bas := _pied_du_mur(ville, v)
+				if haut - bas < MUR_MINI: continue
+				var centre := Vector3((float(i) + 0.5 + float(d.x) * 0.5) * CASE,
+					(haut + bas) * 0.5,
+					(float(j) + 0.5 + float(d.y) * 0.5) * CASE)
+				var dims := Vector3(CASE, haut - bas, EPAISSEUR_MUR) if d.x == 0 \
+					else Vector3(EPAISSEUR_MUR, haut - bas, CASE)
+				# Le mur mord d'un demi-pouce sous la dalle pour ne pas laisser
+				# de fente au raccord.
+				_boite(racine, dims, centre, TEINTE_BETON if en_ville else TEINTE_ROCHE)
+
+## Le pied d'un mur du côté de la case `v` : le sol si c'est de la terre, le
+## fond sous la nappe si c'est de l'eau, et très bas hors carte (un bord de
+## carte ne doit pas montrer sa tranche).
+static func _pied_du_mur(ville: Ville2, v: Vector2i) -> float:
+	if not ville.dedans(v):
+		return -6.0
+	if not ville.terre(v):
+		return minf(ville.sol(v), TerrainV2.NIVEAU_MER) - 0.6
+	return ville.sol(v)
 
 # ------------------------------------------------------------------ les lots
 

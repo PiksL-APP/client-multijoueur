@@ -33,7 +33,10 @@ const PALIER := Ville2.PALIER
 
 enum { OUTIL_SELECTION, OUTIL_ROUTE, OUTIL_LOT, OUTIL_OBJET, OUTIL_TERRAIN, OUTIL_EAU }
 const NOMS_OUTILS := ["Sélection", "Route", "Bâtiment", "Objet", "Terrain", "Eau"]
-const RACCOURCIS_OUTILS := ["S", "R", "B", "O", "T", "W"]
+## ⚠ DES CHIFFRES, PAS DES LETTRES. Les lettres servent à SE DÉPLACER
+## (ZQSD, comme dans le jeu et comme dans Godot) : tant que « S » choisissait
+## l'outil Sélection, avancer la caméra changeait d'outil.
+const RACCOURCIS_OUTILS := ["1", "2", "3", "4", "5", "6"]
 const GENRES_ROUTE := [Ville2.R_RUE, Ville2.R_AVENUE, Ville2.R_VOIE_RAPIDE]
 
 ## LES RACCOURCIS DE LA PALETTE : les props que les générateurs posent, avec
@@ -80,6 +83,10 @@ var _souris := Vector2.ZERO
 var _case := Vector2i(-1, -1)
 var _point := Vector3.ZERO              ## le point visé, au sol
 var _presse := false
+var _tire := false                      ## on déplace la sélection à la souris
+var _tire_depart := Vector3.ZERO        ## le point du sol sous le curseur au clic
+var _tire_ref := Vector2.ZERO           ## la position de l'objet (ou du lot) au clic
+var _tire_bouge := false                ## le seuil de 3 unités a été franchi
 
 var _pile: Array[String] = []
 var _refaire: Array[String] = []
@@ -245,12 +252,38 @@ func _essai() -> void:
 	_appliquer(true)
 	_appliquer(true)
 	print("[essai] terrain : palier %d en (37,36), %d en (39,39) — %s" % [_ville.palier(Vector2i(37, 36)), _ville.palier(Vector2i(39, 39)), _etat.text])
-	# La sélection : le lot posé, tourné puis effacé.
+	# LA SÉLECTION SE VÉRIFIE SUR UN OBJET QUI EXISTE, pas sur une case choisie
+	# d'avance : le banc visait (0,20) et ne trouvait rien, et c'est ce trou
+	# qui a laissé passer « la sélection ne marche pas » jusqu'au client.
 	_choisir_outil(OUTIL_SELECTION)
-	_case = Vector2i(0, 20)
-	_point = Vector3(1.0 * CASE, 0, 20.5 * CASE)
-	_appliquer(true)
-	print("[essai] sélection : %s — %s" % [str(_selection), _etat.text])
+	var cible: Dictionary = _ville.objets[_ville.objets.size() / 2]
+	var ox := float(cible["x"])
+	var oz := float(cible["z"])
+	_point = Vector3(ox + 1.0, 0, oz + 1.0)
+	_case = Vector2i(floori(_point.x / CASE), floori(_point.z / CASE))
+	_selectionner()
+	print("[essai] sélection objet : %s — %s" % [str(_selection), _etat.text])
+	# Le glissé : on attrape, on tire de deux cases, on relâche.
+	_armer_le_glisse()
+	_point += Vector3(2.0 * CASE, 0, 0)
+	_glisser()
+	_poser_le_glisse()
+	print("[essai] glissé : x %.1f -> %.1f (%s)" % [ox, float(cible["x"]), _etat.text])
+	_annuler()
+	print("[essai] glissé annulé : x %.1f" % float((_ville.objets[_ville.objets.size() / 2] as Dictionary)["x"]))
+	# Puis un bâtiment : sélection, rotation, effacement.
+	# On cherche un bâtiment dont le centre n'est pas encombré : un banc ou une
+	# voiture garée pile au milieu volerait le clic, et le banc dirait « raté »
+	# là où l'éditeur a bien fait son travail.
+	var essais := 0
+	for k in range(_ville.lots.size() / 2, _ville.lots.size()):
+		var centre := _ville.centre_du_lot(_ville.lots[k])
+		_point = centre
+		_case = Vector2i(floori(centre.x / CASE), floori(centre.z / CASE))
+		_selectionner()
+		essais += 1
+		if not _selection.is_empty() and String(_selection["genre"]) == "lot": break
+	print("[essai] sélection lot : %s en %d essai(s) — %s" % [str(_selection), essais, _etat.text])
 	_tourner_selection(1)
 	_supprimer_selection()
 	print("[essai] après suppression : %d lots — %s" % [_ville.lots.size(), _etat.text])
@@ -303,12 +336,25 @@ const C_DOCK := Color("#23283286")
 const C_TRAIT := Color("#3a4150")
 const C_ACCENT := Color("#2fe0d0")
 
+## ⚠ PAS LA POLICE DU PROJET. Celle-ci est une police à pixels : dessinée pour
+## les gros titres d'une borne d'arcade, elle est illisible en corps 13 et
+## impose des lignes hautes. Un logiciel se lit en petit et en dense — on
+## reprend donc les DEUX POLICES DU MENU (`ui/charte.gd`), la condensée demi-
+## grasse pour le courant et la grasse en capitales pour les entêtes.
+const POLICE := preload("res://polices/BarlowCondensed-SemiBold.ttf")
+const POLICE_GRASSE := preload("res://polices/BarlowCondensed-Bold.ttf")
+const CORPS := 16
+const CORPS_ENTETE := 13
+
 func _interface() -> void:
 	var couche := interface()
 	var racine := VBoxContainer.new()
 	racine.set_anchors_preset(Control.PRESET_FULL_RECT)
 	racine.add_theme_constant_override("separation", 0)
 	racine.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Le thème descend sur TOUT l'arbre : une seule ligne habille les boutons,
+	# les listes, les champs et les info-bulles.
+	racine.theme = _theme_logiciel()
 	couche.add_child(racine)
 
 	# ---- la barre d'outils du haut : le fichier et la carte
@@ -319,6 +365,9 @@ func _interface() -> void:
 	_titre = Label.new()
 	_titre.text = "  PIKS  ·  ÉDITEUR DE VILLE  "
 	_titre.add_theme_color_override("font_color", C_ACCENT)
+	_titre.add_theme_font_override("font", POLICE_GRASSE)
+	_titre.add_theme_font_size_override("font_size", CORPS)
+	_titre.add_theme_constant_override("font_spacing_glyph", 2)
 	hb.add_child(_titre)
 	hb.add_child(_separateur())
 	var etiquette_carte := Label.new()
@@ -331,6 +380,7 @@ func _interface() -> void:
 	for k in _cartes.item_count:
 		if _cartes.get_item_text(k) == _chemin.get_file().get_basename():
 			_cartes.select(k)
+	_cartes.focus_mode = Control.FOCUS_NONE
 	_cartes.item_selected.connect(_changer_de_carte)
 	hb.add_child(_cartes)
 	hb.add_child(_separateur())
@@ -416,6 +466,9 @@ func _interface() -> void:
 	noms_familles.sort()
 	for f in noms_familles:
 		_familles.add_item(String(f))
+	# ⚠ AUCUN FOCUS SUR LES LISTES. Une liste qui a le clavier avale les
+	# flèches : on croyait déplacer la caméra, on faisait défiler le catalogue.
+	_familles.focus_mode = Control.FOCUS_NONE
 	_familles.item_selected.connect(func(_k: int) -> void: _remplir_palette())
 	db.add_child(_familles)
 	_recherche = LineEdit.new()
@@ -426,6 +479,7 @@ func _interface() -> void:
 	_palette = ItemList.new()
 	_palette.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_palette.custom_minimum_size.y = 200
+	_palette.focus_mode = Control.FOCUS_NONE
 	_palette.item_selected.connect(_palette_choisie)
 	db.add_child(_palette)
 	db.add_child(_entete("Aperçu"))
@@ -455,7 +509,7 @@ func _interface() -> void:
 	_etat.add_theme_color_override("font_color", Color("#d7dde8"))
 	bb.add_child(_etat)
 	_aide = Label.new()
-	_aide.text = "  clic droit : tourner · molette : zoom · Maj+clic : déplacer"
+	_aide.text = "  ZQSD ou flèches : déplacer · clic droit : tourner · molette : zoom · A/E : pivoter · Suppr : effacer"
 	_aide.add_theme_color_override("font_color", Color("#8d95a6"))
 	bb.add_child(_aide)
 	racine.add_child(bas)
@@ -479,16 +533,59 @@ func _panneau(couleur: Color) -> PanelContainer:
 	p.mouse_filter = Control.MOUSE_FILTER_STOP
 	return p
 
-## ⚠ PAS DE `font_size` RÉDUIT SUR CES TITRES. La police du projet est une
-## police à pixels : sous sa taille de dessin, ses hautes lettres passent
-## au-dessus de la boîte de ligne et le titre sort rogné par le haut.
+## L'entête d'une section du dock : petites capitales espacées, comme les
+## titres de l'inspecteur de Godot. L'espacement se donne en pixels ici — le
+## moteur ne connaît que ça.
 func _entete(texte: String) -> Label:
 	var l := Label.new()
 	l.text = texte.to_upper()
 	l.add_theme_color_override("font_color", C_ACCENT)
-	l.custom_minimum_size.y = 24
+	l.add_theme_font_override("font", POLICE_GRASSE)
+	l.add_theme_font_size_override("font_size", CORPS_ENTETE)
+	l.add_theme_constant_override("font_spacing_glyph", 2)
+	l.custom_minimum_size.y = 22
 	l.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	return l
+
+## Le thème du logiciel : la police du menu, en corps de logiciel, et des
+## boutons plats qui s'éclairent au survol plutôt que de se dessiner un cadre.
+func _theme_logiciel() -> Theme:
+	var t := Theme.new()
+	t.default_font = POLICE
+	t.default_font_size = CORPS
+	var plat := func(fond: Color, bord: Color) -> StyleBoxFlat:
+		var f := StyleBoxFlat.new()
+		f.bg_color = fond
+		f.border_color = bord
+		f.set_border_width_all(1)
+		f.corner_radius_top_left = 3
+		f.corner_radius_top_right = 3
+		f.corner_radius_bottom_left = 3
+		f.corner_radius_bottom_right = 3
+		f.content_margin_left = 8
+		f.content_margin_right = 8
+		f.content_margin_top = 4
+		f.content_margin_bottom = 4
+		return f
+	# ⚠ PAS LA CASE À COCHER : un fond et un cadre lui donnent l'air d'un
+	# bouton, et on ne sait plus si elle est cochée ou enfoncée.
+	for classe in ["Button", "OptionButton"]:
+		t.set_stylebox("normal", classe, plat.call(Color("#2b313c"), C_TRAIT))
+		t.set_stylebox("hover", classe, plat.call(Color("#38404e"), Color("#4d5666")))
+		t.set_stylebox("pressed", classe, plat.call(Color("#14484a"), C_ACCENT))
+		t.set_stylebox("focus", classe, plat.call(Color(0, 0, 0, 0), Color(0, 0, 0, 0)))
+		t.set_color("font_color", classe, Color("#d7dde8"))
+		t.set_color("font_hover_color", classe, Color.WHITE)
+		t.set_color("font_pressed_color", classe, C_ACCENT)
+	t.set_color("font_color", "CheckBox", Color("#d7dde8"))
+	t.set_color("font_hover_color", "CheckBox", Color.WHITE)
+	t.set_stylebox("normal", "LineEdit", plat.call(Color("#181c23"), C_TRAIT))
+	t.set_stylebox("panel", "ItemList", plat.call(Color("#181c23"), C_TRAIT))
+	t.set_color("font_selected_color", "ItemList", Color("#06232a"))
+	t.set_stylebox("selected", "ItemList", plat.call(C_ACCENT, C_ACCENT))
+	t.set_stylebox("selected_focus", "ItemList", plat.call(C_ACCENT, C_ACCENT))
+	t.set_stylebox("normal", "RichTextLabel", plat.call(Color("#181c23"), C_TRAIT))
+	return t
 
 func _separateur() -> VSeparator:
 	return VSeparator.new()
@@ -851,6 +948,9 @@ func _unhandled_input(ev: InputEvent) -> void:
 			var avant := Vector3(-_camera.global_transform.basis.z.x, 0, -_camera.global_transform.basis.z.z).normalized()
 			_pivot -= (droite * m.relative.x - avant * m.relative.y) * _distance * 0.0016
 			_placer_camera()
+		elif _tire:
+			_viser()
+			_glisser()
 		else:
 			_viser()
 			_montrer_apercu()
@@ -888,11 +988,16 @@ func _unhandled_input(ev: InputEvent) -> void:
 					_glisse = b.pressed
 				elif b.pressed:
 					if _sur_l_interface(b.position): return
+					# Un clic dans la vue rend le clavier à la vue : sans ça,
+					# un champ resté actif avalait les flèches et le ZQSD.
+					get_viewport().gui_release_focus()
 					_viser()
 					_presse = true
 					_appliquer(true)
+					_armer_le_glisse()
 				else:
 					_presse = false
+					_poser_le_glisse()
 	elif ev is InputEventKey and (ev as InputEventKey).pressed:
 		_touche(ev as InputEventKey)
 
@@ -910,17 +1015,17 @@ func _touche(k: InputEventKey) -> void:
 			KEY_S: _enregistrer()
 		return
 	match k.keycode:
-		KEY_S: _choisir_outil(OUTIL_SELECTION)
-		KEY_R: _choisir_outil(OUTIL_ROUTE)
-		KEY_B: _choisir_outil(OUTIL_LOT)
-		KEY_O: _choisir_outil(OUTIL_OBJET)
-		KEY_T: _choisir_outil(OUTIL_TERRAIN)
-		KEY_W: _choisir_outil(OUTIL_EAU)
+		KEY_1, KEY_KP_1: _choisir_outil(OUTIL_SELECTION)
+		KEY_2, KEY_KP_2: _choisir_outil(OUTIL_ROUTE)
+		KEY_3, KEY_KP_3: _choisir_outil(OUTIL_LOT)
+		KEY_4, KEY_KP_4: _choisir_outil(OUTIL_OBJET)
+		KEY_5, KEY_KP_5: _choisir_outil(OUTIL_TERRAIN)
+		KEY_6, KEY_KP_6: _choisir_outil(OUTIL_EAU)
 		KEY_G:
 			_genre_route = (_genre_route + 1) % GENRES_ROUTE.size()
 			if _outil == OUTIL_ROUTE: _palette.select(_genre_route)
 			_dire("Genre de route : " + GENRES_ROUTE[_genre_route])
-		KEY_Q, KEY_A:
+		KEY_A:
 			_quarts = posmod(_quarts + 1, 4)
 			_tourner_selection(1)
 			_montrer_apercu()
@@ -952,13 +1057,19 @@ func _touche(k: InputEventKey) -> void:
 			_photographier()
 		KEY_HOME:
 			_tout_voir()
-		KEY_LEFT: _deplacer(Vector3(-1, 0, 0))
-		KEY_RIGHT: _deplacer(Vector3(1, 0, 0))
-		KEY_UP: _deplacer(Vector3(0, 0, -1))
-		KEY_DOWN: _deplacer(Vector3(0, 0, 1))
+		# La caméra se conduit au ZQSD ET aux flèches. Le déplacement suit les
+		# AXES DE L'ÉCRAN, pas ceux du monde : « avancer » va vers le haut de
+		# l'écran quelle que soit l'orientation de la caméra.
+		KEY_LEFT, KEY_Q: _deplacer(-1.0, 0.0)
+		KEY_RIGHT, KEY_D: _deplacer(1.0, 0.0)
+		KEY_UP, KEY_Z: _deplacer(0.0, 1.0)
+		KEY_DOWN, KEY_S: _deplacer(0.0, -1.0)
 
-func _deplacer(d: Vector3) -> void:
-	_pivot += d * _distance * 0.08
+func _deplacer(cote: float, avant: float) -> void:
+	var b := _camera.global_transform.basis
+	var droite := Vector3(b.x.x, 0, b.x.z).normalized()
+	var devant := Vector3(-b.z.x, 0, -b.z.z).normalized()
+	_pivot += (droite * cote + devant * avant) * _distance * 0.08
 	_placer_camera()
 
 # ------------------------------------------------------------------ les gestes
@@ -1120,25 +1231,50 @@ func _peindre_eau(eau: bool) -> void:
 
 # ------------------------------------------------------------------ la sélection
 
-func _selectionner() -> void:
-	_selection = {}
-	# Un objet à moins de 6 unités ?
+## ⚠ LE RAYON DE PIOCHE SUIT LA TAILLE DU MODÈLE. Six unités fixes, c'était
+## moins d'un tiers de conteneur : il fallait viser le nombril de l'objet pour
+## l'attraper, et le client a conclu que la sélection ne marchait pas. On prend
+## maintenant la demi-emprise réelle du modèle, plus deux unités de tolérance.
+func _rayon_pioche(o: Dictionary) -> float:
+	var large := float(o.get("w", 0.0))
+	var profond := float(o.get("d", 0.0))
+	if large <= 0.0 or profond <= 0.0:
+		# `taille()` répond en CASES, la ville compte en unités.
+		var t := KitVille2.taille(String(o["m"])) * CASE
+		large = t.x
+		profond = t.z
+	return clampf(maxf(large, profond) * 0.5 + 2.0, 4.0, 60.0)
+
+## ⚠ TROIS PASSES, DANS CET ORDRE. Le doigt sur un objet l'emporte ; sinon le
+## bâtiment sous le curseur ; sinon seulement un objet voisin, à la tolérance.
+## Sans cette hiérarchie, une voiture garée devant un immeuble prenait le clic
+## qui visait l'immeuble.
+func _objet_pique(large: bool) -> int:
 	var meilleur := -1
-	var dist := 36.0
+	var meilleure := INF
 	for k in _ville.objets.size():
 		var o: Dictionary = _ville.objets[k]
-		var d := Vector2(float(o["x"]), float(o["z"])).distance_squared_to(Vector2(_point.x, _point.z))
-		if d < dist:
-			dist = d
+		var r := _rayon_pioche(o)
+		if not large: r = maxf(r - 2.0, 2.0) * 0.6
+		var d := Vector2(float(o["x"]), float(o["z"])).distance_to(Vector2(_point.x, _point.z))
+		if d <= r and d < meilleure:
+			meilleure = d
 			meilleur = k
+	return meilleur
+
+func _selectionner() -> void:
+	_selection = {}
+	var meilleur := _objet_pique(false)
+	if meilleur < 0 and _ville.lot_sur(_case) < 0:
+		meilleur = _objet_pique(true)
 	if meilleur >= 0:
 		_selection = {"genre": "objet", "k": meilleur}
-		_dire("Objet : %s — Suppr efface, Q/E tourne." % String(_ville.objets[meilleur]["m"]))
+		_dire("Objet : %s — glisser déplace, Suppr efface, A/E tourne." % _nom_lisible(String(_ville.objets[meilleur]["m"])))
 	else:
 		var l := _ville.lot_sur(_case)
 		if l >= 0:
 			_selection = {"genre": "lot", "k": l}
-			_dire("Bâtiment : %s — Suppr efface, Q/E tourne." % String(_ville.lots[l]["m"]))
+			_dire("Bâtiment : %s — glisser déplace, Suppr efface, A/E tourne." % _nom_lisible(String(_ville.lots[l]["m"])))
 		elif _ville.carte.route(_case):
 			for k in _ville.routes.size():
 				if _case in Ville2.cases_de_route(_ville.routes[k]):
@@ -1147,6 +1283,77 @@ func _selectionner() -> void:
 					_dire("Route : %s « %s » (%d points) — Suppr efface." % [r["genre"], r["nom"], (r["points"] as Array).size()])
 					break
 	_montrer_cadre()
+
+## LE DÉPLACEMENT À LA SOURIS. Un clic sélectionne ; si la souris bouge
+## ensuite de plus de trois unités avant le relâchement, la sélection SUIT le
+## curseur. Rien n'est rebâti pendant le glissé — seul le cadre suit, et la
+## ville se refait une fois, au relâchement : sinon chaque pixel de souris
+## reconstruisait un morceau de seize cases.
+func _armer_le_glisse() -> void:
+	_tire = false
+	_tire_bouge = false
+	if _outil != OUTIL_SELECTION or _selection.is_empty(): return
+	match String(_selection["genre"]):
+		"objet":
+			var o: Dictionary = _ville.objets[int(_selection["k"])]
+			_tire_ref = Vector2(float(o["x"]), float(o["z"]))
+		"lot":
+			var l: Dictionary = _ville.lots[int(_selection["k"])]
+			_tire_ref = Vector2(float(l["x"]), float(l["y"]))
+		_:
+			return
+	_tire_depart = _point
+	_tire = true
+
+func _glisser() -> void:
+	if not _tire: return
+	var d := Vector2(_point.x - _tire_depart.x, _point.z - _tire_depart.z)
+	if not _tire_bouge and d.length() < 3.0: return
+	# ⚠ ON EMPILE AU PREMIER MOUVEMENT, pas au clic : sinon chaque clic de
+	# sélection laissait un « Annuler » qui ne défaisait rien. À cet instant
+	# la sélection n'a pas encore bougé — c'est le bon état à garder.
+	if not _tire_bouge: _empiler()
+	_tire_bouge = true
+	match String(_selection["genre"]):
+		"objet":
+			var o: Dictionary = _ville.objets[int(_selection["k"])]
+			o["x"] = snappedf(_tire_ref.x + d.x, 0.5)
+			o["z"] = snappedf(_tire_ref.y + d.y, 0.5)
+			_dire("Déplacement : x %.1f  z %.1f" % [float(o["x"]), float(o["z"])])
+		"lot":
+			# Un bâtiment se pose sur la trame : il se déplace en DEMI-CASES.
+			var l: Dictionary = _ville.lots[int(_selection["k"])]
+			l["x"] = int(_tire_ref.x) + roundi(d.x / DEMI)
+			l["y"] = int(_tire_ref.y) + roundi(d.y / DEMI)
+			_dire("Déplacement : demi-case %d, %d" % [int(l["x"]), int(l["y"])])
+	_montrer_cadre()
+
+func _poser_le_glisse() -> void:
+	if not _tire: return
+	_tire = false
+	if not _tire_bouge: return
+	_tire_bouge = false
+	var touchees: Array = []
+	match String(_selection["genre"]):
+		"objet":
+			var o: Dictionary = _ville.objets[int(_selection["k"])]
+			# L'objet reprend l'altitude de son nouveau sol, sauf s'il avait
+			# été posé à une hauteur voulue (`y_abs`) — un panneau au mur.
+			if o.has("y_abs"):
+				o["y_abs"] = TerrainV2.hauteur_en(_ville, float(o["x"]), float(o["z"])) + _decalage
+			touchees = [_case_de(_tire_ref.x, _tire_ref.y),
+				_case_de(float(o["x"]), float(o["z"]))]
+		"lot":
+			var l: Dictionary = _ville.lots[int(_selection["k"])]
+			touchees = Ville2.cases_du_lot(l)
+			for c in Ville2.cases_du_lot({"x": int(_tire_ref.x), "y": int(_tire_ref.y),
+					"w": int(l["w"]), "h": int(l["h"])}):
+				touchees.append(c)
+	_rebatir(touchees)
+	_dire("Déplacé. (Ctrl+Z annule)")
+
+func _case_de(x: float, z: float) -> Vector2i:
+	return Vector2i(floori(x / CASE), floori(z / CASE))
 
 func _montrer_cadre() -> void:
 	_cadre.visible = false

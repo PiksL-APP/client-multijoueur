@@ -216,12 +216,46 @@ static func catalogue() -> Array[String]:
 
 ## La famille d'un modèle, telle qu'elle paraît dans la liste déroulante :
 ## `kenney/batiments`, `piksl`, `voitures`…
+##
+## ⚠ LES GROS DOSSIERS SE COUPENT EN RAYONS. Le kit nature compte 330 modèles :
+## dans une seule liste, trouver un pin demandait de dérouler trente écrans. Au
+## delà de `SEUIL_RAYON` modèles, le dossier se découpe sur le PRÉFIXE du nom
+## (`tree_pineTallA` → `kenney/nature · tree`), qui est la façon dont Kenney
+## nomme ses familles. Les modèles sans préfixe tombent dans « divers ».
+const SEUIL_RAYON := 60
+
 static func famille(chemin_modele: String) -> String:
 	var nom := chemin_modele.trim_prefix("res://modeles/").trim_suffix(".glb")
 	var bouts := nom.split("/")
-	if bouts.size() >= 3: return "%s/%s" % [bouts[0], bouts[1]]
-	if bouts.size() == 2: return String(bouts[0])
-	return "divers"
+	var dossier := "divers"
+	if bouts.size() >= 3: dossier = "%s/%s" % [bouts[0], bouts[1]]
+	elif bouts.size() == 2: dossier = String(bouts[0])
+	if _gros.is_empty(): _compter()
+	if not _gros.has(dossier): return dossier
+	return "%s · %s" % [dossier, _rayon(String(bouts[bouts.size() - 1]))]
+
+static var _gros: Dictionary = {}
+
+static func _compter() -> void:
+	_gros = {"—": true}
+	var n: Dictionary = {}
+	for m in catalogue():
+		var nom := String(m).trim_prefix("res://modeles/").trim_suffix(".glb")
+		var bouts := nom.split("/")
+		var d := "divers"
+		if bouts.size() >= 3: d = "%s/%s" % [bouts[0], bouts[1]]
+		elif bouts.size() == 2: d = String(bouts[0])
+		n[d] = int(n.get(d, 0)) + 1
+	for d in n:
+		if int(n[d]) > SEUIL_RAYON: _gros[d] = true
+
+## Le rayon d'un nom de modèle : ce qui précède le premier `_`, ou le premier
+## `-` à défaut. `tree_pineTallA` → `tree` ; `road-bend-square` → `road`.
+static func _rayon(fichier: String) -> String:
+	var k := fichier.find("_")
+	if k < 0: k = fichier.find("-")
+	if k <= 0: return "divers"
+	return fichier.substr(0, k)
 
 static func nom_court(chemin_modele: String) -> String:
 	return chemin_modele.get_file().get_basename()
