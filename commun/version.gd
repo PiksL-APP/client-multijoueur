@@ -2,8 +2,8 @@ class_name Version
 extends RefCounted
 ## ÉCRIT PAR le workflow d'export — ne pas modifier à la main.
 
-const COMMIT := "fef8ea1"
-const DATE := "12/09/2026 16:34 UTC"
+const COMMIT := "7c70a09"
+const DATE := "12/09/2026 17:42 UTC"
 
 static func etiquette() -> String:
 	if COMMIT == "sources":
