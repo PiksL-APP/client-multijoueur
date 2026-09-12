@@ -116,6 +116,51 @@ const PROPS := {
 	"parasol": {"m": "batiments/detail-parasol-a", "h": 4.2},
 	"parasol_b": {"m": "batiments/detail-parasol-b", "h": 4.2},
 	"conteneur": {"m": "industriel/shipping-container-a", "h": 0.0},
+
+	# LE KIT NATURE AU COMPLET (demande du client, 12/09 : « le kit nature
+	# comprend énormément de choses, utilise-les »). Trois cents modèles sont
+	# arrivés dans `modeles/kenney/nature/` ; ceux-ci sont les NOMS COURTS que
+	# les générateurs et les raccourcis de l'éditeur emploient. Les autres
+	# restent accessibles par leur chemin — un objet peut toujours être posé
+	# par `res://…`, c'est ce que fait la palette.
+	"pin": {"m": "nature/tree_pineTallA", "h": 13.0},
+	"pin_b": {"m": "nature/tree_pineTallC", "h": 12.0},
+	"pin_rond": {"m": "nature/tree_pineRoundC", "h": 10.0},
+	"pin_petit": {"m": "nature/tree_pineSmallB", "h": 6.0},
+	"sapin": {"m": "nature/tree_cone_dark", "h": 9.0},
+	"arbre_automne": {"m": "nature/tree_default_fall", "h": 7.6},
+	"arbre_plateau": {"m": "nature/tree_plateau", "h": 8.2},
+	"arbre_fin": {"m": "nature/tree_thin", "h": 9.5},
+	"palmier_haut": {"m": "nature/tree_palmTall", "h": 11.0},
+	"palmier_courbe": {"m": "nature/tree_palmBend", "h": 9.0},
+	"cactus": {"m": "nature/cactus_tall", "h": 5.0},
+	"buisson_petit": {"m": "nature/plant_bushSmall", "h": 1.0},
+	"buisson_grand": {"m": "nature/plant_bushLarge", "h": 2.2},
+	"herbes": {"m": "nature/grass_large", "h": 1.4},
+	"touffe": {"m": "nature/grass", "h": 1.0},
+	"fleurs_rouges": {"m": "nature/flower_redA", "h": 0.9},
+	"fleurs_jaunes": {"m": "nature/flower_yellowB", "h": 0.9},
+	"fleurs_violettes": {"m": "nature/flower_purpleC", "h": 0.9},
+	"champignon": {"m": "nature/mushroom_red", "h": 1.0},
+	"champignons": {"m": "nature/mushroom_tanGroup", "h": 1.1},
+	"souche": {"m": "nature/stump_round", "h": 1.2},
+	"tronc": {"m": "nature/log", "h": 1.3},
+	"tas_de_bois": {"m": "nature/log_stack", "h": 2.0},
+	"rocher": {"m": "nature/rock_largeA", "h": 5.0},
+	"rocher_b": {"m": "nature/rock_largeD", "h": 5.6},
+	"rocher_haut": {"m": "nature/rock_tallA", "h": 8.5},
+	"caillou": {"m": "nature/rock_smallA", "h": 1.4},
+	"pierre_plate": {"m": "nature/stone_smallFlatA", "h": 0.8},
+	"cloture": {"m": "nature/fence_simple", "h": 1.6},
+	"cloture_planches": {"m": "nature/fence_planks", "h": 1.8},
+	"portail": {"m": "nature/fence_gate", "h": 2.2},
+	"pot": {"m": "nature/pot_large", "h": 1.6},
+	"statue": {"m": "nature/statue_head", "h": 6.0},
+	"obelisque": {"m": "nature/statue_obelisk", "h": 8.0},
+	"tente": {"m": "nature/tent_detailedClosed", "h": 3.0},
+	"feu_de_camp": {"m": "nature/campfire_stones", "h": 1.0},
+	"nenuphar": {"m": "nature/lily_large", "h": 0.4},
+	"escalier_pierre": {"m": "nature/cliff_steps_stone", "h": 0.0},
 }
 
 ## LES BATEAUX (cahier § 3) : modèle, longueur voulue en unités, et le tirant

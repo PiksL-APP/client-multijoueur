@@ -158,29 +158,77 @@ static func _poser_soutenements(racine: Node3D, ville: Ville2, zone: Rect2i) -> 
 			var c := Vector2i(i, j)
 			if not ville.dedans(c) or not ville.plate(c): continue
 			var haut := ville.sol(c) + EPAISSEUR_TUILE
-			var en_ville := ville.matiere_de(c) == Ville2.M_DALLE
+			# ⚠ LE BÉTON SOUS CE QUI EST BÂTI, les rochers ailleurs (cahier
+			# § 4) — et une terrasse en herbe reste de la ville : c'est la RUE
+			# ou le LOT qui décide, pas la pelouse.
+			var en_ville := ville.matiere_de(c) == Ville2.M_DALLE \
+				or ville.carte.route(c) or ville.lot_sur(c) >= 0
+			# ⚠ UNE RAMPE MONTE AU-DESSUS DE SA PROPRE CASE. `road-slant`
+			# grimpe d'un palier entre l'entrée et la sortie de la case : un
+			# mur arrêté à l'altitude de la case laissait, sur les DEUX CÔTÉS
+			# du lacet, un triangle ouvert par lequel on voyait le dessous de
+			# la colline. On monte donc le mur jusqu'au haut de la rampe, et
+			# on le construit en DEUX DEMI-MURS pour épouser la pente au lieu
+			# de faire une marche.
+			var vers_le_haut := _sens_de_la_rampe(ville, c)
 			for d in CarteVille.COTES:
 				var v: Vector2i = c + d
 				var bas := _pied_du_mur(ville, v)
 				if haut - bas < MUR_MINI: continue
-				var centre := Vector3((float(i) + 0.5 + float(d.x) * 0.5) * CASE,
-					(haut + bas) * 0.5,
-					(float(j) + 0.5 + float(d.y) * 0.5) * CASE)
-				var dims := Vector3(CASE, haut - bas, EPAISSEUR_MUR) if d.x == 0 \
-					else Vector3(EPAISSEUR_MUR, haut - bas, CASE)
-				# Le mur mord d'un demi-pouce sous la dalle pour ne pas laisser
-				# de fente au raccord.
-				_boite(racine, dims, centre, TEINTE_BETON if en_ville else TEINTE_ROCHE)
+				var teinte: Color = TEINTE_BETON if en_ville else TEINTE_ROCHE
+				if vers_le_haut == Vector2i.ZERO or d == -vers_le_haut:
+					_mur(racine, i, j, d, bas, haut, 1.0, 0.0, teinte)
+				elif d == vers_le_haut:
+					_mur(racine, i, j, d, bas, haut + PALIER, 1.0, 0.0, teinte)
+				else:
+					# Un côté qui longe la pente : deux demis, en escalier.
+					_mur(racine, i, j, d, bas, haut + PALIER * 0.25, 0.5, -0.25, teinte)
+					_mur(racine, i, j, d, bas, haut + PALIER * 0.75, 0.5, 0.25, teinte)
+
+## Un pan de mur le long du côté `d` de la case (i, j), de `bas` à `haut`.
+## `part` est la fraction de la case couverte, `glisse` le décalage du centre
+## le long de ce côté (en fraction de case) : c'est ce qui permet de poser deux
+## demi-murs à deux hauteurs pour suivre une rampe.
+static func _mur(racine: Node3D, i: int, j: int, d: Vector2i, bas: float, haut: float,
+		part: float, glisse: float, teinte: Color) -> void:
+	if haut - bas < MUR_MINI: return
+	var le_long := Vector3(float(d.y), 0.0, float(d.x)) * glisse * CASE
+	var centre := Vector3((float(i) + 0.5 + float(d.x) * 0.5) * CASE, (haut + bas) * 0.5,
+		(float(j) + 0.5 + float(d.y) * 0.5) * CASE) + le_long
+	var dims := Vector3(CASE * part, haut - bas, EPAISSEUR_MUR) if d.x == 0 \
+		else Vector3(EPAISSEUR_MUR, haut - bas, CASE * part)
+	_boite(racine, dims, centre, teinte)
+
+## Le sens dans lequel cette case de chaussée GRIMPE : la voisine en chaussée
+## qui est un palier plus haut, ou zéro si la case est plate.
+static func _sens_de_la_rampe(ville: Ville2, c: Vector2i) -> Vector2i:
+	if not ville.carte.route(c): return Vector2i.ZERO
+	var mien := ville.carte.palier(c)
+	for d in CarteVille.COTES:
+		var v: Vector2i = c + d
+		if ville.dedans(v) and ville.carte.route(v) and ville.carte.palier(v) > mien:
+			return d
+	return Vector2i.ZERO
 
 ## Le pied d'un mur du côté de la case `v` : le sol si c'est de la terre, le
 ## fond sous la nappe si c'est de l'eau, et très bas hors carte (un bord de
 ## carte ne doit pas montrer sa tranche).
+## ⚠ LE MUR DESCEND JUSQU'AU COIN LE PLUS BAS DE LA VOISINE, pas jusqu'à son
+## altitude de case. Le terrain est un maillage LISSÉ : ses coins sont soudés
+## à la moyenne des quatre cases, si bien que la nappe passe sous l'altitude
+## nominale dès qu'elle plonge. Un mur arrêté à `sol(v)` laissait une fente
+## ouverte sous le lacet — on voyait le DESSOUS de la colline, en bleu sombre,
+## entre la chaussée et l'herbe.
 static func _pied_du_mur(ville: Ville2, v: Vector2i) -> float:
 	if not ville.dedans(v):
 		return -6.0
 	if not ville.terre(v):
 		return minf(ville.sol(v), TerrainV2.NIVEAU_MER) - 0.6
-	return ville.sol(v)
+	var bas := ville.sol(v)
+	for dj in 2:
+		for di in 2:
+			bas = minf(bas, TerrainV2.hauteur_coin(ville, v.x + di, v.y + dj))
+	return bas - 0.25
 
 # ------------------------------------------------------------------ les lots
 
@@ -214,8 +262,20 @@ static func _poser_objets(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 		# ⚠ L'ALTITUDE VIENT DU SOL RÉEL. Sur une case plate c'est le palier de
 		# la tuile ; sur du terrain c'est le maillage interpolé — sinon un arbre
 		# planté sur une dune s'enfonce d'un côté et flotte de l'autre.
-		var y := (float(ville.carte.palier(c)) * PALIER + EPAISSEUR_TUILE) if ville.plate(c) \
-			else TerrainV2.hauteur_en(ville, x, z)
+		# ⚠ TROIS SOLS POSSIBLES, ET PAS UN DE MOINS.
+		#   • une CHAUSSÉE est une tuile du kit, posée au palier ARRONDI ;
+		#   • une autre case plate (dalle, lot) suit son altitude EXACTE — la
+		#     promenade du bord de mer descend par quarts de palier, et l'objet
+		#     posé dessus au palier arrondi flottait d'une demi-marche : c'est
+		#     le « certains cailloux volent » du client ;
+		#   • le reste suit le maillage lissé.
+		var y := 0.0
+		if ville.carte.route(c):
+			y = float(ville.carte.palier(c)) * PALIER + EPAISSEUR_TUILE
+		elif ville.plate(c):
+			y = ville.sol(c) + EPAISSEUR_TUILE
+		else:
+			y = TerrainV2.hauteur_en(ville, x, z)
 		# `y_abs` : une altitude IMPOSÉE, pour ce qui n'est pas posé au sol —
 		# le bar et les lampadaires d'une jetée sont sur son tablier.
 		if o.has("y_abs"): y = float(o["y_abs"])

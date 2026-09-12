@@ -41,12 +41,20 @@ const GENRES_ROUTE := [Ville2.R_RUE, Ville2.R_AVENUE, Ville2.R_VOIE_RAPIDE]
 
 ## LES RACCOURCIS DE LA PALETTE : les props que les générateurs posent, avec
 ## leur hauteur réglée. Ils ouvrent la liste, avant le catalogue complet.
-const RACCOURCIS := ["lampadaire", "lampadaire_parc", "lampadaire_double", "feu", "stop", "plaque",
-	"arbre", "arbre_oak", "arbre_rond", "arbre_petit", "palmier", "buisson", "banc", "poubelle",
-	"benne", "borne", "cone", "monument", "parasol", "parasol_b", "auvent", "auvent_large",
-	"conteneur", "pelouse",
-	"voitures/sedan", "voitures/sedan-sports", "voitures/taxi", "voitures/van", "voitures/police",
-	"voitures/ambulance", "voitures/firetruck", "voitures/garbage-truck", "voitures/truck"]
+##
+## ⚠ PLUS DE LISTE TENUE À LA MAIN. Elle en comptait trente, figés ; le jour où
+## `KitVille2.PROPS` en a gagné trente-cinq de plus (le kit nature), l'éditeur
+## n'en montrait toujours que trente. Elle se DÉDUIT maintenant du kit.
+static func raccourcis() -> Array:
+	var l: Array = KitVille2.PROPS.keys()
+	l.sort()
+	l.append("pelouse")
+	for v in KitVille2.VOITURES:
+		l.append(v)
+	for v in ["voitures/police", "voitures/ambulance", "voitures/firetruck",
+			"voitures/garbage-truck", "voitures/truck"]:
+		if not l.has(v): l.append(v)
+	return l
 const FAMILLE_TOUT := "— tout —"
 const FAMILLE_RACCOURCIS := "★ raccourcis"
 
@@ -802,7 +810,7 @@ func _remplir_palette() -> void:
 	var cherche := _recherche.text.strip_edges().to_lower()
 	var source: Array = []
 	if f == FAMILLE_RACCOURCIS:
-		source = RACCOURCIS.duplicate()
+		source = raccourcis()
 	else:
 		source = KitVille2.catalogue().duplicate()
 		if f != FAMILLE_TOUT:
