@@ -113,6 +113,32 @@ var _cartes: OptionButton
 var _familles: OptionButton
 var _recherche: LineEdit
 var _libre: CheckBox
+var _aimant: OptionButton
+
+## LES PAS D'AIMANT. « libre » vaut zéro : rien n'est arrondi, l'objet se pose
+## là où pointe la souris. Les autres sont les trames du jeu — le décimètre pour
+## l'ajustement fin, le demi-mètre (l'ancien réglage en dur), le mètre, puis la
+## demi-case et la case, qui sont les trames du kit.
+const PAS_AIMANT := [
+	{"nom": "libre", "pas": 0.0},
+	{"nom": "0,1", "pas": 0.1},
+	{"nom": "0,5", "pas": 0.5},
+	{"nom": "1", "pas": 1.0},
+	{"nom": "demi-case", "pas": Ville2.DEMI},
+	{"nom": "case", "pas": Ville2.CASE},
+]
+const PAS_DEFAUT := 2                   ## 0,5 — ce qui se faisait avant
+
+## Le pas d'aimant courant, en unités. Zéro : pose libre.
+func pas_d_aimant() -> float:
+	if _aimant == null: return 0.5
+	var k := clampi(_aimant.selected, 0, PAS_AIMANT.size() - 1)
+	return float((PAS_AIMANT[k] as Dictionary)["pas"])
+
+## Arrondit une coordonnée au pas courant — ou la laisse telle quelle.
+func _aimanter(valeur: float) -> float:
+	var pas := pas_d_aimant()
+	return valeur if pas <= 0.0 else snappedf(valeur, pas)
 var _apercu3d: SubViewport
 var _apercu_noeud: MeshInstance3D
 var _apercu_nom: Label
@@ -465,9 +491,25 @@ func _interface() -> void:
 		gb.add_child(b)
 		_boutons_outils.append(b)
 	gb.add_child(_entete("Réglages"))
+	# ⚠ DEUX RÉGLAGES DISTINCTS, ET ILS L'ÉTAIENT MAL. « Pose libre » ne levait
+	# que les REFUS (rue, eau, lot occupé) ; la POSITION, elle, restait aimantée
+	# au demi-mètre quoi qu'il arrive. D'où « je n'arrive pas à le bouger au
+	# pixel près même en libre » (client, 12/09) : deux besoins différents
+	# derrière une seule case à cocher.
+	#
+	# Désormais : une liste pour le PAS D'AIMANT (jusqu'à « libre », où rien
+	# n'arrondit), et une case pour le CHEVAUCHEMENT, qu'on coche quand on veut
+	# délibérément faire mordre deux pièces l'une sur l'autre.
+	_aimant = OptionButton.new()
+	for f in PAS_AIMANT:
+		_aimant.add_item(String(f["nom"]))
+	_aimant.selected = PAS_DEFAUT
+	_aimant.focus_mode = Control.FOCUS_NONE
+	_aimant.tooltip_text = "Le pas auquel les poses et les déplacements s'arrondissent."
+	gb.add_child(_ligne_reglage("Aimant", _aimant, ""))
 	_libre = CheckBox.new()
-	_libre.text = "Pose libre"
-	_libre.tooltip_text = "Ignore les refus : rue, eau, lot déjà posé."
+	_libre.text = "Chevauchement"
+	_libre.tooltip_text = "Autorise la pose sur une rue, l'eau ou un lot déjà posé,\net laisse deux pièces se recouvrir."
 	_libre.focus_mode = Control.FOCUS_NONE
 	gb.add_child(_libre)
 	gb.add_child(_ligne_reglage("Pinceau", _regle_rayon(), "cases"))
@@ -1083,6 +1125,15 @@ func _touche(k: InputEventKey) -> void:
 			KEY_Z: _annuler()
 			KEY_Y: _refaire_geste()
 			KEY_S: _enregistrer()
+			# ⚠ AVEC Ctrl, LES FLÈCHES POUSSENT LA SÉLECTION, PAS LA CAMÉRA.
+			# C'est le seul moyen d'être VRAIMENT au pixel près : à cette
+			# distance la souris ne peut pas viser un dixième d'unité, le
+			# clavier si. Le pas est celui de l'aimant, ou un dixième quand
+			# l'aimant est sur « libre ».
+			KEY_LEFT, KEY_Q: _pousser(-1, 0)
+			KEY_RIGHT, KEY_D: _pousser(1, 0)
+			KEY_UP: _pousser(0, -1)
+			KEY_DOWN: _pousser(0, 1)
 		return
 	match k.keycode:
 		KEY_1, KEY_KP_1: _choisir_outil(OUTIL_SELECTION)
@@ -1130,10 +1181,37 @@ func _touche(k: InputEventKey) -> void:
 		# La caméra se conduit au ZQSD ET aux flèches. Le déplacement suit les
 		# AXES DE L'ÉCRAN, pas ceux du monde : « avancer » va vers le haut de
 		# l'écran quelle que soit l'orientation de la caméra.
+		# ⚠ AVEC Ctrl, LES FLÈCHES POUSSENT LA SÉLECTION, PAS LA CAMÉRA. C'est
+		# le seul moyen d'être VRAIMENT au pixel près : la souris ne peut pas
+		# viser un dixième d'unité à cette distance, le clavier si. Le pas est
+		# celui de l'aimant, ou un dixième quand il est sur « libre ».
 		KEY_LEFT, KEY_Q: _deplacer(-1.0, 0.0)
 		KEY_RIGHT, KEY_D: _deplacer(1.0, 0.0)
 		KEY_UP, KEY_Z: _deplacer(0.0, 1.0)
 		KEY_DOWN, KEY_S: _deplacer(0.0, -1.0)
+
+## Pousse la sélection d'un pas, à la touche. Rien sans sélection.
+func _pousser(dx: int, dz: int) -> void:
+	if _selection.is_empty(): return
+	var pas := pas_d_aimant()
+	if pas <= 0.0: pas = 0.1
+	_empiler()
+	match String(_selection["genre"]):
+		"objet":
+			var o: Dictionary = _ville.objets[int(_selection["k"])]
+			o["x"] = float(o.get("x", 0.0)) + float(dx) * pas
+			o["z"] = float(o.get("z", 0.0)) + float(dz) * pas
+			_dire("x %.2f  z %.2f  (pas %.2f)" % [float(o["x"]), float(o["z"]), pas])
+		"lot":
+			# Un bâtiment vit sur la trame des demi-cases : il s'y pousse.
+			var l: Dictionary = _ville.lots[int(_selection["k"])]
+			l["x"] = int(l["x"]) + dx
+			l["y"] = int(l["y"]) + dz
+			_dire("demi-case %d, %d" % [int(l["x"]), int(l["y"])])
+		_:
+			return
+	_rebatir([])
+	_montrer_cadre()
 
 func _deplacer(cote: float, avant: float) -> void:
 	var b := _camera.global_transform.basis
@@ -1262,7 +1340,7 @@ func _poser_objet() -> void:
 		_dire("Impossible ici : une rue, l'eau ou un bâtiment.")
 		return
 	_empiler()
-	var o := {"m": m, "x": snappedf(_point.x, 0.5), "z": snappedf(_point.z, 0.5),
+	var o := {"m": m, "x": _aimanter(_point.x), "z": _aimanter(_point.z),
 		"r": PI * 0.5 * float(_quarts), "h": 0.0}
 	if absf(_decalage) > 0.01:
 		o["y_abs"] = TerrainV2.hauteur_en(_ville, float(o["x"]), float(o["z"])) + _decalage
@@ -1387,9 +1465,9 @@ func _glisser() -> void:
 	match String(_selection["genre"]):
 		"objet":
 			var o: Dictionary = _ville.objets[int(_selection["k"])]
-			o["x"] = snappedf(_tire_ref.x + d.x, 0.5)
-			o["z"] = snappedf(_tire_ref.y + d.y, 0.5)
-			_dire("Déplacement : x %.1f  z %.1f" % [float(o["x"]), float(o["z"])])
+			o["x"] = _aimanter(_tire_ref.x + d.x)
+			o["z"] = _aimanter(_tire_ref.y + d.y)
+			_dire("Déplacement : x %.2f  z %.2f" % [float(o["x"]), float(o["z"])])
 		"lot":
 			# Un bâtiment se pose sur la trame : il se déplace en DEMI-CASES.
 			var l: Dictionary = _ville.lots[int(_selection["k"])]

@@ -87,8 +87,21 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 				# Les voies rapides sont bordées de glissières.
 				if ville.genre_de_route(c) == Ville2.R_VOIE_RAPIDE and CarteVille.BARRIERES.has(nom):
 					_tuile(racine, String(CarteVille.BARRIERES[nom]), centre, int(f[1]))
-			else:
+			elif ville.matiere_de(c) == Ville2.M_DALLE:
 				_tuile(racine, _dalle_de(ville, c), centre, 0, TEINTE_DALLE)
+			# ⚠ SINON, ON NE POSE RIEN — ET SURTOUT PAS DU BÉTON. `plate()` est
+			# vrai dès qu'un LOT occupe la case : jusqu'ici, poser un bâtiment
+			# faisait donc apparaître une dalle de trottoir sous lui, quelle que
+			# soit la matière du sol. Une maison de banlieue se retrouvait sur
+			# un socle de béton au milieu de sa pelouse, et dans l'éditeur le
+			# moindre rocher posé bétonnait son carré (« quand je place un
+			# cliff, le sol se transforme en béton, j'aimerais que le sol ne
+			# change pas », client, 12/09).
+			#
+			# `plate()` veut dire « cette case est un plateau, le terrain s'y
+			# soude à plat » — pas « cette case est pavée ». Seule la MATIÈRE
+			# dit ce qu'on voit, et le maillage du terrain la rend déjà, à la
+			# bonne couleur et à la bonne hauteur.
 
 ## LES TUILES DE CAMPAGNE (demande du client, 12/09 : « road-bend plutôt que
 ## road-bend-sidewalk sur l'herbe »). Le kit a deux dessins pour le même
@@ -177,8 +190,26 @@ static func _poser_ouvrages(racine: Node3D, ville: Ville2, zone: Rect2i) -> void
 const TEINTE_BETON := Color("#b4b2ab")
 const TEINTE_ROCHE := Color("#9b978e")
 const EPAISSEUR_MUR := 1.2
-## De combien une tuile déborde de sa case pour couvrir le biseau de sa voisine.
-const RECOUVREMENT := 1.0
+## ⚠ DE COMBIEN UNE TUILE DÉBORDE DE SA CASE — ET POURQUOI IL LE FAUT MÊME
+## SANS BISEAU. Mesuré sur les .glb : la face haute d'une tuile de route va
+## exactement de −0,5 à +0,5, sans chanfrein. Deux tuiles voisines se touchent
+## donc au millième près, et pourtant un LISERÉ CLAIR d'un ou deux pixels reste
+## visible à chaque joint (« je vois toujours des écarts entre les routes »,
+## client, 12/09).
+##
+## Ce n'est PAS un trou : en peignant le sol sous la chaussée en rouge vif, pas
+## un pixel rouge n'apparaît. C'est la couture entre DEUX MAILLAGES SÉPARÉS :
+## chaque tuile est son propre `MeshInstance3D`, donc son bord est anticrénelé
+## pour son propre compte, et l'arête commune se retrouve mélangée deux fois.
+## Aucune valeur de sol ne peut corriger ça — il faut que les tuiles SE
+## CHEVAUCHENT.
+##
+## Le chevauchement est minuscule (0,3 unité sur 20) et ne peut pas faire
+## clignoter : `DECALAGE_DAMIER` descend une case sur deux d'un cheveu, si bien
+## que le débord d'une tuile passe toujours SOUS le dessus plat de sa voisine
+## au lieu d'être coplanaire avec lui.
+const RECOUVREMENT := 1.015
+const DECALAGE_DAMIER := 0.006
 ## ⚠ LE SEUIL DOIT ÊTRE PLUS GRAND QUE L'ÉPAISSEUR D'UNE TUILE. À 0,35 il était
 ## plus PETIT que les 0,4 d'une dalle du kit : sur un sol parfaitement plat,
 ## chaque case se trouvait « plus haute » que sa voisine et se bordait d'un
@@ -679,8 +710,11 @@ static func _tuile(parent: Node3D, nom: String, ou: Vector3, quarts: int, teinte
 	# tuile passe SOUS le dessus plat de sa voisine : le joint disparaît, sans
 	# rien déplacer et sans z-fighting — le chanfrein est plus bas que la face
 	# qui le couvre.
+	# Une case sur deux descend d'un cheveu : voir `DECALAGE_DAMIER`.
+	var damier := float((posmod(roundi(ou.x / CASE) + roundi(ou.z / CASE), 2)))
 	n.transform = Transform3D(Basis(Vector3.UP, PI * 0.5 * float(quarts)).scaled(
-		Vector3.ONE * CASE * RECOUVREMENT), ou)
+		Vector3.ONE * CASE * RECOUVREMENT),
+		ou - Vector3(0.0, damier * DECALAGE_DAMIER, 0.0))
 	n.set_meta("tuile", nom)
 	_noter(chemin)
 	parent.add_child(n)

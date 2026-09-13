@@ -32,6 +32,14 @@ extends RefCounted
 ## `class_name` neuf n'existe pas dans l'export web.
 const ANGLES := preload("res://commun/ville2/angles.gd")
 
+## Les règles communes à tous les quartiers : rien sur la chaussée, et pas
+## une pelouse nue. Appelées en dernier (voir `commun/ville2/proprete.gd`).
+const PROPRETE := preload("res://commun/ville2/proprete.gd")
+
+## Les panneaux publicitaires (cahier § 7) : toits, pignons aveugles, bords
+## d'axe. Brique commune — l'affichage est une règle de ville, pas de quartier.
+const AFFICHES := preload("res://commun/ville2/affiches.gd")
+
 const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
 
@@ -137,6 +145,7 @@ static func generer(graine := 4, taille := Vector2i(40, 40), curseurs := {}) -> 
 	v.graine = graine
 	var alea := RandomNumberGenerator.new()
 	alea.seed = graine
+	Lotisseur.oublier_les_sacs()
 
 	_terrain(v)
 	_quartiers(v)
@@ -153,6 +162,8 @@ static func generer(graine := 4, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_le_parc(v, alea)
 	_les_jardins(v, alea)
 	_details(v, alea)
+	AFFICHES.semer(v, alea, 150.0, [], 4)
+	PROPRETE.finir(v, alea)
 	return v
 
 # ------------------------------------------------------------------ 1. le terrain
@@ -324,6 +335,18 @@ static func _le_pole(v: Ville2, alea: RandomNumberGenerator) -> void:
 		v.ajouter_lot(m, ECOLE.position.x * 2, ECOLE.position.y * 2, e.x, e.y, 2, "ecole")
 		v.ajouter_lieu("ecole", (float(ECOLE.position.x) + 2.0) * CASE,
 			(float(ECOLE.position.y) + 1.5) * CASE, {"nom": "École des Tilleuls"})
+	# ⚠ LES REPÈRES DU CLIENT, ET PAS SEULEMENT DES BOÎTES DU KIT. L'église et
+	# la supérette sont des modèles faits pour ce jeu (`modeles/piksl/`) : un
+	# quartier qui n'en porte aucun se lit comme du Kenney tout nu. L'église
+	# marque le cœur du village, la supérette la route d'entrée — c'est là
+	# qu'on s'arrête en rentrant.
+	_poser_repere(v, "piksl/eglise", Vector2i(24, 28), 2, "eglise", "Église du Verger")
+	_poser_repere(v, "piksl/supermarket", Vector2i(16, 32), 0, "supermarche",
+		"Supérette des Tilleuls")
+	# La cabine téléphonique, au coin de la place : le détail qui date le
+	# quartier.
+	v.ajouter_objet("cabine", 15.4 * CASE, 32.8 * CASE, PI)
+
 	# LE TERRAIN DE SPORT : une dalle et une clôture autour. Le kit n'a pas de
 	# terrain tout fait — c'est le grillage qui le dessine.
 	var t := Rect2i(ECOLE.position.x + 6, ECOLE.position.y - 4, 6, 4)
@@ -554,6 +577,30 @@ static func _details(v: Ville2, alea: RandomNumberGenerator) -> void:
 					v.ajouter_objet("nature/grass_large", (float(i) + alea.randf()) * CASE,
 						(float(j) + alea.randf()) * CASE, alea.randf() * TAU, 0.70)
 		_clore(v, Rect2i(coin, Vector2i(3, 3)), alea, 1.9, "urbain/construction-fence")
+
+## ⚠ UN REPÈRE CHERCHE SA PLACE, IL N'ABANDONNE PAS AU PREMIER REFUS. Premier
+## jet : une seule case essayée, et si elle était prise le bâtiment n'existait
+## pas — l'église du quartier n'est jamais apparue une seule fois, sans que rien
+## ne le signale. On s'écarte donc en SPIRALE CARRÉE autour du point voulu, et
+## on essaie les quatre orientations. Ce n'est qu'après avoir tout essayé qu'on
+## renonce, et alors c'est un vrai manque de place, pas un hasard.
+static func _poser_repere(v: Ville2, modele: String, depart: Vector2i, quarts: int,
+		genre: String, nom: String, portee := 7) -> bool:
+	for tour in [quarts, (quarts + 2) % 4, (quarts + 1) % 4, (quarts + 3) % 4]:
+		var e := KitVille2.emprise_tournee(modele, tour)
+		for rayon in range(0, portee):
+			for dj in range(-rayon, rayon + 1):
+				for di in range(-rayon, rayon + 1):
+					if maxi(absi(di), absi(dj)) != rayon: continue
+					var c := depart + Vector2i(di, dj)
+					if c.x < 1 or c.y < 1: continue
+					if not Lotisseur.terrain_libre(v, c.x * 2, c.y * 2, e): continue
+					v.ajouter_lot(modele, c.x * 2, c.y * 2, e.x, e.y, tour, genre)
+					v.ajouter_lieu(genre, (float(c.x) + float(e.x) * 0.25) * CASE,
+						(float(c.y) + float(e.y) * 0.25) * CASE, {"nom": nom})
+					return true
+	push_warning("repère « %s » : pas de place" % nom)
+	return false
 
 ## Un grillage autour d'un rectangle de cases : un panneau par case de bord.
 static func _clore(v: Ville2, r: Rect2i, alea: RandomNumberGenerator, hauteur: float,

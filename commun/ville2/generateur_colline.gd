@@ -38,6 +38,14 @@ extends RefCounted
 ## par `preload` — un `class_name` neuf n'existe pas dans l'export web.
 const ANGLES := preload("res://commun/ville2/angles.gd")
 
+## Les règles communes à tous les quartiers : rien sur la chaussée, et pas
+## une pelouse nue. Appelées en dernier (voir `commun/ville2/proprete.gd`).
+const PROPRETE := preload("res://commun/ville2/proprete.gd")
+
+## Les panneaux publicitaires (cahier § 7) : toits, pignons aveugles, bords
+## d'axe. Brique commune — l'affichage est une règle de ville, pas de quartier.
+const AFFICHES := preload("res://commun/ville2/affiches.gd")
+
 const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
 const PALIER := Ville2.PALIER
@@ -159,6 +167,7 @@ static func generer(graine := 3, taille := Vector2i(40, 40), curseurs := {}) -> 
 	v.graine = graine
 	var alea := RandomNumberGenerator.new()
 	alea.seed = graine
+	Lotisseur.oublier_les_sacs()
 
 	_terrain(v)
 	_quartiers(v)
@@ -183,6 +192,13 @@ static func generer(graine := 3, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_sentiers(v, alea)
 	_nature(v, alea)
 	_details(v, alea)
+	# ⚠ LES REPÈRES DU CLIENT. Ce sont ses propres modèles, faits pour ce
+	# jeu : un quartier qui n'en porte aucun se lit comme du Kenney tout nu.
+	_poser_repere(v, "piksl/eglise", Vector2i(18, 30), 0, "eglise", "Église du Coteau")
+	_poser_repere(v, "piksl/supermarket", Vector2i(8, 33), 0, "supermarche", "Supérette des Terrasses")
+	v.rasteriser()
+	AFFICHES.semer(v, alea, 130.0, [], 3)
+	PROPRETE.finir(v, alea)
 	return v
 
 # ------------------------------------------------------------------ le terrain
@@ -550,3 +566,24 @@ static func _details(v: Ville2, alea: RandomNumberGenerator) -> void:
 					(float(t["j1"]) + 0.95) * CASE, 0.0)
 			v.ajouter_lieu("belvedere", milieu * CASE, (float(t["j1"]) + 0.5) * CASE,
 				{"nom": "Belvédère du Coteau", "y": y})
+
+## Cherche une place pour un repère du client, en spirale autour du point voulu
+## et dans les quatre orientations. Même règle partout : un repère qui abandonne
+## au premier refus n'apparaît jamais, et rien ne le dit.
+static func _poser_repere(v: Ville2, modele: String, depart: Vector2i, quarts: int,
+		genre: String, nom: String, portee := 9) -> bool:
+	for tour in [quarts, (quarts + 2) % 4, (quarts + 1) % 4, (quarts + 3) % 4]:
+		var e := KitVille2.emprise_tournee(modele, tour)
+		for rayon in range(0, portee):
+			for dj in range(-rayon, rayon + 1):
+				for di in range(-rayon, rayon + 1):
+					if maxi(absi(di), absi(dj)) != rayon: continue
+					var c := depart + Vector2i(di, dj)
+					if c.x < 1 or c.y < 1: continue
+					if not Lotisseur.terrain_libre(v, c.x * 2, c.y * 2, e): continue
+					v.ajouter_lot(modele, c.x * 2, c.y * 2, e.x, e.y, tour, genre)
+					v.ajouter_lieu(genre, (float(c.x) + float(e.x) * 0.25) * CASE,
+						(float(c.y) + float(e.y) * 0.25) * CASE, {"nom": nom})
+					return true
+	push_warning("repère « %s » : pas de place" % nom)
+	return false

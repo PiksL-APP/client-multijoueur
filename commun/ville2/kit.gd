@@ -161,6 +161,11 @@ const PROPS := {
 	"feu_de_camp": {"m": "nature/campfire_stones", "h": 0.45},
 	"nenuphar": {"m": "nature/lily_large", "h": 0.15},
 	"escalier_pierre": {"m": "nature/cliff_steps_stone", "h": 0.0},
+
+	# LES OBJETS DU CLIENT. Une cabine téléphonique fait 2,6 m de haut ; le
+	# modèle est déjà en unités de jeu, mais on impose la hauteur pour qu'il
+	# suive la règle commune.
+	"cabine": {"m": "piksl/cabine_telephonique", "h": 2.60},
 }
 
 ## LES BATEAUX (cahier § 3) : modèle, longueur voulue en unités, et le tirant
@@ -197,6 +202,27 @@ const PIKSL := {
 	"piksl/firestation": {"taille": [23.8, 15.1, 18.0], "echelle": 1.0},
 	"piksl/eglise": {"taille": [14.6, 20.3, 24.6], "echelle": 1.0},
 	"piksl/garage_de_peinture": {"taille": [8.32, 4.71, 6.75], "echelle": 2.4},
+	# ⚠ MESURÉS LE 12/09, ET JUSQUE-LÀ INUTILISÉS. Le client a fait ces modèles
+	# et aucun générateur ne les posait : « tu n'utilises aucun supermarket,
+	# firestation, autre gare, église, hôpital, compacteur de voiture, cabine
+	# téléphonique ». Ils sont maintenant dans les témoins — repères de la
+	# ville (§ 3 : « hôtel de ville / commissariat / hôpital / caserne
+	# visibles »), église et supérette en banlieue, compacteur à la casse.
+	"piksl/compacteur_voitures": {"taille": [16.1, 8.63, 12.0], "echelle": 1.0},
+	"piksl/cabine_telephonique": {"taille": [1.08, 3.14, 1.08], "echelle": 1.0},
+}
+
+## Les repères du client : les bâtiments qu'on reconnaît de loin et qui donnent
+## son nom à un endroit. Ils ne se tirent jamais au hasard — chacun est posé à
+## sa place par le générateur du quartier.
+const REPERES := {
+	"gare": "piksl/gare",
+	"hopital": "piksl/hospital",
+	"supermarche": "piksl/supermarket",
+	"caserne": "piksl/firestation",
+	"eglise": "piksl/eglise",
+	"garage": "piksl/garage_de_peinture",
+	"compacteur": "piksl/compacteur_voitures",
 }
 
 ## La taille d'un modèle EN CASES (largeur X, hauteur Y, profondeur Z).
@@ -270,17 +296,43 @@ const FAMILLES_DE_TERRAIN := ["cliff_", "ground_", "bridge_", "path_", "platform
 	"crops_dirt"]
 const ECHELLE_NATURE := 3.2
 
+## ⚠⚠ ET LE KIT PAVILLONS A EXACTEMENT LE MÊME DÉFAUT. Je ne l'avais pas vu :
+## la règle ci-dessus ne regardait que `nature/`, et le client a fini par
+## rencontrer une clôture `pavillons/fence` posée à l'échelle du kit — CINQ
+## MÈTRES CINQUANTE de haut, un mur d'enceinte au milieu des jardins (« certaines
+## fences sont encore énormes », 12/09, capture à l'appui).
+##
+## Mesuré : le kit pavillons est bâti sur une tuile de 0,4 unité (`driveway-long`
+## 0,36 × 0,4, `path-long` 0,2 × 0,4), et ses accessoires suivent cette trame —
+## pas la case. Seuls ses BÂTIMENTS et ses pièces de SOL sont à l'échelle de la
+## case : une maison `building-type-*` y fait 1 à 1,8 unité, c'est-à-dire 20 à
+## 36 unités de jeu, et c'est juste.
+##
+## Le facteur vient des rapports mesurés (clôture 0,27 → 1,10 m, soit 4,1 ;
+## jardinière 0,177 → 0,80, soit 4,5). Les ARBRES en sont exclus : à 5, un
+## `tree-large` ferait moins de quatre mètres. Ils restent à l'échelle de la
+## case, où ils en font quinze — un grand arbre.
+const FAMILLES_PAVILLONS := ["building-type", "driveway", "path", "tree"]
+const ECHELLE_PAVILLONS := 5.0
+
 ## Le facteur d'un modèle posé SANS hauteur voulue (`h` nul) : comme
-## `echelle()`, sauf pour les accessoires du kit nature.
+## `echelle()`, sauf pour les accessoires des kits dessinés à l'échelle d'un
+## personnage plutôt qu'à celle de la case.
 static func echelle_libre(chemin_ou_modele: String) -> float:
 	var e := echelle(chemin_ou_modele)
 	if e != CASE: return e
-	if not chemin_ou_modele.contains("nature/"): return e
 	var nom := chemin_ou_modele.get_file().trim_suffix(".glb")
-	if nom == "": nom = chemin_ou_modele.get_slice("nature/", 1)
-	for f in FAMILLES_DE_TERRAIN:
-		if nom.begins_with(f): return e
-	return ECHELLE_NATURE
+	if chemin_ou_modele.contains("nature/"):
+		if nom == "": nom = chemin_ou_modele.get_slice("nature/", 1)
+		for f in FAMILLES_DE_TERRAIN:
+			if nom.begins_with(f): return e
+		return ECHELLE_NATURE
+	if chemin_ou_modele.contains("pavillons/"):
+		if nom == "": nom = chemin_ou_modele.get_slice("pavillons/", 1)
+		for f in FAMILLES_PAVILLONS:
+			if nom.begins_with(f): return e
+		return ECHELLE_PAVILLONS
+	return e
 
 ## TOUS LES MODÈLES POSABLES, chemins `res://…`, variantes comprises. La liste
 ## vient de `ModelesDuKit` (écrite par `outils/modeles.sh`) : `DirAccess` ne

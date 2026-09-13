@@ -34,6 +34,14 @@ extends RefCounted
 ## `class_name` neuf n'existe pas dans l'export web.
 const ANGLES := preload("res://commun/ville2/angles.gd")
 
+## Les règles communes à tous les quartiers : rien sur la chaussée, et pas
+## une pelouse nue. Appelées en dernier (voir `commun/ville2/proprete.gd`).
+const PROPRETE := preload("res://commun/ville2/proprete.gd")
+
+## Les panneaux publicitaires (cahier § 7) : toits, pignons aveugles, bords
+## d'axe. Brique commune — l'affichage est une règle de ville, pas de quartier.
+const AFFICHES := preload("res://commun/ville2/affiches.gd")
+
 const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
 
@@ -107,6 +115,7 @@ static func generer(graine := 5, taille := Vector2i(40, 40), curseurs := {}) -> 
 	v.graine = graine
 	var alea := RandomNumberGenerator.new()
 	alea.seed = graine
+	Lotisseur.oublier_les_sacs()
 
 	_terrain(v, alea)
 	_quartiers(v)
@@ -124,6 +133,8 @@ static func generer(graine := 5, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_les_conteneurs(v, alea)
 	_la_friche(v, alea)
 	_details(v, alea)
+	AFFICHES.semer(v, alea, 110.0, [], 6)
+	PROPRETE.finir(v, alea)
 	return v
 
 # ------------------------------------------------------------------ 1. le terrain
@@ -233,8 +244,10 @@ static func _la_casse(v: Ville2, alea: RandomNumberGenerator) -> void:
 	for j in range(r.position.y, r.end.y):
 		for i in range(r.position.x, r.end.x):
 			v.poser_matiere(Vector2i(i, j), Ville2.M_TERRE)
-	# Le hangar du compacteur, au coin.
-	var m := "industriel/building-l"
+	# ⚠ LE COMPACTEUR EST UN MODÈLE DU CLIENT, ET C'EST LUI QUI NOMME LA CASSE.
+	# Le cahier le cite explicitement (§ 3 : « casse auto (compacteur) ») et il
+	# dormait dans `modeles/piksl/` sans qu'aucun générateur le pose.
+	var m := "piksl/compacteur_voitures"
 	var e := KitVille2.emprise_tournee(m, 2)
 	if Lotisseur.terrain_libre(v, r.position.x * 2, r.position.y * 2, e):
 		v.ajouter_lot(m, r.position.x * 2, r.position.y * 2, e.x, e.y, 2, "casse")
@@ -364,6 +377,12 @@ static func _details(v: Ville2, alea: RandomNumberGenerator) -> void:
 	for i in range(2, v.taille.x - 1, 5):
 		v.ajouter_objet("res://modeles/kenney/urbain/electricity-pole.glb",
 			(float(i) + 0.5) * CASE, (float(J_RAIL) - 1.2) * CASE, 0.0, 11.0)
+	# LA CASERNE ET LE GARAGE DE PEINTURE, deux repères du client, sur la
+	# rocade : les services de la zone (cahier § 8).
+	for f in [["piksl/firestation", Vector2i(19, 13), "caserne", "Caserne de la Zone"],
+			["piksl/garage_de_peinture", Vector2i(9, 25), "garage", "Garage du Fret"],
+			["piksl/supermarket", Vector2i(6, 21), "supermarche", "Cash du Fret"]]:
+		_poser_repere(v, String(f[0]), f[1], 0, String(f[2]), String(f[3]))
 	# Les camions garés le long de la rocade.
 	for k in 8:
 		var m: String = KitVille2.VOITURES[alea.randi() % KitVille2.VOITURES.size()]
@@ -374,6 +393,28 @@ static func _details(v: Ville2, alea: RandomNumberGenerator) -> void:
 		var x := (2.0 + alea.randf() * 36.0) * CASE
 		var z := (float(J_DESSERTE) + alea.randf_range(0.75, 1.6)) * CASE
 		v.ajouter_objet("benne" if alea.randf() < 0.6 else "cone", x, z, alea.randf() * TAU)
+
+## Cherche une place pour un repère du client, en spirale autour du point voulu
+## et dans les quatre orientations. Voir le même commentaire dans le générateur
+## de banlieue : un repère qui abandonne au premier refus n'apparaît jamais, et
+## rien ne le dit.
+static func _poser_repere(v: Ville2, modele: String, depart: Vector2i, quarts: int,
+		genre: String, nom: String, portee := 8) -> bool:
+	for tour in [quarts, (quarts + 2) % 4, (quarts + 1) % 4, (quarts + 3) % 4]:
+		var e := KitVille2.emprise_tournee(modele, tour)
+		for rayon in range(0, portee):
+			for dj in range(-rayon, rayon + 1):
+				for di in range(-rayon, rayon + 1):
+					if maxi(absi(di), absi(dj)) != rayon: continue
+					var c := depart + Vector2i(di, dj)
+					if c.x < 1 or c.y < 1: continue
+					if not Lotisseur.terrain_libre(v, c.x * 2, c.y * 2, e): continue
+					v.ajouter_lot(modele, c.x * 2, c.y * 2, e.x, e.y, tour, genre)
+					v.ajouter_lieu(genre, (float(c.x) + float(e.x) * 0.25) * CASE,
+						(float(c.y) + float(e.y) * 0.25) * CASE, {"nom": nom})
+					return true
+	push_warning("repère « %s » : pas de place" % nom)
+	return false
 
 ## Un grillage autour d'un rectangle de cases, avec un portail : une case du
 ## bord tirée au sort reste ouverte, sinon on n'entre pas.

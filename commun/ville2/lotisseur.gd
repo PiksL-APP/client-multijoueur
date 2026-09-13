@@ -11,6 +11,12 @@ extends RefCounted
 ## Tout se compte en DEMI-CASES : une demi-case est une tuile du jeu, et un lot
 ## qui tombe sur cette grille bloque des tuiles entières.
 
+## ⚠ UN `preload`, PAS LE NOM DE CLASSE. `class_name` ne se résout qu'à travers
+## `.godot/global_script_class_cache.cfg`, que `godot --headless --import` NE
+## RÉÉCRIT PAS : une classe toute neuve compile au bureau et tombe en ligne.
+## Piège déjà payé avec `GenerateurColline`, et repayé ici le jour même.
+const VARIER := preload("res://commun/ville2/varier.gd")
+
 ## Le quart de tour qui met la FAÇADE d'un modèle (son −Z) vers ce côté.
 const VERS := {"n": 0, "e": 3, "s": 2, "o": 1}
 
@@ -107,13 +113,26 @@ static func terrain_libre(v: Ville2, hx: int, hy: int, e: Vector2i) -> bool:
 
 ## Le modèle dont la FAÇADE (sa largeur une fois tournée) tient dans
 ## `longueur` demi-cases.
+## ⚠ ON TIRE DANS UN SAC, PAS AVEC UN DÉ. `candidats[randi() % taille]` tire
+## AVEC REMISE : sur vingt maisons prises parmi seize modèles, sept sortent en
+## double et cinq ne sortent jamais. C'est exactement ce que le client a vu —
+## « tu as l'air de toujours utiliser les mêmes maisons avec les mêmes
+## variantes » (12/09). `VarierVille2` tire SANS remise et ne rebat qu'une fois
+## le sac vide : les seize modèles passent avant qu'aucun ne revienne.
+##
+## Un sac par liste de choix, gardé d'un appel à l'autre : c'est ce qui fait
+## que la rue entière alterne, et pas seulement un pâté.
+static var _sacs: Dictionary = {}
+
+static func oublier_les_sacs() -> void:
+	_sacs.clear()
+
 static func modele_qui_tient(choix: Array, q: int, longueur: int, alea: RandomNumberGenerator) -> String:
-	var candidats: Array = []
-	for m in choix:
-		if KitVille2.emprise_tournee(String(m), q).x <= longueur:
-			candidats.append(m)
-	if candidats.is_empty(): return ""
-	return String(candidats[alea.randi() % candidats.size()])
+	var cle := "|".join(PackedStringArray(choix))
+	if not _sacs.has(cle): _sacs[cle] = VARIER.new(choix, alea)
+	var sac: RefCounted = _sacs[cle]
+	return sac.tirer_si(func(m: String) -> bool:
+		return KitVille2.emprise_tournee(m, q).x <= longueur)
 
 static func libre(occupe: Dictionary, hx: int, hy: int, e: Vector2i) -> bool:
 	for b in e.y:

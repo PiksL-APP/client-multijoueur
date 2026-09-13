@@ -17,6 +17,14 @@ extends RefCounted
 ## par `preload` — un `class_name` neuf n'existe pas dans l'export web.
 const ANGLES := preload("res://commun/ville2/angles.gd")
 
+## Les règles communes à tous les quartiers : rien sur la chaussée, et pas
+## une pelouse nue. Appelées en dernier (voir `commun/ville2/proprete.gd`).
+const PROPRETE := preload("res://commun/ville2/proprete.gd")
+
+## Les panneaux publicitaires (cahier § 7) : toits, pignons aveugles, bords
+## d'axe. Brique commune — l'affichage est une règle de ville, pas de quartier.
+const AFFICHES := preload("res://commun/ville2/affiches.gd")
+
 const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
 
@@ -42,6 +50,7 @@ static func generer(graine := 1, taille := Vector2i(40, 40), curseurs := {}) -> 
 	v.graine = graine
 	var alea := RandomNumberGenerator.new()
 	alea.seed = graine
+	Lotisseur.oublier_les_sacs()
 	var pas := int(curseurs.get("pas", 5))            # une rue toutes les 5 cases
 	var densite := float(curseurs.get("densite", 1.0))
 
@@ -145,6 +154,7 @@ static func generer(graine := 1, taille := Vector2i(40, 40), curseurs := {}) -> 
 			_pate_d_immeubles(v, r, alea, densite)
 	_la_place(v, place, alea)
 	_la_gare(v, gare, alea)
+	_les_services(v, alea)
 	v.rasteriser()
 
 	# 6. Les détails de rue.
@@ -152,6 +162,7 @@ static func generer(graine := 1, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_voitures_garees(v, alea, place, gare)
 	_panneaux_pub(v, alea, avenues_x, avenues_y, pas)
 	v.rasteriser()
+	PROPRETE.finir(v, alea)
 	return v
 
 ## Les morceaux d'une rue de 0 à `longueur − 1`, une fois ôtés les `trous`
@@ -352,6 +363,51 @@ static func _la_place(v: Ville2, place: Rect2i, alea: RandomNumberGenerator) -> 
 			v.ajouter_objet("banc", ax, (float(place.end.y) - 0.5) * CASE, PI)
 			v.ajouter_objet("poubelle", ax + 5.0, (float(place.position.y) + 0.5) * CASE, 0.0)
 
+## ⚠ LES SERVICES DE LA VILLE (cahier § 3 : « hôtel de ville / commissariat /
+## hôpital / caserne visibles »). Ce sont des MODÈLES DU CLIENT, faits pour ce
+## jeu, et aucun générateur ne les posait : « tu n'utilises aucun supermarket,
+## firestation, autre gare, église, hôpital » (12/09). Un centre-ville qui n'a
+## que des boîtes du kit se lit comme une maquette ; ce sont ces trois-là qui
+## lui donnent une adresse.
+##
+## Ils sont posés APRÈS les pâtés, donc sur ce qui reste : chacun cherche sa
+## place à partir d'un coin voulu et s'écarte jusqu'à trouver. Un repère qui ne
+## tient nulle part est simplement sauté — mieux vaut un hôpital manquant qu'un
+## hôpital à cheval sur une avenue.
+const SERVICES := [
+	{"m": "piksl/hospital", "ou": Vector2i(6, 6), "genre": "hopital", "nom": "Hôpital Central"},
+	{"m": "piksl/firestation", "ou": Vector2i(30, 7), "genre": "caserne",
+		"nom": "Caserne des Docks"},
+	{"m": "piksl/supermarket", "ou": Vector2i(7, 30), "genre": "supermarche",
+		"nom": "Supermarché du Centre"},
+]
+
+static func _les_services(v: Ville2, _alea: RandomNumberGenerator) -> void:
+	for f in SERVICES:
+		var m := String(f["m"])
+		var depart: Vector2i = f["ou"]
+		for q in [0, 2]:
+			var e := KitVille2.emprise_tournee(m, q)
+			var pose := false
+			# On s'écarte du point voulu en spirale carrée, jusqu'à six cases.
+			for rayon in range(0, 7):
+				for dj in range(-rayon, rayon + 1):
+					for di in range(-rayon, rayon + 1):
+						if maxi(absi(di), absi(dj)) != rayon: continue
+						var c := depart + Vector2i(di, dj)
+						if c.x < 1 or c.y < 1: continue
+						if not Lotisseur.terrain_libre(v, c.x * 2, c.y * 2, e): continue
+						v.ajouter_lot(m, c.x * 2, c.y * 2, e.x, e.y, q, String(f["genre"]))
+						v.ajouter_lieu(String(f["genre"]),
+							(float(c.x) + float(e.x) * 0.25) * CASE,
+							(float(c.y) + float(e.y) * 0.25) * CASE,
+							{"nom": String(f["nom"])})
+						pose = true
+						break
+					if pose: break
+				if pose: break
+			if pose: break
+
 # ------------------------------------------------------------------ la gare
 
 ## La gare : le grand hall du kit face à la rue, les quais derrière, la voie
@@ -509,21 +565,34 @@ const PUB_DEBORD := 1.55
 ## pâté ne suffisait pas : deux pâtés voisins en posaient deux à quinze mètres
 ## l'un de l'autre, de part et d'autre du même carrefour. On garde donc une
 ## distance FRANCHE entre deux affiches, quel que soit le pâté.
+## ⚠ ET IL EN FAUT MOINS EN VILLE, PAS PLUS (« il y a peut-être trop de
+## panneaux publicitaires en ville et pas assez ailleurs, essaye de
+## diversifier », client, 12/09). Le centre est dense : à écart égal, il y tient
+## mécaniquement quatre fois plus d'affiches qu'en périphérie, et la ville finit
+## tapissée. On double donc l'écart au cœur et on garde l'écart normal ailleurs,
+## de sorte que la DENSITÉ d'affiches soit à peu près la même partout.
 const PUB_ECART := 96.0                ## presque cinq cases
+const PUB_ECART_COEUR := 190.0         ## au cœur des affaires, le double
+## Le rayon, depuis le centre de la carte, où s'applique l'écart doublé.
+const PUB_COEUR := 11.0 * CASE
 
 ## ⚠ UN PANNEAU PAR PÂTÉ, PAS UN PAR IMMEUBLE. Sans cette règle, chaque
 ## immeuble d'une même rue prenait le sien : trois panneaux côte à côte sur
 ## trois toits voisins, et la ville se lisait comme un bord de périphérique.
-## Vrai si aucune affiche n'est plantée à moins de `PUB_ECART` d'ici.
-static func _assez_loin(poses: Array, x: float, z: float) -> bool:
+## Vrai si aucune affiche n'est plantée trop près d'ici — l'écart exigé étant
+## plus grand au cœur de la ville qu'en périphérie.
+static func _assez_loin(poses: Array, x: float, z: float, milieu: Vector2) -> bool:
+	var ecart := PUB_ECART_COEUR if Vector2(x, z).distance_to(milieu) < PUB_COEUR \
+		else PUB_ECART
 	for p in poses:
-		if (p as Vector2).distance_to(Vector2(x, z)) < PUB_ECART: return false
+		if (p as Vector2).distance_to(Vector2(x, z)) < ecart: return false
 	return true
 
 static func _panneaux_pub(v: Ville2, alea: RandomNumberGenerator, _avenues_x: Array, _avenues_y: Array,
 		pas: int = 5) -> void:
 	var image := 0
 	var poses: Array = []              ## où l'on a déjà planté, pour les espacer
+	var milieu := Vector2(float(v.taille.x), float(v.taille.y)) * 0.5 * CASE
 	var pris: Dictionary = {}          ## une pose par case visée : jamais deux face à face
 	var toit_du_pate: Dictionary = {}  ## un panneau de toit par pâté
 	var mur_du_pate: Dictionary = {}   ## un panneau mural par pâté
@@ -544,7 +613,7 @@ static func _panneaux_pub(v: Ville2, alea: RandomNumberGenerator, _avenues_x: Ar
 		var pate := Vector2i(floori(float(ici.x) / float(pas)), floori(float(ici.y) / float(pas)))
 		if v.genre_de_route(devant) == Ville2.R_AVENUE and t.y >= PUB_TOIT_MIN and t.y <= PUB_TOIT_MAX \
 				and not pris.has(devant) and not toit_du_pate.has(pate) \
-				and _assez_loin(poses, centre.x, centre.z) and alea.randf() < 0.55:
+				and _assez_loin(poses, centre.x, centre.z, milieu) and alea.randf() < 0.55:
 			pris[devant] = true
 			toit_du_pate[pate] = true
 			poses.append(Vector2(centre.x, centre.z))
@@ -569,7 +638,7 @@ static func _panneaux_pub(v: Ville2, alea: RandomNumberGenerator, _avenues_x: Ar
 			if face == ici: continue
 			if not v.carte.route(face) or v.lot_sur(face) >= 0: continue
 			if pris.has(face) or mur_du_pate.has(pate): continue
-			if not _assez_loin(poses, centre.x, centre.z): continue
+			if not _assez_loin(poses, centre.x, centre.z, milieu): continue
 			if alea.randf() > 0.45: continue
 			pris[face] = true
 			mur_du_pate[pate] = true

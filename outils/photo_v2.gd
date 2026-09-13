@@ -15,6 +15,10 @@ extends Node3D
 const COLLINE := preload("res://commun/ville2/generateur_colline.gd")
 const BANLIEUE := preload("res://commun/ville2/generateur_banlieue.gd")
 const INDUSTRIE := preload("res://commun/ville2/generateur_industrie.gd")
+const VIEILLE := preload("res://commun/ville2/generateur_vieille_ville.gd")
+const CHAUD := preload("res://commun/ville2/generateur_chaud.gd")
+const CAMPUS := preload("res://commun/ville2/generateur_campus.gd")
+const BIDONVILLE := preload("res://commun/ville2/generateur_bidonville.gd")
 
 var _images := 0
 var _attendre := 10
@@ -73,6 +77,14 @@ func _ready() -> void:
 		ville = BANLIEUE.generer(int(_arg("graine", "4")))
 	elif _arg("temoin", "centre") == "industrie":
 		ville = INDUSTRIE.generer(int(_arg("graine", "5")))
+	elif _arg("temoin", "centre") == "vieille":
+		ville = VIEILLE.generer(int(_arg("graine", "6")))
+	elif _arg("temoin", "centre") == "chaud":
+		ville = CHAUD.generer(int(_arg("graine", "7")))
+	elif _arg("temoin", "centre") == "campus":
+		ville = CAMPUS.generer(int(_arg("graine", "8")))
+	elif _arg("temoin", "centre") == "bidonville":
+		ville = BIDONVILLE.generer(int(_arg("graine", "9")))
 	else:
 		ville = GenerateurCentre.generer(int(_arg("graine", "1")))
 	var json := _arg("json", "")
