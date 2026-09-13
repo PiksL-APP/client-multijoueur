@@ -43,6 +43,7 @@ func _arg(nom: String, defaut: String) -> String:
 
 func _ready() -> void:
 	_sortie = _arg("sortie", _sortie)
+	_pas = float(_arg("pas", str(PAS)))
 	var amb: Array = MatieresCarnage.ambiance()
 	for n in amb: add_child(n)
 	MatieresCarnage.regler_heure(amb[0], amb[1], amb[2], 0.08)
@@ -88,29 +89,44 @@ func _ready() -> void:
 		RenduVille2.poser_objet(self, m, _ou(k + 2, par_rang), 0.0)
 		print("%-34s posé à l'échelle %.2f" % [m, KitVille2.echelle_libre(m)])
 
-	var large := float(par_rang) * PAS
-	var fond := float(rangs) * PAS
+	var large := float(par_rang) * _pas
+	var fond := float(rangs) * _pas
 	var cam := Camera3D.new()
 	cam.far = 2000.0
 	cam.fov = 34.0
 	add_child(cam)
-	var vise := Vector3(large * 0.5 - PAS * 0.5, 1.4, fond * 0.5 - PAS * 0.5)
+	var vise := Vector3(large * 0.5 - _pas * 0.5, 1.4, fond * 0.5 - _pas * 0.5)
 	var recul := maxf(large, fond) * 1.15
+	# ⚠ LA VUE DE DESSUS (`--dessus=1`) SERT À UNE SEULE CHOSE, ET ELLE EST
+	# INDISPENSABLE : LIRE L'ORIENTATION D'UNE TUILE DE SOL. Une tuile de
+	# chemin vue de biais ne dit pas dans quel sens elle court, et c'est
+	# exactement ce qu'on a raté la première fois — « aucune flèche ne se
+	# suit » (client, 12/09), parce que la rotation avait été devinée.
+	if _arg("dessus", "") != "":
+		cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+		cam.size = maxf(large, fond) * 1.05
+		cam.look_at_from_position(vise + Vector3(0, 400.0, 0.01), vise, Vector3.UP)
+		return
 	cam.look_at_from_position(vise + Vector3(0, recul * 0.42, recul), vise, Vector3.UP)
 
 ## L'écart entre deux modèles de la planche, en mètres.
+## ⚠ RÉGLABLE (`--pas=`). Trois mètres conviennent aux accessoires ; un pavillon
+## du kit fait sept mètres de large et deux voisins se chevauchent, on ne voit
+## plus quelle façade appartient à quel modèle. Pour une planche de BÂTIMENTS,
+## `--pas=10`.
 const PAS := 3.0
+var _pas := PAS
 
 ## Où se pose le n-ième modèle de la planche.
 func _ou(n: int, par_rang: int) -> Vector3:
-	return Vector3(float(n % par_rang) * PAS, 0.0, float(n / par_rang) * PAS)
+	return Vector3(float(n % par_rang) * _pas, 0.0, float(n / par_rang) * _pas)
 
 ## Un damier d'un mètre : sans lui on ne sait pas ce qu'on regarde. Les cases
 ## d'un mètre donnent l'échelle d'un coup d'œil — un champignon tient dans un
 ## quart de case, une clôture dans une.
 func _damier(par_rang: int, rangs: int) -> void:
-	var large := int(float(par_rang) * PAS) + 4
-	var profond := int(float(rangs) * PAS) + 4
+	var large := int(float(par_rang) * _pas) + 4
+	var profond := int(float(rangs) * _pas) + 4
 	var sommets := PackedVector3Array()
 	var couleurs := PackedColorArray()
 	var indices := PackedInt32Array()

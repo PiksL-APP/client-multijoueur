@@ -41,6 +41,9 @@ const ANGLES := preload("res://commun/ville2/angles.gd")
 ## Les règles communes à tous les quartiers : rien sur la chaussée, et pas
 ## une pelouse nue. Appelées en dernier (voir `commun/ville2/proprete.gd`).
 const PROPRETE := preload("res://commun/ville2/proprete.gd")
+const ATLAS := preload("res://commun/ville2/atlas.gd")
+const CHEMINS := preload("res://commun/ville2/chemins.gd")
+const TEINTES := preload("res://commun/ville2/teintes.gd")
 
 ## Les panneaux publicitaires (cahier § 7) : toits, pignons aveugles, bords
 ## d'axe. Brique commune — l'affichage est une règle de ville, pas de quartier.
@@ -198,6 +201,10 @@ static func generer(graine := 3, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_poser_repere(v, "piksl/supermarket", Vector2i(8, 33), 0, "supermarche", "Supérette des Terrasses")
 	v.rasteriser()
 	AFFICHES.semer(v, alea, 130.0, [], 3)
+	# ⚠ AUCUNE TOITURE VERTE (client, 13/09). Voir `atlas.gd` : la bande
+	# verte de l'atlas est repeinte par bâtiment, murs inchangés.
+	TEINTES.couvrir(v, alea, "", ATLAS.MIDI)
+	TEINTES.peindre(v, alea, "", TEINTES.PIERRE_DU_SUD, 0.00)
 	PROPRETE.finir(v, alea)
 	return v
 
@@ -482,6 +489,11 @@ static func _sentiers(v: Ville2, alea: RandomNumberGenerator) -> void:
 			var m := "nature/ground_pathStraight"
 			if j == int(bas["route"]) - 1: m = "nature/ground_pathEnd"
 			v.ajouter_objet(m, (float(i) + 0.5) * CASE, (float(j) + 0.5) * CASE, 0.0)
+			# ⚠ APLATIE. Ces tuiles sont dessinées pour être ENFONCÉES (leur
+			# boîte est sous le niveau zéro) ; reposées base à zéro par le
+			# chargeur, elles ressortent d'un mètre et le sentier devient une
+			# dalle posée sur l'herbe. Voir `chemins.gd`.
+			v.objets[v.objets.size() - 1]["aplat"] = CHEMINS.APLAT
 			# Deux ou trois pierres plates le long du sentier.
 			if alea.randf() < 0.4:
 				v.ajouter_objet("nature/stone_smallFlatB",

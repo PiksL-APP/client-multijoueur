@@ -186,10 +186,39 @@ static func cases_de_route(r: Dictionary) -> Array:
 
 # ------------------------------------------------------------------ lots
 
+## ⚠ LE REGISTRE DES DEMI-CASES DÉJÀ BÂTIES, TENU À JOUR À CHAQUE POSE.
+##
+## `lot_sur()` ne sait que ce que la DERNIÈRE rastérisation a écrit. Une passe
+## qui pose cent maisons d'affilée sans rastériser entre deux — c'est le cas de
+## tous les générateurs — interroge donc une carte d'avant la première maison :
+## elle répond « libre » partout, et les maisons s'encastrent les unes dans les
+## autres. C'est ce que le client a vu en vieille ville (« certaines maisons se
+## chevauchent », 13/09) et sur le port (« tu ne dois pas fusionner des
+## conteneurs »).
+##
+## `Lotisseur.border` s'en sortait avec une table locale, mais une table locale
+## ne protège QUE le pâté en cours : deux pâtés voisins, deux tables, et le
+## chevauchement revient à la couture. Le registre vit donc ici, avec la ville,
+## et il est juste à l'instant même.
+var demi_prises: Dictionary = {}
+
+## Vrai si le rectangle de demi-cases n'est encore pris par aucun lot.
+func demi_libre(x: int, y: int, w: int, h: int) -> bool:
+	for b in h:
+		for a in w:
+			if demi_prises.has(Vector2i(x + a, y + b)): return false
+	return true
+
 ## Un lot en DEMI-cases : `x`,`y` son coin nord-ouest, `w`,`h` son emprise
 ## déjà tournée. Le modèle est posé au centre du lot, à l'échelle CASE.
-func ajouter_lot(modele: String, x: int, y: int, w: int, h: int, quarts: int, genre := "") -> int:
-	lots.append({"m": modele, "x": x, "y": y, "w": w, "h": h, "q": quarts, "genre": genre})
+func ajouter_lot(modele: String, x: int, y: int, w: int, h: int, quarts: int, genre := "",
+		teinte := "") -> int:
+	var fiche := {"m": modele, "x": x, "y": y, "w": w, "h": h, "q": quarts, "genre": genre}
+	if teinte != "": fiche["c"] = teinte
+	lots.append(fiche)
+	for b in h:
+		for a in w:
+			demi_prises[Vector2i(x + a, y + b)] = true
 	return lots.size() - 1
 
 ## Le centre d'un lot, en unités 3D (le sol vient de la case du centre).
@@ -338,15 +367,54 @@ static func depuis_json(texte: String) -> Ville2:
 	v.rasteriser()
 	return v
 
+## ⚠⚠ LA CARTE MODIFIÉE PASSE AVANT LA CARTE LIVRÉE.
+##
+## Au navigateur, `res://` est le paquet exporté : il est EN LECTURE SEULE.
+## L'éditeur écrivait donc ses enregistrements dans `user://cartes/`, mais tout
+## ce qui RELIT une carte — l'éditeur lui-même quand on rechange de carte, le
+## jeu à travers `PlanV2`, la photo — demandait `res://cartes/…`. Le fichier
+## modifié était bien écrit, et personne ne le lisait jamais : « quand
+## j'enregistre une carte après mes modifications elle ne se modifie pas »
+## (client, 13/09).
+##
+## La résolution vit ici, dans `charger`, et pas chez les appelants : il y en a
+## quatre, et le prochain qui s'ajoutera oublierait la règle. Une carte
+## enregistrée par-dessus une carte livrée porte le même nom de fichier ; celle
+## de `user://` gagne, toujours.
+static func chemin_utile(chemin: String) -> String:
+	if not chemin.begins_with("res://cartes/"): return chemin
+	var perso := "user://cartes/" + chemin.get_file()
+	return perso if FileAccess.file_exists(perso) else chemin
+
 static func charger(chemin: String) -> Ville2:
-	if not FileAccess.file_exists(chemin):
-		push_warning("ville introuvable : " + chemin)
+	var vrai := chemin_utile(chemin)
+	if not FileAccess.file_exists(vrai):
+		push_warning("ville introuvable : " + vrai)
 		return Ville2.new()
-	return depuis_json(FileAccess.get_file_as_string(chemin))
+	return depuis_json(FileAccess.get_file_as_string(vrai))
+
+## Là où l'éditeur doit écrire : sur place au bureau, dans `user://` au
+## navigateur, où `res://` ne s'écrit pas.
+static func chemin_d_ecriture(chemin: String) -> String:
+	if OS.has_feature("web") or OS.has_feature("template"):
+		return "user://cartes/" + chemin.get_file()
+	return chemin
 
 func enregistrer(chemin: String) -> bool:
 	DirAccess.make_dir_recursive_absolute(chemin.get_base_dir())
 	var f := FileAccess.open(chemin, FileAccess.WRITE)
 	if f == null: return false
 	f.store_string(vers_json())
+	# ⚠ ON FERME. Sans `close()`, l'écriture n'atteint le disque qu'à la
+	# libération du `FileAccess` — et au navigateur, le système de fichiers
+	# persistant n'est vidé qu'ensuite : un rechargement de page juste après un
+	# Ctrl+S perdait l'enregistrement.
+	f.close()
 	return true
+
+## Efface la version modifiée d'une carte et rend la carte livrée.
+static func oublier_les_modifications(chemin: String) -> bool:
+	var perso := "user://cartes/" + chemin.get_file()
+	if not FileAccess.file_exists(perso): return false
+	return DirAccess.remove_absolute(ProjectSettings.globalize_path(perso)) == OK \
+		or DirAccess.remove_absolute(perso) == OK

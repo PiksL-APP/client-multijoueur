@@ -26,7 +26,10 @@ extends RefCounted
 
 const ANGLES := preload("res://commun/ville2/angles.gd")
 const PROPRETE := preload("res://commun/ville2/proprete.gd")
+const ATLAS := preload("res://commun/ville2/atlas.gd")
 const AFFICHES := preload("res://commun/ville2/affiches.gd")
+const NEONS := preload("res://commun/ville2/neons.gd")
+const TEINTES := preload("res://commun/ville2/teintes.gd")
 
 const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
@@ -61,7 +64,21 @@ const CLUBS := ["batiments/building-c", "batiments/building-d", "batiments/build
 	"batiments/building-i", "batiments/building-j"]
 ## Les immeubles de rapport au-dessus des bars : hôtels de passe et meublés.
 const MEUBLES := ["batiments/low-detail-building-wide-a", "batiments/low-detail-building-wide-b",
-	"ville/building-small-b", "ville/building-small-c", "ville/building-small-d"]
+	"ville/building-small-b", "ville/building-small-c", "ville/building-small-d",
+	"batiments/low-detail-building-e", "batiments/low-detail-building-h"]
+
+## ⚠ LES DEUX IMMEUBLES AUX VITRES CONDAMNÉES (demande du client, 13/09 : « la
+## variante A du kit modèle Industrial sur les 2 bâtiments qui ressemblent à
+## des immeubles, vitres condamnées par des planches »). `industriel/building-a`
+## et `-b` sont les deux seuls du kit industriel qui ont la silhouette d'un
+## immeuble d'habitation — deux corps, une façade percée, un toit plat — et
+## leur atlas industriel remplace le vitrage par du bardage. Posés dans un
+## quartier chaud, ce sont les deux barres murées du bout de la rue.
+##
+## On les pose à la main, pas dans la liste des pâtés : deux, pas douze. Une
+## barre murée est un repère ; douze, c'est une friche.
+const MURES := ["industriel/building-a", "industriel/building-b"]
+const OU_MURES := [Vector2i(14, 21), Vector2i(25, 6)]
 ## Les chambres de motel : basses, alignées, toutes pareilles — c'est le
 ## principe d'un motel.
 const CHAMBRES := ["pavillons/building-type-h", "pavillons/building-type-i",
@@ -87,6 +104,7 @@ static func generer(graine := 7, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_les_pates(v, alea)
 	_le_casino(v, alea)
 	_les_motels(v, alea)
+	_les_barres_murees(v, alea)
 	v.rasteriser()
 	_details(v, alea)
 	# ⚠ ICI ON EN MET TROP, ET C'EST VOULU. L'écart est le plus court de tous
@@ -97,9 +115,41 @@ static func generer(graine := 7, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_poser_repere(v, "piksl/garage_de_peinture", Vector2i(24, 32), 0, "garage", "Garage du Mirage")
 	_poser_repere(v, "piksl/firestation", Vector2i(15, 34), 0, "caserne", "Poste du Mirage")
 	v.rasteriser()
-	AFFICHES.semer(v, alea, 40.0, [], 10)
+	# ⚠ MOINS DE PUB, PLUS DE NÉON. Le réglage d'hier (écart 40, dix panneaux de
+	# bord de route) partait d'une intuition juste — « ici l'accumulation EST le
+	# décor » — appliquée au mauvais objet. Le client a tranché le 13/09 :
+	# « beaucoup trop de pub », « pas assez de néon ». Une pub est une image
+	# mate et grande qu'on regarde de la voiture : trois ou quatre suffisent.
+	# L'accumulation, c'est celle des ENSEIGNES, et elle se règle plus bas.
+	AFFICHES.semer(v, alea, 150.0, [], 3)
+	NEONS.semer(v, alea, ["club", "casino", "hotel", "mure"], 0.85)
+	# La saleté au sol : au pied des clubs et des meublés, pas sur l'artère.
+	PROPRETE.salir(v, alea, ["club", "mure"], 0.7, 4)
+	# ⚠ PAS DE PASTELS ICI. Premier essai avec la gamme pavillonnaire : de nuit,
+	# un mur lilas sous une lumière bleue devient violet fluo et les clubs
+	# ressemblaient à des immeubles de dessin animé. Un quartier chaud est en
+	# béton sale ; la couleur doit venir des ENSEIGNES, pas des façades.
+	TEINTES.peindre_genres(v, alea, ["club", "mure"], TEINTES.INDUSTRIE, 0.35)
+	# ⚠ AUCUNE TOITURE VERTE (client, 13/09). Voir `atlas.gd` : la bande
+	# verte de l'atlas est repeinte par bâtiment, murs inchangés.
+	TEINTES.couvrir(v, alea, "", ATLAS.VIEILLE)
 	PROPRETE.finir(v, alea, 0)
 	return v
+
+# ------------------------------------------------------------------ les barres murées
+
+static func _les_barres_murees(v: Ville2, alea: RandomNumberGenerator) -> void:
+	for k in MURES.size():
+		var m: String = MURES[k]
+		var ou: Vector2i = OU_MURES[k]
+		if not _poser_repere(v, m, ou, 0, "mure", "Barre murée %d" % (k + 1), 7):
+			continue
+		# Les planches sur les vitres du rez : des palettes empilées contre la
+		# façade, et la benne de chantier qui n'est jamais repartie.
+		for _n in 6:
+			v.ajouter_objet("benne" if alea.randf() < 0.4 else "nourriture/barrel",
+				(float(ou.x) + alea.randf_range(-1.0, 2.4)) * CASE,
+				(float(ou.y) + alea.randf_range(-1.0, 2.4)) * CASE, alea.randf() * TAU)
 
 # ------------------------------------------------------------------ 1. le terrain
 

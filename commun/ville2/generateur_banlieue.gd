@@ -35,6 +35,9 @@ const ANGLES := preload("res://commun/ville2/angles.gd")
 ## Les règles communes à tous les quartiers : rien sur la chaussée, et pas
 ## une pelouse nue. Appelées en dernier (voir `commun/ville2/proprete.gd`).
 const PROPRETE := preload("res://commun/ville2/proprete.gd")
+const ATLAS := preload("res://commun/ville2/atlas.gd")
+const CHEMINS := preload("res://commun/ville2/chemins.gd")
+const TEINTES := preload("res://commun/ville2/teintes.gd")
 
 ## Les panneaux publicitaires (cahier § 7) : toits, pignons aveugles, bords
 ## d'axe. Brique commune — l'affichage est une règle de ville, pas de quartier.
@@ -160,9 +163,15 @@ static func generer(graine := 4, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_le_pole(v, alea)
 	v.rasteriser()
 	_le_parc(v, alea)
+	_la_ferme(v, alea)
+	v.rasteriser()
 	_les_jardins(v, alea)
 	_details(v, alea)
 	AFFICHES.semer(v, alea, 150.0, [], 4)
+	# ⚠ AUCUNE TOITURE VERTE (client, 13/09). Voir `atlas.gd` : la bande
+	# verte de l'atlas est repeinte par bâtiment, murs inchangés.
+	TEINTES.couvrir(v, alea, "", ATLAS.PAVILLONNAIRE)
+	TEINTES.peindre(v, alea, "", TEINTES.PAVILLONS, 0.30)
 	PROPRETE.finir(v, alea)
 	return v
 
@@ -297,9 +306,16 @@ static func _devant_de_maison(v: Ville2, coin: Vector2i, e: Vector2i, n: Vector2
 	var ax := cx - float(n.x) * float(e.x) * 0.5 * DEMI + travers.x * biais
 	var az := cz - float(n.y) * float(e.y) * 0.5 * DEMI + travers.y * biais
 	var vers_rue := atan2(float(n.x), float(n.y))
-	# Deux dalles d'allée : le kit en a une longue et une courte, à l'échelle
-	# du kit (elles pavent le sol, comme les tuiles de sentier).
-	for t in 2:
+	# ⚠ L'ALLÉE DOIT ALLER JUSQU'À LA RUE (demande du client, 13/09 : « pas
+	# assez de route qui mène aux maisons »). Elle était bien là — deux dalles —
+	# mais elle s'arrêtait à seize mètres de la façade, et le recul de la
+	# parcelle en fait dix de plus : entre le bout de l'allée et le trottoir, il
+	# restait de la pelouse. Une allée qui ne touche pas la rue ne se lit pas
+	# comme une allée, elle se lit comme une tache.
+	#
+	# La dalle `driveway-long` mesure 7,2 × 8,0 m : quatre bout à bout font
+	# trente-deux mètres, soit le recul, la marge et le débord sur le trottoir.
+	for t in 4:
 		v.ajouter_objet("pavillons/driveway-long",
 			ax + float(n.x) * float(t) * DEMI * 0.8,
 			az + float(n.y) * float(t) * DEMI * 0.8, vers_rue)
@@ -317,6 +333,106 @@ static func _devant_de_maison(v: Ville2, coin: Vector2i, e: Vector2i, n: Vector2
 			az + float(n.y) * DEMI * 1.6 + travers.y * 9.0,
 			alea.randf() * TAU, alea.randf_range(4.5, 7.0))
 	return biais
+
+# ------------------------------------------------------------------ la ferme
+
+## LES HANGARS ET LES CHAMPS DE LÉGUMES (demande du client, 13/09).
+##
+## ⚠ ET ILS ONT LEUR PLACE TOUTE TROUVÉE : une banlieue, c'est ce qui reste
+## quand la ville a mangé la campagne, et le bout qu'elle n'a pas encore mangé
+## est justement le terrain agricole du fond. C'est aussi ce qui manquait le
+## plus à ce témoin — des hectares d'herbe rase sans rien dessus.
+##
+## Le kit nature a de vrais sillons (`crops_dirtRow`, une case de long) et de
+## vraies cultures à trois stades de pousse. On alterne les planches : maïs,
+## blé, feuillu, jachère — un champ d'une seule culture se lit comme une
+## moquette.
+const CULTURES := ["nature/crops_cornStageC", "nature/crops_cornStageD",
+	"nature/crops_wheatStageB", "nature/crops_leafsStageB", "nature/crops_bambooStageB",
+	"nature/crops_cornStageB", "nature/crops_leafsStageA", "nature/crops_wheatStageA"]
+const H_CULTURES = [2.4, 2.4, 1.1, 1.3, 1.8, 1.9, 0.9, 0.7]
+## Les bâtiments de ferme : deux hangars et un silo.
+const HANGARS := ["industriel/building-c", "industriel/building-h", "industriel/building-i"]
+
+static func _la_ferme(v: Ville2, alea: RandomNumberGenerator) -> void:
+	# ⚠ ON RÉTRÉCIT PLUTÔT QUE D'ABANDONNER. Premier essai : un seul appel à
+	# `_zone_libre(12, 9)`, et il ne trouvait rien — la boucle de rues, ses
+	# courbes larges et soixante parcelles ne laissent nulle part treize cases
+	# sur dix entièrement nettes. La ferme n'existait donc pas, en silence,
+	# exactement comme le casino du quartier chaud et l'église de la banlieue
+	# avant elle. C'est la TROISIÈME fois que ce motif coûte une pièce entière :
+	# une demande de place qui échoue doit toujours réessayer plus petit.
+	var zone := Rect2i()
+	for taille in [Vector2i(12, 9), Vector2i(10, 8), Vector2i(9, 7), Vector2i(7, 6)]:
+		zone = _zone_libre(v, taille.x, taille.y)
+		if zone.size.x > 0: break
+	if zone.size.x == 0:
+		push_warning("ferme : pas de place")
+		return
+	# LES PLANCHES DE CULTURE. Une planche = une bande d'une case de large, avec
+	# son sillon au sol et ses plants dessus. Elles courent toutes dans le même
+	# sens : c'est le labour qui l'impose, et c'est ce qui se lit d'en haut.
+	var champs := Rect2i(zone.position.x, zone.position.y + 3, zone.size.x, zone.size.y - 3)
+	for j in range(champs.position.y, champs.end.y):
+		var n := alea.randi() % CULTURES.size()
+		for i in range(champs.position.x, champs.end.x):
+			var c := Vector2i(i, j)
+			if not v.dedans(c) or not v.terre(c): continue
+			if v.carte != null and (v.carte.route(c) or v.carte.case_prise(c)): continue
+			if v.lot_sur(c) >= 0: continue
+			v.poser_matiere(c, Ville2.M_TERRE)
+			# Les sillons : DEUX par case, décalés, pour que la planche ait sa
+			# rayure. Une seule tuile de sillon brune sur de la terre brune ne
+			# se voyait pas — le champ sortait en rectangle plat.
+			for d in [0.28, 0.72]:
+				v.ajouter_objet("nature/crops_dirtDoubleRow", (float(i) + 0.5) * CASE,
+					(float(j) + d) * CASE, 0.0)
+			# ⚠ ET IL FAUT BEAUCOUP DE PLANTS. Un pied de maïs ramené à sa
+			# taille réelle (2,4 m) fait soixante centimètres de large ; cinq
+			# par case en couvrent trois mètres sur vingt. Le premier champ est
+			# sorti en terre nue pour cette raison — la même arithmétique que
+			# les baraques du bidonville, le même oubli.
+			for k in 16:
+				v.ajouter_objet(CULTURES[n],
+					(float(i) + 0.06 + float(k % 8) * 0.118) * CASE,
+					(float(j) + (0.30 if k < 8 else 0.72)
+						+ alea.randf_range(-0.05, 0.05)) * CASE,
+					alea.randf() * TAU, float(H_CULTURES[n]) * alea.randf_range(0.9, 1.1))
+	# LES HANGARS, en tête de champ, tournés vers le sud.
+	Lotisseur.aligner(v, alea, HANGARS, "n",
+		Vector2i(zone.position.x * 2, zone.position.y * 2), (zone.size.x - 2) * 2,
+		"hangar", 0.85, 1)
+	# Le tracteur, les bottes et les bidons de la cour.
+	v.ajouter_objet("voitures/tractor", (float(zone.position.x) + 1.4) * CASE,
+		(float(zone.position.y) + 2.4) * CASE, PI * 0.5)
+	for k in 7:
+		v.ajouter_objet(["nature/log_stack", "nature/pot_large", "nature/crops_dirtSingle"][k % 3],
+			(float(zone.position.x) + 2.5 + alea.randf() * 6.0) * CASE,
+			(float(zone.position.y) + 2.2 + alea.randf()) * CASE, alea.randf() * TAU,
+			[1.6, 1.0, 0.5][k % 3])
+	v.ajouter_lieu("ferme", (float(zone.position.x) + float(zone.size.x) * 0.5) * CASE,
+		(float(zone.position.y) + float(zone.size.y) * 0.5) * CASE,
+		{"nom": "Les Maraîchers"})
+
+## ⚠ ON CHERCHE LA PLACE, ON NE LA DÉCRÈTE PAS. Écrire un `Rect2i` en dur pour
+## la ferme, c'est reproduire l'erreur du stade du campus : la boucle de rues
+## de ce témoin est tracée à la main, et le moindre décalage la ferait passer
+## au travers. On balaie donc la carte et on prend le premier rectangle
+## entièrement libre — terre, sans route, sans pièce, sans lot.
+static func _zone_libre(v: Ville2, larg: int, haut: int) -> Rect2i:
+	for j in range(2, v.taille.y - haut - 1):
+		for i in range(2, v.taille.x - larg - 1):
+			var bon := true
+			for b in range(haut + 1):
+				for a in range(larg + 1):
+					var c := Vector2i(i + a, j + b)
+					if not v.dedans(c) or not v.terre(c): bon = false
+					elif v.carte != null and (v.carte.route(c) or v.carte.case_prise(c)): bon = false
+					elif v.lot_sur(c) >= 0: bon = false
+					if not bon: break
+				if not bon: break
+			if bon: return Rect2i(i, j, larg, haut)
+	return Rect2i()
 
 # ------------------------------------------------------------------ 4. le pôle
 
@@ -387,12 +503,14 @@ static func _le_parc(v: Ville2, alea: RandomNumberGenerator) -> void:
 		elif i == r.position.x or i == r.end.x - 1: m = "nature/ground_pathEnd"
 		var tour := AXE_DU_SENTIER + (PI if i == r.end.x - 1 else 0.0)
 		v.ajouter_objet(m, (float(i) + 0.5) * CASE, (float(jm) + 0.5) * CASE, tour)
+		v.objets[v.objets.size() - 1]["aplat"] = CHEMINS.APLAT
 	for j in range(r.position.y, r.end.y):
 		if j == jm: continue
 		var m := "nature/ground_pathStraight"
 		if j == r.position.y or j == r.end.y - 1: m = "nature/ground_pathEnd"
 		var tour := AXE_DU_SENTIER + PI * 0.5 + (PI if j == r.position.y else 0.0)
 		v.ajouter_objet(m, (float(im) + 0.5) * CASE, (float(j) + 0.5) * CASE, tour)
+		v.objets[v.objets.size() - 1]["aplat"] = CHEMINS.APLAT
 	var clairiere := Rect2i(r.position + Vector2i(1, 1), Vector2i(2, 2))
 	# Les bancs, en bordure de la clairière, tournés vers elle.
 	for k in 8:
@@ -422,7 +540,11 @@ static func _le_parc(v: Ville2, alea: RandomNumberGenerator) -> void:
 	# dans le quart nord-est, avec ses nénuphars.
 	var bx := (float(r.position.x) + float(r.size.x) * 0.78) * CASE
 	var bz := (float(r.position.y) + float(r.size.y) * 0.25) * CASE
-	v.ajouter_objet("pelouse", bx, bz, 0.0, 0.0, "#4fb3d9")
+	# ⚠ UN BASSIN DE PARC N'EST PAS UNE PISCINE. Le cyan de piscine (#4fb3d9)
+	# faisait un rectangle turquoise au milieu des arbres, visible d'un bout à
+	# l'autre du témoin : une eau de parc est verte et sombre, elle reçoit le
+	# reflet des feuillages. La même couleur que les étangs de `parc.gd`.
+	v.ajouter_objet("pelouse", bx, bz, 0.0, 0.0, "#2f6b74")
 	v.objets[v.objets.size() - 1]["w"] = 2.2 * CASE
 	v.objets[v.objets.size() - 1]["d"] = 1.6 * CASE
 	for _k in 6:

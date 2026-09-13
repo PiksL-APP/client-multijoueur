@@ -92,6 +92,53 @@ static func remplir_l_herbe(v: Ville2, alea: RandomNumberGenerator,
 				poses += 1
 	return poses
 
+## ⚠ LA SALETÉ EST UN DÉCOR, PAS UN DÉFAUT (demande du client pour le quartier
+## chaud, 13/09 : « pas assez de poubelle de saleté au sol »). Deux bennes par
+## pâté ne salissent rien ; ce qui salit, c'est le PETIT déchet répété — un
+## carton éventré au pied d'un mur, un sac plat dans le caniveau, un fût
+## renversé au coin. On les sème donc au pied des bâtiments, sur le trottoir,
+## là où l'œil passe.
+##
+## Le caniveau EST de la chaussée : ces objets portent donc le drapeau de
+## voirie, sinon la passe « rien sur les routes » les balaie tous.
+const DETRITUS := ["interieur/cardboardBoxOpen", "interieur/cardboardBoxClosed",
+	"nourriture/bag-flat", "nourriture/bag", "nourriture/barrel", "poubelle"]
+const H_DETRITUS = [0.55, 0.55, 0.25, 0.45, 0.95, 1.05]
+
+## Sème des détritus le long des façades qui donnent sur la rue. `par_lot` :
+## combien au pied de chaque bâtiment retenu.
+static func salir(v: Ville2, alea: RandomNumberGenerator, genres: Array = [],
+		densite := 0.55, par_lot := 3) -> int:
+	if v.carte == null: return 0
+	var poses := 0
+	for l in v.lots:
+		if not genres.is_empty() and not genres.has(String(l.get("genre", ""))): continue
+		if alea.randf() > densite: continue
+		var centre := v.centre_du_lot(l)
+		var t := KitVille2.taille(String(l["m"]))
+		var q := int(l["q"])
+		var demi_x := (t.x if q % 2 == 0 else t.z) * CASE * 0.5
+		var demi_z := (t.z if q % 2 == 0 else t.x) * CASE * 0.5
+		for _k in alea.randi_range(1, par_lot):
+			# Le long d'un des quatre murs, collé dessus, décalé au hasard.
+			var mur := alea.randi() % 4
+			var x := centre.x
+			var z := centre.z
+			if mur == 0: z -= demi_z + alea.randf_range(0.6, 2.4)
+			elif mur == 1: z += demi_z + alea.randf_range(0.6, 2.4)
+			elif mur == 2: x -= demi_x + alea.randf_range(0.6, 2.4)
+			else: x += demi_x + alea.randf_range(0.6, 2.4)
+			if mur < 2: x += alea.randf_range(-demi_x * 0.7, demi_x * 0.7)
+			else: z += alea.randf_range(-demi_z * 0.7, demi_z * 0.7)
+			var c := Vector2i(floori(x / CASE), floori(z / CASE))
+			if not v.dedans(c) or not v.terre(c): continue
+			if v.lot_sur(c) >= 0: continue
+			var n := alea.randi() % DETRITUS.size()
+			v.objets.append({"m": DETRITUS[n], "x": x, "z": z, "r": alea.randf() * TAU,
+				"h": float(H_DETRITUS[n]) * alea.randf_range(0.8, 1.2), SUR_ROUTE: true})
+			poses += 1
+	return poses
+
 ## La passe complète, à appeler en dernier dans chaque générateur.
 static func finir(v: Ville2, alea: RandomNumberGenerator, herbe := 3) -> void:
 	rien_sur_les_routes(v)

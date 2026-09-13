@@ -23,6 +23,8 @@ const ANGLES := preload("res://commun/ville2/angles.gd")
 ## Les règles communes à tous les quartiers : rien sur la chaussée, et pas
 ## une pelouse nue. Appelées en dernier (voir `commun/ville2/proprete.gd`).
 const PROPRETE := preload("res://commun/ville2/proprete.gd")
+const ATLAS := preload("res://commun/ville2/atlas.gd")
+const TEINTES := preload("res://commun/ville2/teintes.gd")
 
 ## Les panneaux publicitaires (cahier § 7) : toits, pignons aveugles, bords
 ## d'axe. Brique commune — l'affichage est une règle de ville, pas de quartier.
@@ -122,6 +124,10 @@ static func generer(graine := 2, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_poser_repere(v, "piksl/supermarket", Vector2i(6, 9), 0, "supermarche", "Supérette du Front de mer")
 	v.rasteriser()
 	AFFICHES.semer(v, alea, 120.0, [], 3)
+	# ⚠ AUCUNE TOITURE VERTE (client, 13/09). Voir `atlas.gd` : la bande
+	# verte de l'atlas est repeinte par bâtiment, murs inchangés.
+	TEINTES.couvrir(v, alea, "", ATLAS.PAVILLONNAIRE)
+	TEINTES.peindre(v, alea, "", TEINTES.PAVILLONS, 0.35)
 	PROPRETE.finir(v, alea)
 	return v
 
@@ -278,9 +284,13 @@ static func _promenade(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i)
 ## rochers au bout, des bouées sur l'eau. Rien n'est aligné — une plage
 ## rangée en grille est la chose qui trahit le plus un décor engendré.
 static func _la_plage(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i) -> void:
+	# ⚠ UNE PLAGE SE JUGE À SA FOULE. Trois tirages par case sur une plage de
+	# quatre cases de profondeur, c'est un parasol tous les cinquante mètres :
+	# vue d'en haut, la plage est vide. On monte à six — le sable reste
+	# majoritaire, mais il est FRÉQUENTÉ, ce qui est le sujet.
 	for i in range(1, mini(taille.x - 1, X_PORT)):
 		var bord := _rivage(i)
-		for k in 3:
+		for k in 6:
 			var x := (float(i) + alea.randf()) * CASE
 			# ⚠ RIEN SUR L'ESTRAN : c'est la seule bande qui penche encore, et
 			# c'est là que les parasols flottaient. On s'arrête au pied de la
@@ -291,7 +301,25 @@ static func _la_plage(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i) 
 			var z := j * CASE
 			var t := alea.randf()
 			if t < 0.26:
-				v.ajouter_objet("parasol" if k % 2 == 0 else "parasol_b", x, z, alea.randf() * TAU)
+				# ⚠ À LA TAILLE D'UN PARASOL, soit deux mètres cinquante de haut
+				# et non la taille du catalogue : le kit le dessine pour son
+				# petit bonhomme, et posé tel quel il se perd dans le sable.
+				v.ajouter_objet("parasol" if k % 2 == 0 else "parasol_b", x, z,
+					alea.randf() * TAU, alea.randf_range(2.4, 3.0))
+				# ⚠ ET SES SERVIETTES DESSOUS (demande du client, 13/09 : « tu
+				# dois faire des serviettes de plage au sol un peu partout sous
+				# les parasols »). Un parasol seul sur le sable a l'air planté
+				# là par erreur ; ce qui dit « on est à la plage », ce sont les
+				# rectangles de couleur autour de son pied. Le kit n'a pas de
+				# serviette — on en fait une surface colorée, comme les
+				# pelouses et les tracés de stade.
+				for _s in alea.randi_range(1, 3):
+					var a := alea.randf() * TAU
+					var d := alea.randf_range(2.5, 7.0)
+					v.objets.append({"m": "pelouse", "x": x + cos(a) * d,
+						"z": z + sin(a) * d, "r": 0.0, "h": 0.0,
+						"w": alea.randf_range(1.5, 2.1), "d": alea.randf_range(3.4, 4.4),
+						"c": SERVIETTES[alea.randi() % SERVIETTES.size()]})
 			elif t < 0.36:
 				v.ajouter_objet(CAILLOUX[alea.randi() % CAILLOUX.size()], x, z,
 					alea.randf() * TAU, alea.randf_range(0.40, 1.00))
@@ -329,10 +357,7 @@ static func _la_plage(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i) 
 		v.ajouter_objet("nature/canoe", bx,
 			float(J_SABLE + 2) * CASE + alea.randf() * CASE,
 			alea.randf_range(-0.5, 0.5) + PI * 0.5, 0.75)
-	# Le poste de secours, au débouché de la jetée.
-	v.ajouter_lot("pavillons/building-type-k", (X_JETEE - 3) * 2, (J_SABLE + 1) * 2,
-		KitVille2.emprise_tournee("pavillons/building-type-k", 0).x,
-		KitVille2.emprise_tournee("pavillons/building-type-k", 0).y, 0, "secours")
+	_le_poste_de_secours(v, alea)
 	# LA POINTE ROCHEUSE du bout de plage, côté port : de vraies falaises du kit
 	# (mesurées : `cliff_rock` fait une case de large et une case de haut), pas
 	# seulement des cailloux grossis.
@@ -350,6 +375,38 @@ static func _la_plage(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i) 
 	for k in 5:
 		v.ajouter_objet("bateau:bouee" if k % 2 == 0 else "bateau:bouee_drapeau",
 			float(X_JETEE + 3) * CASE, float(J_RIVAGE + 2 + k * 3) * CASE, 0.0)
+
+## LES COULEURS DE SERVIETTE. Franches et variées : c'est leur bariolage qui
+## fait la plage fréquentée, une plage de serviettes assorties serait un hôtel.
+const SERVIETTES := ["#e8514a", "#f2a43c", "#3f8fd6", "#49b36a", "#d45ea8", "#f2e04a"]
+
+## ⚠ LE POSTE DE SECOURS EST UNE CABANE SUR PILOTIS, PAS UN PAVILLON. Avant, on
+## posait un `building-type-k` — une maison de lotissement de vingt mètres — et
+## le client ne la voyait pas pour ce qu'elle était : « tu dois mettre un centre
+## de sauvetage pour maître nageur » (13/09). Ce qui fait reconnaître un poste
+## de secours, ce n'est pas le bâtiment : c'est la SILHOUETTE — une cabine
+## carrée perchée sur une plateforme, une rampe, un mât, et le rouge.
+static func _le_poste_de_secours(v: Ville2, alea: RandomNumberGenerator) -> void:
+	var x := float(X_JETEE - 4) * CASE
+	var z := float(J_SABLE + 2) * CASE
+	var haut := 5.0
+	# La plateforme sur pilotis, à cinq mètres au-dessus du sable.
+	v.objets.append({"m": "plateforme", "x": x, "z": z, "r": 0.0, "h": 0.0,
+		"w": 14.0, "d": 12.0, "y": haut})
+	# La cabine dessus, rouge et blanche.
+	v.objets.append({"m": "ville/building-garage", "x": x, "z": z, "r": 0.0,
+		"h": 4.2, "dy": haut + 0.8, "c": "#e05a4a", "toit": "#f0f2ee"})
+	# Le mât et son drapeau, les bouées, la rampe d'accès.
+	v.objets.append({"m": "lampadaire", "x": x + 6.0, "z": z - 5.0, "r": 0.0,
+		"h": 11.0, "dy": haut + 0.8})
+	for k in 3:
+		v.ajouter_objet("bateaux/buoy", x - 7.5, z - 4.0 + float(k) * 4.0, PI * 0.5, 1.4)
+	for k in 5:
+		v.ajouter_objet("nature/path_wood", x - 10.0 - float(k) * 3.2,
+			z + 6.0 + float(k) * 1.1, 0.0, 0.3)
+	# Le quad et la remorque de secours, au pied.
+	v.ajouter_objet("voitures/suv", x + 12.0, z + 5.0, PI * 0.5)
+	v.ajouter_lieu("secours", x, z, {"nom": "Poste de Secours"})
 
 # ------------------------------------------------------------------ 6. la jetée
 
@@ -393,6 +450,41 @@ static func _la_jetee(v: Ville2, alea: RandomNumberGenerator) -> void:
 		v.ajouter_objet("bateau:barque" if b % 2 == 0 else "bateau:vedette_b",
 			x - 16.0 - float(b) * 3.0, float(J_RIVAGE + 2 + b) * CASE, alea.randf_range(1.2, 1.9))
 
+## La taille d'un conteneur du kit, mesurée, en unités : 7,5 large, 7,0 haut,
+## 16,5 long.
+const CONTENEUR := Vector3(7.46, 6.96, 16.46)
+## Le jeu entre deux boîtes : ce que laisse un cavalier gerbeur pour passer.
+const JEU_GRUE := 1.6
+
+static func _les_conteneurs(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i,
+		zq: float) -> void:
+	# Tournés d'un quart de tour : leur longueur suit l'axe des x, comme les
+	# rangées du quai. Donc pas de `CONTENEUR.z` en x, `CONTENEUR.x` en z.
+	var pas_x := CONTENEUR.z + JEU_GRUE
+	var pas_z := CONTENEUR.x + JEU_GRUE
+	var x0 := (float(X_PORT) + 0.2) * CASE
+	var rangs := 5
+	for r in rangs:
+		var z := zq - 14.0 - float(r) * pas_z
+		var x := x0
+		while x < float(taille.x - 1) * CASE:
+			# Une travée sur six reste vide : c'est l'allée du cavalier.
+			if alea.randf() < 0.82:
+				var pile := 1 + alea.randi() % 3
+				for k in pile:
+					var lettre: String = ["a", "b", "c"][alea.randi() % 3]
+					v.objets.append({
+						"m": "res://modeles/kenney/industriel/shipping-container-%s.glb" % lettre,
+						"x": x, "z": z, "r": PI * 0.5, "h": 0.0,
+						"dy": float(k) * CONTENEUR.y})
+			x += pas_x
+	# Quelques boîtes isolées, posées de travers près du hangar : un quai n'est
+	# jamais parfait. Elles sont HORS de la grille, donc sans risque.
+	for k in 4:
+		v.ajouter_objet("res://modeles/kenney/industriel/shipping-container-b.glb",
+			(float(X_PORT) + 0.5 + float(k) * 1.4) * CASE, zq - 14.0 - float(rangs) * pas_z - 24.0,
+			alea.randf_range(-0.25, 0.25))
+
 # ------------------------------------------------------------------ 7. le port
 
 ## LE PORT DE COMMERCE : un terre-plein pavé, des piles de conteneurs, des
@@ -400,16 +492,22 @@ static func _la_jetee(v: Ville2, alea: RandomNumberGenerator) -> void:
 ## de la dalle, et la coque d'un cargo tient contre elle.
 static func _le_port(v: Ville2, alea: RandomNumberGenerator, taille: Vector2i) -> void:
 	var zq := float(J_QUAI) * CASE
-	# Les piles de conteneurs, en rangées le long du quai.
-	for r in 3:
-		var z := zq - 12.0 - float(r) * 13.0
-		var i := X_PORT
-		while i < taille.x - 1:
-			if alea.randf() < 0.75:
-				var lettre: String = ["a", "b", "c"][alea.randi() % 3]
-				v.ajouter_objet("res://modeles/kenney/industriel/shipping-container-%s.glb" % lettre,
-					(float(i) + 0.5) * CASE, z, PI * 0.5 * float(alea.randi() % 2))
-			i += 1
+	# ⚠⚠ ON EMPILE LES CONTENEURS, ON NE LES ENCASTRE PAS (demande du client,
+	# 13/09 : « tu ne dois pas fusionner des conteneurs — empile-les si tu dois
+	# le faire »).
+	#
+	# La faute était arithmétique. Un conteneur du kit mesure, à l'échelle de la
+	# case, 7,5 × 16,5 × 7,0 mètres. Les rangées étaient espacées de TREIZE
+	# mètres et l'orientation tirée au hasard entre 0 et un quart de tour : une
+	# fois sur deux la profondeur de 16,5 m tombait dans un pas de 13 m, et la
+	# rangée suivante entrait dans la précédente. Rien ne pouvait le rattraper —
+	# ce sont des objets libres, personne ne vérifiait.
+	#
+	# Un parc à conteneurs réel est ORTHOGONAL et tout aligné : c'est la
+	# manutention qui l'impose, et c'est aussi ce qui se lit d'en haut. On pose
+	# donc toutes les boîtes dans le même sens, au pas de leur taille réelle
+	# plus un jeu de grutage, et la variété vient de la HAUTEUR des piles.
+	_les_conteneurs(v, alea, taille, zq)
 	# Les cuves et le château d'eau du terre-plein.
 	v.ajouter_objet("res://modeles/kenney/industriel/water-tower.glb",
 		(float(X_PORT) + 0.6) * CASE, zq - 46.0, 0.0)

@@ -14,6 +14,25 @@ extends RefCounted
 const RACINE := "res://modeles/kenney/"
 const CASE := 20.0
 
+## ⚠ TOUT CE QUI EST SOUS `res://modeles/` N'EST PAS SOUS `kenney/`.
+##
+## `chemin()` préfixait par `RACINE` tout ce qui ne commençait pas par
+## `piksl/` : `ville/building-garage` devenait
+## `res://modeles/kenney/ville/building-garage.glb`, qui n'existe pas. Le
+## renderer posait un `push_warning` et SAUTAIT le lot — trente-six maisons
+## évaporées au seul témoin de vieille ville, et rien dans l'image pour le
+## dire, puisqu'un trou dans un front de rue ressemble à une cour.
+##
+## Le catalogue de l'éditeur (`ModelesDuKit.TOUS`) liste ces dossiers : la
+## palette les proposait donc, et ils ne se posaient jamais.
+##
+## ⚠ `interieur/` ET `voitures/` N'Y SONT PAS, et c'est délibéré : ce sont les
+## deux seuls noms qui existent des DEUX côtés (`modeles/voitures/` et
+## `modeles/kenney/voitures/`). Pour eux, le préfixe kenney reste la réponse —
+## c'est celui que tous les générateurs visent.
+const HORS_KENNEY := ["piksl", "ville", "commerce", "banlieue", "industrie",
+	"ferme", "village", "mobilier", "cartons", "voxel", "creatures", "personnages"]
+
 ## [largeur X, hauteur Y, profondeur Z] en cases.
 const BATIMENTS := {
 	"batiments/building-a": [0.884, 1.293, 0.940],
@@ -292,28 +311,57 @@ static func echelle(modele: String) -> float:
 ## les rapports ne sont pas constants, on prend la médiane. Les générateurs,
 ## eux, imposent une hauteur exacte via `PROPS` : cette règle ne les concerne
 ## pas, elle rattrape ce qui est posé à la main.
-const FAMILLES_DE_TERRAIN := ["cliff_", "ground_", "bridge_", "path_", "platform_",
-	"crops_dirt"]
-const ECHELLE_NATURE := 3.2
+## ⚠⚠⚠ LA TABLE DES ÉCHELLES LIBRES — et elle a été découverte kit par kit,
+## chaque fois par une capture du client. Trois fois de suite j'ai corrigé UN
+## kit au lieu de poser la règle : « toutes les fences et les fleurs champignon
+## sont énormes » (nature), puis « certaines fences sont encore énormes »
+## (pavillons), puis le même défaut sur le kit urbain. D'où cette table : un
+## kit nouveau s'y ajoute en une ligne, et on mesure AVANT que le client le
+## voie.
+##
+## LE FOND DU PROBLÈME. Kenney dessine ses kits à deux échelles différentes et
+## ne le dit nulle part :
+##
+## * les pièces de DÉCOR DE SOL — falaises, dalles, chemins, ponts, tuiles de
+##   route — sont à l'échelle de la CASE : une unité Kenney = une case = 20
+##   unités de jeu. Posées telles quelles, elles pavent parfaitement ;
+## * les ACCESSOIRES — clôtures, lampadaires, bancs, champignons — sont à
+##   l'échelle du petit bonhomme du kit. À ×20 ils deviennent des monuments :
+##   une clôture de 7 m, un lampadaire de 12, un champignon de 4.
+##
+## Le facteur de chaque kit est la MÉDIANE des rapports mesurés sur ses pièces
+## dont on connaît la bonne taille (celles que `PROPS` fixe déjà). Les familles
+## listées sont les exceptions : les pièces de ce kit qui, elles, sont bien à
+## l'échelle de la case et ne doivent pas être réduites.
+const ECHELLES_LIBRES := {
+	# 330 modèles. Terrain : falaises, sols, ponts, chemins, plates-formes,
+	# sillons de culture. Accessoires : tout le reste (arbre 7,6/1,708 = 4,45 ;
+	# clôture 1,10/0,345 = 3,19 ; tente 2,20/0,561 = 3,92 ; banc 0,85/0,47 = 1,81).
+	"nature": {"facteur": 3.2, "terrain": ["cliff_", "ground_", "bridge_", "path_",
+		"platform_", "crops_dirt"]},
+	# Kit bâti sur une tuile de 0,4 unité. Terrain : les maisons, les allées,
+	# les dalles de chemin. Les ARBRES restent à l'échelle de la case — à 5 un
+	# `tree-large` ferait moins de quatre mètres.
+	# ⚠ `suburb-building-type` EST AUSSI DU BÂTI, malgré son préfixe différent.
+	# Sans cette ligne il tombait dans les accessoires (facteur 5) : son emprise
+	# se calculait à 6,5 m tandis que `_poser_lots` le rendait à l'échelle de la
+	# case, 26 m — la maison débordait de son lot sur deux cases et demie, et
+	# aucun contrôle de chevauchement ne pouvait le rattraper, puisque le lot
+	# réservé était juste.
+	"pavillons": {"facteur": 5.0, "terrain": ["building-type", "suburb-building-type",
+		"driveway", "path", "tree"]},
+	# Mobilier de voirie. Aucune pièce de sol : rien à excepter. (panneau stop
+	# 2,40/0,494 = 4,9 ; benne 1,10/0,209 = 5,3 ; lampadaire 5,60/0,600 = 9,3.)
+	"urbain": {"facteur": 6.4, "terrain": []},
+}
 
-## ⚠⚠ ET LE KIT PAVILLONS A EXACTEMENT LE MÊME DÉFAUT. Je ne l'avais pas vu :
-## la règle ci-dessus ne regardait que `nature/`, et le client a fini par
-## rencontrer une clôture `pavillons/fence` posée à l'échelle du kit — CINQ
-## MÈTRES CINQUANTE de haut, un mur d'enceinte au milieu des jardins (« certaines
-## fences sont encore énormes », 12/09, capture à l'appui).
-##
-## Mesuré : le kit pavillons est bâti sur une tuile de 0,4 unité (`driveway-long`
-## 0,36 × 0,4, `path-long` 0,2 × 0,4), et ses accessoires suivent cette trame —
-## pas la case. Seuls ses BÂTIMENTS et ses pièces de SOL sont à l'échelle de la
-## case : une maison `building-type-*` y fait 1 à 1,8 unité, c'est-à-dire 20 à
-## 36 unités de jeu, et c'est juste.
-##
-## Le facteur vient des rapports mesurés (clôture 0,27 → 1,10 m, soit 4,1 ;
-## jardinière 0,177 → 0,80, soit 4,5). Les ARBRES en sont exclus : à 5, un
-## `tree-large` ferait moins de quatre mètres. Ils restent à l'échelle de la
-## case, où ils en font quinze — un grand arbre.
-const FAMILLES_PAVILLONS := ["building-type", "driveway", "path", "tree"]
-const ECHELLE_PAVILLONS := 5.0
+## ⚠ LES TUILES DE ROUTE SONT À L'ÉCHELLE DE LA CASE, Y COMPRIS LEURS
+## GLISSIÈRES : `road-straight-barrier` mesure 1 × 0,08 × 1, soit une case de
+## large et 1,6 m de haut — une vraie glissière. Le kit `routes` n'est donc pas
+## dans la table. Ses deux seuls intrus sont les doublons du kit urbain
+## (`construction-fence`, `construction-barrier`), qui suivent le facteur urbain
+## par leur nom.
+const INTRUS_URBAIN := ["construction-"]
 
 ## Le facteur d'un modèle posé SANS hauteur voulue (`h` nul) : comme
 ## `echelle()`, sauf pour les accessoires des kits dessinés à l'échelle d'un
@@ -322,16 +370,16 @@ static func echelle_libre(chemin_ou_modele: String) -> float:
 	var e := echelle(chemin_ou_modele)
 	if e != CASE: return e
 	var nom := chemin_ou_modele.get_file().trim_suffix(".glb")
-	if chemin_ou_modele.contains("nature/"):
-		if nom == "": nom = chemin_ou_modele.get_slice("nature/", 1)
-		for f in FAMILLES_DE_TERRAIN:
-			if nom.begins_with(f): return e
-		return ECHELLE_NATURE
-	if chemin_ou_modele.contains("pavillons/"):
-		if nom == "": nom = chemin_ou_modele.get_slice("pavillons/", 1)
-		for f in FAMILLES_PAVILLONS:
-			if nom.begins_with(f): return e
-		return ECHELLE_PAVILLONS
+	for kit in ECHELLES_LIBRES:
+		if not chemin_ou_modele.contains(String(kit) + "/"): continue
+		var f: Dictionary = ECHELLES_LIBRES[kit]
+		if nom == "": nom = chemin_ou_modele.get_slice(String(kit) + "/", 1)
+		for prefixe in (f["terrain"] as Array):
+			if nom.begins_with(String(prefixe)): return e
+		return float(f["facteur"])
+	for prefixe in INTRUS_URBAIN:
+		if nom.begins_with(String(prefixe)):
+			return float((ECHELLES_LIBRES["urbain"] as Dictionary)["facteur"])
 	return e
 
 ## TOUS LES MODÈLES POSABLES, chemins `res://…`, variantes comprises. La liste
@@ -454,7 +502,8 @@ static func emprise_tournee(modele: String, quarts: int) -> Vector2i:
 
 static func chemin(modele: String) -> String:
 	if modele.begins_with("res://"): return modele
-	if modele.begins_with("piksl/"): return "res://modeles/" + modele + ".glb"
+	for d in HORS_KENNEY:
+		if modele.begins_with(String(d) + "/"): return "res://modeles/" + modele + ".glb"
 	return RACINE + modele + ".glb"
 
 static func etages(modele: String) -> int:

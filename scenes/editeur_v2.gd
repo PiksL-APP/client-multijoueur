@@ -1475,6 +1475,46 @@ func _glisser() -> void:
 			l["y"] = int(_tire_ref.y) + roundi(d.y / DEMI)
 			_dire("Déplacement : demi-case %d, %d" % [int(l["x"]), int(l["y"])])
 	_montrer_cadre()
+	_suivre_le_glisse()
+
+## ⚠ LE MODÈLE SUIT LA SOURIS, PAS SEULEMENT LE CADRE. Jusqu'ici seul le cadre
+## de sélection bougeait pendant le glissé : on lâchait, on regardait, on
+## recommençait. « J'aimerais le voir se déplacer avant que je relâche, pour
+## une meilleure précision et moins de tests de placement » (client, 12/09) —
+## et il a raison, ajuster à l'aveugle coûte trois essais là où un suffi.
+##
+## ⚠⚠ MAIS PAS À CHAQUE PIXEL DE SOURIS. Refaire le morceau à chaque
+## `mouse_motion`, c'est rebâtir quelques centaines de maillages soixante fois
+## par seconde : l'éditeur devient une diapositive et le glissé saccade — donc
+## imprécis, exactement ce qu'on cherchait à corriger. On refait au plus tous
+## les `MS_SUIVI` millièmes, ce qui donne environ vingt-cinq images par seconde
+## de retour : l'œil suit, la machine tient.
+const MS_SUIVI := 40
+
+var _dernier_suivi := 0
+
+func _suivre_le_glisse() -> void:
+	var t := Time.get_ticks_msec()
+	if t - _dernier_suivi < MS_SUIVI: return
+	_dernier_suivi = t
+	_rebatir(_cases_du_glisse())
+
+## Les cases à refaire pendant un glissé : celle d'où l'on vient et celle où
+## l'on est. Sans la première, l'objet reste dessiné à son ancienne place.
+func _cases_du_glisse() -> Array:
+	match String(_selection.get("genre", "")):
+		"objet":
+			var o: Dictionary = _ville.objets[int(_selection["k"])]
+			return [_case_de(_tire_ref.x, _tire_ref.y),
+				_case_de(float(o["x"]), float(o["z"]))]
+		"lot":
+			var l: Dictionary = _ville.lots[int(_selection["k"])]
+			var cases := Ville2.cases_du_lot(l)
+			for c in Ville2.cases_du_lot({"x": int(_tire_ref.x), "y": int(_tire_ref.y),
+					"w": int(l["w"]), "h": int(l["h"])}):
+				cases.append(c)
+			return cases
+	return []
 
 func _poser_le_glisse() -> void:
 	if not _tire: return
@@ -1714,15 +1754,20 @@ func _recharger(json: String) -> void:
 	_morceaux.suivre(Vector3(float(_ville.taille.x) * CASE * 0.5, 0, float(_ville.taille.y) * CASE * 0.5))
 	_poser_grille()
 
+## ⚠ LA RÈGLE VIT DANS `Ville2`, PAS ICI. Elle doit être la même pour celui qui
+## écrit et pour tous ceux qui relisent (l'éditeur, le jeu, la photo) : quand
+## elle était écrite des deux côtés, les deux côtés ont divergé et les
+## enregistrements ne revenaient jamais.
 func _chemin_d_enregistrement() -> String:
-	if OS.has_feature("web") or OS.has_feature("template"):
-		return "user://cartes/" + _chemin.get_file()
-	return _chemin
+	return Ville2.chemin_d_ecriture(_chemin)
 
 func _enregistrer() -> void:
 	var ou := _chemin_d_enregistrement()
 	if _ville.enregistrer(ou):
-		_dire("Enregistré : " + ou)
+		# On redit le nom de la carte : c'est lui qu'on rechargera, et c'est
+		# la version enregistrée qui gagnera sur celle livrée.
+		_dire("Enregistré : %s — %d lots, %d objets. Rechargée telle quelle." % [
+			_chemin.get_file(), _ville.lots.size(), _ville.objets.size()])
 	else:
 		_dire("Impossible d'écrire " + ou)
 

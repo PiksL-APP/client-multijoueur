@@ -317,7 +317,23 @@ static func _poser_lots(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 			continue
 		var n := MeshInstance3D.new()
 		n.mesh = FormesCarnage.maillage_kenney(chemin, 0.0, Vector3.AXIS_X, 0.0)
-		n.material_override = _matiere(chemin, Color.WHITE)
+		# ⚠ LA TEINTE DU LOT. Les 21 pavillons du kit partagent UN seul atlas :
+		# murs blancs, toit menthe, pour tous. Le client voit donc « toujours
+		# les mêmes maisons » même quand le générateur alterne consciencieusement
+		# vingt-et-un modèles différents — la variété de FORME ne se lit pas à
+		# la distance où l'on juge un quartier, la variété de COULEUR si.
+		# Le shader des kits multiplie l'atlas par `teinte` (`peinture` à 0 pour
+		# les bâtiments) : un ocre donne des murs ocre et un toit olive, ce qui
+		# est exactement ce qu'on veut pour la colline « pierre du Sud ».
+		var couleur := Color.WHITE
+		var dit := String(l.get("c", ""))
+		if dit != "": couleur = Color(dit)
+		# ⚠ ET LA COULEUR DU TOIT, QUI N'EST PAS UNE TEINTE. Voir `atlas.gd` :
+		# la teinte multiplie tout le bâtiment, la toiture repeint UNE bande de
+		# l'atlas. Un lot peut porter les deux — murs crème, toit ardoise.
+		var toit := String(l.get("toit", ""))
+		n.material_override = _matiere(chemin, couleur) if toit == "" \
+			else _matiere_toit(chemin, couleur, toit)
 		# Posé SUR la dalle : une tuile du kit a une épaisseur, et un modèle posé
 		# au palier avait le pied enterré de 0,4 unité.
 		var ou := ville.centre_du_lot(l) + Vector3(0, EPAISSEUR_TUILE, 0)
@@ -354,6 +370,10 @@ static func _poser_objets(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 		# `y_abs` : une altitude IMPOSÉE, pour ce qui n'est pas posé au sol —
 		# le bar et les lampadaires d'une jetée sont sur son tablier.
 		if o.has("y_abs"): y = float(o["y_abs"])
+		# `dy` : une hauteur AU-DESSUS du sol trouvé — un conteneur empilé sur
+		# un autre, une caisse sur une pile. C'est la différence avec `y_abs` :
+		# la pile suit le quai s'il n'est pas à zéro.
+		if o.has("dy"): y += float(o["dy"])
 		poser_objet(racine, String(o["m"]), Vector3(x, y, z), float(o.get("r", 0.0)),
 			float(o.get("h", 0.0)), String(o.get("c", "")), o)
 
@@ -362,7 +382,8 @@ static func _poser_objets(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0.0,
 		hauteur := 0.0, teinte := "", fiche_objet := {}) -> void:
 	if modele == "pelouse":
-		_pelouse(parent, ou, float(fiche_objet.get("w", CASE)), float(fiche_objet.get("d", CASE)))
+		_pelouse(parent, ou, float(fiche_objet.get("w", CASE)),
+			float(fiche_objet.get("d", CASE)), String(fiche_objet.get("c", "")))
 		return
 	if modele == "plateforme":
 		# Le tablier se compte AU-DESSUS DE LA MER, pas au-dessus du fond :
@@ -376,6 +397,11 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 		return
 	if modele.begins_with("bateau:"):
 		_bateau(parent, modele.trim_prefix("bateau:"), ou, tourne)
+		return
+	if modele == "neon":
+		_enseigne(parent, ou + Vector3(0, float(fiche_objet.get("y", 8.0)), 0), tourne,
+			float(fiche_objet.get("w", 6.0)), float(fiche_objet.get("hh", 1.6)),
+			String(fiche_objet.get("c", "#ff3c78")))
 		return
 	if modele == "pub":
 		_panneau(parent, ou + Vector3(0, float(fiche_objet.get("y", 0.0)), 0), tourne,
@@ -396,6 +422,10 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 	if not ResourceLoader.exists(chemin):
 		push_warning("objet absent : " + chemin)
 		return
+	# Un OBJET aussi peut avoir sa toiture repeinte : les baraques du
+	# bidonville sont des objets libres, pas des lots, et elles doivent être en
+	# tôle comme le reste du quartier.
+	var toit_o := String(fiche_objet.get("toit", ""))
 	var n := MeshInstance3D.new()
 	if modele.begins_with("voitures/"):
 		# ⚠ Le Car Kit regarde +Z quand les props regardent −Z (mesuré,
@@ -410,10 +440,38 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 		# ⚠ PAS `CASE` EN DUR : les accessoires du kit nature sont dessinés pour
 		# le bonhomme du kit, pas pour la case — à 20, un champignon fait quatre
 		# mètres. `KitVille2.echelle_libre` fait le tri (voir son commentaire).
-		n.mesh = FormesCarnage.maillage_kenney(chemin, 0.0, Vector3.AXIS_X, 0.0)
+		# ⚠ ET SON HERBE PEUT ÊTRE REPEINTE. Les tuiles de chemin du kit nature
+		# apportent leur carré d'herbe avec elles ; sur un sol nu, ça fait un
+		# rectangle vert par case. `sol` demande de remplacer les sommets verts
+		# par cette couleur-là — voir `atlas.sans_verdure`, et pourquoi la
+		# teinte d'instance ne peut pas le faire.
+		var sol := String(fiche_objet.get("sol", ""))
+		n.mesh = FormesCarnage.maillage_kenney(chemin, 0.0, Vector3.AXIS_X, 0.0) if sol == "" \
+			else ATLAS.sans_verdure(chemin, Color(sol))
+		# ⚠ `aplat` ÉCRASE LA TUILE EN HAUTEUR, ET C'EST INDISPENSABLE POUR UNE
+		# PIÈCE DE SOL.
+		#
+		# `maillage_kenney` repose tout modèle BASE À ZÉRO : il descend la boîte
+		# englobante pour que son plancher tombe sur le sol. C'est juste pour un
+		# arbre ou une maison. Pour une tuile de chemin, c'est faux : sa boîte va
+		# de −0,10 à −0,05 unité Kenney, c'est-à-dire qu'elle est dessinée ENTRE
+		# 1 ET 2 MÈTRES SOUS le niveau du sol — elle est faite pour être
+		# ENFONCÉE. Reposée base à zéro, elle ressort entière : un mètre de
+		# ruban posé sur la terre, avec son mur de côté et son ombre (« pourquoi
+		# la route sort de la terre, on dirait qu'elle n'est pas enfoncée
+		# dedans », client, 13/09).
+		#
+		# On ne peut pas simplement la redescendre : le terrain est une surface
+		# continue, pas un volume, et il n'y a aucun trou dessous — enfoncée,
+		# elle disparaîtrait. On l'ÉCRASE donc : son mètre devient quinze
+		# centimètres, l'ornière garde son relief et son ombre portée, et la
+		# tuile se lit comme du sol, plus comme une dalle.
+		var aplat := float(fiche_objet.get("aplat", 1.0))
+		var e := KitVille2.echelle_libre(chemin)
 		n.transform = Transform3D(Basis(Vector3.UP, tourne).scaled(
-			Vector3.ONE * KitVille2.echelle_libre(chemin)), ou)
-	n.material_override = _matiere(chemin, couleur)
+			Vector3(e, e * aplat, e)), ou)
+	n.material_override = _matiere(chemin, couleur) if toit_o == "" \
+		else _matiere_toit(chemin, couleur, toit_o)
 	n.set_meta("modele", modele)
 	_noter(chemin)
 	parent.add_child(n)
@@ -514,13 +572,25 @@ static func _panneau(parent: Node3D, ou: Vector3, tour: float, large: float, hau
 	# épais : il coiffe le relief, et l'affiche se pose sur sa face avant.
 	var ep := 3.2 if pied <= 0.0 else 0.5
 	if pied > 0.0:
+		# ⚠ DES POTEAUX QU'ON VOIE. À soixante-dix centimètres de section, un
+		# poteau disparaît à la distance où l'on regarde un quartier, et le
+		# panneau semble flotter — c'est exactement le défaut signalé en zone
+		# industrielle le 13/09. Un vrai mât de 4 × 3 mètres en fait un bon
+		# mètre ; on le dessine à un mètre vingt, et on lui ajoute sa semelle
+		# de béton, qui est ce qui ancre l'objet au sol pour l'œil.
 		for s in [-1.0, 1.0]:
 			var n := MeshInstance3D.new()
 			n.mesh = _cube
 			n.material_override = _pub_cadre
-			n.transform = boite.call(Vector3(0.7, pied + haut * 0.5, 0.7),
+			n.transform = boite.call(Vector3(1.2, pied + haut * 0.5, 1.2),
 				ou + base * Vector3(s * large * 0.36, (pied + haut * 0.5) * 0.5, 0.0))
 			parent.add_child(n)
+		var semelle := MeshInstance3D.new()
+		semelle.mesh = _cube
+		semelle.material_override = _teinte_unie(Color("#8d8f8c"))
+		semelle.transform = boite.call(Vector3(large * 0.86, 0.5, 3.2),
+			ou + Vector3(0, 0.25, 0))
+		parent.add_child(semelle)
 	# ⚠ L'AFFICHE DONNE SES PROPORTIONS, PAS LE PANNEAU. `large` et `haut` ne
 	# sont qu'un ENCOMBREMENT MAXIMAL (ce que le mur ou le toit peut porter) :
 	# on y inscrit l'image à son format, sinon un visuel qui n'est pas en 16:9
@@ -549,6 +619,54 @@ static func _panneau(parent: Node3D, ou: Vector3, tour: float, large: float, hau
 	toile.transform = Transform3D(base, ou + Vector3(0, mi_h, 0) + base * Vector3(0, 0, ep * 0.5 + 0.06))
 	toile.set_meta("modele", "pub")
 	parent.add_child(toile)
+
+## ⚠ UNE ENSEIGNE AU NÉON, PAS UN PANNEAU. Le client demande « pas assez de
+## néon » dans le quartier chaud, et une affiche de plus n'y répondrait pas :
+## une pub est une IMAGE mate qu'on éclaire, un néon est une SOURCE. Ce qui
+## fait le quartier la nuit, c'est la couleur saturée posée à hauteur de
+## premier étage, répétée sur chaque façade — pas la surface imprimée.
+##
+## Un caisson sombre, une face émissive devant. L'émissif porte en mode
+## compatibilité (WebGL 2) là où une vraie lumière ne porterait pas : le moteur
+## n'en accepte que huit par objet, et une rue en compte quarante.
+const TEINTE_CAISSON := Color("#23252a")
+
+static func _enseigne(parent: Node3D, ou: Vector3, tour: float, large: float,
+		haut: float, couleur: String) -> void:
+	if _cube == null:
+		_cube = BoxMesh.new()
+		_cube.size = Vector3.ONE
+	var base := Basis(Vector3.UP, tour)
+	var caisson := MeshInstance3D.new()
+	caisson.mesh = _cube
+	caisson.material_override = _teinte_unie(TEINTE_CAISSON)
+	caisson.transform = Transform3D(base * Basis.from_scale(
+		Vector3(large + 0.5, haut + 0.5, 0.7)), ou)
+	parent.add_child(caisson)
+	var tube := MeshInstance3D.new()
+	tube.mesh = _cube
+	tube.material_override = _neon_matiere(couleur)
+	tube.transform = Transform3D(base * Basis.from_scale(Vector3(large, haut, 0.35)),
+		ou + base * Vector3(0, 0, 0.45))
+	tube.set_meta("modele", "neon")
+	parent.add_child(tube)
+
+static var _neons: Dictionary = {}
+
+static func _neon_matiere(couleur: String) -> StandardMaterial3D:
+	if _neons.has(couleur): return _neons[couleur]
+	var c := Color(couleur)
+	var m := StandardMaterial3D.new()
+	m.albedo_color = c
+	m.emission_enabled = true
+	m.emission = c
+	# Fort : c'est ce qui passe le seuil du halo et fait la flaque de couleur
+	# sur la façade voisine. Un néon discret ne se voit pas de nuit, et c'est
+	# de nuit que ce quartier se juge.
+	m.emission_energy_multiplier = 2.4
+	m.roughness = 0.5
+	_neons[couleur] = m
+	return m
 
 # ------------------------------------------------------------------ le bord de mer
 
@@ -665,13 +783,20 @@ static func _bateau(parent: Node3D, nom: String, ou: Vector3, tourne: float) -> 
 ## Une pelouse : un plan vert, posé un rien au-dessus de la dalle.
 const TEINTE_PELOUSE := Color("#5d9a3c")
 
-static func _pelouse(parent: Node3D, ou: Vector3, largeur: float, profondeur: float) -> void:
+## ⚠ LA COULEUR DEMANDÉE, PAS LA COULEUR PAR DÉFAUT. Le générateur du campus
+## passait `VERT_PELOUSE` (un vert tondu, plus franc que l'herbe du terrain)
+## depuis le premier jour, et la pelouse sortait quand même de la couleur de
+## la constante : le paramètre était ignoré. Une pelouse de stade de la même
+## couleur que le pré d'à côté ne se voit pas — et un stade dont on ne voit pas
+## la pelouse n'est pas un stade.
+static func _pelouse(parent: Node3D, ou: Vector3, largeur: float, profondeur: float,
+		teinte := "") -> void:
 	var n := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(largeur, profondeur)
 	n.mesh = pm
 	var m := StandardMaterial3D.new()
-	m.albedo_color = TEINTE_PELOUSE
+	m.albedo_color = Color(teinte) if teinte != "" else TEINTE_PELOUSE
 	m.roughness = 1.0
 	n.material_override = m
 	n.position = ou + Vector3(0, 0.06, 0)
@@ -718,6 +843,24 @@ static func _tuile(parent: Node3D, nom: String, ou: Vector3, quarts: int, teinte
 	n.set_meta("tuile", nom)
 	_noter(chemin)
 	parent.add_child(n)
+
+const ATLAS := preload("res://commun/ville2/atlas.gd")
+
+## La matière d'un modèle dont on a repeint la bande de toiture.
+static func _matiere_toit(chemin: String, teinte: Color, toit: String) -> Material:
+	var cle := chemin + teinte.to_html() + "|t" + toit
+	if _matieres.has(cle): return _matieres[cle]
+	var m := FormesCarnage.matiere_kenney(chemin).duplicate()
+	if m is ShaderMaterial:
+		var sm := m as ShaderMaterial
+		sm.set_shader_parameter("teinte", teinte)
+		var source: Texture2D = sm.get_shader_parameter("atlas")
+		sm.set_shader_parameter("atlas", ATLAS.toiture(source, Color(toit)))
+	elif m is BaseMaterial3D:
+		# Pas d'atlas (couleur de sommet) : on ne peut pas isoler le toit.
+		(m as BaseMaterial3D).albedo_color = teinte
+	_matieres[cle] = m
+	return m
 
 static func _matiere(chemin: String, teinte: Color) -> Material:
 	var cle := chemin + teinte.to_html()

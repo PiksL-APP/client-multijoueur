@@ -20,6 +20,10 @@ const ANGLES := preload("res://commun/ville2/angles.gd")
 ## Les règles communes à tous les quartiers : rien sur la chaussée, et pas
 ## une pelouse nue. Appelées en dernier (voir `commun/ville2/proprete.gd`).
 const PROPRETE := preload("res://commun/ville2/proprete.gd")
+const PARC := preload("res://commun/ville2/parc.gd")
+const ATLAS := preload("res://commun/ville2/atlas.gd")
+const CHEMINS := preload("res://commun/ville2/chemins.gd")
+const TEINTES := preload("res://commun/ville2/teintes.gd")
 
 ## Les panneaux publicitaires (cahier § 7) : toits, pignons aveugles, bords
 ## d'axe. Brique commune — l'affichage est une règle de ville, pas de quartier.
@@ -147,11 +151,29 @@ static func generer(graine := 1, taille := Vector2i(40, 40), curseurs := {}) -> 
 		var dy := absi(r.position.y - place.position.y)
 		if (dx <= pas and dy <= pas) and not r.position == place.position:
 			tours.append(r)
+	# ⚠⚠ UN PÂTÉ ENTIER EST RENDU AU PARC (demande du client, 13/09 : « tu dois
+	# faire un vrai parc au centre avec Kenney nature »).
+	#
+	# Et il faut bien un PÂTÉ ENTIER, pas un coin de pelouse : le centre n'avait
+	# de vert que les quatre plates-bandes de la place, et une plate-bande n'est
+	# pas un parc. Ce qui fait un parc dans une ville dense, c'est justement
+	# qu'un îlot bâti manque — le trou dans la trame se voit d'en haut avant
+	# même les arbres. On en choisit donc un vrai, central, et on ne le lotit
+	# pas du tout.
+	var parc := _le_pate_du_parc(pates, place, gare)
 	for r in pates:
+		if r == parc: continue
 		if r in tours:
 			_pate_de_tours(v, r, alea)
 		else:
 			_pate_d_immeubles(v, r, alea, densite)
+	if parc.size.x > 0:
+		# Les entrées du parc sont aux MILIEUX DE CÔTÉ : c'est là que les rues
+		# qui le bordent viennent buter, donc là qu'on entre.
+		PARC.dessiner(v, alea, parc, mini(2, mini(parc.size.x, parc.size.y) / 3), [])
+		v.ajouter_lieu("parc", (float(parc.position.x) + float(parc.size.x) * 0.5) * CASE,
+			(float(parc.position.y) + float(parc.size.y) * 0.5) * CASE,
+			{"nom": "Jardin Public"})
 	_la_place(v, place, alea)
 	_la_gare(v, gare, alea)
 	_les_services(v, alea)
@@ -162,8 +184,31 @@ static func generer(graine := 1, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_voitures_garees(v, alea, place, gare)
 	_panneaux_pub(v, alea, avenues_x, avenues_y, pas)
 	v.rasteriser()
+	# ⚠ AUCUNE TOITURE VERTE (client, 13/09). Voir `atlas.gd` : la bande
+	# verte de l'atlas est repeinte par bâtiment, murs inchangés.
+	TEINTES.couvrir(v, alea, "", ATLAS.VIEILLE)
 	PROPRETE.finir(v, alea)
 	return v
+
+## Le pâté qui devient le parc : le plus grand des pâtés CENTRAUX qui ne touche
+## ni la place ni la gare. Central, parce qu'un jardin public de centre-ville
+## est à dix minutes à pied de la place — au bord de la carte, ce serait un
+## terrain vague.
+static func _le_pate_du_parc(pates: Array, place: Rect2i, gare: Rect2i) -> Rect2i:
+	var mieux := Rect2i()
+	var note := -1.0
+	for r in pates:
+		var rr: Rect2i = r
+		if rr.size.x < 3 or rr.size.y < 3: continue
+		if rr.grow(1).intersects(place) or rr.grow(1).intersects(gare): continue
+		# On note la SURFACE, pénalisée par l'éloignement du centre de la carte.
+		var c := Vector2(float(rr.position.x) + float(rr.size.x) * 0.5,
+			float(rr.position.y) + float(rr.size.y) * 0.5)
+		var n := float(rr.size.x * rr.size.y) - c.distance_to(Vector2(20.0, 20.0)) * 1.6
+		if n > note:
+			note = n
+			mieux = rr
+	return mieux
 
 ## Les morceaux d'une rue de 0 à `longueur − 1`, une fois ôtés les `trous`
 ## ([début, fin] inclus). Un morceau d'une seule case ne vaut pas une rue.
@@ -337,8 +382,12 @@ static func _la_place(v: Ville2, place: Rect2i, alea: RandomNumberGenerator) -> 
 				px + alea.randf_range(-1.0, 1.0) * CASE,
 				cz + alea.randf_range(-0.7, 0.7) * CASE, alea.randf() * TAU, 0.45)
 		for k in 5:
+			# ⚠ Aplatie : cette dalle est dessinée sous le niveau zéro, et le
+			# chargeur la repose base à zéro — elle ressortait d'un mètre. Voir
+			# `chemins.gd`.
 			v.ajouter_objet("nature/path_stone", px - CASE + float(k) * 0.5 * CASE,
 				cz + 0.75 * CASE, 0.0)
+			v.objets[v.objets.size() - 1]["aplat"] = CHEMINS.APLAT
 	# Les terrasses (cahier § 8 : « activités : bancs, terrasses ») le long du
 	# côté est, face à l'avenue : parasols du kit et bancs, deux rangs.
 	var xe := (float(place.end.x) - 0.7) * CASE

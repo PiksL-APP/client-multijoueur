@@ -13,8 +13,13 @@ extends RefCounted
 ## On emploie donc des OBJETS LIBRES (`ajouter_objet`, angle quelconque) au lieu
 ## de lots, pour la première fois du projet. Conséquences assumées :
 ##
-## * les baraques peuvent se toucher et se chevaucher un peu — c'est voulu, un
-##   bidonville se construit en s'appuyant sur le voisin ;
+## * ⚠ LES BARAQUES NE SE CHEVAUCHENT PAS. C'était écrit ici le 12/09 comme un
+##   parti pris (« un bidonville se construit en s'appuyant sur le voisin ») et
+##   le client l'a tranché le 13/09 : « tu ne dois pas fusionner deux bâtiments
+##   l'un à l'autre ». Il a raison et le parti pris était faux : deux volumes
+##   qui s'interpénètrent ne font pas un appentis, ils font un défaut de rendu —
+##   on voit un mur sortir d'un toit. Serré n'est pas confondu. Elles se TOUCHENT
+##   donc, à quelques centimètres, et jamais plus ;
 ## * elles ne bloquent pas le lotisseur, mais il n'y en a pas ici ;
 ## * elles suivent la règle des hauteurs en mètres comme tout le reste : une
 ##   baraque fait trois à quatre mètres et demi, pas onze.
@@ -32,7 +37,10 @@ extends RefCounted
 ## lots → détails.
 
 const PROPRETE := preload("res://commun/ville2/proprete.gd")
+const ATLAS := preload("res://commun/ville2/atlas.gd")
+const TEINTES := preload("res://commun/ville2/teintes.gd")
 const AFFICHES := preload("res://commun/ville2/affiches.gd")
+const CHEMINS := preload("res://commun/ville2/chemins.gd")
 
 const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
@@ -52,16 +60,44 @@ const PRENOMS := ["de la Décharge", "du Talus", "des Tôles", "du Fossé", "de 
 ## modèles sont des garages et des hangars : à l'échelle du kit ils font onze à
 ## vingt mètres. Ramenés à trois ou quatre, ce sont des cabanes — le même
 ## modèle, la même règle qu'ailleurs, un résultat qui n'a plus rien à voir.
-const BARAQUES := [
-	{"m": "ville/building-garage", "h": 3.4},
-	{"m": "batiments/low-detail-building-n", "h": 4.2},
-	{"m": "industriel/building-c", "h": 3.8},
-	{"m": "industriel/building-h", "h": 4.4},
-	{"m": "industriel/building-i", "h": 3.6},
-	{"m": "pavillons/building-type-c", "h": 4.0},
-	{"m": "pavillons/building-type-l", "h": 3.8},
-	{"m": "nature/tent_detailedOpen", "h": 2.4},
-	{"m": "nature/tent_detailedClosed", "h": 2.4},
+## ⚠ TOUTES LES VARIANTES DU KIT SUBURBAN, ET TOUTES À LA MÊME HAUTEUR
+## (demandes du client, 13/09 : « tu dois utiliser toutes les variantes du
+## modèle Suburban » et « tu ne dois pas gérer de différence de taille »).
+##
+## La seconde demande a l'air d'un détail et n'en est pas un : la variation de
+## hauteur (0,85 à 1,25) faisait sortir des baraques de trois mètres à côté de
+## baraques de cinq, et comme l'emprise suit la hauteur, elle faisait varier
+## aussi la LARGEUR — d'où des voisines qui se recouvraient. Une seule hauteur,
+## et le pavage redevient calculable.
+const HAUTEUR_BARAQUE := 3.8
+
+## Les vingt-et-une variantes du kit, sans exception.
+const SUBURBAN := ["pavillons/building-type-a", "pavillons/building-type-b",
+	"pavillons/building-type-c", "pavillons/building-type-d", "pavillons/building-type-e",
+	"pavillons/building-type-f", "pavillons/building-type-g", "pavillons/building-type-h",
+	"pavillons/building-type-i", "pavillons/building-type-j", "pavillons/building-type-k",
+	"pavillons/building-type-l", "pavillons/building-type-m", "pavillons/building-type-n",
+	"pavillons/building-type-o", "pavillons/building-type-p", "pavillons/building-type-q",
+	"pavillons/building-type-r", "pavillons/building-type-s", "pavillons/building-type-t",
+	"pavillons/building-type-u"]
+
+## ⚠ LES CARAVANES ET LES CAMPING-CARS (demande du client, 13/09). Le kit n'a
+## ni l'un ni l'autre — vérifié : `modeles/kenney/voitures/` n'a pas de
+## remorque d'habitation. Ce qui s'en approche, ce sont les VOLUMES BOÎTE du
+## kit voitures : `box` est une caisse de remorque (donc une caravane dételée),
+## `delivery` et `van` sont des fourgons à toit haut (donc des camping-cars).
+## Posés à hauteur d'habitation au milieu des cabanes, c'est ce qu'on lit.
+const CARAVANES := ["voitures/box", "voitures/delivery", "voitures/van",
+	"voitures/truck-flat"]
+const H_CARAVANES = [3.0, 3.2, 2.8, 3.0]
+
+## Les cabanes de fortune : les tentes et les appentis, plus bas.
+const CABANES := [
+	{"m": "nature/tent_detailedOpen", "h": 2.6},
+	{"m": "nature/tent_detailedClosed", "h": 2.6},
+	{"m": "nature/tent_smallClosed", "h": 2.2},
+	{"m": "ville/building-garage", "h": 3.2},
+	{"m": "industriel/building-h", "h": 3.4},
 ]
 ## Ce qui traîne entre les baraques.
 const TAS := ["nature/log_stack", "nature/rock_smallA", "nature/stone_smallB",
@@ -93,14 +129,38 @@ static func generer(graine := 9, taille := Vector2i(40, 40), curseurs := {}) -> 
 	# de la même terre. On la peint donc en `M_ROCHE` : le gris de la caillasse
 	# tassée par les pas, juste assez différent du remblai pour dessiner le
 	# réseau d'en haut.
-	for c in sentes: v.poser_matiere(c, Ville2.M_ROCHE)
+	# ⚠ PAS UN BRIN D'HERBE, PAS MÊME SOUS LES SENTES. Le quartier est de la
+	# terre nue d'un bord à l'autre : c'est sa définition. Les deux essais
+	# précédents mettaient de l'herbe sous les tuiles de chemin, puis une bande
+	# débordante, pour cacher le liseré vert que la tuile apporte avec elle —
+	# et ça donnait des pelouses au milieu d'un bidonville. La verdure est
+	# maintenant retirée DE LA TUILE (voir `chemins.gd` et `atlas.sans_verdure`),
+	# donc le sol n'a plus rien à compenser : on le laisse en terre, et on
+	# marque juste la sente d'un ton de caillasse tassée.
+	# ⚠ ET RIEN SOUS LA SENTE : LA MÊME TERRE QUE PARTOUT. La case était peinte
+	# en `M_ROCHE` (le gris de la caillasse) pour que le réseau se voie d'en
+	# haut. Maintenant que les tuiles portent le chemin, ce gris ne sert plus à
+	# rien — il ne fait que dépasser d'un liseré autour de chaque tuile, ce qui
+	# est exactement le défaut qu'on vient de corriger côté verdure.
+	pass
 	_les_baraques(v, alea, sentes)
+	# ⚠ ET LES SENTES SONT DE VRAIES TUILES DE CHEMIN (demande du client, 13/09 :
+	# « tu dois faire des routes de terre du kit Kenney nature »). Peindre la
+	# case en `M_ROCHE` dessinait bien le réseau d'en haut, mais de près il n'y
+	# avait rien : une nuance de gris, pas un chemin. Les tuiles `ground_path*`
+	# du kit ont l'ornière, le bord relevé et les cailloux ; raccordées par
+	# `chemins.gd`, elles font le chemin creusé qu'on attend.
+	CHEMINS.poser(v, alea, sentes, "", ATLAS.TERRE_SECHE.to_html(false))
 	_le_point_d_eau(v, alea)
 	_details(v, alea, sentes)
 	# Deux ou trois affiches en lisière, jamais dedans : ce sont les panneaux de
 	# la route, et ils regardent ailleurs.
 	AFFICHES.semer(v, alea, 150.0, [], 3)
 	# Pas d'herbe : le sol est nu.
+	# ⚠ AUCUNE TOITURE VERTE (client, 13/09). Voir `atlas.gd` : la bande
+	# verte de l'atlas est repeinte par bâtiment, murs inchangés.
+	TEINTES.couvrir(v, alea, "", ATLAS.TOLE)
+	TEINTES.peindre(v, alea, "", TEINTES.TOLE, 0.00)
 	PROPRETE.finir(v, alea, 0)
 	return v
 
@@ -137,38 +197,148 @@ static func _rues(v: Ville2) -> void:
 ## LES SENTES. Ce sont les seuls « axes » de l'intérieur, et elles ne sont pas
 ## des routes : le kit n'a pas de tuile pour un chemin de terre entre deux
 ## cabanes, et une tuile de route ferait un boulevard. On les trace donc en
-## MARQUANT DES CASES, et on s'en sert ensuite pour deux choses : n'y poser
-## aucune baraque, et y semer les détails de passage.
+## MARQUANT DES CASES ; `chemins.gd` pose ensuite les tuiles `ground_path*` qui
+## conviennent au voisinage de chacune.
+##
+## ⚠⚠ ET LE RÉSEAU DOIT ÊTRE D'UN SEUL TENANT. « Fais en sorte que dans le
+## bidonville chaque rue soit connectée entre elle, car là ce n'est pas le cas »
+## (client, 13/09). Il avait raison, et la faute tenait à UNE LIGNE :
+##
+##     for _k in ...:           # on descend, on écrit (i, j), puis j -= 1
+##     i = i ± 1                # on se décale
+##     sentes[Vector2i(i, j)]   # on écrit (i ± 1, j)
+##
+## La dernière case du tronçon était (i, j + 1) et la première du suivant
+## (i ± 1, j) : elles sont EN DIAGONALE. Or `chemins.gd` ne raccorde que les
+## voisins nord/est/sud/ouest — une case en diagonale n'est pas un voisin. À
+## chaque zigzag, la sente se coupait donc en deux, et il y en avait un tous
+## les deux ou trois pas. Vu d'en haut ça ressemblait à un chemin ; parcouru,
+## ça n'en était pas un.
+##
+## ⚠ LA LEÇON, plus générale : un décalage se dessine en L, jamais en diagonale.
+## Il faut écrire la CASE DE COIN. C'est la même contrainte que le tracé des
+## routes du cahier (« le modèle refuse la diagonale, le kit ne sait pas la
+## paver ») ; elle vaut pour tout ce qui se pave à la case.
+##
+## Et comme un tracé juste ne prouve pas un réseau connexe — deux sentes
+## peuvent parfaitement ne jamais se croiser —, on VÉRIFIE à la fin par
+## propagation, et on creuse ce qu'il faut. Voir `_rendre_connexe`.
 ##
 ## Rend l'ensemble des cases de sente.
 static func _les_sentes(v: Ville2, alea: RandomNumberGenerator) -> Dictionary:
 	var sentes: Dictionary = {}
-	# Trois sentes qui partent de la route et serpentent vers le fond, plus
-	# deux transversales. Elles zigzaguent d'une case tous les deux ou trois
-	# pas : une sente droite serait une rue.
+	# Trois sentes qui montent de la route vers le fond, deux transversales.
+	# Elles zigzaguent d'une case tous les deux ou trois pas — une sente droite
+	# serait une rue — mais chaque zigzag est un COUDE, pas un saut.
 	for depart in [8, 18, 29]:
 		var i: int = depart
 		var j := J_ROUTE - 1
 		while j > COEUR.position.y:
-			for _k in alea.randi_range(2, 4):
-				if j <= COEUR.position.y: break
-				sentes[Vector2i(i, j)] = true
-				j -= 1
-			i = clampi(i + (1 if alea.randf() < 0.5 else -1), COEUR.position.x + 1,
-				COEUR.end.x - 2)
-			sentes[Vector2i(i, j)] = true
+			var bas := j
+			j = maxi(COEUR.position.y, j - alea.randi_range(2, 4))
+			_couloir(sentes, Vector2i(i, bas), Vector2i(i, j))
+			if j <= COEUR.position.y: break
+			var suivant := clampi(i + (1 if alea.randf() < 0.5 else -1),
+				COEUR.position.x + 1, COEUR.end.x - 2)
+			# Le coude : on parcourt la ligne AVANT de redescendre. C'est cette
+			# case-là qui manquait.
+			_couloir(sentes, Vector2i(i, j), Vector2i(suivant, j))
+			i = suivant
 	for jj in [12, 24]:
 		var i2 := COEUR.position.x + 1
 		var j2: int = jj
 		while i2 < COEUR.end.x - 1:
-			for _k in alea.randi_range(2, 4):
-				if i2 >= COEUR.end.x - 1: break
-				sentes[Vector2i(i2, j2)] = true
-				i2 += 1
-			j2 = clampi(j2 + (1 if alea.randf() < 0.5 else -1), COEUR.position.y + 1,
-				COEUR.end.y - 2)
-			sentes[Vector2i(i2, j2)] = true
+			var gauche := i2
+			i2 = mini(COEUR.end.x - 1, i2 + alea.randi_range(2, 4))
+			_couloir(sentes, Vector2i(gauche, j2), Vector2i(i2, j2))
+			if i2 >= COEUR.end.x - 1: break
+			var suivant2 := clampi(j2 + (1 if alea.randf() < 0.5 else -1),
+				COEUR.position.y + 1, COEUR.end.y - 2)
+			_couloir(sentes, Vector2i(i2, j2), Vector2i(i2, suivant2))
+			j2 = suivant2
+	# ⚠ ET ON RACCORDE LA ROUTE. Une sente qui s'arrête une case avant la
+	# chaussée ne débouche nulle part : le bidonville n'aurait aucune entrée.
+	for depart in [8, 18, 29]:
+		_couloir(sentes, Vector2i(depart, J_ROUTE - 1), Vector2i(depart, J_ROUTE - 1))
+	_rendre_connexe(v, sentes, alea)
 	return sentes
+
+## Creuse un couloir d'une case entre deux points ALIGNÉS (même x ou même y),
+## bornes comprises. C'est la seule primitive de tracé : tout passe par elle,
+## donc aucun tracé ne peut produire de diagonale.
+static func _couloir(sentes: Dictionary, a: Vector2i, b: Vector2i) -> void:
+	var d := (b - a).sign()
+	var c := a
+	sentes[c] = true
+	var garde := 0
+	while c != b and garde < 200:
+		c += d
+		sentes[c] = true
+		garde += 1
+
+## ⚠ LA PREUVE, PAS L'INTENTION. Le tracé ci-dessus est juste, mais rien ne
+## garantit que les cinq sentes se croisent : elles zigzaguent au hasard, et
+## une graine peut très bien les faire passer à côté les unes des autres. On
+## vérifie donc, par propagation de proche en proche (voisins orthogonaux
+## seulement, comme `chemins.gd` les raccorde), que TOUT est d'un seul tenant —
+## et quand ça ne l'est pas, on creuse.
+##
+## Le rattachement se fait vers la case du grand morceau la plus proche, en L :
+## c'est le chemin le plus court qui reste orthogonal.
+static func _rendre_connexe(v: Ville2, sentes: Dictionary, alea: RandomNumberGenerator) -> void:
+	var tours := 0
+	while tours < 12:
+		tours += 1
+		var morceaux := _morceaux(sentes)
+		if morceaux.size() <= 1: return
+		# Le plus gros morceau est le réseau ; tous les autres s'y rattachent.
+		var principal: Array = morceaux[0]
+		for m in morceaux:
+			if (m as Array).size() > principal.size(): principal = m
+		var relie := false
+		for m in morceaux:
+			if m == principal: continue
+			var de: Vector2i = (m as Array)[0]
+			var vers: Vector2i = principal[0]
+			var mieux := 1 << 30
+			for a in (m as Array):
+				for b in principal:
+					var d: int = absi(int(a.x) - int(b.x)) + absi(int(a.y) - int(b.y))
+					if d < mieux:
+						mieux = d
+						de = a
+						vers = b
+			# Le L : d'abord en x, puis en y (ou l'inverse, au hasard, pour que
+			# les raccords ne se ressemblent pas tous).
+			if alea.randf() < 0.5:
+				_couloir(sentes, de, Vector2i(vers.x, de.y))
+				_couloir(sentes, Vector2i(vers.x, de.y), vers)
+			else:
+				_couloir(sentes, de, Vector2i(de.x, vers.y))
+				_couloir(sentes, Vector2i(de.x, vers.y), vers)
+			relie = true
+			break
+		if not relie: return
+
+## Les morceaux connexes de l'ensemble, par propagation orthogonale.
+static func _morceaux(sentes: Dictionary) -> Array:
+	var vus: Dictionary = {}
+	var morceaux: Array = []
+	for depart in sentes:
+		if vus.has(depart): continue
+		var morceau: Array = []
+		var pile: Array = [depart]
+		vus[depart] = true
+		while not pile.is_empty():
+			var c: Vector2i = pile.pop_back()
+			morceau.append(c)
+			for d in [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]:
+				var n: Vector2i = c + d
+				if sentes.has(n) and not vus.has(n):
+					vus[n] = true
+					pile.append(n)
+		morceaux.append(morceau)
+	return morceaux
 
 # ------------------------------------------------------------------ 4. les baraques
 
@@ -176,37 +346,84 @@ static func _les_sentes(v: Ville2, alea: RandomNumberGenerator) -> Dictionary:
 ## et un chevauchement toléré : c'est la seule façon d'obtenir le désordre
 ## caractéristique. Deux garde-fous seulement — jamais sur une sente, jamais sur
 ## la route — parce qu'un bidonville est désordonné, pas impraticable.
+## ⚠ LE PAVAGE SANS CHEVAUCHEMENT. Deux contraintes qui se combattent : il en
+## faut BEAUCOUP (une baraque de six mètres, une case de vingt — il en faut une
+## douzaine pour paver une case, sinon le témoin sort en « jouets semés sur une
+## plage ») et il n'en faut AUCUNE qui en traverse une autre.
+##
+## La solution n'est ni une grille (trop régulière : ça fait un lotissement) ni
+## un semis pur (il laisse des trous et fait des paquets). On garde la
+## SOUS-GRILLE, qui garantit la couverture, et on lui ajoute un REGISTRE des
+## cercles déjà occupés : chaque baraque réserve son rayon, et une candidate
+## qui empiéterait n'est pas posée. Le jeu autorisé dans la sous-grille est
+## alors ce qui défait l'alignement, et le registre ce qui interdit la fusion.
+##
+## Le rayon vient de l'emprise RÉELLE du modèle à la hauteur voulue — pas d'une
+## constante : une caravane fait deux mètres de large et un pavillon six.
 static func _les_baraques(v: Ville2, alea: RandomNumberGenerator, sentes: Dictionary) -> void:
+	var pris: Array = []
 	for j in range(COEUR.position.y, COEUR.end.y):
 		for i in range(COEUR.position.x, COEUR.end.x):
 			var c := Vector2i(i, j)
 			if sentes.has(c): continue
-			if v.carte != null and v.carte.route(c): continue
+			if v.carte != null and (v.carte.route(c) or v.carte.case_prise(c)): continue
 			if c.distance_to(Vector2(POINT_D_EAU)) < 2.5: continue
-			# ⚠⚠ IL EN FAUT BEAUCOUP PLUS QU'ON NE CROIT. Premier jet : une ou
-			# deux baraques par case. Une baraque ramenée à quatre mètres fait
-			# SIX MÈTRES DE CÔTÉ, une case en fait vingt : deux baraques n'en
-			# couvrent qu'un cinquième, et le témoin est sorti en jouets semés
-			# sur une plage. Un bidonville est mur à mur — il en faut de quoi
-			# PAVER la case, soit une douzaine.
-			#
-			# On les pose donc sur une sous-grille de trois par trois, avec du
-			# jeu : la sous-grille garantit la couverture, le jeu défait
-			# l'alignement. Poser au hasard pur laisse des trous et des paquets.
 			var proche := absf(float(j) - float(J_ROUTE)) < 18.0
-			var densite := 0.86 if proche else 0.52
+			var densite := 0.92 if proche else 0.6
 			for sj in SOUS_GRILLE:
 				for si in SOUS_GRILLE:
 					if alea.randf() > densite: continue
-					var f: Dictionary = BARAQUES[alea.randi() % BARAQUES.size()]
 					var pas := 1.0 / float(SOUS_GRILLE)
-					v.ajouter_objet(String(f["m"]),
-						(float(i) + (float(si) + 0.5) * pas
-							+ alea.randf_range(-0.12, 0.12)) * CASE,
-						(float(j) + (float(sj) + 0.5) * pas
-							+ alea.randf_range(-0.12, 0.12)) * CASE,
-						alea.randf() * TAU,
-						float(f["h"]) * alea.randf_range(0.85, 1.25))
+					var x := (float(i) + (float(si) + 0.5) * pas
+						+ alea.randf_range(-0.07, 0.07)) * CASE
+					var z := (float(j) + (float(sj) + 0.5) * pas
+						+ alea.randf_range(-0.07, 0.07)) * CASE
+					_essayer(v, alea, pris, x, z)
+
+## Tire un abri au hasard et le pose s'il tient sans toucher ses voisins.
+## Une cabane sur sept est une caravane, une sur cinq une tente : le reste est
+## bâti avec les vingt-et-une variantes du kit Suburban.
+static func _essayer(v: Ville2, alea: RandomNumberGenerator, pris: Array,
+		x: float, z: float) -> bool:
+	var tirage := alea.randf()
+	var modele := ""
+	var hauteur := HAUTEUR_BARAQUE
+	if tirage < 0.14:
+		var n := alea.randi() % CARAVANES.size()
+		modele = CARAVANES[n]
+		hauteur = float(H_CARAVANES[n])
+	elif tirage < 0.32:
+		var f: Dictionary = CABANES[alea.randi() % CABANES.size()]
+		modele = String(f["m"])
+		hauteur = float(f["h"])
+	else:
+		modele = SUBURBAN[alea.randi() % SUBURBAN.size()]
+	var r := _rayon(modele, hauteur)
+	for p in pris:
+		var q: Vector3 = p
+		if Vector2(q.x, q.y).distance_to(Vector2(x, z)) < r + q.z: return false
+	pris.append(Vector3(x, z, r))
+	# ⚠ LA TÔLE, PAS LE VERT. La bande de toiture est repeinte comme partout
+	# ailleurs (voir `atlas.gd`) ; ici c'est de la tôle rouillée, et les murs
+	# prennent une teinte de bois grisé — c'est ce qui fait la « cabane en
+	# bois » avec un modèle de pavillon.
+	var teinte: String = TEINTES.TOLE[alea.randi() % TEINTES.TOLE.size()]
+	var couverture: String = ATLAS.TOLE[alea.randi() % ATLAS.TOLE.size()]
+	var fiche := {"m": modele, "x": x, "z": z, "r": alea.randf() * TAU, "h": hauteur,
+		"c": teinte, "toit": couverture}
+	v.objets.append(fiche)
+	return true
+
+## Le demi-diamètre au sol d'un modèle posé à la hauteur voulue, en unités.
+## ⚠ ON MESURE, ON NE DEVINE PAS. `KitVille2.taille()` rend la boîte en CASES à
+## l'échelle du catalogue ; à hauteur imposée, tout est mis à l'échelle par le
+## rapport des hauteurs. Une constante « six mètres » aurait fait tenir une
+## caravane pour un pavillon et laissé des trous partout.
+static func _rayon(modele: String, hauteur: float) -> float:
+	var t := KitVille2.taille(modele)
+	if t.y <= 0.001: return 3.0
+	var facteur := hauteur / (t.y * CASE)
+	return 0.5 * sqrt(pow(t.x * CASE * facteur, 2.0) + pow(t.z * CASE * facteur, 2.0)) * 0.88
 
 # ------------------------------------------------------------------ 5. le point d'eau
 

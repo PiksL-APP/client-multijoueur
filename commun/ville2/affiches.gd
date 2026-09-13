@@ -161,8 +161,14 @@ static func _au_bord_des_axes(v: Ville2, alea: RandomNumberGenerator, ecart: flo
 		var z := (float(b.y) + 0.5) * CASE
 		if not _assez_loin(poses, x, z, ecart): continue
 		poses.append(Vector2(x, z))
+		# ⚠ PLUS BAS, PLUS PETIT (« j'ai des pubs qui volent », client, 13/09).
+		# Un panneau de dix mètres de haut dont le bas est à cinq mètres, planté
+		# seul au milieu d'une friche, n'a rien pour donner l'échelle : les
+		# poteaux se perdent contre le sol et l'image paraît suspendue. On
+		# descend le pied à trois mètres — sous la hauteur des toits voisins,
+		# donc lisible comme « posé au sol » — et on réduit la toile.
 		v.objets.append({"m": "pub", "x": x, "z": z, "r": _vers(vers), "h": 0.0,
-			"y": 0.0, "w": 18.0, "hh": 10.0, "pied": 5.0, "image": image0 + image})
+			"y": 0.0, "w": 14.0, "hh": 8.0, "pied": 3.0, "image": image0 + image})
 		image += 1
 	return image
 

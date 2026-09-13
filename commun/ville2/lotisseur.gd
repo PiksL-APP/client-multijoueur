@@ -98,6 +98,10 @@ static func aligner(v: Ville2, alea: RandomNumberGenerator, choix: Array, cote: 
 ## À appeler AVANT `ajouter_lot`, jamais après : `lot_sur()` ne connaît que les
 ## lots de la dernière rastérisation.
 static func terrain_libre(v: Ville2, hx: int, hy: int, e: Vector2i) -> bool:
+	# ⚠ LE REGISTRE VIVANT D'ABORD. `lot_sur()` date de la dernière
+	# rastérisation ; `demi_prises` connaît la maison posée il y a trois lignes.
+	# Sans ce test, une passe qui pose cent maisons les empile toutes.
+	if not v.demi_libre(hx, hy, e.x, e.y): return false
 	if v.carte == null: return true
 	var palier := -9999
 	for b in e.y:

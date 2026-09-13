@@ -29,6 +29,8 @@ extends RefCounted
 
 const ANGLES := preload("res://commun/ville2/angles.gd")
 const PROPRETE := preload("res://commun/ville2/proprete.gd")
+const TEINTES := preload("res://commun/ville2/teintes.gd")
+const ATLAS := preload("res://commun/ville2/atlas.gd")
 const AFFICHES := preload("res://commun/ville2/affiches.gd")
 
 const CASE := Ville2.CASE
@@ -87,15 +89,32 @@ const IMPASSES := [
 ## Ce qui fait une vieille ville, c'est un bâti BAS et SERRÉ. On prend donc ce
 ## que le catalogue a de plus bas — mesuré, entre 0,55 et 1,15 case de haut,
 ## soit onze à vingt-trois mètres — et on le colle bord à bord.
-const MAISONS := ["batiments/low-detail-building-n", "batiments/low-detail-building-wide-a",
-	"batiments/low-detail-building-wide-b", "ville/building-small-a",
-	"pavillons/building-type-h", "pavillons/building-type-i", "pavillons/building-type-m",
-	"pavillons/building-type-g", "pavillons/building-type-a", "pavillons/building-type-p",
-	"pavillons/building-type-q"]
+##
+## ⚠ LA VARIANTE A DU KIT SUBURBAN (demande du client, 13/09). Vérifié au
+## md5 : `suburb-building-type-a.glb` est OCTET POUR OCTET
+## `building-type-a.glb` — les six `suburb-*` du dossier sont des doublons de
+## leurs homonymes, comme `modeles/banlieue/`, `modeles/commerce/` et
+## `modeles/industrie/` sont des copies entières des kits Kenney. Il n'y a donc
+## qu'un seul modèle « A » du kit Suburban, et c'est celui-ci. On écrit le
+## chemin canonique : un doublon supprimé ne doit pas emporter un quartier.
+##
+## Il domine le front (deux entrées sur onze dans le sac), le reste alterne.
+const MAISONS := ["pavillons/building-type-a", "pavillons/building-type-a",
+	"pavillons/building-type-c", "pavillons/building-type-f",
+	"pavillons/building-type-j", "pavillons/building-type-m",
+	"pavillons/building-type-q", "pavillons/building-type-h",
+	"pavillons/building-type-i", "batiments/low-detail-building-n",
+	"batiments/low-detail-building-wide-a", "batiments/low-detail-building-wide-b"]
 ## Les plus basses encore : remises, ateliers, appentis. Elles cassent la ligne
 ## de toits, qui sans ça serait aussi régulière qu'un lotissement.
-const BASSES := ["ville/building-garage", "batiments/low-detail-building-n",
-	"pavillons/building-type-c", "pavillons/building-type-l"]
+## ⚠ PAS DE `ville/…` ICI. Ces modèles-là existent sous `res://modeles/ville/`,
+## mais `KitVille2.chemin()` préfixe tout ce qui n'est pas du client par
+## `res://modeles/kenney/` : `ville/building-garage` se résolvait en un chemin
+## qui n'existe pas, le renderer posait un `push_warning` et sautait le lot. En
+## vieille ville, TRENTE-SIX maisons disparaissaient ainsi à chaque rendu, sans
+## rien dans l'image pour le dire.
+const BASSES := ["batiments/low-detail-building-n", "pavillons/building-type-l",
+	"pavillons/building-type-c", "pavillons/building-type-h"]
 ## ⚠ QUELQUES TOURS, ET SEULEMENT QUELQUES-UNES. Les `low-detail` hauts ne sont
 ## pas une erreur si on les emploie pour ce qu'ils sont : des tours de famille
 ## et des beffrois, comme à San Gimignano. Une sur vingt-cinq — au-delà, on
@@ -103,8 +122,8 @@ const BASSES := ["ville/building-garage", "batiments/low-detail-building-n",
 const TOURS := ["batiments/low-detail-building-a", "batiments/low-detail-building-c",
 	"batiments/low-detail-building-k", "batiments/low-detail-building-d"]
 ## Les bâtiments de belle taille : hôtels particuliers et halles.
-const NOTABLES := ["ville/building-small-b", "ville/building-small-d",
-	"batiments/building-k", "batiments/building-d", "batiments/building-c"]
+const NOTABLES := ["batiments/building-k", "batiments/building-d",
+	"batiments/building-c", "batiments/building-a", "batiments/building-h"]
 
 static func generer(graine := 6, taille := Vector2i(40, 40), curseurs := {}) -> Ville2:
 	var v := Ville2.new(taille)
@@ -128,12 +147,21 @@ static func generer(graine := 6, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_la_place(v, alea)
 	v.rasteriser()
 	_les_cours(v, alea)
+	_le_dehors(v, alea)
 	_details(v, alea)
 	# ⚠ PEU D'AFFICHES ICI, ET AUCUNE AU BORD DES RUES. Une vieille ville en est
 	# le contraire : ses murs portent des enseignes, pas des 4 × 3. On garde
 	# quelques pignons, très espacés, et zéro panneau sur pieds — une ruelle n'a
 	# pas la place, et ça jurerait.
 	AFFICHES.semer(v, alea, 240.0, [], 0)
+	# LES ENDUITS. Un front de maisons toutes blanches se lit comme UNE maison
+	# très longue ; ce sont les changements de couleur qui font compter les
+	# façades. On garde une sur six au blanc du kit, pour le contraste.
+	TEINTES.peindre(v, alea, "vieille", TEINTES.VIEILLE_PIERRE, 0.16)
+	# ET LES TOITS. Tuile passée et ardoise : aucune toiture verte, c'est la
+	# demande du 13/09 et c'est aussi la vérité d'une vieille ville.
+	TEINTES.couvrir(v, alea, "vieille", ATLAS.VIEILLE)
+	TEINTES.couvrir(v, alea, "eglise", ATLAS.VIEILLE)
 	# ⚠ PAS UN BRIN D'HERBE : le quartier est pavé d'un bord à l'autre, donc la
 	# passe de remplissage n'a rien à faire ici. On lui passe zéro.
 	PROPRETE.finir(v, alea, 0)
@@ -285,11 +313,33 @@ static func _poser_repere(v: Ville2, modele: String, depart: Vector2i, quarts: i
 ## Une vieille ville a des COURS : de la terre battue, des remises, un puits.
 ## On repeint donc en terre tout ce qui n'est ni rue, ni bâti, ni la place — et
 ## le réseau des ruelles se lit enfin, parce qu'il est le seul pavé.
+## ⚠ ET LE DEHORS N'EST PAS UNE COUR. Le quartier tient entre les cases 2 et 37
+## en x, 2 et 33 en y : tout ce qui est au-delà est hors les murs. Repeint en
+## terre comme les cours, il faisait un liseré de sable de deux cases tout
+## autour du témoin — une vieille ville posée sur une plage. Hors les murs, on
+## met de l'herbe et des arbres : c'est la campagne, et le contraste dit où
+## finit la ville.
+const DEDANS := Rect2i(2, 2, 36, 32)
+
+static func _le_dehors(v: Ville2, alea: RandomNumberGenerator) -> void:
+	for j in v.taille.y:
+		for i in v.taille.x:
+			var c := Vector2i(i, j)
+			if DEDANS.has_point(c) or not v.terre(c): continue
+			if v.carte != null and (v.carte.route(c) or v.carte.case_prise(c)): continue
+			if v.lot_sur(c) >= 0: continue
+			v.poser_matiere(c, Ville2.M_HERBE)
+			if alea.randf() < 0.5:
+				v.ajouter_objet(["arbre", "arbre_oak", "arbre_petit"][alea.randi() % 3],
+					(float(i) + alea.randf_range(0.2, 0.8)) * CASE,
+					(float(j) + alea.randf_range(0.2, 0.8)) * CASE, alea.randf() * TAU)
+
 static func _les_cours(v: Ville2, alea: RandomNumberGenerator) -> void:
 	var cour := ["pot", "buisson_petit", "tas_de_bois", "caillou", "benne", "poubelle"]
 	for j in v.taille.y:
 		for i in v.taille.x:
 			var c := Vector2i(i, j)
+			if not DEDANS.has_point(c): continue
 			if not v.terre(c): continue
 			if v.carte != null and (v.carte.route(c) or v.carte.case_prise(c)): continue
 			if v.lot_sur(c) >= 0: continue
