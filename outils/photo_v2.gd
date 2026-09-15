@@ -19,6 +19,8 @@ const VIEILLE := preload("res://commun/ville2/generateur_vieille_ville.gd")
 const CHAUD := preload("res://commun/ville2/generateur_chaud.gd")
 const CAMPUS := preload("res://commun/ville2/generateur_campus.gd")
 const BIDONVILLE := preload("res://commun/ville2/generateur_bidonville.gd")
+## LA CARTE ENTIÈRE — l'archipel qui greffe les neuf témoins (14/09).
+const CARTE := preload("res://commun/ville2/generateur_carte.gd")
 
 var _images := 0
 var _attendre := 10
@@ -85,6 +87,8 @@ func _ready() -> void:
 		ville = CAMPUS.generer(int(_arg("graine", "8")))
 	elif _arg("temoin", "centre") == "bidonville":
 		ville = BIDONVILLE.generer(int(_arg("graine", "9")))
+	elif _arg("temoin", "centre") == "carte":
+		ville = CARTE.generer(int(_arg("graine", "100")))
 	else:
 		ville = GenerateurCentre.generer(int(_arg("graine", "1")))
 	var json := _arg("json", "")

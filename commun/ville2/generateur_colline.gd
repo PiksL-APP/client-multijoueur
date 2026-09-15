@@ -34,6 +34,15 @@ extends RefCounted
 ## l'arbre qu'on y pose flotte d'un côté ou s'enterre de l'autre (« enlève tes
 ## dénivelés dans la montagne, sinon les objets flottent », client, 12/09).
 
+## ⚠ ET DEPUIS LE 14/09, C'EST UN VILLAGE DE PIERRE. « Je m'occupe des
+## modifications à faire mais tu dois changer TOUS les modèles par des maisons
+## de pierre (style sud de la France) » : le coteau ne porte plus un seul
+## immeuble de rapport ni un seul pavillon d'Amérique, et le nez de ses
+## terrasses n'est plus un panneau de falaise mais un MUR DE SOUTÈNEMENT
+## maçonné — la pièce qui manquait pour qu'un terrain en gradins se lise comme
+## un village perché. Voir `_lots` pour les maisons et `_soutenements` pour les
+## murs.
+
 ## Les courbes larges et le rond-point (cahier § 5) : brique commune, appelée
 ## par `preload` — un `class_name` neuf n'existe pas dans l'export web.
 const ANGLES := preload("res://commun/ville2/angles.gd")
@@ -124,16 +133,60 @@ const LACETS := [
 const PRENOMS := ["des Terrasses", "du Belvédère", "des Vignes", "de la Corniche",
 	"du Coteau", "des Cyprès", "de la Vue", "du Chemin Creux", "des Oliviers"]
 
-## Les familles : des villas et des pavillons sur les terrasses hautes, des
-## immeubles de rapport en bas — une ville où l'on monte est une ville où
-## l'habitat s'allège à mesure qu'on gagne la vue.
-const VILLAS := ["pavillons/building-type-b", "pavillons/building-type-d",
-	"pavillons/building-type-f", "pavillons/building-type-g", "pavillons/building-type-n",
-	"pavillons/building-type-t", "pavillons/building-type-u", "pavillons/building-type-a"]
-const RAPPORT := ["batiments/building-c", "batiments/building-e", "batiments/building-f",
-	"batiments/building-a", "batiments/building-b", "batiments/building-h",
-	"batiments/building-i"]
-const COMMERCES := ["batiments/building-d", "batiments/building-g", "batiments/building-k"]
+## ⚠⚠ TOUT LE BÂTI EST DE LA PIERRE DU SUD, ET RIEN D'AUTRE (client, 14/09).
+##
+## Le kit n'a pas de mas provençal et n'en aura pas. Ce qui fait LIRE la pierre
+## à la distance où l'on juge un quartier — celle d'une capture vue d'en haut —
+## ce n'est pas le plan de masse, c'est trois choses :
+##
+## 1. LE VOLUME : un corps simple sous un toit à deux pentes. Tout le kit
+##    `pavillons` est bâti là-dessus. Le kit `batiments` (le Commercial), lui,
+##    est bâti sur des rez-de-chaussée VITRÉS et des toits plats : les sept
+##    immeubles de rapport et les trois commerces qui tenaient la ville basse
+##    et les terrasses d'en bas sont donc partis EN ENTIER. Une vitrine
+##    d'immeuble dans un village perché se voit de l'autre bout de la carte ;
+## 2. LE MUR : la teinte d'instance, prise dans `TEINTES.PIERRE_DU_SUD` — le
+##    calcaire du Lubéron, et jamais un blanc pur ;
+## 3. LE TOIT : la bande verte de l'atlas repeinte en tuile (`ATLAS.MIDI`,
+##    « que de la tuile, dix nuances de cuisson »), les annexes en tuile
+##    passée (`ATLAS.VIEILLE`). Voir la fin de `generer`.
+##
+## LES VINGT-ET-UN MODÈLES DU KIT PASSENT TOUS, rangés par gabarit. « Tu as
+## l'air de toujours utiliser les mêmes maisons avec les mêmes variantes »
+## (12/09) a déjà été dit deux fois : trois sacs qui épuisent vingt-et-un
+## modèles avant d'en répéter un seul sont la seule réponse qui tienne, et
+## chaque rangée tire dans un sac différent du sien.
+
+## LES MAS ET LES BASTIDES : les plus larges et les plus profonds, un long
+## corps de logis sous une panne faîtière. Ils tiennent le côté aval des
+## terrasses hautes, là où la vue fait la valeur du terrain.
+const MAS := ["pavillons/building-type-b", "pavillons/building-type-d",
+	"pavillons/building-type-n", "pavillons/building-type-f",
+	"pavillons/building-type-t", "pavillons/building-type-u",
+	"pavillons/building-type-s"]
+## LES MAISONS DE VILLAGE : le tout-venant, une à deux travées, mitoyennes dès
+## qu'on les serre.
+const MAISONS := ["pavillons/building-type-e", "pavillons/building-type-o",
+	"pavillons/building-type-c", "pavillons/building-type-j",
+	"pavillons/building-type-a", "pavillons/building-type-l",
+	"pavillons/building-type-r", "pavillons/building-type-k"]
+## LES CABANONS ET LES REMISES : les plus BAS du kit (0,74 à 0,92 case, mesuré
+## dans `KitVille2.BATIMENTS`). Adossés au mur de soutènement côté amont, ils
+## cassent la ligne de toits — une rue dont toutes les maisons ont la même
+## hauteur est une rue de lotissement, pas un village.
+const CABANONS := ["pavillons/building-type-h", "pavillons/building-type-i",
+	"pavillons/building-type-m", "pavillons/building-type-g",
+	"pavillons/building-type-p", "pavillons/building-type-q"]
+
+## LES PIÈCES DU CLIENT POUR LE RELIEF (`modeles/pxl/`, à l'échelle du kit :
+## posées avec `h = 0`). Mesurées au GLB le 14/09, et c'est ce qui décide de
+## tout ce qui suit : le mur fait UN PALIER de haut et UNE CASE de long, donc
+## il se pose bout à bout et s'empile sans le moindre calcul d'échelle.
+const MUR := "pxl/mur-soutenement"                      ## 20 x 5 x 1 m
+const ANGLE_SORTANT := "pxl/mur-soutenement-angle-out"   ## 1 x 5 x 1 m
+const ANGLE_RENTRANT := "pxl/mur-soutenement-angle-in"   ## 1 x 5 x 1 m
+const ESCALIER_DE_VILLE := "pxl/escalier-de-ville"       ## 4 x 5,9 x 20 m
+const PYLONE := "pxl/pylone-telecom"                     ## 4,7 x 30 x 4,7 m
 
 ## Les pins tiennent la ligne de crête, les feuillus les terrasses basses —
 ## c'est la règle déjà retenue pour le relief (`claude/relief-et-assets.md`).
@@ -185,13 +238,18 @@ static func generer(graine := 3, taille := Vector2i(40, 40), curseurs := {}) -> 
 	v.rasteriser()
 	_lots(v, alea)
 	v.rasteriser()
-	# ⚠ RIEN À HABILLER SUR UN TERRAIN PLAT. Les falaises tiennent le nez des
-	# terrasses et les escaliers relient deux niveaux : sans relief, les unes
+	# ⚠ RIEN À HABILLER SUR UN TERRAIN PLAT. Les murs tiennent le nez des
+	# terrasses et les escaliers relient deux niveaux : sans relief, les uns
 	# sont des panneaux plantés dans l'herbe et les autres des marches vers
-	# nulle part. Elles reviennent avec `RELIEF`.
+	# nulle part. Ils reviennent avec `RELIEF`.
+	#
+	# ⚠ ET LES ESCALIERS PASSENT AVANT LES MURS, pas l'inverse : ils rendent
+	# les cases où la maçonnerie doit S'OUVRIR pour les laisser passer. Posé
+	# après coup, le mur murait son propre escalier — et rien dans l'image ne
+	# l'aurait dit, sinon des marches contre un mur plein.
 	if RELIEF > 0.0:
-		_falaises(v, alea)
-		_escaliers(v)
+		_soutenements(v, _escaliers(v))
+	_pylone(v)
 	_sentiers(v, alea)
 	_nature(v, alea)
 	_details(v, alea)
@@ -203,7 +261,20 @@ static func generer(graine := 3, taille := Vector2i(40, 40), curseurs := {}) -> 
 	AFFICHES.semer(v, alea, 130.0, [], 3)
 	# ⚠ AUCUNE TOITURE VERTE (client, 13/09). Voir `atlas.gd` : la bande
 	# verte de l'atlas est repeinte par bâtiment, murs inchangés.
+	#
+	# LE VILLAGE EN TUILE, LES ANNEXES EN TUILE PASSÉE. `ATLAS.MIDI` n'est que
+	# de la tuile romane en dix cuissons — c'est ce qui fait reconnaître un
+	# village du Midi sur une photo aérienne, un seul matériau partout.
+	# `ATLAS.VIEILLE` descend d'un ton : on la garde pour les cabanons et les
+	# remises, dont personne ne refait le toit.
+	TEINTES.couvrir_genres(v, alea, ["mas", "maison"], ATLAS.MIDI)
+	TEINTES.couvrir(v, alea, "cabanon", ATLAS.VIEILLE)
+	# Ce qui reste sans genre — les repères du client — suit le village.
 	TEINTES.couvrir(v, alea, "", ATLAS.MIDI)
+	# ⚠ `garder` À ZÉRO, ET C'EST VOULU ICI. Ailleurs on laisse une part des
+	# maisons à la couleur du kit pour qu'un quartier ne soit pas un nuancier ;
+	# un village de pierre n'a pas de maison blanche du tout, et une seule
+	# suffirait à se voir.
 	TEINTES.peindre(v, alea, "", TEINTES.PIERRE_DU_SUD, 0.00)
 	PROPRETE.finir(v, alea)
 	return v
@@ -390,74 +461,66 @@ static func _palier_de_terrasse(c: Vector2i) -> int:
 ## Sur une terrasse, les maisons bordent la route des deux côtés — au nord
 ## adossées au mur de la terrasse du dessus, au sud le nez dans le vide, avec
 ## la vue. Dans la ville basse, des pâtés ordinaires.
+##
+## ⚠ LE GABARIT SUIT LA PENTE, ET IL SUIT AUSSI LE CÔTÉ DE LA RUE. Côté aval
+## on a la vue et la place : c'est là que se posent les mas. Côté amont on est
+## adossé au mur de soutènement de la terrasse du dessus, donc à l'ombre et à
+## l'étroit : cabanons et remises. C'est ce qui fait qu'une rue de village n'a
+## pas deux fronts identiques, et ça ne coûte qu'un sac de plus.
 static func _lots(v: Ville2, alea: RandomNumberGenerator) -> void:
 	for k in TERRASSES.size():
 		var t: Dictionary = TERRASSES[k]
 		var haute := k >= 2
-		var choix: Array = VILLAS if haute else RAPPORT
 		var route := int(t["route"])
 		var i0 := int(t["i0"]) + 1
 		var large := int(t["i1"]) - int(t["i0"]) - 1
 		# Côté aval (au sud de la route) : la rangée qui a la vue.
-		Lotisseur.aligner(v, alea, choix, "n", Vector2i(i0 * 2, (route + 1) * 2),
-			large * 2, "villa" if haute else "rapport", 0.86, 1)
+		Lotisseur.aligner(v, alea, MAS if haute else MAISONS, "n",
+			Vector2i(i0 * 2, (route + 1) * 2), large * 2,
+			"mas" if haute else "maison", 0.86, 1)
 		# Côté amont : plus dense en bas, plus clairsemé en haut.
-		Lotisseur.aligner(v, alea, VILLAS if haute else COMMERCES, "s",
+		Lotisseur.aligner(v, alea, MAISONS if haute else CABANONS, "s",
 			Vector2i(i0 * 2 + 2, route * 2), large * 2 - 2,
-			"villa" if haute else "commerce", 0.7 if haute else 0.9, 1)
-	# La ville basse : quatre pâtés bordés.
+			"maison" if haute else "cabanon", 0.7 if haute else 0.9, 1)
+	# LA VILLE BASSE : quatre pâtés bordés. Un pâté sur deux tire dans le sac
+	# des mas, l'autre dans celui des maisons — deux sacs voisins, et le bas du
+	# village cesse d'être quatre fois le même front.
+	var pair := true
 	for x in [4, 13, 22, 31]:
 		for y in [28, 33]:
 			var r := Rect2i(x, y, 9, 5)
-			Lotisseur.border(v, r, alea, RAPPORT, 0.9, "rapport")
+			Lotisseur.border(v, r, alea, MAS if pair else MAISONS, 0.9,
+				"mas" if pair else "maison")
+			pair = not pair
 
 # ------------------------------------------------------------------ les détails
 
-## LES ESCALIERS : un piéton ne fait pas le lacet. Entre deux terrasses, à
-## l'opposé du demi-tour de la route, on pose une volée de marches du kit —
-## c'est le raccourci, et c'est aussi ce qui prouve que le mur de soutènement
-## est franchissable à pied (cahier § 4).
-## LES NEZ DE TERRASSE, EN VRAIES FALAISES. Le rendu pose déjà un mur de
-## soutènement (une boîte) sous chaque case plate ; en ville c'est du béton et
-## c'est juste. Hors ville, le cahier demande des ROCHERS — et le kit nature a
-## exactement ça : un panneau de falaise d'une case de large et d'une case de
-## haut, plus ses pièces de coin et de lèvre. On les pose devant le mur, qui
-## reste derrière pour boucher, et la terrasse cesse d'être un gâteau en béton.
-const FALAISES := ["nature/cliff_rock", "nature/cliff_rock", "nature/cliff_stone",
-	"nature/cliff_waterfall_rock", "nature/cliff_cave_rock"]
-
-static func _falaises(v: Ville2, alea: RandomNumberGenerator) -> void:
-	for t in TERRASSES:
-		var j := int(t["j1"])
-		var y := palier_de(t) * PALIER
-		var b := bornes(t, j)
-		for i in range(b.x, b.y + 1):
-			var c := Vector2i(i, j)
-			# Sous la chaussée, le béton du rendu : une route ne sort pas d'une
-			# falaise. Sous l'herbe, la falaise.
-			if v.carte != null and (v.carte.route(c) or v.lot_sur(c) >= 0): continue
-			if not v.dedans(Vector2i(i, j + 1)): continue
-			var m: String = FALAISES[alea.randi() % FALAISES.size()]
-			# Le panneau regarde le sud (vers le vide) ; sa base est une case
-			# sous le plateau, sa lèvre affleure donc le bord de la terrasse.
-			v.ajouter_objet(m, (float(i) + 0.5) * CASE, (float(j) + 1.0) * CASE - 1.2, 0.0)
-			v.objets[v.objets.size() - 1]["y_abs"] = y - CASE
-			# Une lèvre de rocher au ras du plateau, une case sur trois.
-			if (i + j) % 3 == 0:
-				v.ajouter_objet("nature/cliff_top_rock", (float(i) + 0.5) * CASE,
-					(float(j) + 1.0) * CASE - 2.6, 0.0)
-				v.objets[v.objets.size() - 1]["y_abs"] = y - CASE
-
-static func _escaliers(v: Ville2) -> void:
+## LES ESCALIERS ENTRE TERRASSES : un piéton ne fait pas le lacet. Entre deux
+## terrasses, à l'opposé du demi-tour de la route, on pose une volée de marches
+## — c'est le raccourci, et c'est aussi ce qui prouve que le mur de
+## soutènement est franchissable à pied (cahier § 4).
+##
+## ⚠ ET C'EST LE ROCHER QUI LES FAIT ICI, PAS `pxl/escalier-de-ville`. Mesurés
+## au GLB le 14/09 : l'escalier de ville monte UN palier (5,9 m) sur une case
+## de long, un nez de terrasse en fait QUATRE — vingt mètres. Quatre modules à
+## la file demanderaient quatre-vingts mètres de recul, c'est-à-dire les quatre
+## cinquièmes de la terrasse d'en dessous, sa route comprise. `cliff_steps_rock`
+## mesure la case en hauteur comme en longueur : c'est la seule pièce du dépôt
+## qui franchisse un nez de terrasse d'un seul tenant. L'escalier de ville sert
+## là où il est juste — les marches d'UN palier, au pied du coteau, et c'est
+## `_soutenements` qui les pose.
+##
+## Rend LES CASES OÙ LE MUR DOIT S'OUVRIR : celle que l'escalier occupe. Sans
+## ça la maçonnerie mure son propre raccourci, et rien dans l'image ne le dit.
+static func _escaliers(v: Ville2) -> Dictionary:
+	var ouvertures: Dictionary = {}
 	for k in range(TERRASSES.size() - 1):
-		var bas: Dictionary = TERRASSES[k]
 		var haut: Dictionary = TERRASSES[k + 1]
 		# À l'opposé du lacet : si la route monte à l'est, l'escalier est à
 		# l'ouest.
 		var a_l_est: bool = int(LACETS[k]["x"]) > 20
 		var i: int = int(haut["i0"]) + 3 if a_l_est else int(haut["i1"]) - 3
 		var j := int(haut["j1"])
-		var y_bas := palier_de(bas) * PALIER
 		var y_haut := palier_de(haut) * PALIER
 		# ⚠ À L'ÉCHELLE DU KIT, SANS ÉTIREMENT. `cliff_steps_rock` mesure
 		# exactement une case de haut (20 unités) : c'est la hauteur d'une
@@ -469,6 +532,232 @@ static func _escaliers(v: Ville2) -> void:
 		v.ajouter_objet("lampadaire_parc", (float(i) + 0.5) * CASE - 8.0,
 			(float(j) + 0.2) * CASE, 0.0)
 		v.objets[v.objets.size() - 1]["y_abs"] = y_haut
+		ouvertures[Vector2i(i, j + 1)] = true
+	return ouvertures
+
+# ----------------------------------------------------------- les soutènements
+
+## ⚠⚠ LES MURS DE SOUTÈNEMENT — LA PIÈCE QUI FAIT LE VILLAGE PERCHÉ (demande du
+## client, 14/09).
+##
+## Un gradin nu, c'est une jupe de terre verticale : le maillage du terrain
+## monte tout droit sur un palier et le sol s'y étire en un aplat. On habillait
+## jusqu'ici le nez des terrasses de panneaux de falaise du kit nature, ce qui
+## était juste tant qu'on parlait d'une colline sauvage et faux depuis qu'on
+## parle d'un village — le cahier (§ 4) dit « murs de soutènement : BÉTON EN
+## VILLE, rochers hors ville », et une terrasse bâtie, c'est de la ville.
+##
+## `pxl/mur-soutenement` mesure 20 x 5 x 1 m : une case de long, UN PALIER de
+## haut. Il n'y a donc rien à mettre à l'échelle et rien à étirer — on le pose
+## bout à bout le long de la limite, et on l'EMPILE quand la marche vaut
+## plusieurs paliers (le nez d'une terrasse en vaut quatre).
+##
+## ⚠ ON NE MURE QUE CE QUI EST BÂTI OU FOULÉ, et c'est la règle du cahier, pas
+## une économie de polygones. « Toute limite entre deux paliers » couvrirait
+## aussi les flancs est et ouest, qui descendent par redans de quatre paliers
+## sur une vingtaine de cases de large : la colline entière sortirait en
+## maçonnerie et deviendrait une forteresse. La terre qu'un village retient est
+## celle qu'il a lui-même taillée — une terrasse, une rue, un lot. Le reste est
+## du talus : il reste en herbe et en rochers (voir `_nature`).
+
+## Les quatre voisins, et la ROTATION qui met la face du mur (son −Z au repos)
+## dans cette direction-là. Vérifiée au calcul, pas à l'œil : une rotation de
+## `r` autour de Y envoie −Z sur (−sin r, −cos r).
+const VOISINS := [Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(0, -1)]
+const VERS_LE_VIDE := [-PI * 0.5, PI, PI * 0.5, 0.0]
+## L'épaisseur du module, en mètres : de combien le mur déborde du côté du vide.
+const EPAISSEUR_MUR := 1.0
+## ⚠ QUATRE MODULES AU PLUS — vingt mètres, le nez d'une terrasse. Au-delà on
+## n'est plus devant un mur mais devant une falaise, et aucun village n'en
+## maçonne une.
+const MUR_MAX := 4
+## LES ESCALIERS DE VILLE : un sur cinq marches d'un palier, quatre au plus.
+## « Pas plus d'une poignée » — un escalier public tous les cent mètres raconte
+## un village, un tous les vingt raconte un stade.
+const ESCALIER_TOUS_LES := 5
+const ESCALIERS_MAX := 4
+
+## Pose la maçonnerie de tout le coteau. `ouvertures` : les cases que les
+## escaliers de terrasse occupent déjà (voir `_escaliers`).
+static func _soutenements(v: Ville2, ouvertures: Dictionary) -> void:
+	# 1. LE RELEVÉ. Une limite par case haute et par direction. On ne pose rien
+	# encore : un escalier prend la place d'un mur, et on ne sait pas lesquels
+	# avant de les avoir tous comptés.
+	var murs: Dictionary = {}
+	var marches: Array = []
+	for j in v.taille.y:
+		for i in v.taille.x:
+			var haut := Vector2i(i, j)
+			if not _porte_un_mur(v, haut): continue
+			for k in VOISINS.size():
+				var d: Vector2i = VOISINS[k]
+				var bas: Vector2i = haut + d
+				if ouvertures.has(bas): continue
+				var n := _hauteur_du_mur(v, haut, bas)
+				if n <= 0: continue
+				murs[Vector3i(i, j, k)] = n
+				# Une marche d'UN palier au bout d'une rue : c'est là, et
+				# nulle part ailleurs, qu'un escalier public a un sens — il
+				# faut bien qu'il mène quelque part.
+				if n == 1 and _touche_une_rue(v, bas):
+					marches.append(Vector3i(i, j, k))
+	# 2. LES ESCALIERS, prélevés sur les murs d'un palier.
+	#
+	# ⚠ ON LES ÉTALE SUR TOUTE LA LISTE, ON N'EN PREND PAS LES QUATRE PREMIERS.
+	# Le relevé est fait ligne par ligne : à pas fixe, les quatre escaliers
+	# sortaient tous du même bout du pied de coteau, à cent mètres les uns des
+	# autres, et les deux tiers du village n'en avaient aucun. Le pas se calcule
+	# donc sur la longueur du relevé, sans jamais descendre sous les cinq murs
+	# qui séparent deux escaliers.
+	var pas := maxi(ESCALIER_TOUS_LES, marches.size() / maxi(1, ESCALIERS_MAX))
+	var poses := 0
+	for m in range(0, marches.size(), pas):
+		if poses >= ESCALIERS_MAX: break
+		var cle: Vector3i = marches[m]
+		murs.erase(cle)
+		_poser_escalier(v, Vector2i(cle.x, cle.y), cle.z)
+		poses += 1
+	# 3. LA POSE, les angles en dernier — ils ont besoin du relevé complet
+	# pour savoir de quel côté le mur tourne.
+	for cle2 in murs:
+		var c3: Vector3i = cle2
+		_poser_mur(v, Vector2i(c3.x, c3.y), c3.z, int(murs[c3]))
+	_angles(v, murs)
+
+## Vrai si cette case retient quelque chose : une terrasse, une chaussée, une
+## dalle, un lot. C'est la règle « béton en ville, rochers hors ville ».
+static func _porte_un_mur(v: Ville2, c: Vector2i) -> bool:
+	if not v.dedans(c) or not v.terre(c): return false
+	return v.plate(c) or _palier_de_terrasse(c) >= 0
+
+## De combien de modules la limite entre `haut` et `bas` a besoin, ou 0 s'il
+## n'y a rien à retenir — ou si la case basse n'est pas libre. Un mur planté
+## dans une chaussée ou au travers d'une maison est pire que pas de mur.
+static func _hauteur_du_mur(v: Ville2, haut: Vector2i, bas: Vector2i) -> int:
+	if not v.dedans(bas) or not v.terre(bas): return 0
+	if v.carte != null and (v.carte.route(bas) or v.carte.case_prise(bas)): return 0
+	if v.lot_sur(bas) >= 0: return 0
+	var chute := v.sol(haut) - v.sol(bas)
+	# ⚠ UN DEMI-PALIER DE MARGE. Les altitudes sont toutes des multiples du
+	# palier, sauf le bord de chaussée que `_marches` recale : un test strict à
+	# `>= PALIER` laissait des trous d'un mur tous les dix mètres le long des
+	# lacets.
+	if chute < PALIER * 0.9: return 0
+	return clampi(roundi(chute / PALIER), 1, MUR_MAX)
+
+## Vrai si la case touche une chaussée — la condition pour qu'un escalier
+## public mène quelque part.
+static func _touche_une_rue(v: Ville2, c: Vector2i) -> bool:
+	if v.carte == null: return false
+	for d in VOISINS:
+		var dd: Vector2i = d
+		if v.dedans(c + dd) and v.carte.route(c + dd): return true
+	return false
+
+## Le point, en mètres, au milieu de la limite entre une case et son voisin,
+## décalé de `dehors` mètres DU CÔTÉ DU VIDE : le dos du mur reste dans la
+## terre qu'il retient, sa face couvre la jupe du gradin.
+static func _bord(c: Vector2i, d: Vector2i, dehors: float) -> Vector2:
+	return Vector2(float(c.x) + 0.5, float(c.y) + 0.5) * CASE \
+		+ Vector2(d) * (CASE * 0.5 + dehors)
+
+## ⚠ LE MUR SE POSE PAR LE HAUT. Son sommet affleure la case haute, et chaque
+## module descend d'un palier — c'est l'inverse d'une pile de caisses, et c'est
+## ce qui garde l'arase droite quand la case basse, elle, ne l'est pas.
+static func _poser_mur(v: Ville2, haut: Vector2i, k: int, n: int) -> void:
+	var d: Vector2i = VOISINS[k]
+	var p := _bord(haut, d, EPAISSEUR_MUR * 0.5)
+	var sommet := v.sol(haut)
+	for m in n:
+		v.ajouter_objet(MUR, p.x, p.y, float(VERS_LE_VIDE[k]))
+		v.objets[v.objets.size() - 1]["y_abs"] = sommet - float(m + 1) * PALIER
+
+## L'escalier de ville : il occupe la case basse en entier — il est dessiné
+## pour monter une case — et son pied regarde le vide, comme la face du mur
+## qu'il remplace.
+static func _poser_escalier(v: Ville2, haut: Vector2i, k: int) -> void:
+	var d: Vector2i = VOISINS[k]
+	var bas: Vector2i = haut + d
+	v.ajouter_objet(ESCALIER_DE_VILLE, (float(bas.x) + 0.5) * CASE,
+		(float(bas.y) + 0.5) * CASE, float(VERS_LE_VIDE[k]))
+	v.objets[v.objets.size() - 1]["y_abs"] = v.sol(bas)
+
+## ⚠ LES ANGLES, ET POURQUOI IL EN FAUT DEUX SORTES. Deux modules droits qui se
+## rencontrent à l'équerre laissent une arête vive et une fente de la largeur
+## du mur — c'est exactement ce qui se voit sur une capture, parce que l'œil
+## suit les lignes d'ombre. Le kit du client a les deux pièces : le coin
+## SORTANT là où le vide fait le tour d'un éperon (les deux murs appartiennent
+## à la MÊME case haute), le coin RENTRANT là où le mur entre dans une encoche
+## (les deux murs appartiennent à DEUX cases hautes, de part et d'autre du
+## vide).
+static func _angles(v: Ville2, murs: Dictionary) -> void:
+	var coins: Dictionary = {}
+	for cle in murs:
+		var m: Vector3i = cle
+		var c := Vector2i(m.x, m.y)
+		var k: int = m.z
+		var s := (k + 1) % 4
+		var dk: Vector2i = VOISINS[k]
+		var ds: Vector2i = VOISINS[s]
+		var voisin := Vector3i(c.x, c.y, s)
+		# Le mur d'en face, de l'autre côté de l'encoche : il regarde la même
+		# case basse que celui-ci, mais par son autre face.
+		var diag: Vector2i = c + dk + ds
+		var autre := Vector3i(diag.x, diag.y, (k + 3) % 4)
+		var sortant := murs.has(voisin)
+		if not sortant and not murs.has(autre): continue
+		# La pièce d'angle ne monte pas plus haut que le plus bas des deux
+		# murs qu'elle raccorde : sinon elle dépasse dans le vide.
+		var n := int(murs[m])
+		if sortant: n = mini(n, int(murs[voisin]))
+		else: n = mini(n, int(murs[autre]))
+		# Le coin, en mètres : le sommet de la case du côté des deux murs.
+		var coin := Vector2(float(c.x) + 0.5, float(c.y) + 0.5) * CASE \
+			+ Vector2(dk + ds) * DEMI
+		# ⚠ UN SEUL ANGLE PAR COIN. Les deux murs d'un coin sortant le
+		# demandent chacun leur tour, et deux pièces au même point font une
+		# arête noire (elles se battent en profondeur).
+		var repere := Vector2i(roundi(coin.x), roundi(coin.y))
+		if coins.has(repere): continue
+		coins[repere] = true
+		# La face de l'angle regarde la DIAGONALE : entre les deux murs pour un
+		# coin sortant, vers l'encoche pour un coin rentrant — un huitième de
+		# tour de part et d'autre de la face du premier mur.
+		var biais: float = -PI * 0.25 if sortant else PI * 0.25
+		var sommet := v.sol(c)
+		for e in n:
+			v.ajouter_objet(ANGLE_SORTANT if sortant else ANGLE_RENTRANT,
+				coin.x, coin.y, float(VERS_LE_VIDE[k]) + biais)
+			v.objets[v.objets.size() - 1]["y_abs"] = sommet - float(e + 1) * PALIER
+
+## LE PYLÔNE TÉLÉCOM, ET UN SEUL (demande du client, 14/09). Un relais
+## hertzien se plante SUR LE POINT HAUT — c'est toute sa raison d'être, et
+## c'est ce qui donne à la colline sa silhouette de loin : trente mètres
+## d'acier au-dessus d'un village qui en fait vingt. Deux pylônes, et il n'y a
+## plus de point haut.
+##
+## Il cherche sa place en partant du NORD de la terrasse sommitale : le
+## belvédère est au sud, et on ne plante pas un relais devant la vue.
+static func _pylone(v: Ville2) -> bool:
+	var haut: Dictionary = TERRASSES[TERRASSES.size() - 1]
+	for j in range(int(haut["j0"]), int(haut["j1"]) + 1):
+		var b := bornes(haut, j)
+		for i in range(b.x, b.y + 1):
+			var c := Vector2i(i, j)
+			if not v.dedans(c) or not v.terre(c): continue
+			if v.carte != null and (v.carte.route(c) or v.carte.case_prise(c)): continue
+			if v.lot_sur(c) >= 0 or not v.demi_libre(i * 2, j * 2, 2, 2): continue
+			v.ajouter_objet(PYLONE, (float(i) + 0.5) * CASE, (float(j) + 0.5) * CASE)
+			# ⚠ ON RÉSERVE SES QUATRE DEMI-CASES. Un pylône est un OBJET, et un
+			# objet ne dit rien au lotisseur : sans cette ligne, la première
+			# passe de lots venue lui pose un mas dans les pieds. `demi_prises`
+			# est le registre vivant des emprises (voir `Lotisseur.terrain_libre`).
+			for db in 2:
+				for da in 2:
+					v.demi_prises[Vector2i(i * 2 + da, j * 2 + db)] = true
+			return true
+	push_warning("pylône télécom : pas une case libre sur la terrasse sommitale")
+	return false
 
 ## LES SENTIERS. Le kit nature a des tuiles de chemin d'une case exactement
 ## (`ground_pathStraight`, `Bend`, `Corner`, mesurées 20 × 1 × 20) : de quoi
@@ -573,9 +862,18 @@ static func _details(v: Ville2, alea: RandomNumberGenerator) -> void:
 					(float(t["j1"]) + 0.62) * CASE, PI)
 			v.ajouter_objet("monument", milieu * CASE + 10.0,
 				(float(t["j1"]) - 0.4) * CASE, 0.0)
+			# ⚠ PAS UNE BARRIÈRE DE CHANTIER. `borne`, c'est le
+			# `construction-barrier` du kit urbain — rouge et blanc, aligné sur
+			# vingt-cinq cases au bord du belvédère d'un village de pierre. Le
+			# garde-corps d'un point de vue est une murette basse, et le kit
+			# nature en a une. Trois par case : la pièce fait six mètres une fois
+			# à sa hauteur, pas vingt — espacée d'une case elle faisait des
+			# pointillés.
 			for i in range(int(t["i0"]) + 1, int(t["i1"]), 1):
-				v.ajouter_objet("borne", (float(i) + 0.5) * CASE,
-					(float(t["j1"]) + 0.95) * CASE, 0.0)
+				for n in 3:
+					v.ajouter_objet("nature/fence_simpleLow",
+						(float(i) + 0.17 + float(n) * 0.33) * CASE,
+						(float(t["j1"]) + 0.95) * CASE, 0.0, 1.24)
 			v.ajouter_lieu("belvedere", milieu * CASE, (float(t["j1"]) + 0.5) * CASE,
 				{"nom": "Belvédère du Coteau", "y": y})
 

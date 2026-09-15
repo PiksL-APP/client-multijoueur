@@ -1,0 +1,124 @@
+# ArchipelLoader.gd
+# Godot 4.5 - Chargeur principal de l'Archipel des Aurones
+# Place ce script sur un Node racine. Mets les JSON dans res://data/
+
+extends Node
+
+const SCALE = 1000.0  # 1 km → 1000 m
+
+var archipel_data: Dictionary
+var road_graph: Dictionary
+var transit_paths: Dictionary
+
+signal data_loaded
+
+func _ready():
+	load_all_data()
+
+
+func load_all_data() -> void:
+	archipel_data = _load_json("res://data/archipel_complet.json")
+	road_graph = _load_json("res://data/road_graph.json")
+	transit_paths = _load_json("res://data/transit_paths.json")
+	
+	if archipel_data.is_empty():
+		push_error("Échec chargement archipel_complet.json")
+		return
+	
+	print("Archipel des Aurones chargé avec succès")
+	print("Îles : ", archipel_data.islands.size())
+	print("Ponts : ", archipel_data.bridges.size())
+	data_loaded.emit()
+
+
+func _load_json(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		push_error("Fichier introuvable : " + path)
+		return {}
+	
+	var file = FileAccess.open(path, FileAccess.READ)
+	var json = JSON.new()
+	var error = json.parse(file.get_as_text())
+	file.close()
+	
+	if error != OK:
+		push_error("Erreur parsing JSON : " + path)
+		return {}
+	
+	return json.data
+
+
+# ---------- Helpers utiles ----------
+
+func get_station_position(station_id: String) -> Vector2:
+	for island in archipel_data.islands.values():
+		for station in island.stations:
+			if station.id == station_id:
+				return Vector2(station.pos.x, station.pos.y) * SCALE
+	return Vector2.ZERO
+
+
+func get_all_stations() -> Array:
+	var list = []
+	for island in archipel_data.islands.values():
+		for station in island.stations:
+			list.append(station)
+	return list
+
+
+func create_all_train_paths(parent: Node2D) -> void:
+	if not transit_paths.has("train"):
+		return
+	for line_id in transit_paths.train:
+		var path = _create_path2d(transit_paths.train[line_id], line_id)
+		parent.add_child(path)
+
+
+func create_all_metro_paths(parent: Node2D) -> void:
+	if not transit_paths.has("metro"):
+		return
+	for line_id in transit_paths.metro:
+		var path = _create_path2d(transit_paths.metro[line_id], line_id)
+		parent.add_child(path)
+
+
+func create_all_tram_paths(parent: Node2D) -> void:
+	if not transit_paths.has("tram"):
+		return
+	for line_id in transit_paths.tram:
+		var path = _create_path2d(transit_paths.tram[line_id], line_id)
+		parent.add_child(path)
+
+
+func _create_path2d(line_data: Dictionary, line_id: String) -> Path2D:
+	var path = Path2D.new()
+	path.name = line_id
+	var curve = Curve2D.new()
+	for p in line_data.points:
+		curve.add_point(Vector2(p.x, p.y) * SCALE)
+	path.curve = curve
+	return path
+
+
+func build_astar_from_road_graph() -> AStar2D:
+	var astar = AStar2D.new()
+	if road_graph.is_empty():
+		return astar
+	
+	var id_map = {}
+	var next_id = 0
+	
+	for node in road_graph.nodes:
+		var pos = Vector2(node.pos.x, node.pos.y) * SCALE
+		astar.add_point(next_id, pos)
+		id_map[node.id] = next_id
+		next_id += 1
+	
+	for edge in road_graph.edges:
+		var from_id = id_map.get(edge.from, -1)
+		var to_id = id_map.get(edge.to, -1)
+		if from_id == -1 or to_id == -1:
+			continue
+		astar.connect_points(from_id, to_id, edge.get("bidirectional", true))
+	
+	return astar

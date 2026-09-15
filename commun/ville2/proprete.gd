@@ -40,6 +40,16 @@ static func rien_sur_les_routes(v: Ville2) -> int:
 	var retires := 0
 	for o in v.objets:
 		var m := String(o.get("m", ""))
+		# ⚠ LES ZONES INTERDITES PASSENT AVANT TOUT LE RESTE, MOBILIER DE
+		# VOIRIE COMPRIS. `pub` est dans la liste blanche de la voirie — c'est
+		# légitime au bord d'une avenue — et c'est par cette porte-là que des
+		# panneaux publicitaires se sont retrouvés PLANTÉS SUR LA PISTE
+		# D'ATTERRISSAGE et entre les rails (client, 14/09). Une piste n'est
+		# pas une rue : rien n'y traîne, sauf ce que l'aérodrome y a posé
+		# lui-même (drapeau `zone`).
+		if not o.get("zone", false) and v.est_interdit(float(o["x"]), float(o["z"])):
+			retires += 1
+			continue
 		if o.get(SUR_ROUTE, false) or _est_de_la_voirie(m) or m.begins_with("voitures/"):
 			gardes.append(o)
 			continue

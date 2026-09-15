@@ -81,15 +81,39 @@ const SUBURBAN := ["pavillons/building-type-a", "pavillons/building-type-b",
 	"pavillons/building-type-r", "pavillons/building-type-s", "pavillons/building-type-t",
 	"pavillons/building-type-u"]
 
-## ⚠ LES CARAVANES ET LES CAMPING-CARS (demande du client, 13/09). Le kit n'a
-## ni l'un ni l'autre — vérifié : `modeles/kenney/voitures/` n'a pas de
-## remorque d'habitation. Ce qui s'en approche, ce sont les VOLUMES BOÎTE du
-## kit voitures : `box` est une caisse de remorque (donc une caravane dételée),
-## `delivery` et `van` sont des fourgons à toit haut (donc des camping-cars).
-## Posés à hauteur d'habitation au milieu des cabanes, c'est ce qu'on lit.
-const CARAVANES := ["voitures/box", "voitures/delivery", "voitures/van",
-	"voitures/truck-flat"]
-const H_CARAVANES = [3.0, 3.2, 2.8, 3.0]
+## ⚠⚠ LES VRAIES CABANES, ARRIVÉES LE 13/09 — et elles changent la règle.
+##
+## Jusqu'ici, une cabane de bidonville était un PAVILLON DE LOTISSEMENT rétréci
+## à 3,80 m et teinté brun : il gardait ses fenêtres à croisillon, son avancée
+## de toit et sa porte de villa. Les caravanes étaient des caisses de remorque
+## du kit voitures. C'était la bricole la plus voyante des neuf témoins.
+##
+## Ces dix modèles-là sont dessinés pour ce jeu. Mesurés à la livraison : neuf
+## sur dix sont **exacts au centimètre** par rapport au cahier, et les dix ont
+## leur base à y = 0. On les pose donc À LEUR TAILLE NATURELLE — hauteur zéro,
+## le facteur de la case fait le reste — au lieu de leur imposer une hauteur.
+##
+## ⚠ ET ON NE LES TEINTE PAS. Ils portent leurs propres matières nommées
+## (`toleRouille`, `toitVert`, `bacheBleue`, `pneu`…) : quarante-trois couleurs
+## réparties sur les dix. Une teinte d'instance par-dessus multiplierait tout
+## et effacerait ce travail — c'est exactement l'inverse de ce qu'on faisait
+## quand les cabanes étaient des pavillons blancs à repeindre.
+const PXL_CABANES := ["pxl/cabane-tole-a", "pxl/cabane-tole-b", "pxl/cabane-tole-c",
+	"pxl/cabane-bois-a", "pxl/cabane-bois-b", "pxl/abri-bache"]
+
+## Les vraies caravanes et le camping-car, à leur taille naturelle.
+const PXL_ROULANTS := ["pxl/caravane", "pxl/camping-car"]
+
+## Ce qui se pose SUR un toit de cabane : la cuve d'eau et la parabole. C'est
+## le détail qui dit qu'on habite là — un toit de bidonville n'est jamais nu.
+const PXL_SUR_LE_TOIT := ["pxl/citerne-eau-toit", "pxl/antenne-parabole"]
+
+## ⚠ LES ANCIENS REMPLAÇANTS SONT RETIRÉS. `voitures/box` et ses voisins
+## tenaient lieu de caravanes faute de mieux ; à côté des vraies, ce sont des
+## CUBES LISSES SANS UN DÉTAIL, et ils sautent aux yeux — une bricole ne se
+## voit jamais autant que le jour où la vraie pièce arrive à côté d'elle.
+## Le constat vaut pour tout le reste du chantier : chaque lot livré rendra
+## visible la bricole voisine.
 
 ## Les cabanes de fortune : les tentes et les appentis, plus bas.
 const CABANES := [
@@ -109,7 +133,13 @@ const H_TOLES = [2.00, 1.40, 1.30]
 
 ## Combien de baraques par côté de case. Trois par trois : une baraque de six
 ## mètres, une case de vingt — il en faut neuf pour la couvrir.
-const SOUS_GRILLE := 3
+## ⚠ QUATRE, DEPUIS QUE LES VRAIES CABANES SONT LÀ. La sous-grille était à
+## trois parce qu'une baraque bricolée avec un pavillon rétréci faisait six
+## mètres de large : à trois par côté, le pas vaut 6,67 m et ça pavait. Les
+## cabanes dessinées pour l'usage font trois à quatre mètres — au même pas,
+## elles laissent deux mètres de vide entre chacune et le quartier s'est
+## clairsemé d'un coup. À quatre, le pas tombe à 5 m et le serré revient.
+const SOUS_GRILLE := 4
 
 static func generer(graine := 9, taille := Vector2i(40, 40), curseurs := {}) -> Ville2:
 	var v := Ville2.new(taille)
@@ -361,7 +391,7 @@ static func _morceaux(sentes: Dictionary) -> Array:
 ## Le rayon vient de l'emprise RÉELLE du modèle à la hauteur voulue — pas d'une
 ## constante : une caravane fait deux mètres de large et un pavillon six.
 static func _les_baraques(v: Ville2, alea: RandomNumberGenerator, sentes: Dictionary) -> void:
-	var pris: Array = []
+	var pris: Dictionary = {}
 	for j in range(COEUR.position.y, COEUR.end.y):
 		for i in range(COEUR.position.x, COEUR.end.x):
 			var c := Vector2i(i, j)
@@ -375,54 +405,109 @@ static func _les_baraques(v: Ville2, alea: RandomNumberGenerator, sentes: Dictio
 					if alea.randf() > densite: continue
 					var pas := 1.0 / float(SOUS_GRILLE)
 					var x := (float(i) + (float(si) + 0.5) * pas
-						+ alea.randf_range(-0.07, 0.07)) * CASE
+						+ alea.randf_range(-0.05, 0.05)) * CASE
 					var z := (float(j) + (float(sj) + 0.5) * pas
-						+ alea.randf_range(-0.07, 0.07)) * CASE
+						+ alea.randf_range(-0.05, 0.05)) * CASE
 					_essayer(v, alea, pris, x, z)
 
 ## Tire un abri au hasard et le pose s'il tient sans toucher ses voisins.
-## Une cabane sur sept est une caravane, une sur cinq une tente : le reste est
-## bâti avec les vingt-et-une variantes du kit Suburban.
-static func _essayer(v: Ville2, alea: RandomNumberGenerator, pris: Array,
+##
+## ⚠ LA RÉPARTITION A CHANGÉ LE 13/09, quand les vraies cabanes sont arrivées.
+## Avant, tout reposait sur les vingt-et-une variantes du kit Suburban, faute
+## de mieux — le client avait demandé de toutes les employer, et il avait
+## raison de le demander tant qu'il n'y avait que ça. Maintenant qu'il existe
+## six cabanes dessinées pour l'usage, ce sont ELLES qui font le quartier.
+##
+## Le kit Suburban reste, en minorité : dans un vrai bidonville, quelques
+## maisons en dur se mêlent aux cabanes — c'est même ce qui donne l'échelle du
+## reste. Une sur six, donc, et les vingt-et-une variantes y passent toujours.
+static func _essayer(v: Ville2, alea: RandomNumberGenerator, pris: Dictionary,
 		x: float, z: float) -> bool:
 	var tirage := alea.randf()
 	var modele := ""
-	var hauteur := HAUTEUR_BARAQUE
-	if tirage < 0.14:
-		var n := alea.randi() % CARAVANES.size()
-		modele = CARAVANES[n]
-		hauteur = float(H_CARAVANES[n])
-	elif tirage < 0.32:
+	var hauteur := 0.0          ## zéro = à la taille naturelle du modèle
+	var teinte := ""
+	var couverture := ""
+	if tirage < 0.52:
+		# LE CŒUR DU QUARTIER : les six cabanes, à leur taille naturelle.
+		modele = PXL_CABANES[alea.randi() % PXL_CABANES.size()]
+	elif tirage < 0.64:
+		modele = PXL_ROULANTS[alea.randi() % PXL_ROULANTS.size()]
+	elif tirage < 0.82:
 		var f: Dictionary = CABANES[alea.randi() % CABANES.size()]
 		modele = String(f["m"])
 		hauteur = float(f["h"])
 	else:
+		# Les maisons en dur, rétrécies et repeintes comme avant.
+
 		modele = SUBURBAN[alea.randi() % SUBURBAN.size()]
+		hauteur = HAUTEUR_BARAQUE
+		teinte = TEINTES.TOLE[alea.randi() % TEINTES.TOLE.size()]
+		couverture = ATLAS.TOLE[alea.randi() % ATLAS.TOLE.size()]
 	var r := _rayon(modele, hauteur)
-	for p in pris:
-		var q: Vector3 = p
-		if Vector2(q.x, q.y).distance_to(Vector2(x, z)) < r + q.z: return false
-	pris.append(Vector3(x, z, r))
-	# ⚠ LA TÔLE, PAS LE VERT. La bande de toiture est repeinte comme partout
-	# ailleurs (voir `atlas.gd`) ; ici c'est de la tôle rouillée, et les murs
-	# prennent une teinte de bois grisé — c'est ce qui fait la « cabane en
-	# bois » avec un modèle de pavillon.
-	var teinte: String = TEINTES.TOLE[alea.randi() % TEINTES.TOLE.size()]
-	var couverture: String = ATLAS.TOLE[alea.randi() % ATLAS.TOLE.size()]
-	var fiche := {"m": modele, "x": x, "z": z, "r": alea.randf() * TAU, "h": hauteur,
-		"c": teinte, "toit": couverture}
+	if not _place_libre(pris, x, z, r): return false
+	_prendre(pris, x, z, r)
+	var fiche := {"m": modele, "x": x, "z": z, "r": alea.randf() * TAU, "h": hauteur}
+	# ⚠ NI TEINTE NI TOITURE SUR LES MODÈLES `pxl/` : ils portent leurs propres
+	# matières. Multiplier par-dessus effacerait la tôle rouillée et la bâche
+	# bleue qu'ils ont déjà.
+	if teinte != "": fiche["c"] = teinte
+	if couverture != "": fiche["toit"] = couverture
 	v.objets.append(fiche)
+	# LE TOIT HABITÉ : une cabane sur quatre porte sa cuve d'eau ou sa parabole.
+	# On les pose avec `dy`, à la hauteur réelle du modèle qu'on vient de poser.
+	if modele.begins_with("pxl/cabane") and alea.randf() < 0.28:
+		var haut := _hauteur_posee(modele, hauteur)
+		v.objets.append({"m": PXL_SUR_LE_TOIT[alea.randi() % PXL_SUR_LE_TOIT.size()],
+			"x": x + alea.randf_range(-0.6, 0.6), "z": z + alea.randf_range(-0.6, 0.6),
+			"r": alea.randf() * TAU, "h": 0.0, "dy": haut - 0.15})
 	return true
 
-## Le demi-diamètre au sol d'un modèle posé à la hauteur voulue, en unités.
-## ⚠ ON MESURE, ON NE DEVINE PAS. `KitVille2.taille()` rend la boîte en CASES à
-## l'échelle du catalogue ; à hauteur imposée, tout est mis à l'échelle par le
-## rapport des hauteurs. Une constante « six mètres » aurait fait tenir une
-## caravane pour un pavillon et laissé des trous partout.
+## ⚠ LE REGISTRE EST INDEXÉ PAR CASE, PAS EN LISTE. À la sous-grille de quatre,
+## on tente seize poses par case sur mille cases : seize mille essais, contre un
+## registre qui finit à cinq mille cercles. En liste, c'est quatre-vingts
+## MILLIONS de distances — le générateur passait de deux secondes à plusieurs
+## minutes. Indexé par case de vingt unités, chaque essai ne regarde que les
+## neuf cases autour de lui, donc une poignée de voisins.
+const RAYON_MAX := 6.0        ## le plus gros abri du quartier, en unités
+
+static func _clef(x: float, z: float) -> Vector2i:
+	return Vector2i(floori(x / CASE), floori(z / CASE))
+
+static func _place_libre(pris: Dictionary, x: float, z: float, r: float) -> bool:
+	var c := _clef(x, z)
+	# Une case de plus autour : un cercle posé dans la case voisine peut
+	# déborder jusqu'ici si son rayon est grand.
+	for dj in [-1, 0, 1]:
+		for di in [-1, 0, 1]:
+			var liste = pris.get(c + Vector2i(di, dj))
+			if liste == null: continue
+			for q in (liste as Array):
+				var w: Vector3 = q
+				if Vector2(w.x, w.y).distance_to(Vector2(x, z)) < r + w.z: return false
+	return true
+
+static func _prendre(pris: Dictionary, x: float, z: float, r: float) -> void:
+	var c := _clef(x, z)
+	if not pris.has(c): pris[c] = []
+	(pris[c] as Array).append(Vector3(x, z, r))
+
+## La hauteur à laquelle se trouve le TOIT d'un modèle une fois posé : sa
+## hauteur voulue, ou sa hauteur naturelle si on ne lui en impose pas.
+static func _hauteur_posee(modele: String, hauteur: float) -> float:
+	if hauteur > 0.0: return hauteur
+	return KitVille2.taille(modele).y * CASE
+
+## Le demi-diamètre au sol d'un modèle, en unités.
+## ⚠ ON MESURE, ON NE DEVINE PAS. `KitVille2.taille()` rend la boîte en CASES ;
+## à hauteur imposée, tout est mis à l'échelle par le rapport des hauteurs, et
+## à hauteur naturelle le facteur vaut un. Une constante « six mètres » aurait
+## fait tenir une caravane pour une cabane et laissé des trous partout.
 static func _rayon(modele: String, hauteur: float) -> float:
 	var t := KitVille2.taille(modele)
 	if t.y <= 0.001: return 3.0
-	var facteur := hauteur / (t.y * CASE)
+	var facteur := 1.0
+	if hauteur > 0.0: facteur = hauteur / (t.y * CASE)
 	return 0.5 * sqrt(pow(t.x * CASE * facteur, 2.0) + pow(t.z * CASE * facteur, 2.0)) * 0.88
 
 # ------------------------------------------------------------------ 5. le point d'eau

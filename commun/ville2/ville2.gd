@@ -202,6 +202,26 @@ static func cases_de_route(r: Dictionary) -> Array:
 ## et il est juste à l'instant même.
 var demi_prises: Dictionary = {}
 
+## LES ZONES INTERDITES, en MÈTRES. Une piste d'atterrissage, une voie ferrée,
+## un quai : rien n'a le droit d'y traîner, PAS MÊME DU MOBILIER DE VOIRIE.
+## C'est la différence avec « rien sur les routes » : un lampadaire au bord
+## d'une avenue est normal, un panneau publicitaire au milieu de la piste ne
+## l'est pas (« assure-toi qu'il n'y ait rien sur la piste d'atterrissage, les
+## rails etc, je vois des panneaux publicitaires », client, 14/09).
+##
+## Les objets posés EXPRÈS dans la zone par le générateur qui l'a déclarée
+## portent la clef `"zone"` : eux restent.
+var interdits: Array = []
+
+func interdire(zone: Rect2) -> void:
+	interdits.append(zone)
+
+## Vrai si ce point est dans une zone interdite.
+func est_interdit(x: float, z: float) -> bool:
+	for r in interdits:
+		if (r as Rect2).has_point(Vector2(x, z)): return true
+	return false
+
 ## Vrai si le rectangle de demi-cases n'est encore pris par aucun lot.
 func demi_libre(x: int, y: int, w: int, h: int) -> bool:
 	for b in h:
@@ -411,6 +431,13 @@ func enregistrer(chemin: String) -> bool:
 	# Ctrl+S perdait l'enregistrement.
 	f.close()
 	return true
+
+## Vrai si une version MODIFIÉE de cette carte existe — celle qui gagnera au
+## prochain chargement. C'est ce qui permet à l'éditeur de le DIRE : sans ça,
+## rien à l'écran ne distingue une carte livrée d'une carte qu'on a enregistrée
+## soi-même, et on croit avoir perdu son travail.
+static func carte_modifiee(chemin: String) -> bool:
+	return chemin_utile(chemin) != chemin
 
 ## Efface la version modifiée d'une carte et rend la carte livrée.
 static func oublier_les_modifications(chemin: String) -> bool:

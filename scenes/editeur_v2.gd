@@ -241,6 +241,9 @@ func demarrer() -> void:
 	monde().add_child(_cadre)
 	_poser_grille()
 	_tout_voir()
+	# L'état de référence : à partir d'ici, toute différence est du travail non
+	# enregistré, et `_changer_de_carte` préviendra avant de le jeter.
+	_dernier_enregistre = _ville.vers_json()
 	_interface()
 	if _manque != "":
 		_dire("⚠ « %s » introuvable dans le paquet — c'est le centre qui s'affiche." % _manque)
@@ -438,17 +441,14 @@ func _interface() -> void:
 	etiquette_carte.text = "Carte"
 	hb.add_child(etiquette_carte)
 	_cartes = OptionButton.new()
-	_cartes.custom_minimum_size.x = 190
-	for nom in _cartes_du_dossier():
-		_cartes.add_item(nom)
-	for k in _cartes.item_count:
-		if _cartes.get_item_text(k) == _chemin.get_file().get_basename():
-			_cartes.select(k)
+	_cartes.custom_minimum_size.x = 210
 	_cartes.focus_mode = Control.FOCUS_NONE
+	_remplir_les_cartes()
 	_cartes.item_selected.connect(_changer_de_carte)
 	hb.add_child(_cartes)
 	hb.add_child(_separateur())
-	for paire in [["Enregistrer", _enregistrer], ["Annuler", _annuler],
+	for paire in [["Enregistrer", _enregistrer], ["Rétablir", _retablir],
+			["Annuler", _annuler],
 			["Refaire", _refaire_geste], ["Photo", _photographier], ["Tout voir", _tout_voir]]:
 		var b := Button.new()
 		b.text = String(paire[0])
@@ -856,7 +856,22 @@ func _cartes_du_dossier() -> Array:
 	return noms
 
 func _changer_de_carte(k: int) -> void:
-	var nom := _cartes.get_item_text(k)
+	var nom := _nom_de_carte(k)
+	# ⚠ ON NE JETTE PAS DU TRAVAIL EN SILENCE. Changer de carte recharge tout :
+	# si la ville courante a bougé depuis le dernier enregistrement, le premier
+	# clic ne fait que PRÉVENIR, et il faut re-cliquer pour confirmer. C'est la
+	# moitié du « mes modifications disparaissent » — l'autre moitié était le
+	# chemin de relecture (voir `Ville2.chemin_utile`).
+	if _des_choses_non_enregistrees() and _a_prevenir != nom:
+		_a_prevenir = nom
+		# On remet la liste sur la carte courante : sinon elle affiche déjà la
+		# nouvelle alors qu'on n'a pas changé.
+		for j in _cartes.item_count:
+			if _nom_de_carte(j) == _chemin.get_file().get_basename(): _cartes.select(j)
+		_dire("⚠ « %s » a des modifications NON ENREGISTRÉES. Ctrl+S pour les garder, ou rechoisis « %s » pour les abandonner." % [
+			_chemin.get_file(), nom])
+		return
+	_a_prevenir = ""
 	_chemin = "res://cartes/%s.json" % nom
 	var v := Ville2.charger(_chemin)
 	if v.lots.is_empty() and v.routes.is_empty():
@@ -865,10 +880,17 @@ func _changer_de_carte(k: int) -> void:
 	_pile.clear()
 	_refaire.clear()
 	_recharger(v.vers_json())
+	_dernier_enregistre = _ville.vers_json()
+	_remplir_les_cartes()
 	_tout_voir()
 	_maj_compteur()
-	_dire("Ville « %s » — %d lots, %d objets, %d routes." % [_ville.nom, _ville.lots.size(),
-		_ville.objets.size(), _ville.routes.size()])
+	var doù := "ta version enregistrée" if Ville2.carte_modifiee(_chemin) else "la carte livrée"
+	_dire("Ville « %s » (%s) — %d lots, %d objets, %d routes." % [_ville.nom, doù,
+		_ville.lots.size(), _ville.objets.size(), _ville.routes.size()])
+
+## La carte pour laquelle on vient de prévenir : un second choix du même nom
+## vaut confirmation.
+var _a_prevenir := ""
 
 func _remplir_palette() -> void:
 	_palette.clear()
@@ -1758,6 +1780,58 @@ func _recharger(json: String) -> void:
 ## écrit et pour tous ceux qui relisent (l'éditeur, le jeu, la photo) : quand
 ## elle était écrite des deux côtés, les deux côtés ont divergé et les
 ## enregistrements ne revenaient jamais.
+## ⚠ LA LISTE DIT CE QUI EST À MOI ET CE QUI EST LIVRÉ. Sans marque, rien à
+## l'écran ne distingue une carte du paquet d'une carte qu'on a enregistrée
+## soi-même : on change de carte, on revient, on retrouve la sienne — et on ne
+## le SAIT pas, donc on croit l'avoir perdue (« je n'ai pas la possibilité de
+## revoir la save après un changement de map », client, 13/09).
+##
+## Une carte modifiée porte donc un point, et le bouton « Rétablir » remet la
+## version livrée. C'est la moitié manquante de l'enregistrement : pouvoir
+## revenir en arrière est ce qui rend la sauvegarde sûre.
+const MARQUE_MODIFIEE := "  ●"
+
+func _remplir_les_cartes() -> void:
+	var choisi := _chemin.get_file().get_basename()
+	_cartes.clear()
+	var noms := _cartes_du_dossier()
+	for k in noms.size():
+		var nom := String(noms[k])
+		var modifiee := Ville2.carte_modifiee("res://cartes/%s.json" % nom)
+		_cartes.add_item(nom + (MARQUE_MODIFIEE if modifiee else ""))
+		_cartes.set_item_metadata(k, nom)
+		if nom == choisi: _cartes.select(k)
+
+## Le nom de carte derrière l'entrée `k`, sans la marque.
+func _nom_de_carte(k: int) -> String:
+	var m = _cartes.get_item_metadata(k)
+	return String(m) if m != null else _cartes.get_item_text(k).replace(MARQUE_MODIFIEE, "")
+
+## Remet la carte LIVRÉE à la place de la version enregistrée.
+func _retablir() -> void:
+	if not Ville2.carte_modifiee(_chemin):
+		_dire("« %s » est déjà la carte livrée — rien à rétablir." % _chemin.get_file())
+		return
+	# Le geste est annulable : on empile l'état courant avant d'écraser.
+	_pile.append(_ville.vers_json())
+	Ville2.oublier_les_modifications(_chemin)
+	var v := Ville2.charger(_chemin)
+	_recharger(v.vers_json())
+	_dernier_enregistre = _ville.vers_json()
+	_remplir_les_cartes()
+	_tout_voir()
+	_maj_compteur()
+	_dire("Carte livrée rétablie : %s — ta version enregistrée est effacée." % _chemin.get_file())
+
+## ⚠ LE TEXTE DE LA VILLE AU DERNIER ENREGISTREMENT (ou au dernier chargement).
+## Il sert à une seule chose, et elle compte : savoir s'il y a du travail non
+## enregistré AVANT de changer de carte. Changer de carte recharge tout ; sans
+## ce garde-fou, un quart d'heure de pose part sans un mot.
+var _dernier_enregistre := ""
+
+func _des_choses_non_enregistrees() -> bool:
+	return _dernier_enregistre != "" and _ville.vers_json() != _dernier_enregistre
+
 func _chemin_d_enregistrement() -> String:
 	return Ville2.chemin_d_ecriture(_chemin)
 
@@ -1766,7 +1840,9 @@ func _enregistrer() -> void:
 	if _ville.enregistrer(ou):
 		# On redit le nom de la carte : c'est lui qu'on rechargera, et c'est
 		# la version enregistrée qui gagnera sur celle livrée.
-		_dire("Enregistré : %s — %d lots, %d objets. Rechargée telle quelle." % [
+		_dernier_enregistre = _ville.vers_json()
+		_remplir_les_cartes()
+		_dire("Enregistré : %s ● — %d lots, %d objets. C'est cette version-là qui reviendra." % [
 			_chemin.get_file(), _ville.lots.size(), _ville.objets.size()])
 	else:
 		_dire("Impossible d'écrire " + ou)

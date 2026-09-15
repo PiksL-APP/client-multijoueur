@@ -75,7 +75,7 @@ const CONTENEURS := Rect2i(17, 6, 14, 5)
 ## cases, sept cent vingt mètres — une piste courte réelle).
 const GARE := Rect2i(3, 5, 12, 4)
 const PARC_AUTO := Rect2i(16, 14, 10, 8)
-const AEROPORT := Rect2i(2, 35, 36, 4)
+const AEROPORT := Rect2i(2, 35, 36, 5)
 
 const PRENOMS := ["de la Fonderie", "des Entrepôts", "du Dépôt", "des Ateliers",
 	"de la Zone", "des Forges", "du Fret", "des Silos", "de la Casse", "du Chantier"]
@@ -110,6 +110,9 @@ const CONTENEUR := ["industriel/shipping-container-a", "industriel/shipping-cont
 ## Un conteneur maritime fait 2,6 m de haut. Posé à l'échelle du kit il en
 ## ferait sept — mesuré 0,348 unité Kenney.
 const H_CONTENEUR := 2.60
+## La hauteur FORCÉE de la machine et des wagons — voir `_la_gare`.
+const H_LOCO := 7.6
+const H_WAGON := 6.6
 
 ## Ce qui traîne sur une friche. Hauteurs en mètres.
 const GRAVATS := ["nature/rock_smallA", "nature/rock_smallD", "nature/stone_smallFlatA",
@@ -146,6 +149,8 @@ static func generer(graine := 5, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_le_chantier(v, alea)
 	_le_depot(v, alea)
 	_les_conteneurs(v, alea)
+	_les_pylones(v, alea)
+	_interdire_le_rail(v)
 	_la_gare(v, alea)
 	_le_parc_automobile(v, alea)
 	_l_aeroport(v, alea)
@@ -221,33 +226,65 @@ static func _encore_des_hangars(v: Ville2, alea: RandomNumberGenerator, combien:
 ## grue, et les wagons qui attendent.
 static func _la_gare(v: Ville2, alea: RandomNumberGenerator) -> void:
 	var r := GARE
+	var debut := v.objets.size()
 	for j in range(r.position.y, r.end.y):
 		for i in range(r.position.x, r.end.x):
 			var c := Vector2i(i, j)
 			if v.carte != null and (v.carte.route(c) or v.carte.case_prise(c)): continue
 			v.poser_matiere(c, Ville2.M_DALLE)
-	# LE QUAI : une longue plateforme basse contre le rail, c'est ce qui dit
-	# « gare » d'en haut — un bâtiment seul dirait « entrepôt ».
-	v.objets.append({"m": "plateforme",
-		"x": (float(r.position.x) + float(r.size.x) * 0.5) * CASE,
-		"z": (float(r.position.y) + 0.4) * CASE, "r": 0.0, "h": 0.0,
-		"w": float(r.size.x) * CASE * 0.92, "d": 16.0, "y": 1.2})
+	# LE QUAI (lot 3) : des pièces de quai bout à bout le long du rail. Un quai
+	# se lit d'en haut mieux que n'importe quel bâtiment — c'est la seule chose
+	# longue et étroite d'un quartier fait de boîtes.
+	# ⚠ La pièce est dessinée dans l'axe Z ; le rail court en X : quart de tour.
+	var zq := (float(J_RAIL) + 1.4) * CASE
+	var nq := int(float(r.size.x) * CASE / 36.0)
+	for k in nq:
+		v.ajouter_objet("pxl/quai-gare",
+			(float(r.position.x) * CASE) + 18.0 + float(k) * 36.0, zq, PI * 0.5)
 	# Le bâtiment de la gare, au milieu du quai.
 	_poser(v, "batiments/building-e", Vector2i(r.position.x + 4, r.position.y + 1), 2, "gare")
-	# Les auvents et les lampadaires du quai.
-	for k in 6:
-		v.ajouter_objet("auvent_large", (float(r.position.x) + 1.0 + float(k) * 1.8) * CASE,
-			(float(r.position.y) + 0.4) * CASE, 0.0)
-		v.ajouter_objet("lampadaire", (float(r.position.x) + 1.6 + float(k) * 1.8) * CASE,
-			(float(r.position.y) + 0.9) * CASE, 0.0)
+	# LE TRAIN, sur la voie : machine en tête, wagons derrière. Un rail nu est
+	# un trait par terre ; un train dessus, c'est une gare.
+	var zr := (float(J_RAIL) + 0.5) * CASE
+	var xt := (float(r.position.x) + 0.6) * CASE
+	# ⚠ UN TRAIN DOIT PESER AUTANT QUE LES HANGARS QUI L'ENTOURENT. À sa cote
+	# réelle — 17,5 m de long, 4,5 m de haut — la machine ressemblait à un
+	# jouet à côté d'une usine Kenney de quarante mètres de large (« le train
+	# m'a l'air petit comparé aux bâtiments à côté », client, 14/09). On force
+	# donc sa hauteur : la même exagération que le kit s'autorise partout
+	# ailleurs, et c'est le RAPPORT qui compte, pas la cote.
+	v.ajouter_objet("pxl/locomotive", xt, zr, PI * 0.5, H_LOCO)
+	xt += 18.5 * (H_LOCO / 4.54)
+	var rame := ["pxl/wagon-marchandises", "pxl/wagon-citerne", "pxl/wagon-plat",
+		"pxl/wagon-marchandises", "pxl/wagon-citerne"]
+	for m in rame:
+		v.ajouter_objet(m, xt, zr, PI * 0.5, H_WAGON)
+		xt += 15.6 * (H_LOCO / 4.54)
+	# Une grue mobile au bout du quai, et les palettes qu'elle décharge.
+	v.ajouter_objet("pxl/grue-mobile", (float(r.end.x) - 1.2) * CASE,
+		(float(J_RAIL) + 2.1) * CASE, PI)
+	# Les lampadaires du quai.
+	for k in 8:
+		v.ajouter_objet("lampadaire", (float(r.position.x) + 0.8 + float(k) * 1.5) * CASE,
+			(float(J_RAIL) + 2.0) * CASE, 0.0)
 	# Les conteneurs et les palettes en attente de chargement.
-	for k in 10:
+	for k in 12:
 		v.ajouter_objet(CONTENEUR[alea.randi() % CONTENEUR.size()],
 			(float(r.position.x) + 0.7 + alea.randf() * (float(r.size.x) - 1.4)) * CASE,
 			(float(r.position.y) + 2.2 + alea.randf() * 1.4) * CASE,
 			PI * 0.5, H_CONTENEUR)
+	for k in range(debut, v.objets.size()):
+		v.objets[k]["zone"] = true
 	v.ajouter_lieu("gare", (float(r.position.x) + float(r.size.x) * 0.5) * CASE,
-		(float(r.position.y) + 1.5) * CASE, {"nom": "Gare de Fret"})
+		(float(J_RAIL) + 1.2) * CASE, {"nom": "Gare de Fret"})
+
+## ⚠ LA VOIE FERRÉE EST UNE ZONE INTERDITE, elle aussi. Le client a vu des
+## panneaux publicitaires ENTRE LES RAILS. Un rail n'est ni une rue ni une
+## parcelle : la passe de propreté doit pouvoir tout en retirer.
+static func _interdire_le_rail(v: Ville2) -> void:
+	var large := float(v.taille.x) * CASE
+	v.interdire(Rect2(0.0, (float(J_RAIL) + 0.15) * CASE, large, CASE * 0.7))
+	v.interdire(Rect2(20.0 * CASE, (float(J_RAIL) + 1.15) * CASE, 11.0 * CASE, CASE * 0.7))
 
 # ------------------------------------------------------------------ le parc automobile
 
@@ -296,22 +333,41 @@ static func _le_parc_automobile(v: Ville2, alea: RandomNumberGenerator) -> void:
 
 # ------------------------------------------------------------------ l'aéroport
 
-## L'AÉRODROME. Le kit n'a pas d'avion — et il n'en faut pas pour qu'un
-## aérodrome se lise d'en haut : ce qui le dit, c'est LA PISTE. Une bande
-## sombre très longue et très étroite, son axe en pointillés blancs, ses seuils
-## marqués, un taxiway parallèle, un tarmac, des hangars et une tour. Aucune
-## autre chose au monde n'a cette forme.
+## L'AÉRODROME (client, 13/09 : « il manque un aéroport »).
+##
+## Ce qui fait lire un aérodrome d'en haut, c'est LA PISTE : une bande sombre
+## très longue et très étroite, son axe en pointillés, ses seuils marqués, un
+## taxiway parallèle, un tarmac au bout. Aucune autre chose au monde n'a cette
+## forme, et ça, le kit savait déjà le faire.
+##
+## Ce qu'il ne savait pas faire, c'est le poser au sol : les hangars étaient
+## trois bâtiments industriels et la tour de contrôle un château d'eau. Le
+## LOT 3 (14/09) apporte les vraies pièces — hangar à toit en demi-cylindre,
+## tour de contrôle vitrée, manche à air, et surtout DES AVIONS, parce qu'un
+## aérodrome sans avion est un parking.
+##
+## ⚠ TOUT REGARDE −Z, comme le reste des pièces `pxl/` : la porte du hangar,
+## le nez des avions, la porte de la tour. Le tarmac étant au SUD de la piste,
+## tout s'y pose sans tourner, nez vers le taxiway.
 const PISTE := "#3f4247"
 const MARQUE := "#eef1ec"
+## Le tarmac, un gris plus clair que la piste — c'est ce qui les sépare d'en
+## haut, et c'est vrai : une aire de stationnement n'est pas un revêtement de
+## piste.
+const TARMAC := "#5b6068"
 
 static func _l_aeroport(v: Ville2, alea: RandomNumberGenerator) -> void:
 	var r := AEROPORT
+	var debut := v.objets.size()
 	for j in range(r.position.y, r.end.y):
 		for i in range(r.position.x, r.end.x):
 			var c := Vector2i(i, j)
 			if v.carte != null and (v.carte.route(c) or v.carte.case_prise(c)): continue
 			v.poser_matiere(c, Ville2.M_DALLE)
-	var zp := (float(r.position.y) + 1.0) * CASE
+	var z0 := float(r.position.y) * CASE
+	var zp := z0 + 15.0                 ## l'axe de la piste
+	var zt := z0 + 40.0                 ## l'axe du taxiway
+	var za := z0 + 65.0                 ## l'axe du tarmac
 	var xc := (float(r.position.x) + float(r.size.x) * 0.5) * CASE
 	var lg := float(r.size.x) * CASE * 0.97
 	# La piste.
@@ -328,27 +384,56 @@ static func _l_aeroport(v: Ville2, alea: RandomNumberGenerator) -> void:
 			v.objets.append({"m": "pelouse", "x": xc + s2 * (lg * 0.5 - 14.0),
 				"z": zp + (float(k) - 2.5) * 3.6, "r": 0.0, "h": 0.0,
 				"w": 18.0, "d": 1.6, "c": MARQUE})
-	# LE TAXIWAY, parallèle, plus étroit.
-	v.objets.append({"m": "pelouse", "x": xc, "z": zp + 1.5 * CASE, "r": 0.0, "h": 0.0,
-		"w": lg * 0.8, "d": 13.0, "c": PISTE})
-	# LE TARMAC et ses hangars, au bout est.
-	var hx := r.end.x - 7
+	# LE TAXIWAY, parallèle, plus étroit, et ses deux bretelles vers le tarmac.
+	v.objets.append({"m": "pelouse", "x": xc, "z": zt, "r": 0.0, "h": 0.0,
+		"w": lg * 0.86, "d": 13.0, "c": PISTE})
+	# LE TARMAC, au sud : c'est là que tout se gare.
+	v.objets.append({"m": "pelouse", "x": xc, "z": za, "r": 0.0, "h": 0.0,
+		"w": lg * 0.95, "d": 34.0, "c": TARMAC})
+	# LES HANGARS (lot 3) : vingt-quatre mètres de large, toit en demi-cylindre,
+	# portes ouvrant sur le tarmac.
+	var hx := (float(r.end.x) - 5.5) * CASE
 	for k in 3:
-		_poser(v, ["industriel/building-c", "industriel/building-l", "industriel/building-i"][k],
-			Vector2i(hx + k * 2, r.position.y + 2), 0, "hangar_avion")
-	# LA TOUR DE CONTRÔLE : le seul volume haut de la bande, au bord du tarmac.
-	v.ajouter_objet("industriel/water-tower", (float(hx) - 1.4) * CASE,
-		(float(r.position.y) + 2.6) * CASE, 0.0, 26.0)
+		v.ajouter_objet("pxl/hangar-avion", hx - float(k) * 32.0, za + 5.0, 0.0)
+	# LA TOUR DE CONTRÔLE : quatorze mètres, cabine vitrée en encorbellement.
+	# C'est le seul volume haut de la bande, et il se voit de tout le quartier.
+	v.ajouter_objet("pxl/tour-controle", hx + 22.0, za + 2.0, 0.0)
+	# LA MANCHE À AIR, au bord de la piste : elle dit le vent, et elle dit
+	# « aérodrome » à elle seule.
+	v.ajouter_objet("pxl/manche-a-air", hx + 22.0, zp + 20.0, 0.0)
+	# LES APPAREILS. Un aérodrome sans avion est un parking : le régional au
+	# poste de chargement, deux légers en file, l'hélico sur sa plateforme.
+	var ax := (float(r.position.x) + float(r.size.x) * 0.42) * CASE
+	v.ajouter_objet("pxl/avion-regional", ax, za - 1.0, 0.0)
+	for k in 3:
+		v.ajouter_objet("pxl/avion-leger", ax - 40.0 - float(k) * 13.0, za + 1.0, 0.0)
+	# L'hélistation : un rond plus clair, sa croix, et l'appareil dessus.
+	var hex := (float(r.position.x) + 2.0) * CASE
+	v.objets.append({"m": "pelouse", "x": hex, "z": za, "r": 0.0, "h": 0.0,
+		"w": 24.0, "d": 24.0, "c": TARMAC})
+	v.objets.append({"m": "pelouse", "x": hex, "z": za, "r": 0.0, "h": 0.0,
+		"w": 12.0, "d": 1.4, "c": MARQUE})
+	v.objets.append({"m": "pelouse", "x": hex, "z": za, "r": 0.0, "h": 0.0,
+		"w": 1.4, "d": 12.0, "c": MARQUE})
+	v.ajouter_objet("pxl/helicoptere", hex, za, 0.0)
+	# Un avion léger en finale de piste, prêt à décoller, au seuil ouest.
+	v.ajouter_objet("pxl/avion-leger", xc - lg * 0.42, zp, PI * 0.5)
 	# Les balises de piste, tous les deux cents mètres, des deux côtés.
 	for k in 10:
 		var bx := (float(r.position.x) + 1.0 + float(k) * (float(r.size.x) - 2.0) / 9.0) * CASE
 		for s3 in [-1.0, 1.0]:
 			v.ajouter_objet("cone", bx, zp + s3 * 16.0, 0.0)
-	# La manche à air et le grillage : un aérodrome est toujours clos.
-	v.ajouter_objet("lampadaire", (float(hx) - 2.6) * CASE,
-		(float(r.position.y) + 0.3) * CASE, 0.0, 9.0)
+	# Le grillage : un aérodrome est toujours clos.
 	_ceindre(v, r, alea)
-	v.ajouter_lieu("aeroport", xc, zp, {"nom": "Aérodrome du Fret"})
+	# ⚠ ET ON FERME LA BANDE. Tout ce que l'aérodrome vient de poser porte le
+	# drapeau `zone` ; ensuite la bande devient interdite, et la passe de
+	# propreté balaie TOUT ce que les autres passes y déposeraient — panneaux
+	# publicitaires compris, qui sont pourtant de la voirie ailleurs.
+	for k in range(debut, v.objets.size()):
+		v.objets[k]["zone"] = true
+	v.interdire(Rect2(float(r.position.x) * CASE, z0,
+		float(r.size.x) * CASE, float(r.size.y) * CASE))
+	v.ajouter_lieu("aeroport", xc, za, {"nom": "Aérodrome du Fret"})
 
 ## ⚠ LE GRILLAGE, ET IL EST EN TREILLIS — c'est la « fence en verre » du client
 ## (13/09) : `urbain/construction-fence` est un panneau de grillage à mailles
@@ -425,6 +510,17 @@ static func _le_rail(v: Ville2) -> void:
 	v.rail.append({"points": [Vector2i(0, J_RAIL), Vector2i(v.taille.x - 1, J_RAIL)]})
 	v.rail.append({"points": [Vector2i(20, J_RAIL), Vector2i(20, J_RAIL + 1),
 		Vector2i(31, J_RAIL + 1)]})
+	# ⚠ ET LA VOIE SE RÉSERVE, SINON ON BÂTIT DESSUS (« je vois des bâtiments
+	# sur la voie de train », client, 14/09). `terrain_libre` ne connaît que les
+	# routes, les pièces et les lots : un rail n'est aucun des trois, et deux
+	# usines se sont donc posées à cheval sur les rails. On marque ses cases
+	# dans le registre vivant AVANT la passe des parcelles.
+	for i in v.taille.x:
+		for j in [J_RAIL, J_RAIL + 1]:
+			if j == J_RAIL + 1 and (i < 20 or i > 31): continue
+			for b in 2:
+				for a in 2:
+					v.demi_prises[Vector2i(i * 2 + a, j * 2 + b)] = true
 
 # ------------------------------------------------------------------ 3. les parcelles
 
@@ -533,6 +629,13 @@ static func _le_chantier(v: Ville2, alea: RandomNumberGenerator) -> void:
 	for k in 3:
 		v.ajouter_objet("benne", (float(r.position.x) + 6.2) * CASE,
 			(float(r.position.y) + 1.0 + float(k) * 1.1) * CASE, 0.0)
+	# LA GRUE À TOUR (lot 3) : trente-cinq mètres de flèche. C'est la pièce la
+	# plus haute du quartier et elle dit « chantier » de l'autre bout de la
+	# carte — un tas de gravats, non.
+	v.ajouter_objet("pxl/grue-tour", (float(r.position.x) + 3.0) * CASE,
+		(float(r.position.y) + 2.5) * CASE, alea.randf() * TAU)
+	v.ajouter_objet("pxl/grue-mobile", (float(r.position.x) + 6.5) * CASE,
+		(float(r.position.y) + 4.2) * CASE, PI * 0.5)
 	_clore(v, r, alea, "urbain/construction-fence", 0.08)
 	v.ajouter_lieu("chantier", (float(r.position.x) + float(r.size.x) * 0.5) * CASE,
 		(float(r.position.y) + float(r.size.y) * 0.5) * CASE, {"nom": "Chantier de la Zone"})
@@ -599,6 +702,22 @@ static func _la_friche(v: Ville2, alea: RandomNumberGenerator) -> void:
 					float(H_GRAVATS[g]))
 
 # ------------------------------------------------------------------ 10. les détails
+
+## LA LIGNE HAUTE TENSION (lot 4). Une zone industrielle est alimentée, et
+## c'est ce qui la relie au reste de la carte : une file de pylônes de
+## vingt-huit mètres, alignée, qui traverse tout le quartier. Rien d'autre dans
+## le kit ne donne cette échelle-là.
+static func _les_pylones(v: Ville2, alea: RandomNumberGenerator) -> void:
+	var j := float(J_ROCADE) - 1.35
+	for k in 7:
+		var x := (2.0 + float(k) * 5.5) * CASE
+		var c := Vector2i(floori(x / CASE), floori(j))
+		if not v.dedans(c) or v.lot_sur(c) >= 0: continue
+		if v.carte != null and (v.carte.route(c) or v.carte.case_prise(c)): continue
+		v.ajouter_objet("pxl/pylone-haute-tension", x, j * CASE, 0.0)
+	# Le relais télécom, sur le point haut de la zone.
+	v.ajouter_objet("pxl/pylone-telecom", (float(CASSE.end.x) + 0.6) * CASE,
+		(float(CASSE.position.y) + 0.6) * CASE, 0.0)
 
 static func _details(v: Ville2, alea: RandomNumberGenerator) -> void:
 	# Les lampadaires de la rocade, hauts et espacés.

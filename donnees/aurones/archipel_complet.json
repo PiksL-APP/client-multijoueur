@@ -1,0 +1,274 @@
+{
+  "meta": {
+    "name": "Archipel des Aurones",
+    "size_km": 20,
+    "unit": "km",
+    "origin": "bottom_left",
+    "godot_scale": 1000,
+    "description": "1 unité Godot = 1 mètre. Multiplier les positions par 1000."
+  },
+  "islands": {
+    "ile_centrale": {
+      "name": "Île Centrale",
+      "type": "main",
+      "center": {"x": 10.0, "y": 10.0},
+      "radius_km": 2.75,
+      "shape": "circular",
+      "stations": [
+        {"id": "gare_centrale", "name": "Gare Centrale", "pos": {"x": 10.0, "y": 10.0}, "types": ["train", "metro", "tram", "bus"]},
+        {"id": "cite_admin", "name": "Cité Administrative", "pos": {"x": 10.0, "y": 8.15}, "types": ["train", "metro", "tram"]},
+        {"id": "universite", "name": "Université", "pos": {"x": 12.15, "y": 10.05}, "types": ["train", "metro", "tram"]},
+        {"id": "port_alpes", "name": "Port-des-Alpes", "pos": {"x": 10.05, "y": 12.35}, "types": ["train", "metro", "bus"]},
+        {"id": "corresp_port_nord", "name": "Correspondance Port-Nord", "pos": {"x": 9.25, "y": 8.75}, "types": ["train", "metro"]}
+      ]
+    },
+    "ile_nord": {
+      "name": "Île Nord",
+      "type": "main",
+      "center": {"x": 10.0, "y": 5.4},
+      "radius_km": 2.1,
+      "shape": "irregular",
+      "stations": [
+        {"id": "port_nord", "name": "Port-Nord", "pos": {"x": 8.55, "y": 5.45}, "types": ["train", "metro", "tram", "bus"]},
+        {"id": "centre_nord", "name": "Centre-Ville Nord", "pos": {"x": 10.0, "y": 5.4}, "types": ["train", "metro", "tram"]},
+        {"id": "sommet", "name": "Sommet", "pos": {"x": 11.55, "y": 5.15}, "types": ["train", "metro", "bus"]}
+      ]
+    },
+    "ile_sud_est": {
+      "name": "Île Sud-Est",
+      "type": "main",
+      "center": {"x": 14.6, "y": 13.6},
+      "radius_km": 2.4,
+      "shape": "irregular",
+      "stations": [
+        {"id": "gare_maritime", "name": "Gare Maritime", "pos": {"x": 13.35, "y": 13.15}, "types": ["train", "metro", "tram", "bus"]},
+        {"id": "centre_sud", "name": "Centre Sud-Est", "pos": {"x": 14.55, "y": 13.55}, "types": ["metro", "tram", "bus"]},
+        {"id": "plage_vents", "name": "Plage-des-Vents", "pos": {"x": 15.1, "y": 15.05}, "types": ["train", "tram", "bus"]}
+      ]
+    },
+    "ile_ouest": {
+      "name": "Île de l'Ouest",
+      "type": "secondary",
+      "center": {"x": 3.8, "y": 9.2},
+      "radius_km": 1.6,
+      "stations": [
+        {"id": "gare_ouest", "name": "Gare de l'Ouest", "pos": {"x": 3.9, "y": 9.15}, "types": ["train", "bus"]}
+      ]
+    },
+    "ile_brumes": {
+      "name": "Île aux Brumes",
+      "type": "secondary",
+      "center": {"x": 6.4, "y": 7.1},
+      "radius_km": 0.7,
+      "stations": [
+        {"id": "halte_brumes", "name": "Halte aux Brumes", "pos": {"x": 6.45, "y": 7.05}, "types": ["train", "bus"]}
+      ]
+    },
+    "ilot_large": {
+      "name": "Îlot du Large",
+      "type": "secondary",
+      "center": {"x": 6.1, "y": 11.8},
+      "radius_km": 0.55,
+      "stations": [
+        {"id": "halte_large", "name": "Halte du Large", "pos": {"x": 6.15, "y": 11.75}, "types": ["train", "bus"]}
+      ]
+    },
+    "ile_pins": {
+      "name": "Île des Pins",
+      "type": "secondary",
+      "center": {"x": 6.9, "y": 14.6},
+      "radius_km": 1.5,
+      "stations": [
+        {"id": "gare_pins", "name": "Gare des Pins", "pos": {"x": 7.0, "y": 14.55}, "types": ["train", "bus"]}
+      ]
+    },
+    "ile_baie": {
+      "name": "Île de la Baie",
+      "type": "secondary",
+      "center": {"x": 13.9, "y": 6.3},
+      "radius_km": 0.65,
+      "stations": [
+        {"id": "halte_baie", "name": "Halte de la Baie", "pos": {"x": 13.95, "y": 6.25}, "types": ["train", "bus"]}
+      ]
+    },
+    "ile_levant": {
+      "name": "Île du Levant",
+      "type": "secondary",
+      "center": {"x": 16.8, "y": 8.9},
+      "radius_km": 0.7,
+      "stations": [
+        {"id": "halte_levant", "name": "Halte du Levant", "pos": {"x": 16.85, "y": 8.85}, "types": ["train", "bus"]}
+      ]
+    },
+    "ile_cote": {
+      "name": "Île de la Côte",
+      "type": "secondary",
+      "center": {"x": 17.6, "y": 14.4},
+      "radius_km": 0.9,
+      "stations": [
+        {"id": "gare_cote", "name": "Gare de la Côte", "pos": {"x": 17.55, "y": 14.35}, "types": ["train", "bus"]}
+      ]
+    }
+  },
+  "bridges": [
+    {
+      "id": "pont_centrale_nord_routier",
+      "name": "Pont Routier Centrale-Nord",
+      "from": "ile_centrale",
+      "to": "ile_nord",
+      "type": "road",
+      "points": [
+        {"x": 9.6, "y": 7.4},
+        {"x": 9.7, "y": 6.6}
+      ],
+      "lanes": 4,
+      "modes": ["car", "bus", "tram"]
+    },
+    {
+      "id": "pont_centrale_nord_ferroviaire",
+      "name": "Pont Ferroviaire Centrale-Nord",
+      "from": "ile_centrale",
+      "to": "ile_nord",
+      "type": "rail",
+      "points": [
+        {"x": 10.15, "y": 7.35},
+        {"x": 10.1, "y": 6.55}
+      ],
+      "modes": ["train"]
+    },
+    {
+      "id": "pont_centrale_sudest_mixte",
+      "name": "Pont Mixte Centrale-SudEst",
+      "from": "ile_centrale",
+      "to": "ile_sud_est",
+      "type": "mixed",
+      "points": [
+        {"x": 12.4, "y": 11.6},
+        {"x": 13.1, "y": 12.5}
+      ],
+      "lanes": 3,
+      "modes": ["car", "bus", "tram", "train"]
+    },
+    {
+      "id": "tunnel_centrale_sudest_rail",
+      "name": "Tunnel Ferroviaire Centrale-SudEst",
+      "from": "ile_centrale",
+      "to": "ile_sud_est",
+      "type": "rail_tunnel",
+      "points": [
+        {"x": 11.9, "y": 11.9},
+        {"x": 13.0, "y": 12.7}
+      ],
+      "modes": ["train"]
+    },
+    {
+      "id": "pont_centrale_pins",
+      "name": "Pont Centrale-Pins",
+      "from": "ile_centrale",
+      "to": "ile_pins",
+      "type": "mixed",
+      "points": [
+        {"x": 8.4, "y": 12.6},
+        {"x": 7.5, "y": 13.7}
+      ],
+      "modes": ["car", "bus", "train"]
+    },
+    {
+      "id": "pont_centrale_large",
+      "name": "Pont Centrale-Large",
+      "from": "ile_centrale",
+      "to": "ilot_large",
+      "type": "road",
+      "points": [
+        {"x": 7.6, "y": 11.3},
+        {"x": 6.7, "y": 11.6}
+      ],
+      "modes": ["car", "bus"]
+    },
+    {
+      "id": "pont_centrale_brumes",
+      "name": "Pont Centrale-Brumes",
+      "from": "ile_centrale",
+      "to": "ile_brumes",
+      "type": "road",
+      "points": [
+        {"x": 7.8, "y": 8.4},
+        {"x": 6.9, "y": 7.5}
+      ],
+      "modes": ["car", "bus"]
+    },
+    {
+      "id": "pont_nord_baie",
+      "name": "Pont Nord-Baie",
+      "from": "ile_nord",
+      "to": "ile_baie",
+      "type": "road",
+      "points": [
+        {"x": 12.0, "y": 5.5},
+        {"x": 13.3, "y": 5.9}
+      ],
+      "modes": ["car", "bus"]
+    },
+    {
+      "id": "pont_sudest_cote",
+      "name": "Pont SudEst-Côte",
+      "from": "ile_sud_est",
+      "to": "ile_cote",
+      "type": "mixed",
+      "points": [
+        {"x": 16.3, "y": 14.0},
+        {"x": 17.0, "y": 14.2}
+      ],
+      "modes": ["car", "bus", "train"]
+    },
+    {
+      "id": "pont_ouest_brumes",
+      "name": "Pont Ouest-Brumes",
+      "from": "ile_ouest",
+      "to": "ile_brumes",
+      "type": "road",
+      "points": [
+        {"x": 5.0, "y": 8.4},
+        {"x": 5.9, "y": 7.5}
+      ],
+      "modes": ["car", "bus"]
+    }
+  ],
+  "train_lines": {
+    "T1": {
+      "name": "Ligne Centrale",
+      "color": "#E53935",
+      "stations": ["gare_pins", "port_alpes", "gare_centrale", "cite_admin", "port_nord", "sommet"]
+    },
+    "T2": {
+      "name": "Ligne Sud",
+      "color": "#FB8C00",
+      "stations": ["gare_centrale", "gare_maritime", "plage_vents", "gare_cote"]
+    },
+    "T3": {
+      "name": "Ligne Ouest",
+      "color": "#8E24AA",
+      "stations": ["gare_centrale", "halte_large", "gare_ouest"]
+    },
+    "T4": {
+      "name": "Ligne Est",
+      "color": "#039BE5",
+      "stations": ["gare_centrale", "universite", "halte_levant", "halte_baie"]
+    }
+  },
+  "metro_lines": {
+    "M1": {"name": "Métro 1", "color": "#1E88E5", "island": "ile_centrale", "stations": ["port_alpes", "gare_centrale", "cite_admin", "universite"]},
+    "M2": {"name": "Métro 2 Anneau", "color": "#43A047", "island": "ile_centrale", "stations": ["gare_centrale", "cite_admin", "universite", "port_alpes"]},
+    "M3": {"name": "Métro 3", "color": "#FDD835", "island": "ile_centrale", "stations": ["corresp_port_nord", "gare_centrale", "port_alpes"]},
+    "MN1": {"name": "Métro Nord 1", "color": "#1E88E5", "island": "ile_nord", "stations": ["port_nord", "centre_nord", "sommet"]},
+    "MS1": {"name": "Métro Sud-Est 1", "color": "#1E88E5", "island": "ile_sud_est", "stations": ["gare_maritime", "centre_sud", "plage_vents"]}
+  },
+  "tram_lines": {
+    "TR1": {"name": "Tram Anneau Centrale", "color": "#2E7D32", "island": "ile_centrale"},
+    "TR2": {"name": "Tram Est-Ouest", "color": "#66BB6A", "island": "ile_centrale"},
+    "TR3": {"name": "Tram Nord-Sud", "color": "#A5D6A7", "island": "ile_centrale"},
+    "TRN1": {"name": "Tram Nord", "color": "#2E7D32", "island": "ile_nord"},
+    "TRS1": {"name": "Tram Rive Sud", "color": "#2E7D32", "island": "ile_sud_est"},
+    "TRS2": {"name": "Tram Côte Est", "color": "#66BB6A", "island": "ile_sud_est"}
+  }
+}

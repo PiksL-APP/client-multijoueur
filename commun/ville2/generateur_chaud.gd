@@ -11,9 +11,14 @@ extends RefCounted
 ##
 ## Ce qui le fait, dans l'ordre d'importance :
 ##
-## * LES AFFICHES, en nombre — c'est le seul quartier où l'on en veut trop.
-##   Ailleurs on les espace (cahier § 7, et « il y a trop de panneaux en ville
-##   et pas assez ailleurs ») ; ici leur accumulation EST le décor ;
+## * LES ENSEIGNES, en nombre — et NON les affiches. C'est la correction du
+##   13/09, et elle porte sur l'objet, pas sur la quantité : l'accumulation
+##   reste le sujet du quartier, mais ce qui s'accumule est l'ENSEIGNE (petite,
+##   colorée, une par devanture, lisible à hauteur de trottoir) et non la PUB
+##   (grande, mate, imprimée, qu'on lit depuis la voiture). Le client a compté
+##   quatorze panneaux publicitaires et jugé « beaucoup trop de pub, pas assez
+##   de néon » : quatre panneaux restent, sur l'artère, et des dizaines
+##   d'enseignes les remplacent ;
 ## * les rues étroites : une trame serrée, des pâtés courts, beaucoup de
 ##   carrefours — on tourne à chaque coin ;
 ## * le casino, seul bâtiment haut, au bout de l'artère ;
@@ -67,22 +72,42 @@ const MEUBLES := ["batiments/low-detail-building-wide-a", "batiments/low-detail-
 	"ville/building-small-b", "ville/building-small-c", "ville/building-small-d",
 	"batiments/low-detail-building-e", "batiments/low-detail-building-h"]
 
-## ⚠ LES DEUX IMMEUBLES AUX VITRES CONDAMNÉES (demande du client, 13/09 : « la
-## variante A du kit modèle Industrial sur les 2 bâtiments qui ressemblent à
-## des immeubles, vitres condamnées par des planches »). `industriel/building-a`
-## et `-b` sont les deux seuls du kit industriel qui ont la silhouette d'un
-## immeuble d'habitation — deux corps, une façade percée, un toit plat — et
-## leur atlas industriel remplace le vitrage par du bardage. Posés dans un
-## quartier chaud, ce sont les deux barres murées du bout de la rue.
+## ⚠ LES DEUX IMMEUBLES AUX VITRES CONDAMNÉES (demande du client, 13/09 : « tu
+## dois utiliser la variante A du kit modèle Industrial sur les 2 bâtiments qui
+## ressemblent à des immeubles, vitres condamnées par des planches »).
 ##
-## On les pose à la main, pas dans la liste des pâtés : deux, pas douze. Une
-## barre murée est un repère ; douze, c'est une friche.
-const MURES := ["industriel/building-a", "industriel/building-b"]
+## ⚠ LA VARIANTE A SUR LES DEUX, PAS A ET B. Premier jet : `building-a` et
+## `building-b`, au motif que ce sont les deux seuls du kit industriel qui ont
+## la silhouette d'un immeuble d'habitation. Mais la demande ne parle pas d'une
+## famille, elle nomme UN modèle — c'est `building-a` que le client a regardé,
+## et lui seul, dont l'atlas remplace le vitrage par du bardage à planches. Le
+## `-b` est sa variante à bardage lisse : de loin on ne voit pas les planches,
+## et la demande tombe à plat sur la moitié du sujet.
+##
+## La répétition ne gêne pas ici : deux barres identiques au bout de deux rues
+## différentes se lisent comme un programme de logement, pas comme un copié-
+## collé. On les pose à la main, pas dans la liste des pâtés : deux, pas douze.
+## Une barre murée est un repère ; douze, c'est une friche.
+const MURES := ["industriel/building-a", "industriel/building-a"]
 const OU_MURES := [Vector2i(14, 21), Vector2i(25, 6)]
 ## Les chambres de motel : basses, alignées, toutes pareilles — c'est le
 ## principe d'un motel.
 const CHAMBRES := ["pavillons/building-type-h", "pavillons/building-type-i",
 	"pavillons/building-type-c", "pavillons/building-type-l"]
+## ⚠ LES TROIS ENSEIGNES DU LOT 4, ET ELLES SONT DESSINÉES EN MÈTRES.
+## Contrairement à tout le reste du dossier `pxl/`, taillé comme un kit Kenney
+## (une unité = une case = 20 m), ces trois-là sont modélisés à l'échelle du
+## monde. `KitVille2.echelle()` ne le sait pas : il voit `pxl/`, applique le
+## facteur de la case, et le caisson de quatre mètres en fait QUATRE-VINGTS —
+## une enseigne plus large que le pâté qu'elle surplombe. On leur impose donc
+## TOUJOURS leur hauteur réelle en posant l'objet ; `h = 0` est interdit ici.
+const ENSEIGNE_LETTRES := "pxl/enseigne-neon-lettres"
+const ENSEIGNE_FLECHE := "pxl/enseigne-neon-fleche"
+const ENSEIGNE_VERTICALE := "pxl/enseigne-neon-verticale"
+const H_LETTRES := 1.4                    ## le caisson de façade, 4 × 1,4 m
+const H_FLECHE := 2.0                     ## l'enseigne à flèche, 2,5 × 2 m
+const H_VERTICALE := 6.0                  ## le panneau d'hôtel, 1,2 × 6 m
+
 ## Les tours du fond : le casino et son hôtel.
 const TOURS := ["batiments/building-skyscraper-a", "batiments/building-skyscraper-c",
 	"batiments/building-skyscraper-e", "batiments/building-l", "batiments/building-m"]
@@ -107,24 +132,37 @@ static func generer(graine := 7, taille := Vector2i(40, 40), curseurs := {}) -> 
 	_les_barres_murees(v, alea)
 	v.rasteriser()
 	_details(v, alea)
-	# ⚠ ICI ON EN MET TROP, ET C'EST VOULU. L'écart est le plus court de tous
-	# les témoins (40 contre 110 à 240 ailleurs) : dans ce quartier, la
-	# surenchère d'affiches n'est pas un défaut de réglage, c'est le sujet.
 	# ⚠ LES REPÈRES DU CLIENT. Ce sont ses propres modèles, faits pour ce
 	# jeu : un quartier qui n'en porte aucun se lit comme du Kenney tout nu.
 	_poser_repere(v, "piksl/garage_de_peinture", Vector2i(24, 32), 0, "garage", "Garage du Mirage")
 	_poser_repere(v, "piksl/firestation", Vector2i(15, 34), 0, "caserne", "Poste du Mirage")
 	v.rasteriser()
-	# ⚠ MOINS DE PUB, PLUS DE NÉON. Le réglage d'hier (écart 40, dix panneaux de
-	# bord de route) partait d'une intuition juste — « ici l'accumulation EST le
-	# décor » — appliquée au mauvais objet. Le client a tranché le 13/09 :
-	# « beaucoup trop de pub », « pas assez de néon ». Une pub est une image
-	# mate et grande qu'on regarde de la voiture : trois ou quatre suffisent.
-	# L'accumulation, c'est celle des ENSEIGNES, et elle se règle plus bas.
-	AFFICHES.semer(v, alea, 150.0, [], 3)
+	# ⚠ LA PUB NE SE POSE PLUS QUE SUR L'AXE, ET ON LES COMPTE SUR UNE MAIN.
+	# Le client en a dénombré quatorze et tranché : « beaucoup trop de pub ».
+	# Le compte venait pour l'essentiel des supports de LOT — toits et pignons
+	# des clubs —, et dans une trame à pâtés de quatre cases il y en a partout :
+	# un écart de 150 unités ne freine rien quand chaque pâté offre huit murs.
+	#
+	# On coupe donc la pub de lot à la racine en ne lui laissant qu'un genre
+	# porteur, `casino` (un seul lot dans tout le quartier, et c'est le bon : le
+	# panneau du casino au bout de l'artère se justifie tout seul), et on garde
+	# QUATRE panneaux sur pieds, que `affiches.gd` ne plante que le long des
+	# avenues. Total visé : quatre ou cinq, tous sur l'axe.
+	AFFICHES.semer(v, alea, 220.0, ["casino"], 4)
+	# Le fond lumineux : un caisson émissif dessiné en code sur chaque façade.
+	# Il ne fait pas une enseigne à lui seul (voir `_les_enseignes`), mais c'est
+	# lui qui met de la couleur sur les murs d'en face.
 	NEONS.semer(v, alea, ["club", "casino", "hotel", "mure"], 0.85)
-	# La saleté au sol : au pied des clubs et des meublés, pas sur l'artère.
-	PROPRETE.salir(v, alea, ["club", "mure"], 0.7, 4)
+	# ... et par-dessus, les vraies enseignes : c'est elles que le client
+	# réclame quand il écrit « pas assez de néon ».
+	_les_enseignes(v, alea, ["club", "casino", "hotel", "mure", "motel"], 0.9)
+	# ⚠ LA SALETÉ À FOND (« pas assez de poubelle, de saleté au sol », 13/09).
+	# Le réglage précédent (0,7 façade sur deux genres, quatre déchets au plus)
+	# laissait un trottoir sur trois parfaitement net — et un trottoir net au
+	# milieu d'un quartier chaud se remarque plus qu'il n'y paraît. On sale
+	# TOUTES les façades, meublés et motels compris, et on double la portée.
+	PROPRETE.salir(v, alea, ["club", "mure", "hotel", "motel"], 1.0, 8)
+	_les_poubelles(v, alea)
 	# ⚠ PAS DE PASTELS ICI. Premier essai avec la gamme pavillonnaire : de nuit,
 	# un mur lilas sous une lumière bleue devient violet fluo et les clubs
 	# ressemblaient à des immeubles de dessin animé. Un quartier chaud est en
@@ -315,8 +353,10 @@ static func _details(v: Ville2, alea: RandomNumberGenerator) -> void:
 		v.ajouter_objet("parasol" if alea.randf() < 0.5 else "parasol_b",
 			(float(i) + 0.5) * CASE, z, alea.randf() * TAU)
 		v.ajouter_objet("banc", (float(i) + 0.9) * CASE, z, PI * 0.5)
-	# Les poubelles et les bennes des arrière-cours : un quartier chaud est sale.
-	for k in 26:
+	# Les bennes des ARRIÈRE-COURS — celles qu'on voit par-dessus les toits et
+	# dans les dents creuses. Le trottoir, lui, est servi par `_les_poubelles` :
+	# ce sont deux endroits différents, et il en faut aux deux.
+	for k in 34:
 		var i := 2 + alea.randi() % (v.taille.x - 4)
 		var j := 2 + alea.randi() % (v.taille.y - 4)
 		var c := Vector2i(i, j)
@@ -336,6 +376,129 @@ static func _details(v: Ville2, alea: RandomNumberGenerator) -> void:
 		var i := 4 + alea.randi() % (v.taille.x - 8)
 		v.ajouter_objet("cabine", (float(i) + 0.15) * CASE,
 			(float(J_ARTERE) + 0.85) * CASE, PI)
+
+# ------------------------------------------------------------------ 7. les enseignes
+
+## LES VRAIES ENSEIGNES, ET C'EST LE CŒUR DE LA DEMANDE DU 13/09.
+##
+## ⚠ POURQUOI `NEONS.semer` NE SUFFISAIT PAS. La brique `neons.gd` pose sur
+## chaque façade un caisson émissif dessiné en code : deux boîtes, une sombre,
+## une colorée. C'est excellent comme FOND — ça met de la couleur sur les murs
+## d'en face et ça coûte trois sommets —, mais ça ne se reconnaît pas. De nuit,
+## quarante rectangles lumineux identiques se lisent comme un éclairage, pas
+## comme une rue de bars. Ce qui fait l'enseigne, c'est la FORME qu'on nomme :
+## des lettres au-dessus d'une devanture, une flèche en drapeau qui barre le
+## trottoir, le panneau d'hôtel qui descend le long d'un angle. On garde donc
+## les deux : le caisson en fond, les trois modèles par-dessus.
+##
+## ⚠ LA FAÇADE ET SON ORIENTATION SE CALCULENT COMME DANS `neons.gd`. C'est le
+## travail difficile et il est déjà fait : la façade d'un modèle est son −Z,
+## tournée de `q` quarts de tour, et elle ne porte une enseigne que si la case
+## d'en face est de la chaussée. Refaire ce calcul autrement ici, c'est se
+## garantir deux règles qui divergent au premier modèle ajouté au kit.
+##
+## ⚠ MAIS L'ANGLE, LUI, N'EST PAS LE MÊME. Le caisson de `neons.gd` est dessiné
+## face à +Z (le renderer décale son tube de `base * (0, 0, 0.45)`) ; les trois
+## modèles `pxl/`, comme toutes les pièces du dossier, regardent −Z. Reprendre
+## tel quel le `atan2(facade.x, facade.y)` de `neons.gd` collerait donc chaque
+## enseigne DOS À LA RUE, face au mur — invisible, et rien ne le signalerait.
+## D'où le demi-tour : `atan2(−facade.x, −facade.y)`.
+##
+## ⚠ ET LE DRAPEAU DE VOIRIE. Une enseigne est en encorbellement au-dessus du
+## trottoir, c'est-à-dire au-dessus de la chaussée : sans `voirie`, la passe
+## `rien_sur_les_routes` les balaierait TOUTES à la dernière ligne du
+## générateur, et l'image reviendrait exactement comme avant.
+static func _les_enseignes(v: Ville2, alea: RandomNumberGenerator, genres: Array,
+		densite := 0.9) -> int:
+	if v.carte == null: return 0
+	var poses := 0
+	for l in v.lots:
+		if not genres.has(String(l.get("genre", ""))): continue
+		if alea.randf() > densite: continue
+		var t := KitVille2.taille(String(l["m"]))
+		var q := int(l["q"])
+		var centre := v.centre_du_lot(l)
+		var ici := Vector2i(floori(centre.x / CASE), floori(centre.z / CASE))
+		var facade := Vector2i(0, -1)
+		for _k in q: facade = Vector2i(facade.y, -facade.x)
+		if not v.carte.route(ici + facade): continue
+		# Le mur qui porte l'enseigne, la demi-profondeur qui la met dehors, et
+		# la hauteur du bâtiment — tout en mètres.
+		var mur: float = (t.x if q % 2 == 0 else t.z) * CASE
+		var demi: float = (t.z if q % 2 == 0 else t.x) * CASE * 0.5
+		var haut: float = t.y * CASE
+		# Le long du mur, pour se ranger contre un angle plutôt qu'au milieu.
+		var cote := Vector2i(-facade.y, facade.x)
+		# L'angle qui met le −Z du modèle — sa face — vers la rue.
+		var vers := atan2(float(-facade.x), float(-facade.y))
+		var fiche := {}
+		# ⚠ JAMAIS PLUS HAUT QUE LE BÂTIMENT, la même règle que `neons.gd` : une
+		# enseigne de six mètres accrochée à huit sur une échoppe qui en fait
+		# douze dépasse du toit et flotte. Chaque forme a donc son plancher de
+		# hauteur bâtie, et son `dy` redescend si le mur est juste.
+		if haut >= 30.0 and mur >= 12.0:
+			# LA VERTICALE, plaquée sur l'ANGLE des bâtiments hauts : c'est sa
+			# place naturelle — un panneau d'hôtel se lit depuis les deux rues
+			# du coin, pas depuis la seule façade.
+			var dx: float = maxf(mur * 0.5 - 1.6, 0.0)
+			fiche = {"m": ENSEIGNE_VERTICALE, "h": H_VERTICALE, "r": vers,
+				"x": centre.x + float(facade.x) * (demi + 0.4) + float(cote.x) * dx,
+				"z": centre.z + float(facade.y) * (demi + 0.4) + float(cote.y) * dx,
+				"dy": minf(8.0, haut - H_VERTICALE - 2.0)}
+		elif haut >= 12.0 and alea.randf() < 0.45:
+			# LA FLÈCHE EN DRAPEAU, perpendiculaire au mur et en encorbellement
+			# au-dessus du trottoir : un quart de tour de plus que la façade,
+			# sinon elle serait plaquée comme les autres et perdrait tout son
+			# intérêt. Décalée vers un angle, là où on la voit en enfilade.
+			var dxf: float = maxf(mur * 0.25, 0.0)
+			fiche = {"m": ENSEIGNE_FLECHE, "h": H_FLECHE, "r": vers + PI * 0.5,
+				"x": centre.x + float(facade.x) * (demi + 1.8) + float(cote.x) * dxf,
+				"z": centre.z + float(facade.y) * (demi + 1.8) + float(cote.y) * dxf,
+				"dy": minf(5.0, haut - H_FLECHE - 1.5)}
+		elif haut >= 8.0:
+			# LES LETTRES, en bandeau centré au-dessus de la devanture. C'est la
+			# forme la plus modeste, donc celle qui reste quand le bâtiment est
+			# trop bas pour les deux autres.
+			fiche = {"m": ENSEIGNE_LETTRES, "h": H_LETTRES, "r": vers,
+				"x": centre.x + float(facade.x) * (demi + 0.4),
+				"z": centre.z + float(facade.y) * (demi + 0.4),
+				"dy": minf(4.0, haut - H_LETTRES - 1.5)}
+		else:
+			continue
+		fiche["voirie"] = true
+		v.objets.append(fiche)
+		poses += 1
+	return poses
+
+# ------------------------------------------------------------------ 8. la saleté
+
+## ⚠ CE QUI MANQUAIT, C'EST LA POUBELLE DU TROTTOIR. `_details` en sème déjà sur
+## les cases libres, mais une case libre dans cette trame est presque toujours
+## un cœur d'îlot, où la caméra ne va jamais : le client traversait donc un
+## quartier propre et disait « pas assez de poubelle » alors qu'il y en avait
+## vingt-six. Une poubelle ne salit que si elle est SUR LE TRAJET — au caniveau,
+## à portée du trottoir qu'on remonte. On longe donc les rues, toutes.
+##
+## Le caniveau est de la chaussée, mais `poubelle` et `benne` sont dans la
+## liste blanche de la voirie (`proprete.gd`) : la passe finale les garde, comme
+## elle garde les lampadaires. Rien à déclarer.
+static func _les_poubelles(v: Ville2, alea: RandomNumberGenerator) -> void:
+	for r in v.routes:
+		var cases := Ville2.cases_de_route(r)
+		if cases.size() < 4: continue
+		for k in range(1, cases.size() - 1, 3):
+			if alea.randf() > 0.45: continue
+			var c: Vector2i = cases[k]
+			# Le sens de la rue, pour savoir de quel côté est le caniveau : le
+			# bord d'une rue est-ouest se compte en Z, et l'inverse.
+			var d: Vector2i = cases[k + 1] - cases[k - 1]
+			var bord: float = -0.36 if alea.randf() < 0.5 else 0.36
+			var x := (float(c.x) + 0.5) * CASE
+			var z := (float(c.y) + 0.5) * CASE
+			if d.x != 0: z += bord * CASE
+			else: x += bord * CASE
+			v.ajouter_objet("benne" if alea.randf() < 0.3 else "poubelle",
+				x, z, alea.randf() * TAU)
 
 ## Cherche une place pour un repère du client, en spirale autour du point voulu
 ## et dans les quatre orientations. Même règle partout : un repère qui abandonne

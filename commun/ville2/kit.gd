@@ -30,7 +30,18 @@ const CASE := 20.0
 ## deux seuls noms qui existent des DEUX côtés (`modeles/voitures/` et
 ## `modeles/kenney/voitures/`). Pour eux, le préfixe kenney reste la réponse —
 ## c'est celui que tous les générateurs visent.
-const HORS_KENNEY := ["piksl", "ville", "commerce", "banlieue", "industrie",
+##
+## ⚠ `pxl/` EST LE DOSSIER DES MODÈLES FAITS POUR CE JEU, et il n'est PAS
+## `piksl/`. La différence est une échelle, et elle vaut un facteur vingt :
+##
+##   `piksl/…`  modèles du client, déjà en unités de JEU → `echelle()` rend 1,0
+##   `pxl/…`    modèles neufs taillés comme un kit Kenney → `echelle()` rend CASE
+##
+## On veut la seconde, parce que ces modèles-là partagent l'atlas des kits et
+## se posent avec les mêmes emprises. Les mettre dans `piksl/` les rendrait
+## vingt fois trop petits ; les mettre sous `kenney/` les mélangerait aux kits
+## d'origine, qu'on doit pouvoir remplacer d'un bloc.
+const HORS_KENNEY := ["piksl", "pxl", "ville", "commerce", "banlieue", "industrie",
 	"ferme", "village", "mobilier", "cartons", "voxel", "creatures", "personnages"]
 
 ## [largeur X, hauteur Y, profondeur Z] en cases.

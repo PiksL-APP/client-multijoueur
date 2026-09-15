@@ -1,0 +1,90 @@
+{
+  "meta": {
+    "description": "Graphe de routes pour AStar2D / AStarGrid2D. Positions en km. Multiplier par 1000 pour Godot (mètres).",
+    "node_types": ["intersection", "station", "bridge_entry", "dead_end"],
+    "edge_types": ["highway", "primary", "secondary", "local", "bridge"]
+  },
+  "nodes": [
+    {"id": "n_gc", "name": "Gare Centrale", "pos": {"x": 10.0, "y": 10.0}, "type": "station"},
+    {"id": "n_ca", "name": "Cité Admin", "pos": {"x": 10.0, "y": 8.15}, "type": "station"},
+    {"id": "n_univ", "name": "Université", "pos": {"x": 12.15, "y": 10.05}, "type": "station"},
+    {"id": "n_pa", "name": "Port-des-Alpes", "pos": {"x": 10.05, "y": 12.35}, "type": "station"},
+    {"id": "n_cpn", "name": "Corresp Port-Nord", "pos": {"x": 9.25, "y": 8.75}, "type": "station"},
+
+    {"id": "n_pn", "name": "Port-Nord", "pos": {"x": 8.55, "y": 5.45}, "type": "station"},
+    {"id": "n_cn", "name": "Centre Nord", "pos": {"x": 10.0, "y": 5.4}, "type": "station"},
+    {"id": "n_som", "name": "Sommet", "pos": {"x": 11.55, "y": 5.15}, "type": "station"},
+
+    {"id": "n_gm", "name": "Gare Maritime", "pos": {"x": 13.35, "y": 13.15}, "type": "station"},
+    {"id": "n_cs", "name": "Centre Sud-Est", "pos": {"x": 14.55, "y": 13.55}, "type": "station"},
+    {"id": "n_pv", "name": "Plage-des-Vents", "pos": {"x": 15.1, "y": 15.05}, "type": "station"},
+
+    {"id": "n_go", "name": "Gare Ouest", "pos": {"x": 3.9, "y": 9.15}, "type": "station"},
+    {"id": "n_hb", "name": "Halte Brumes", "pos": {"x": 6.45, "y": 7.05}, "type": "station"},
+    {"id": "n_hl", "name": "Halte Large", "pos": {"x": 6.15, "y": 11.75}, "type": "station"},
+    {"id": "n_gp", "name": "Gare Pins", "pos": {"x": 7.0, "y": 14.55}, "type": "station"},
+    {"id": "n_hba", "name": "Halte Baie", "pos": {"x": 13.95, "y": 6.25}, "type": "station"},
+    {"id": "n_hlev", "name": "Halte Levant", "pos": {"x": 16.85, "y": 8.85}, "type": "station"},
+    {"id": "n_gcote", "name": "Gare Côte", "pos": {"x": 17.55, "y": 14.35}, "type": "station"},
+
+    {"id": "n_ring_n", "name": "Anneau Nord", "pos": {"x": 10.0, "y": 8.7}, "type": "intersection"},
+    {"id": "n_ring_e", "name": "Anneau Est", "pos": {"x": 11.5, "y": 10.0}, "type": "intersection"},
+    {"id": "n_ring_s", "name": "Anneau Sud", "pos": {"x": 10.0, "y": 11.4}, "type": "intersection"},
+    {"id": "n_ring_w", "name": "Anneau Ouest", "pos": {"x": 8.5, "y": 10.0}, "type": "intersection"},
+
+    {"id": "n_bridge_cn_n", "name": "Entrée Pont Nord", "pos": {"x": 9.7, "y": 7.5}, "type": "bridge_entry"},
+    {"id": "n_bridge_cn_s", "name": "Sortie Pont Nord", "pos": {"x": 9.7, "y": 6.5}, "type": "bridge_entry"},
+    {"id": "n_bridge_cs_w", "name": "Entrée Pont SudEst", "pos": {"x": 12.3, "y": 11.5}, "type": "bridge_entry"},
+    {"id": "n_bridge_cs_e", "name": "Sortie Pont SudEst", "pos": {"x": 13.2, "y": 12.6}, "type": "bridge_entry"},
+    {"id": "n_bridge_pins", "name": "Pont Pins", "pos": {"x": 8.0, "y": 13.2}, "type": "bridge_entry"},
+    {"id": "n_bridge_large", "name": "Pont Large", "pos": {"x": 7.2, "y": 11.5}, "type": "bridge_entry"},
+    {"id": "n_bridge_cote", "name": "Pont Côte", "pos": {"x": 16.6, "y": 14.1}, "type": "bridge_entry"}
+  ],
+  "edges": [
+    {"from": "n_gc", "to": "n_ca", "type": "primary", "length_km": 1.85, "lanes": 4, "bidirectional": true},
+    {"from": "n_gc", "to": "n_univ", "type": "primary", "length_km": 2.15, "lanes": 4, "bidirectional": true},
+    {"from": "n_gc", "to": "n_pa", "type": "primary", "length_km": 2.35, "lanes": 4, "bidirectional": true},
+    {"from": "n_gc", "to": "n_cpn", "type": "primary", "length_km": 1.45, "lanes": 3, "bidirectional": true},
+
+    {"from": "n_gc", "to": "n_ring_n", "type": "primary", "length_km": 1.3, "lanes": 3, "bidirectional": true},
+    {"from": "n_gc", "to": "n_ring_e", "type": "primary", "length_km": 1.5, "lanes": 3, "bidirectional": true},
+    {"from": "n_gc", "to": "n_ring_s", "type": "primary", "length_km": 1.4, "lanes": 3, "bidirectional": true},
+    {"from": "n_gc", "to": "n_ring_w", "type": "primary", "length_km": 1.5, "lanes": 3, "bidirectional": true},
+
+    {"from": "n_ring_n", "to": "n_ring_e", "type": "primary", "length_km": 2.0, "lanes": 3, "bidirectional": true},
+    {"from": "n_ring_e", "to": "n_ring_s", "type": "primary", "length_km": 2.1, "lanes": 3, "bidirectional": true},
+    {"from": "n_ring_s", "to": "n_ring_w", "type": "primary", "length_km": 2.0, "lanes": 3, "bidirectional": true},
+    {"from": "n_ring_w", "to": "n_ring_n", "type": "primary", "length_km": 1.9, "lanes": 3, "bidirectional": true},
+
+    {"from": "n_ca", "to": "n_cpn", "type": "secondary", "length_km": 0.9, "lanes": 2, "bidirectional": true},
+    {"from": "n_univ", "to": "n_ring_e", "type": "secondary", "length_km": 0.7, "lanes": 2, "bidirectional": true},
+    {"from": "n_pa", "to": "n_ring_s", "type": "secondary", "length_km": 1.0, "lanes": 2, "bidirectional": true},
+
+    {"from": "n_cpn", "to": "n_bridge_cn_n", "type": "primary", "length_km": 1.3, "lanes": 3, "bidirectional": true},
+    {"from": "n_bridge_cn_n", "to": "n_bridge_cn_s", "type": "bridge", "length_km": 1.0, "lanes": 4, "bidirectional": true},
+    {"from": "n_bridge_cn_s", "to": "n_cn", "type": "primary", "length_km": 1.2, "lanes": 3, "bidirectional": true},
+
+    {"from": "n_pn", "to": "n_cn", "type": "primary", "length_km": 1.5, "lanes": 3, "bidirectional": true},
+    {"from": "n_cn", "to": "n_som", "type": "primary", "length_km": 1.6, "lanes": 3, "bidirectional": true},
+
+    {"from": "n_ring_e", "to": "n_bridge_cs_w", "type": "primary", "length_km": 1.6, "lanes": 3, "bidirectional": true},
+    {"from": "n_bridge_cs_w", "to": "n_bridge_cs_e", "type": "bridge", "length_km": 1.4, "lanes": 3, "bidirectional": true},
+    {"from": "n_bridge_cs_e", "to": "n_gm", "type": "primary", "length_km": 0.7, "lanes": 3, "bidirectional": true},
+    {"from": "n_gm", "to": "n_cs", "type": "primary", "length_km": 1.3, "lanes": 3, "bidirectional": true},
+    {"from": "n_cs", "to": "n_pv", "type": "primary", "length_km": 1.6, "lanes": 3, "bidirectional": true},
+
+    {"from": "n_pa", "to": "n_bridge_pins", "type": "primary", "length_km": 1.5, "lanes": 2, "bidirectional": true},
+    {"from": "n_bridge_pins", "to": "n_gp", "type": "bridge", "length_km": 1.4, "lanes": 2, "bidirectional": true},
+
+    {"from": "n_ring_w", "to": "n_bridge_large", "type": "secondary", "length_km": 1.4, "lanes": 2, "bidirectional": true},
+    {"from": "n_bridge_large", "to": "n_hl", "type": "bridge", "length_km": 0.8, "lanes": 2, "bidirectional": true},
+
+    {"from": "n_pv", "to": "n_bridge_cote", "type": "primary", "length_km": 1.5, "lanes": 2, "bidirectional": true},
+    {"from": "n_bridge_cote", "to": "n_gcote", "type": "bridge", "length_km": 0.9, "lanes": 2, "bidirectional": true},
+
+    {"from": "n_cn", "to": "n_hba", "type": "secondary", "length_km": 4.0, "lanes": 2, "bidirectional": true},
+    {"from": "n_univ", "to": "n_hlev", "type": "secondary", "length_km": 4.8, "lanes": 2, "bidirectional": true},
+    {"from": "n_go", "to": "n_hb", "type": "secondary", "length_km": 2.8, "lanes": 2, "bidirectional": true},
+    {"from": "n_hb", "to": "n_cpn", "type": "secondary", "length_km": 2.5, "lanes": 2, "bidirectional": true}
+  ]
+}
