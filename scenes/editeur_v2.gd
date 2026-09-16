@@ -34,6 +34,13 @@ extends Ecran
 ## in the current scope », et l'écran entier refusait de se charger. Un preload
 ## se résout par CHEMIN : il n'a besoin de personne.
 const COLLINE := preload("res://commun/ville2/generateur_colline.gd")
+## ⭐ LE PAYS. `?ecran=editeur2&pays=1` ouvre l'Archipel des Aurones au lieu
+## d'une carte enregistrée : le plan cuit est relu, et la FENÊTRE demandée est
+## bâtie à la volée. Vingt kilomètres sur vingt ne tiennent pas dans une seule
+## `Ville2` — un million de cases et un million et demi de lots — donc on en
+## regarde un morceau à la fois, et on se déplace en changeant `ou`.
+const PLAN_PAYS := preload("res://commun/ville2/plan_pays.gd")
+const PAYS := preload("res://commun/ville2/generateur_pays.gd")
 
 const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
@@ -160,6 +167,34 @@ func _ready() -> void:
 	if get_parent() == get_tree().root:
 		demarrer()
 
+## LA FENÊTRE DU PAYS, bâtie à la demande. `ou` est le CENTRE en cases
+## (« 500,500 » = le milieu de la carte, la Gare Centrale), `large` le côté.
+##
+## ⚠ UN REPLI QUI SE VOIT. Sans le plan cuit dans le paquet, on rendrait une
+## ville vide et l'écran montrerait la mer : on préfère le dire.
+## Est-on en train de regarder le pays ? La question se pose AVANT que le
+## terrain soit bâti (pour la nappe d'eau) et APRÈS (pour l'enregistrement) :
+## elle relit donc les paramètres, elle ne se déduit pas de l'état.
+func _est_le_pays() -> bool:
+	if String(donnees.get("pays", "")) not in ["", "0"]: return true
+	for a in OS.get_cmdline_args():
+		if a.begins_with("--pays=") and a.trim_prefix("--pays=") not in ["", "0"]:
+			return true
+	return false
+
+func _la_fenetre_du_pays(ou: String, large: int) -> Ville2:
+	var plan := PLAN_PAYS.charger()
+	if plan.is_empty():
+		_manque = PLAN_PAYS.PLAN_CUIT
+		return GenerateurCentre.generer(1)
+	var m: PackedStringArray = ou.split(",")
+	var c := Vector2i(500, 500)
+	if m.size() == 2: c = Vector2i(int(m[0]), int(m[1]))
+	var cote := clampi(large, 40, 400)
+	var f := Rect2i(c - Vector2i(cote, cote) / 2, Vector2i(cote, cote))
+	var ctx := PLAN_PAYS.contexte(plan)
+	return PAYS.fenetre(plan, ctx, f, {"nom": "Aurones %d,%d" % [c.x, c.y]})
+
 func demarrer() -> void:
 	# ⚠ `donnees` D'ABORD, LA LIGNE DE COMMANDE ENSUITE. Dans le navigateur la
 	# ligne de commande est vide : c'est `scenes/racine.gd` qui lit l'URL et
@@ -184,13 +219,21 @@ func demarrer() -> void:
 	env.ambient_light_color = Color("#cfd6e4")
 	env.ambient_light_energy = 0.55
 
-	var mer := MeshInstance3D.new()
-	var plan := PlaneMesh.new()
-	plan.size = Vector2(600.0 * CASE, 600.0 * CASE)
-	mer.mesh = plan
-	mer.material_override = MatieresCarnage.eau()
-	mer.position = Vector3(0, -2.85, 0)
-	monde().add_child(mer)
+	# ⚠⚠ LA NAPPE D'EAU DE L'ÉDITEUR NE VAUT QUE POUR UNE CARTE DE TÉMOIN. C'est
+	# un plan de six cents cases posé au niveau de la mer, qui donne son fond
+	# bleu à une petite carte. Sur une fenêtre du PAYS, dont le terrain porte
+	# déjà sa propre mer case par case et dont les plaines sont à quelques
+	# centimètres au-dessus du niveau zéro, cette nappe passe DEVANT la ville :
+	# la capitale entière se retrouvait sous un voile turquoise quadrillé. Le
+	# pays fait sa mer tout seul.
+	if not _est_le_pays():
+		var mer := MeshInstance3D.new()
+		var plan := PlaneMesh.new()
+		plan.size = Vector2(600.0 * CASE, 600.0 * CASE)
+		mer.mesh = plan
+		mer.material_override = MatieresCarnage.eau()
+		mer.position = Vector3(0, -2.85, 0)
+		monde().add_child(mer)
 
 	_camera = Camera3D.new()
 	_camera.fov = 50.0
@@ -202,9 +245,18 @@ func demarrer() -> void:
 	# de lire un fichier : c'est la façon la plus courte de REGARDER ce que le
 	# générateur vient de produire, sans rien enregistrer.
 	var temoin := String(donnees.get("temoin", ""))
+	var pays := String(donnees.get("pays", ""))
+	var ou := String(donnees.get("ou", "500,500"))
+	var large := int(String(donnees.get("large", "160")))
 	for a2 in OS.get_cmdline_args():
 		if a2.begins_with("--temoin="): temoin = a2.trim_prefix("--temoin=")
-	if temoin == "plage":
+		if a2.begins_with("--pays="): pays = a2.trim_prefix("--pays=")
+		if a2.begins_with("--ou="): ou = a2.trim_prefix("--ou=")
+		if a2.begins_with("--large="): large = int(a2.trim_prefix("--large="))
+	if pays != "" and pays != "0":
+		_ville = _la_fenetre_du_pays(ou, large)
+		_chemin = "res://cartes/pays-%s.json" % ou.replace(",", "-")
+	elif temoin == "plage":
 		_ville = GenerateurPlage.generer(2)
 		_chemin = "res://cartes/temoin-plage.json"
 	elif temoin == "colline":

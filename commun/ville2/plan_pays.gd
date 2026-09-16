@@ -349,6 +349,31 @@ const ILE_COTE := 9
 const ORDRE_ILES := ["ile_centrale", "ile_nord", "ile_sud_est", "ile_ouest",
 	"ile_brumes", "ilot_large", "ile_pins", "ile_baie", "ile_levant", "ile_cote"]
 
+## L'ÎLE DU RELEVÉ, GARNIE DES GARES DU FICHIER. La forme est celle du relevé —
+## on ne la retouche pas, elle a été réglée lobe par lobe sur les cartes du
+## client. Seules s'y ajoutent les gares du fichier qui tomberaient hors de
+## l'enveloppe : la règle 3 de `_ile_depuis` vaut ici aussi, une gare en mer ne
+## se voit pas sur une image de mille pixels.
+static func _ile_du_releve(mien: Dictionary, src: Dictionary, cle: String) -> Dictionary:
+	var sortie := mien.duplicate(true)
+	sortie["id"] = cle
+	var c := case_de(mien["c"])
+	var rm: Array = mien["r"]
+	var rx := float(rm[0])
+	var rz := float(rm[1])
+	var bruit := float(mien.get("bruit", 12.0))
+	var util := minf(rx, rz) - bruit * MARGE_ENVELOPPE
+	var caps: Array = sortie["caps"]
+	for s2 in src.get("stations", []):
+		var fs: Dictionary = s2
+		var p := _point(fs["pos"]) - c
+		var d := Vector2(p).length()
+		if d <= 0.62 * util: continue
+		var mini := bruit * PART_BRUIT_CAP + 6.0
+		var large := clampf(0.22 * minf(rx, rz), mini, maxf(util - d, mini))
+		caps.append([p.x, p.y, large, large])
+	return sortie
+
 # ------------------------------------------------------------------ le relief
 
 ## LE RELIEF. Une plaine côtière, des collines, et les sommets NOMMÉS par le
@@ -551,14 +576,23 @@ static func batir(graine := 1) -> Dictionary:
 	var alea := RandomNumberGenerator.new()
 	alea.seed = graine
 	var donnees := _lire(FICHIER_ARCHIPEL)
+	var iles := _les_iles(donnees, graine)
+	## ⭐ LE RECALAGE DES ÎLES. Deux corrections d'un coup, et la seconde est une
+	## demande du client : « qu'aucune île ne se touche, qu'on puisse voir de
+	## l'espace entre ». Voir `_ecarter_les_iles`. Le tableau rendu dit de
+	## combien CHAQUE île a bougé — les gares du fichier suivront (voir
+	## `_les_reperes`), sans quoi une île déplacée laisserait ses quais
+	## derrière elle, en pleine mer.
+	var recalage := _ecarter_les_iles(iles, donnees)
 	var plan := {
 		"version": 3,
 		"nom": "Archipel des Aurones",
 		"graine": graine,
 		"taille": [TAILLE.x, TAILLE.y],
 		## 1. les côtes et le relief.
-		"iles": _les_iles(donnees, graine),
-		"detroits": _les_detroits(donnees),
+		"iles": iles,
+		"recalage": recalage,
+		"detroits": _les_detroits(donnees, iles, recalage),
 		"monts": [], "plaines": [],
 		## 2. les gares et les stations — le squelette.
 		"stations": [], "lieux_dits": [],
@@ -566,8 +600,10 @@ static func batir(graine := 1) -> Dictionary:
 		##    et le ferry ; `routes` porte la voirie, qui est le sixième et le
 		##    seul qui descende en 3D telle quelle.
 		"lignes": [], "routes": [], "ponts": [],
-		## 4. les quartiers : pas encore.
-		"implantations": [],
+		## 4. LES QUARTIERS, EN TACHES ET PAS EN CARRÉS (voir `QUARTIERS`).
+		##    `implantations` reste pour les grandes pièces posées à l'unité
+		##    (une ferme, un aérodrome) ; il est vide aujourd'hui.
+		"quartiers": [], "implantations": [], "rivieres": [],
 	}
 	_verifier_l_ordre(plan)
 	# ⚠ LES REPÈRES AVANT LE RELIEF, ET LE RELIEF AVANT LE CONTEXTE. Les plaines
@@ -579,6 +615,18 @@ static func batir(graine := 1) -> Dictionary:
 	plan["monts"] = _les_monts(plan)
 	plan["plaines"] = _les_plaines(plan)
 	var ctx := contexte(plan)
+	## ⚠⚠ LES RIVIÈRES AVANT TOUT LE RESTE DU PLAN, ET C'EST UNE LEÇON PAYÉE. Une
+	## rivière est de l'EAU posée en travers de la terre : creusée après les
+	## stations, elle en a noyé quatre d'un coup — et une station noyée ne se voit
+	## pas sur une image de mille pixels. Creusée AVANT, la voirie la longe, les
+	## stations l'évitent, et le recensement des ouvrages lui pose ses ponts.
+	## `contexte` est REFAIT tout de suite : tout ce qui suit doit voir cette eau.
+	plan["rivieres"] = _les_rivieres(plan, ctx, alea)
+	ctx = contexte(plan)
+	## ⚠ LES PORTS SUR LEUR RIVAGE AVANT LA VOIRIE : les routes et les lignes
+	## vont chercher les stations par leur nom, et une station déplacée après
+	## coup laisserait tout le réseau pointer l'ancien endroit.
+	_les_ports_au_bord(plan, ctx)
 	_la_voirie(plan, ctx, alea)
 	_le_graphe_routier(plan, ctx, alea)
 	_les_reseaux(plan, ctx, alea, donnees)
@@ -586,6 +634,9 @@ static func batir(graine := 1) -> Dictionary:
 	_les_ponts_du_fichier(plan, donnees)
 	_les_stations(plan, ctx)
 	_recenser_les_ponts(plan, ctx)
+	## 4. LES QUARTIERS — après les stations, qui leur servent d'ancre.
+	plan["quartiers"] = _les_quartiers(plan)
+	_indexer_les_quartiers(plan, ctx)
 	return plan
 
 # ------------------------------------------------------------------ le fichier
@@ -610,6 +661,16 @@ static func _lire(chemin: String) -> Dictionary:
 		push_warning("données de l'archipel mal formées : " + chemin)
 		return {}
 	return brut
+
+## ⭐ CHARGER UN PLAN DÉJÀ BÂTI. Le bâtir coûte une quinzaine de secondes : au
+## navigateur, c'est un onglet figé et un joueur qui croit que la page a planté.
+## Le plan est donc cuit d'avance par `outils/pays.gd`, versionné dans
+## `cartes/`, et relu ici en quelques millisecondes.
+##
+## ⚠ RIEN NE SE RECALCULE À LA LECTURE. Un plan relu doit être identique au plan
+## écrit, sinon deux machines ne verraient pas le même pays — c'est la même
+## garantie que pour les fenêtres, à l'échelle du fichier.
+const PLAN_CUIT := "res://cartes/aurones-plan.json"
 
 ## Un point du fichier (en kilomètres) en case de la carte.
 static func _point(p: Dictionary) -> Vector2i:
@@ -644,11 +705,33 @@ static func _les_iles(donnees: Dictionary, graine: int) -> Array:
 		push_warning("archipel : pas d'îles dans le fichier, repli sur le relevé au pixel")
 		return ILES_SECOURS.duplicate(true)
 	var sortie: Array = []
+	var vus := {}
 	var index := 0
 	for cle in donnees["islands"]:
-		sortie.append(_ile_depuis(donnees["islands"][cle], String(cle), index, graine))
+		var ile := _ile_depuis(donnees["islands"][cle], String(cle), index, graine)
+		vus[String(ile["nom"])] = true
+		sortie.append(ile)
 		index += 1
+	# ⚠ ET LES ÎLES QUE LE FICHIER NE CONNAÎT PAS. Le relevé en dessine onze, le
+	# fichier en décrit dix : la onzième n'est pas une erreur du relevé, c'est un
+	# oubli du fichier. On la garde.
+	for e in ILES_SECOURS:
+		var mien: Dictionary = e
+		if vus.has(String(mien["nom"])): continue
+		sortie.append(mien.duplicate(true))
 	return sortie
+
+## ⭐ LE RELEVÉ, PAR NOM D'ÎLE. Le fichier de l'archipel est une SOURCE
+## D'INFORMATION, pas une autorité : il nomme les gares et place les ponts mieux
+## que le relevé au pixel, mais ses cercles sont plus petits que les îles que le
+## client a dessinées. Là où le relevé est plus grand, LE RELEVÉ GAGNE — et avec
+## le rayon, on reprend sa forme complète (centre, lobes, caps, golfes), parce
+## qu'un rayon repris sans ses lobes ne fait que gonfler un cercle.
+static func _releve(nom: String) -> Dictionary:
+	for e in ILES_SECOURS:
+		var mien: Dictionary = e
+		if String(mien["nom"]) == nom: return mien
+	return {}
 
 ## ⭐ UNE ÎLE, DU CERCLE DU FICHIER À LA CÔTE DESSINÉE. Trois règles, et les
 ## trois se paient si on les oublie :
@@ -672,6 +755,16 @@ static func _ile_depuis(brut, cle: String, index: int, graine: int) -> Dictionar
 	var src: Dictionary = brut
 	var c := _point(src["center"])
 	var r := float(src["radius_km"]) * KM
+	var nom := String(src.get("name", cle))
+	# LE RELEVÉ D'ABORD S'IL EST PLUS GRAND (voir `_releve`). On reprend alors
+	# TOUT de lui — centre, rayons, bruit, lobes, golfes — et on n'emprunte au
+	# fichier que ce qu'il fait mieux : les gares, qui vont se tailler leurs caps
+	# plus bas, par-dessus ceux du relevé.
+	var mien := _releve(nom)
+	if not mien.is_empty():
+		var rm: Array = mien["r"]
+		if maxf(float(rm[0]), float(rm[1])) > r:
+			return _ile_du_releve(mien, src, cle)
 	# L'amplitude du bruit : onze pour cent du rayon, bornée. Une grande île
 	# supporte seize cases de morsure ; un îlot de vingt-sept cases n'en supporte
 	# que trois, sinon le bruit ne le découpe pas, il l'efface.
@@ -813,14 +906,14 @@ static func contexte(plan: Dictionary) -> Dictionary:
 
 	ctx["monts"] = plan["monts"]
 	ctx["plaines"] = plan["plaines"]
-	# ⚠ LES DEUX TABLES D'EAU DOUCE RESTENT, VIDES. La carte du client ne montre
-	# ni fleuve ni lac — l'archipel est une géographie maritime. Le mécanisme
-	# reste en place (il ne coûte qu'un `has()` par case) parce que la Vallée
-	# Verte et la Vallée des Pins réclameront un ruisseau, et parce que la règle
-	# qui les gouverne est celle qu'on oublie toujours : dans ce moteur,
-	# `TerrainV2.maillage_eau` pose TOUTE nappe à `NIVEAU_MER`, donc une eau
-	# douce au-dessus du niveau de la mer est impossible tant qu'on n'aura pas
-	# une cote par pièce d'eau.
+	# ⚠⚠ LA RÈGLE QUI GOUVERNE TOUTE EAU DOUCE, ET QU'ON OUBLIE TOUJOURS : dans
+	# ce moteur, `TerrainV2.maillage_eau` pose TOUTE nappe à `NIVEAU_MER`. Une
+	# rivière perchée est donc IMPOSSIBLE tant qu'il n'y aura pas une cote par
+	# pièce d'eau : nos rivières sont des rivières de plaine côtière, creusées
+	# jusqu'au niveau de la mer — des estuaires qui remontent dans les terres.
+	# C'est aussi ce qui les empêche de monter dans les collines : une rivière
+	# qui traverserait un mont de 70 m y ouvrirait un canyon de 70 m.
+	# `lacs` reste vide, et le mécanisme ne coûte qu'un `has()` par case.
 	ctx["lit"] = {}
 	ctx["lacs"] = {}
 	ctx["plateaux"] = {}
@@ -831,6 +924,10 @@ static func contexte(plan: Dictionary) -> Dictionary:
 		for j in range(z.position.y, z.end.y):
 			for i in range(z.position.x, z.end.x):
 				ctx["plateaux"][Vector2i(i, j)] = int(d2["p"])
+	# ⚠ LES LITS EN DERNIER, ET C'EST UNE DÉPENDANCE, PAS UN GOÛT : creuser une
+	# rivière demande l'altitude du sol, donc `sol_en`, donc les plateaux.
+	_creuser_les_lits(plan, ctx)
+	_indexer_les_quartiers(plan, ctx)
 	return ctx
 
 static func _lobe(x: float, z: float, rx: float, rz: float, amp: float) -> Dictionary:
@@ -1006,11 +1103,27 @@ static func sol_en(plan: Dictionary, ctx: Dictionary, c: Vector2i) -> Array:
 	var d := distance_signee(plan, ctx, c.x, c.y)
 	if d > 0.0:
 		return [maxf(FOND_MAX, PREMIER_FOND + d * PENTE_FOND), 1.0]
-	return [_altitude_terre(plan, ctx, c.x, c.y, -d), 0.0]
+	return _sol_creuse(plan, ctx, c, _altitude_terre(plan, ctx, c.x, c.y, -d))
+
+## ⚠⚠ LE LIT DE LA RIVIÈRE COMPTE COMME DE L'EAU, ET IL FAUT LE DIRE ICI. Le
+## creusement est appliqué dans `remplir_terrain` ; tant que `sol_en` et
+## `terre_en` l'ignoraient, le PLAN croyait marcher sur de la terre là où le
+## TERRAIN posait de la rivière — et deux stations se sont retrouvées au milieu
+## de l'eau sans que rien ne le signale. Une seule vérité sur ce qui est mouillé.
+static func _sol_creuse(plan: Dictionary, ctx: Dictionary, c: Vector2i, y: float) -> Array:
+	var lit: Dictionary = ctx["lit"]
+	if not lit.has(c): return [y, 0.0]
+	var creuse := y - float(lit[c])
+	if creuse <= TerrainV2.NIVEAU_MER + 0.35:
+		return [minf(creuse, TerrainV2.NIVEAU_MER - 2.0), 1.0]
+	return [creuse, 0.0]
 
 static func terre_en(plan: Dictionary, ctx: Dictionary, c: Vector2i) -> bool:
 	if c.x < 0 or c.y < 0 or c.x >= TAILLE.x or c.y >= TAILLE.y: return false
-	return distance_signee(plan, ctx, c.x, c.y) <= 0.0
+	if distance_signee(plan, ctx, c.x, c.y) > 0.0: return false
+	var lit: Dictionary = ctx["lit"]
+	if not lit.has(c): return true
+	return float(sol_en(plan, ctx, c)[1]) < 0.5
 
 static func palier_en(plan: Dictionary, ctx: Dictionary, c: Vector2i) -> int:
 	return roundi(float(sol_en(plan, ctx, c)[0]) / PALIER)
@@ -1030,11 +1143,20 @@ static func palier_en(plan: Dictionary, ctx: Dictionary, c: Vector2i) -> int:
 ## pas perdues pour autant : `types` est recopié tel quel.
 static func _les_reperes(plan: Dictionary, donnees: Dictionary) -> void:
 	var trouvees := 0
+	var recalage: Array = plan.get("recalage", [])
+	var index := 0
 	for cle in donnees.get("islands", {}):
 		var ile: Dictionary = donnees["islands"][cle]
+		# ⚠⚠ LA GARE SUIT SON ÎLE, ET C'EST LA CORRECTION LA PLUS RENTABLE DU
+		# LOT. Le fichier donne les gares en kilomètres sur SES cercles ; notre
+		# île est plus grande, plus loin, et le fichier l'ignore. Sans ce
+		# décalage, Port-Nord se retrouvait à cinq cents mètres dans les terres
+		# et les gares du chapelet à la limite du rivage.
+		var dep: Vector2i = recalage[index] if index < recalage.size() else Vector2i.ZERO
+		index += 1
 		for s in ile.get("stations", []):
 			var f: Dictionary = s
-			var c := _point(f["pos"])
+			var c := _point(f["pos"]) + dep
 			var types: Array = f.get("types", ["train"])
 			plan["stations"].append({
 				"nom": String(f["name"]), "id": String(f.get("id", "")),
@@ -1304,36 +1426,80 @@ static func _le_graphe_routier(plan: Dictionary, ctx: Dictionary,
 ## était censé ne rien déranger : le tunnel ferroviaire Centrale ↔ Sud-Est
 ## mordait quatre-vingts cases de la côte sud-est de la capitale.
 const DETROIT_BRUIT := 4.0           ## peu bruité : un chenal ne doit pas se refermer
-const DETROIT_TRAVERS := 70.0        ## largeur minimale de la découpe, en travers
+## ⚠⚠ UN DÉTROIT EST UN BRAS DE MER, PAS UN TROU. Il valait 70 cases de large —
+## 1,4 km — et le client l'a vu tout de suite : « sans les gros trous ». Une
+## découpe de cette taille ne se lit plus comme un chenal, elle se lit comme un
+## morceau d'île manquant. 14 cases = 280 m : un bras de mer qu'un pont franchit,
+## et qui ne mange pas la côte autour.
+const DETROIT_TRAVERS := 14.0        ## largeur minimale de la découpe, en travers
+const DETROIT_DEBORD := 1.15         ## ce que le chenal dépasse de la travée, en part
 
-static func _les_detroits(donnees: Dictionary) -> Array:
+## ⚠ NI LES OUVRAGES QUE L'AGRANDISSEMENT A MIS À TERRE. Le fichier place ses
+## ponts sur SES cercles ; là où le relevé est plus grand, un de ces ponts se
+## retrouve à un kilomètre à l'intérieur des terres. Lui creuser son chenal
+## ouvrait un lagon en plein milieu de l'Île Sud-Est. Un pont dont les DEUX
+## extrémités sont bien à l'intérieur d'une même île n'enjambe plus rien : il
+## devient une route, et on ne creuse pas la mer sous une route.
+const DEDANS := 0.80                 ## part du rayon en deçà de laquelle on est « en pleine terre »
+
+static func _les_detroits(donnees: Dictionary, iles: Array, recalage: Array) -> Array:
 	var sortie: Array = []
 	for b in donnees.get("bridges", []):
 		var f: Dictionary = b
 		if String(f.get("type", "road")) == "rail_tunnel": continue
-		var t := _travee(f)
+		var t := _travee(f, iles, recalage)
 		if t.is_empty(): continue
 		var a: Vector2i = t[0]
 		var z: Vector2i = t[1]
+		if _meme_terre(iles, a, z): continue
 		var m := (a + z) / 2
-		var demi := float(maxi(absi(z.x - a.x), absi(z.y - a.y))) * 0.5
-		var travers := maxf(DETROIT_TRAVERS, demi * 3.0)
+		# ⚠ ET IL NE DÉPASSE PLUS LA TRAVÉE QUE DE QUINZE POUR CENT. Il valait
+		# trois fois la demi-travée : un pont de 600 m creusait 1,8 km de côte.
+		var demi := float(maxi(absi(z.x - a.x), absi(z.y - a.y))) * 0.5 * DETROIT_DEBORD
+		var travers := DETROIT_TRAVERS
 		if absi(z.x - a.x) >= absi(z.y - a.y):
 			sortie.append([m.x, m.y, demi, travers, DETROIT_BRUIT])
 		else:
 			sortie.append([m.x, m.y, travers, demi, DETROIT_BRUIT])
 	return sortie
 
+## Les deux bouts tombent-ils en pleine terre sur la MÊME île ? Un test
+## d'ellipse, pas de contour : le contour n'existe pas encore quand les détroits
+## se décident, et `DEDANS` garde assez de marge pour qu'un bruit de côte ne
+## puisse pas démentir la réponse.
+static func _meme_terre(iles: Array, a: Vector2i, z: Vector2i) -> bool:
+	for e in iles:
+		var ile: Dictionary = e
+		var c := case_de(ile["c"])
+		var r: Array = ile["r"]
+		var rx := float(r[0]) * DEDANS
+		var rz := float(r[1]) * DEDANS
+		if _dans_l_ellipse(a, c, rx, rz) and _dans_l_ellipse(z, c, rx, rz):
+			return true
+	return false
+
+static func _dans_l_ellipse(p: Vector2i, c: Vector2i, rx: float, rz: float) -> bool:
+	var dx := float(p.x - c.x) / maxf(rx, 1.0)
+	var dz := float(p.y - c.y) / maxf(rz, 1.0)
+	return dx * dx + dz * dz <= 1.0
+
 ## LA TRAVÉE D'UN PONT DU FICHIER, ALIGNÉE SUR SON AXE DOMINANT. Les deux
 ## extrémités données sont des points quelconques (9,6 / 7,4 vers 9,7 / 6,6) :
 ## un pont en biais ne se pave pas, et `generateur_pays` le sauterait en silence.
 ## Partagée par les détroits et les ponts — deux calculs séparés dériveraient, et
 ## le chenal ne tomberait plus sous l'ouvrage.
-static func _travee(f: Dictionary) -> Array:
+## ⚠⚠ UN PONT DU FICHIER EST DONNÉ DANS LES COORDONNÉES DU FICHIER, et nos îles
+## ont bougé — recalées sur le relevé, puis écartées les unes des autres. Sans
+## recalage, le chenal d'un pont se creuse à l'ancienne place : le 16/09 il
+## tranchait l'Île Centrale en deux, et le compte des masses de terre est passé
+## de 11 à 13 sans autre signe. Chaque extrémité suit l'île dont elle est la plus
+## proche — un pont relie deux îles, ses deux bouts ne bougent donc pas
+## forcément du même vecteur.
+static func _travee(f: Dictionary, iles: Array, recalage: Array) -> Array:
 	var pts: Array = f.get("points", [])
 	if pts.size() < 2: return []
-	var a := _point(pts[0])
-	var z := _point(pts[pts.size() - 1])
+	var a := _recaler(iles, recalage, _point(pts[0]))
+	var z := _recaler(iles, recalage, _point(pts[pts.size() - 1]))
 	if absi(z.x - a.x) >= absi(z.y - a.y):
 		var y := (a.y + z.y) / 2
 		a.y = y
@@ -1366,7 +1532,7 @@ static func _travee(f: Dictionary) -> Array:
 static func _les_ponts_du_fichier(plan: Dictionary, donnees: Dictionary) -> void:
 	for b in donnees.get("bridges", []):
 		var f: Dictionary = b
-		var t := _travee(f)
+		var t := _travee(f, plan["iles"], plan.get("recalage", []))
 		if t.is_empty(): continue
 		var a: Vector2i = t[0]
 		var z: Vector2i = t[1]
@@ -1720,9 +1886,16 @@ static func _ligne(plan: Dictionary, reseau: String, nom: String, souterrain: bo
 ## Le pas du treillis de recherche, en cases. Chercher case par case sur un
 ## million de cases coûterait des secondes par ligne, pour une précision utile
 ## de deux cents mètres : on cherche de dix en dix, puis on rabat au cas près.
-const PAS_MER := 10
+## ⚠ CINQ DEPUIS LE 15/09, ET LE DIX A COÛTÉ DEUX LIGNES DE FERRY. En
+## agrandissant les îles, le bras de mer entre l'Île Nord et l'Île Centrale est
+## tombé à trente et une cases : avec un treillis de dix et une marge de côte de
+## quatorze, il ne restait AUCUN nœud navigable dedans, et F1 comme F3 rendaient
+## « pas de passage par la mer » — deux lignes disparues en silence. À cinq, le
+## chenal porte cinq nœuds. Le coût : quatre fois plus de nœuds à explorer, soit
+## quarante mille — quelques dizaines de millisecondes.
+const PAS_MER := 7
 ## Le rayon, en cases, dans lequel une case de terre rend la navigation chère.
-const MARGE_COTE := 14
+const MARGE_COTE := 9
 ## Le surcoût par voisin terrestre trouvé dans ce rayon. Assez haut pour que le
 ## détour au large soit rentable, assez bas pour qu'un chenal étroit reste
 ## franchissable : à l'infini, le ferry n'entrerait plus dans les ports.
@@ -1763,14 +1936,66 @@ static func _les_voies_maritimes(plan: Dictionary, ctx: Dictionary, alea: Random
 ## LA RADE D'UN PORT : la case d'eau la plus proche du repère, cherchée en
 ## spirale. Un repère est posé à terre ; sans ce rabattement, la ligne partirait
 ## d'une case de terre et le premier pas serait déjà une faute.
+## ⭐⭐ LA MER, ET PAS SEULEMENT « CE QUI N'EST PAS DE LA TERRE ». Depuis que le
+## pays a des rivières, `terre_en` rend faux sur un lit de rivière : un ferry qui
+## cherchait « la première case qui n'est pas de la terre » s'amarrait dans LE RU
+## VERT, à trois cases de large, et le treillis de navigation n'y trouvait aucun
+## nœud — F1 et F3 rendaient « pas de passage par la mer » sans qu'on sache
+## pourquoi. La mer, c'est le champ de distance signée positif ; une rivière est
+## de la terre creusée.
+static func mer_en(plan: Dictionary, ctx: Dictionary, c: Vector2i) -> bool:
+	if c.x < 0 or c.y < 0 or c.x >= TAILLE.x or c.y >= TAILLE.y: return false
+	return distance_signee(plan, ctx, c.x, c.y) > 0.0
+
+## ⭐ LES PORTS SUR LA CÔTE, ET C'EST UNE CORRECTION D'ÉCHELLE. Le fichier place
+## les trois ports en kilomètres sur SES cercles ; nos îles sont plus grandes, et
+## Port-Nord s'est retrouvé à cinq cents mètres DANS LES TERRES — un port de
+## commerce sans eau. On les ramène donc sur leur rivage, avant que la voirie et
+## les réseaux n'aillent les chercher.
+const PORTS := ["Port-Nord", "Port-des-Alpes", "Gare Maritime"]
+
+static func _les_ports_au_bord(plan: Dictionary, ctx: Dictionary) -> void:
+	for s in plan["stations"]:
+		var f: Dictionary = s
+		if not PORTS.has(String(f["nom"])): continue
+		var q := _bord_de_mer(plan, ctx, case_de(f["c"]))
+		if q.x < 0: continue
+		f["c"] = [q.x, q.y]
+
+## La case de TERRE la plus proche qui ait la mer à deux cases : un quai.
+static func _bord_de_mer(plan: Dictionary, ctx: Dictionary, ou: Vector2i) -> Vector2i:
+	# ⚠ ON PARCOURT LE PÉRIMÈTRE DE L'ANNEAU, PAS SON CARRÉ. Balayer le carré et
+	# jeter l'intérieur coûte r² par anneau, donc r³ en tout : sur cent vingt
+	# anneaux, deux millions de sondes par port, et le plan passait de quatre à
+	# trente et une secondes. Le périmètre coûte r.
+	for r in 120:
+		for c in _anneau(ou, r):
+			var d: Vector2i = c
+			if not terre_en(plan, ctx, d): continue
+			for p in [Vector2i(2, 0), Vector2i(-2, 0), Vector2i(0, 2), Vector2i(0, -2)]:
+				if mer_en(plan, ctx, d + (p as Vector2i)): return d
+	return Vector2i(-9999, -9999)
+
+## Les cases du CARRÉ de rayon `r` autour de `ou` — son périmètre seulement.
+static func _anneau(ou: Vector2i, r: int) -> Array:
+	if r == 0: return [ou]
+	var sortie: Array = []
+	for t in range(-r, r + 1):
+		sortie.append(ou + Vector2i(t, -r))
+		sortie.append(ou + Vector2i(t, r))
+	for t2 in range(-r + 1, r):
+		sortie.append(ou + Vector2i(-r, t2))
+		sortie.append(ou + Vector2i(r, t2))
+	return sortie
+
 static func _rade(plan: Dictionary, ctx: Dictionary, ou: Vector2i) -> Vector2i:
 	if ou.x < 0: return Vector2i(-1, -1)
-	if not terre_en(plan, ctx, ou): return ou
+	if mer_en(plan, ctx, ou): return ou
 	for r in range(1, 60):
 		for k in range(0, 8 * r):
 			var a := TAU * float(k) / float(8 * r)
 			var c := ou + Vector2i(int(round(cos(a) * float(r))), int(round(sin(a) * float(r))))
-			if not terre_en(plan, ctx, c): return c
+			if mer_en(plan, ctx, c): return c
 	push_warning("aucune eau autour de %s" % ou)
 	return Vector2i(-1, -1)
 
@@ -1849,7 +2074,7 @@ static func _noeud_marin(plan: Dictionary, ctx: Dictionary, c: Vector2i) -> Vect
 				var n := n0 + Vector2i(dx, dy)
 				if n.x < 0 or n.y < 0: continue
 				if n.x * PAS_MER >= TAILLE.x or n.y * PAS_MER >= TAILLE.y: continue
-				if not terre_en(plan, ctx, n * PAS_MER): return n
+				if mer_en(plan, ctx, n * PAS_MER): return n
 	return Vector2i(-1, -1)
 
 ## Combien de terre il y a autour de cette case, dans le rayon `MARGE_COTE`.
@@ -2112,6 +2337,420 @@ static func _ponts_du_trace(plan: Dictionary, ctx: Dictionary, pts: Array, nom: 
 			if c == b: break
 			c += pas
 
+
+## ⭐⭐ ÉCARTER LES ÎLES — « qu'aucune île ne se touche et qu'on puisse voir de
+## l'espace entre » (client, 16/09).
+##
+## Deux décalages s'additionnent ici, et il faut les distinguer :
+##
+## 1. LE RECALAGE SUR LE RELEVÉ. Là où le relevé a gagné (île plus grande), son
+##    centre n'est pas celui du fichier. Tout ce que le fichier place — les
+##    gares — doit suivre le même décalage, sinon un port se retrouve dans les
+##    terres. C'est le défaut qui a coûté deux lignes de ferry.
+## 2. L'ÉCARTEMENT. On mesure, pour chaque paire, le vide entre les deux
+##    enveloppes SUR LA LIGNE DES CENTRES, bruit de côte compris ; s'il manque
+##    de quoi voir la mer, on repousse les deux îles d'un demi-manque chacune.
+##    Quelques passes suffisent : chaque passe corrige le pire, la suivante ce
+##    qu'elle a créé.
+##
+## ⚠ ON DÉPLACE, ON NE RÉTRÉCIT PAS. Rétrécir aurait été plus simple — et aurait
+## défait l'agrandissement que le client venait de demander.
+const ECART_ILES := 26.0             ## vide minimal entre deux côtes, en cases (520 m)
+const PASSES_ECART := 6
+const BORD_CARTE := 30.0             ## on ne pousse pas une île hors du monde
+
+static func _ecarter_les_iles(iles: Array, donnees: Dictionary) -> Array:
+	var recalage: Array = []
+	var centres: Array = []
+	# 1. le recalage sur le relevé, île par île, dans l'ordre du fichier.
+	var index := 0
+	var origines: Array = []
+	for cle in donnees.get("islands", {}):
+		var f: Dictionary = donnees["islands"][cle]
+		origines.append(_point(f["center"]))
+		index += 1
+	for k in iles.size():
+		var ile: Dictionary = iles[k]
+		var c := case_de(ile["c"])
+		centres.append(Vector2(c))
+		var o: Vector2i = origines[k] if k < origines.size() else c
+		recalage.append(c - o)
+	# 2. l'écartement, par relaxation.
+	for _p in PASSES_ECART:
+		for a in iles.size():
+			for b in range(a + 1, iles.size()):
+				var ca: Vector2 = centres[a]
+				var cb: Vector2 = centres[b]
+				var axe := cb - ca
+				var d := axe.length()
+				if d < 0.001: continue
+				var u := axe / d
+				var vide := d - _rayon_vers(iles[a], u) - _rayon_vers(iles[b], -u)
+				if vide >= ECART_ILES: continue
+				var pousse := (ECART_ILES - vide) * 0.5
+				centres[a] = ca - u * pousse
+				centres[b] = cb + u * pousse
+	# 3. on réécrit les centres et on ajoute le déplacement au recalage.
+	for k2 in iles.size():
+		var ile2: Dictionary = iles[k2]
+		var avant := case_de(ile2["c"])
+		var v: Vector2 = centres[k2]
+		var apres := Vector2i(
+			clampi(roundi(v.x), int(BORD_CARTE), TAILLE.x - int(BORD_CARTE)),
+			clampi(roundi(v.y), int(BORD_CARTE), TAILLE.y - int(BORD_CARTE)))
+		ile2["c"] = [apres.x, apres.y]
+		recalage[k2] = (recalage[k2] as Vector2i) + (apres - avant)
+	return recalage
+
+## Le décalage à appliquer à un point du fichier : celui de l'île dont il était
+## le plus proche AVANT déplacement. On compare donc aux centres d'origine —
+## centre actuel moins recalage —, pas aux centres d'arrivée : après un
+## écartement, la plus proche des nouvelles positions n'est pas forcément celle
+## à laquelle le point appartenait.
+static func _recaler(iles: Array, recalage: Array, c: Vector2i) -> Vector2i:
+	var mieux := -1
+	var d2 := 1.0e20
+	for k in iles.size():
+		if k >= recalage.size(): continue
+		var ile: Dictionary = iles[k]
+		var origine: Vector2i = case_de(ile["c"]) - (recalage[k] as Vector2i)
+		var e := Vector2(c - origine).length_squared()
+		if e < d2:
+			d2 = e
+			mieux = k
+	if mieux < 0: return c
+	return c + (recalage[mieux] as Vector2i)
+
+## Le rayon de l'enveloppe d'une île dans la direction `u`, bruit de côte
+## compris. C'est un rayon d'ELLIPSE, pas de cercle : nos îles sont toutes plus
+## larges que hautes ou l'inverse, et prendre le grand rayon les écarterait deux
+## fois trop.
+static func _rayon_vers(e, u: Vector2) -> float:
+	var ile: Dictionary = e
+	var r: Array = ile["r"]
+	var rx := maxf(float(r[0]), 1.0)
+	var rz := maxf(float(r[1]), 1.0)
+	var dx := u.x / rx
+	var dz := u.y / rz
+	var n := sqrt(dx * dx + dz * dz)
+	if n < 0.000001: return maxf(rx, rz)
+	return 1.0 / n + float(ile.get("bruit", 10.0))
+
+# ══════════════════════════════════════════════════════════════════ LES RIVIÈRES
+
+## ⭐ QUATRE RIVIÈRES, ET PAS UNE DE PLUS. « Je voulais juste quelques rivières » :
+## ce sont des cours d'eau de plaine côtière, pas des chenaux de navigation. Une
+## rivière remonte depuis son embouchure jusqu'à ce que le terrain se relève —
+## c'est un ESTUAIRE, et c'est la seule eau douce que ce moteur sache poser
+## (voir la règle de `maillage_eau` dans `contexte`).
+##
+## `[île, angle de l'embouchure en degrés, nom]`. L'angle est celui du rayon qui
+## part du centre de l'île : 0° à l'est, 90° au sud.
+const RIVIERES := [
+	[CENTRALE, 118.0, "La Sèvre"],
+	[NORD, 130.0, "Le Ru Vert"],              ## descend de la Vallée Verte
+	[SUDEST, 137.0, "La Pinède"],             ## descend de la Vallée des Pins
+	[SUDEST, -40.0, "L'Aube"],                ## descend vers la Pointe de l'Aube
+]
+
+const RIVIERE_LONG := 150            ## remontée maximale, en cases (3 km)
+const RIVIERE_PLAFOND := 4           ## on s'arrête quand le sol dépasse 4 paliers (20 m)
+const RIVIERE_LARGE := 1.3           ## demi-largeur du lit, en cases (~50 m de rivière)
+const RIVIERE_BERGE := 1.4           ## la berge, en plus du lit
+const RIVIERE_MEANDRE := 7.0         ## amplitude du méandre, en cases
+const RIVIERE_FOND := 1.6            ## ce qu'on creuse SOUS le niveau de la mer
+
+## ⚠ UNE RIVIÈRE SE REMONTE, ELLE NE SE DESCEND PAS. Partir d'une source et
+## chercher la mer, c'est un problème d'écoulement — il faut un champ de pente
+## fiable, et le nôtre est bruité : la rivière tourne en rond ou s'arrête dans
+## une cuvette. Partir de l'EMBOUCHURE et remonter tant que le sol est bas donne
+## le même dessin, sans jamais échouer : la mer est trouvée d'avance.
+static func _les_rivieres(plan: Dictionary, ctx: Dictionary, alea: RandomNumberGenerator) -> Array:
+	var sortie: Array = []
+	var iles: Array = plan["iles"]
+	for e in RIVIERES:
+		var f: Array = e
+		var k := int(f[0])
+		if k >= iles.size(): continue
+		var pts := _remonter(plan, ctx, k, deg_to_rad(float(f[1])), alea)
+		if pts.size() < 8: continue
+		sortie.append({"nom": String(f[2]), "points": pts, "large": RIVIERE_LARGE})
+	return sortie
+
+static func _remonter(plan: Dictionary, ctx: Dictionary, k: int, angle: float,
+		alea: RandomNumberGenerator) -> Array:
+	var c := centre_ile(plan, k)
+	var r := rayon_ile(plan, k)
+	var u := Vector2(cos(angle), sin(angle))
+	# 1. L'EMBOUCHURE : la dernière case de terre sur le rayon.
+	var bouche := Vector2i(-1, -1)
+	var pas := 1.0
+	while pas < maxf(r.x, r.y) * 1.6:
+		var p := Vector2i(roundi(float(c.x) + u.x * pas), roundi(float(c.y) + u.y * pas))
+		if not terre_en(plan, ctx, p):
+			break
+		bouche = p
+		pas += 1.0
+	if bouche.x < 0: return []
+	# 2. LA REMONTÉE, vers le centre, en serpentant.
+	var v := -u
+	var n := Vector2(-v.y, v.x)
+	var f1 := alea.randf_range(0.030, 0.055)
+	var f2 := alea.randf_range(0.075, 0.115)
+	var p1 := alea.randf_range(0.0, TAU)
+	var p2 := alea.randf_range(0.0, TAU)
+	var pts: Array = []
+	var dernier := Vector2i(-9999, -9999)
+	for t in RIVIERE_LONG:
+		var d := float(t)
+		# ⚠ LE MÉANDRE S'OUVRE EN REMONTANT. À l'embouchure la rivière est droite
+		# (une enveloppe qui part de zéro) : sinon le premier méandre tombe dans
+		# la mer et l'estuaire se dédouble en delta, ce qui n'est pas demandé.
+		var ouvre := clampf(d / 26.0, 0.0, 1.0)
+		var lat := RIVIERE_MEANDRE * ouvre * (0.62 * sin(TAU * f1 * d + p1)
+			+ 0.38 * sin(TAU * f2 * d + p2))
+		var q := Vector2(float(bouche.x), float(bouche.y)) + v * d + n * lat
+		var cc := Vector2i(roundi(q.x), roundi(q.y))
+		if cc.x < 2 or cc.y < 2 or cc.x >= TAILLE.x - 2 or cc.y >= TAILLE.y - 2: break
+		# On s'arrête quand le sol se relève : une rivière creusée jusqu'au
+		# niveau de la mer à travers un mont de 70 m serait un canyon.
+		if terre_en(plan, ctx, cc) and palier_en(plan, ctx, cc) > RIVIERE_PLAFOND: break
+		if cc != dernier:
+			pts.append([cc.x, cc.y])
+			dernier = cc
+	return pts
+
+## LE CREUSEMENT DU LIT, dans le contexte. `ctx["lit"]` porte, par case, LA
+## PROFONDEUR À RETIRER au terrain ; `remplir_terrain` fait la soustraction et
+## met de l'eau si le résultat passe sous la mer.
+##
+## ⚠ LA BERGE N'EST PAS UN DÉTAIL. Sans elle, le lit est une tranchée à parois
+## verticales : la rivière se lit comme une saignée, pas comme un cours d'eau. La
+## couronne qui entoure le lit reçoit une fraction décroissante du creusement, et
+## c'est ce qui donne le talus.
+static func _creuser_les_lits(plan: Dictionary, ctx: Dictionary) -> void:
+	var lit: Dictionary = ctx["lit"]
+	var portee := int(ceil(RIVIERE_LARGE + RIVIERE_BERGE)) + 1
+	for e in plan.get("rivieres", []):
+		var f: Dictionary = e
+		var large := float(f.get("large", RIVIERE_LARGE))
+		for p in f["points"]:
+			var a := case_de(p)
+			for dj in range(-portee, portee + 1):
+				for di in range(-portee, portee + 1):
+					var c := Vector2i(a.x + di, a.y + dj)
+					if c.x < 0 or c.y < 0 or c.x >= TAILLE.x or c.y >= TAILLE.y: continue
+					var d := Vector2(float(di), float(dj)).length()
+					if d > large + RIVIERE_BERGE: continue
+					# ⚠ PAS `sol_en` ICI : il lit `ctx["lit"]`, qu'on est en train
+					# d'écrire — le creusement dépendrait de l'ordre des cases.
+					var ds := distance_signee(plan, ctx, c.x, c.y)
+					if ds > 0.0: continue                     ## déjà la mer
+					var y := _altitude_terre(plan, ctx, c.x, c.y, -ds)
+					# Le creusement PLEIN dans le lit, dégressif sur la berge.
+					var part := 1.0
+					if d > large:
+						part = 1.0 - (d - large) / RIVIERE_BERGE
+					var vise := TerrainV2.NIVEAU_MER - RIVIERE_FOND
+					var creuse := (y - vise) * part
+					if creuse <= 0.0: continue
+					if creuse > float(lit.get(c, 0.0)): lit[c] = creuse
+
+
+# ══════════════════════════════════════════════════ LES QUARTIERS, EN TACHES
+
+## ⭐⭐ UN QUARTIER N'EST PAS UN CARRÉ, ET LES NEUF TÉMOINS NE SONT PAS DES TAMPONS.
+##
+## La première version posait les témoins tels quels, en blocs de 40 × 40 collés
+## les uns aux autres. Le client a tranché, et il a raison : « de base les témoins
+## sont pas là pour être collés tels quels mais pour établir des règles par
+## quartier », et « on va partir sur quelque chose d'organique donc non carré ».
+##
+## Donc : un quartier est une TACHE — un centre, deux rayons, un contour bruité —
+## exactement comme une île. C'est la même machine (`_lobe`, l'index par secteur,
+## le bruit de contour), et c'est voulu : une forme qui a déjà fait ses preuves à
+## l'échelle de l'archipel n'a pas besoin d'être réinventée à l'échelle de la
+## ville.
+##
+## Ce que le témoin donne alors, ce n'est plus son plan de masse : c'est sa
+## CHARTE — sa liste de modèles et leurs poids, l'écart entre ses rues, la
+## matière de son sol hors chaussée, la densité de son mobilier. Le remplissage
+## la lira quartier par quartier (chantier suivant).
+##
+## ⚠ LE RANG DÉCIDE, PAS L'ORDRE. Deux taches se recouvrent toujours — une
+## vieille ville est DANS un centre, un front de mer MORD le port. Le rang le
+## plus haut gagne la case. Sans lui, le quartier peint en dernier gagnerait, et
+## le dessin dépendrait de l'ordre de la table : le genre de règle qu'on ne
+## retrouve jamais trois semaines plus tard.
+const RANG_CAMPAGNE := 0
+## ⚠ L'AMPLITUDE FAIT LA DIFFÉRENCE ENTRE UNE TACHE ET UN DISQUE. À 0,16 du
+## rayon, le contour d'un centre-ville de 34 cases bouge de cinq cases : sur une
+## image d'île entière, ça se lit comme un CERCLE PARFAIT posé sur la ville, et
+## c'est le défaut le plus voyant du premier jet. À 0,30 la tache a des anses et
+## des pointes, et plus personne ne devine le compas.
+const Z_BRUIT := 0.30                ## amplitude du contour, en part du rayon
+const Z_FREQ := 0.022                ## une anse de quartier toutes les ~45 cases
+
+## `[genre, dx, dy, rx, rz, rang, nom]` — dx/dy/rx/rz en CASES, depuis le repère.
+const QUARTIERS := {
+	## ⭐ LA CAPITALE VA JUSQU'À LA PLAGE. « L'île centrale doit être remplie un
+	## max jusqu'au bord de plage » : le faubourg couvre donc TOUT le rayon de
+	## l'île (142 × 137) et huit cases de plus, pour que le contour bruité du
+	## quartier morde le trait de côte au lieu de s'arrêter avant. Une tache
+	## déborde en mer sans dommage — le remplissage ne bâtit que la terre.
+	##
+	## Et une ville pleine n'est pas une ville uniforme : les couronnes portent
+	## des poches — une seconde zone industrielle à l'ouest, deux bidonvilles en
+	## marge, deux parcs, et QUATRE FRONTS DE MER qui font la couture avec la
+	## plage. Sans elles, remplir l'île donne deux mille hectares du même
+	## pavillonnaire, ce qui est pire que le trou qu'on vient de boucher.
+	"Gare Centrale": [
+		## ⚠ LE FAUBOURG EST CENTRÉ SUR L'ÎLE, PAS SUR LA GARE. La Gare Centrale est à
+		## 22 cases au nord du centre de l'Île Centrale : une tache centrée sur elle
+		## laissait 440 m de campagne sur toute la côte sud. Le décalage rattrape
+		## l'écart, le rayon couvre l'île et huit cases de plus.
+		[Ville2.Q_PAVILLONS, 5, 22, 150, 145, 1, "Les Faubourgs"],
+		[Ville2.Q_CENTRE, 0, 0, 34, 31, 5, "Le Centre"],
+		[Ville2.Q_VIEILLE_VILLE, -36, -15, 25, 22, 6, "La Vieille Ville"],
+		[Ville2.Q_CHAUD, 35, 18, 21, 18, 6, "Le Mirage"],
+		[Ville2.Q_INDUSTRIE, -92, 14, 30, 26, 4, "La Zone de l'Ouest"],
+		[Ville2.Q_BIDONVILLE, -52, 66, 22, 18, 4, "Les Tôles"],
+		[Ville2.Q_BIDONVILLE, 74, -54, 20, 17, 4, "Le Haut-Talus"],
+		[Ville2.Q_PARC, -20, -72, 24, 20, 3, "Le Grand Parc"],
+		[Ville2.Q_PARC, 62, 48, 20, 17, 3, "Le Bois de l'Est"],
+		## LES FRONTS DE MER, posés SUR le trait de côte aux quatre orients.
+		[Ville2.Q_PLAGE, -8, 128, 44, 22, 7, "La Grève du Sud"],
+		[Ville2.Q_PLAGE, -126, -20, 22, 40, 7, "La Grève de l'Ouest"],
+		[Ville2.Q_PLAGE, 122, 34, 22, 38, 7, "La Grève de l'Est"],
+		[Ville2.Q_PLAGE, 24, -128, 40, 22, 7, "La Grève du Nord"],
+	],
+	"Université": [[Ville2.Q_CAMPUS, 0, 0, 27, 24, 6, "Le Campus"]],
+	"Cité Administrative": [[Ville2.Q_CENTRE, 0, 0, 23, 20, 5, "La Cité"]],
+	"Port-des-Alpes": [
+		[Ville2.Q_INDUSTRIE, 0, 0, 25, 20, 8, "Le Port des Alpes"],
+		[Ville2.Q_PLAGE, 4, 26, 24, 15, 7, "Le Front de Mer"],
+	],
+	"Port-Nord": [[Ville2.Q_INDUSTRIE, 0, 0, 27, 22, 8, "Les Bassins"]],
+	## L'ÎLE NORD, PLEINE ELLE AUSSI. Son centre-ville est à 20 cases au sud du
+	## centre de l'île : même correction que pour la capitale.
+	"Centre-Ville Nord": [
+		[Ville2.Q_PAVILLONS, 0, -20, 136, 112, 1, "Les Vergers"],
+		[Ville2.Q_CENTRE, 0, 0, 27, 24, 5, "Le Centre Nord"],
+		[Ville2.Q_VIEILLE_VILLE, -29, 11, 18, 16, 6, "Le Vieux Nord"],
+		[Ville2.Q_CHAUD, -52, 8, 16, 14, 6, "Les Quais"],
+		[Ville2.Q_BIDONVILLE, -72, -42, 20, 17, 4, "La Corniche Basse"],
+		[Ville2.Q_PARC, 44, -72, 24, 20, 3, "Le Bois du Mont"],
+		[Ville2.Q_PLAGE, 6, -116, 40, 20, 7, "La Grève du Nord"],
+		[Ville2.Q_PLAGE, 22, 80, 38, 20, 7, "La Grève du Sud"],
+		[Ville2.Q_PLAGE, -118, -18, 20, 34, 7, "La Grève de l'Ouest"],
+		[Ville2.Q_PLAGE, 118, -12, 20, 34, 7, "La Grève de l'Est"],
+	],
+	"Sommet": [[Ville2.Q_PAVILLONS, 0, 0, 21, 18, 4, "Le Belvédère"]],
+	"Gare Maritime": [[Ville2.Q_INDUSTRIE, 0, 0, 27, 22, 8, "La Gare Maritime"]],
+	## L'ÎLE SUD-EST, PLEINE. Son centre est à 36 cases à l'ouest et 12 au nord
+	## du centre de l'île — c'est la plus décentrée des trois.
+	"Centre Sud-Est": [
+		[Ville2.Q_PAVILLONS, 36, 12, 158, 134, 1, "Les Vignes"],
+		[Ville2.Q_CENTRE, 0, 0, 27, 24, 5, "Le Centre Sud-Est"],
+		[Ville2.Q_CHAUD, 27, -15, 17, 15, 6, "Les Enseignes"],
+		[Ville2.Q_VIEILLE_VILLE, -28, 26, 19, 17, 6, "Le Vieux Bourg"],
+		[Ville2.Q_BIDONVILLE, -58, 72, 21, 18, 4, "Les Cabanes"],
+		[Ville2.Q_INDUSTRIE, 118, 62, 26, 22, 4, "La Zone de l'Est"],
+		[Ville2.Q_PARC, 104, 58, 26, 22, 3, "Le Bois des Brises"],
+		[Ville2.Q_PARC, 12, -74, 22, 19, 3, "Le Parc du Nord"],
+		[Ville2.Q_PLAGE, 36, 126, 44, 22, 7, "La Grève du Sud"],
+		[Ville2.Q_PLAGE, 36, -102, 44, 22, 7, "La Grève du Nord"],
+		[Ville2.Q_PLAGE, 176, 12, 22, 38, 7, "La Grève de l'Est"],
+		[Ville2.Q_PLAGE, -102, 12, 22, 38, 7, "La Grève de l'Ouest"],
+	],
+	"Plage-des-Vents": [[Ville2.Q_PLAGE, 0, 0, 27, 17, 7, "Plage-des-Vents"]],
+	"Gare de l'Ouest": [[Ville2.Q_PAVILLONS, 0, 0, 24, 21, 2, "Le Bourg de l'Ouest"]],
+	"Halte aux Brumes": [[Ville2.Q_PAVILLONS, 0, 0, 20, 17, 2, "Les Brumes"]],
+	"Halte du Large": [[Ville2.Q_PAVILLONS, 0, 0, 16, 14, 2, "Le Large"]],
+	"Gare des Pins": [[Ville2.Q_PAVILLONS, 0, 0, 22, 19, 2, "Les Pins"]],
+	"Halte de la Baie": [[Ville2.Q_PAVILLONS, 0, 0, 18, 15, 2, "La Baie"]],
+	"Halte du Levant": [[Ville2.Q_PAVILLONS, 0, 0, 18, 15, 2, "Le Levant"]],
+	"Gare de la Côte": [[Ville2.Q_PAVILLONS, 0, 0, 20, 17, 2, "La Côte"]],
+	## LES LIEUX-DITS : des hameaux, un cran au-dessus de la campagne.
+	"Mont Aurélien": [[Ville2.Q_PAVILLONS, 0, 0, 13, 11, 3, "Mont Aurélien"]],
+	"Vallée Verte": [[Ville2.Q_PAVILLONS, 0, 0, 15, 13, 3, "Vallée Verte"]],
+	"Baie du Sud": [[Ville2.Q_PAVILLONS, 0, 0, 14, 12, 3, "Baie du Sud"]],
+	"Mont des Brises": [[Ville2.Q_PAVILLONS, 0, 0, 13, 11, 3, "Mont des Brises"]],
+	"Pointe de l'Aube": [[Ville2.Q_PAVILLONS, 0, 0, 14, 12, 3, "Pointe de l'Aube"]],
+	"Colline de l'Est": [[Ville2.Q_PAVILLONS, 0, 0, 13, 11, 3, "Colline de l'Est"]],
+	"Vallée des Pins": [[Ville2.Q_PAVILLONS, 0, 0, 15, 13, 3, "Vallée des Pins"]],
+}
+
+## Les taches, ancrées sur les repères. Aucun tirage : deux plans de même graine
+## ont les mêmes quartiers, et deux fenêtres voisines les découpent au même
+## endroit — c'est la garantie de raccord, à l'échelle du quartier.
+static func _les_quartiers(plan: Dictionary) -> Array:
+	var sortie: Array = []
+	for nom in QUARTIERS:
+		var ou := repere(plan, String(nom))
+		if ou.x < 0: continue
+		for e in QUARTIERS[nom]:
+			var f: Array = e
+			sortie.append({
+				"g": String(f[0]), "nom": String(f[6]), "rang": int(f[5]),
+				"c": [ou.x + int(f[1]), ou.y + int(f[2])],
+				"r": [int(f[3]), int(f[4])],
+			})
+	return sortie
+
+## L'index des taches, monté comme celui des îles. Une case de pleine campagne
+## n'interroge alors aucune tache au lieu des quarante de la carte.
+static func _indexer_les_quartiers(plan: Dictionary, ctx: Dictionary) -> void:
+	var lobes: Array = []
+	for e in plan.get("quartiers", []):
+		var f: Dictionary = e
+		var c := case_de(f["c"])
+		var r: Array = f["r"]
+		var rx := float(r[0])
+		var rz := float(r[1])
+		lobes.append(_lobe(float(c.x), float(c.y), rx, rz,
+			maxf(rx, rz) * Z_BRUIT))
+	ctx["q_lobes"] = lobes
+	ctx["q_secteurs"] = _indexer_les_lobes(lobes)
+	var b := FastNoiseLite.new()
+	b.seed = int(plan["graine"]) + 5171
+	b.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	b.frequency = Z_FREQ
+	b.fractal_type = FastNoiseLite.FRACTAL_FBM
+	b.fractal_octaves = 3
+	ctx["q_bruit"] = b
+
+## ⭐ LE QUARTIER D'UNE CASE, ou −1 pour la campagne. Rend l'indice dans
+## `plan["quartiers"]`. C'est LA fonction que le remplissage interrogera : elle
+## remplace à elle seule les emprises carrées et leur découpage.
+static func quartier_en(plan: Dictionary, ctx: Dictionary, c: Vector2i) -> int:
+	var secteurs: Dictionary = ctx["q_secteurs"]
+	var cle := Vector2i(int(floor(float(c.x) / float(COTE_SECTEUR))),
+		int(floor(float(c.y) / float(COTE_SECTEUR))))
+	if not secteurs.has(cle): return -1
+	var lobes: Array = ctx["q_lobes"]
+	var b: FastNoiseLite = ctx["q_bruit"]
+	var n := b.get_noise_2d(float(c.x), float(c.y))
+	var quartiers: Array = plan["quartiers"]
+	var gagnant := -1
+	var rang := RANG_CAMPAGNE
+	var marge := 0.0
+	for k in (secteurs[cle] as Array):
+		var f: Dictionary = lobes[k]
+		var dx := (float(c.x) - float(f["x"])) / float(f["rx"])
+		var dz := (float(c.y) - float(f["z"])) / float(f["rz"])
+		var e := (sqrt(dx * dx + dz * dz) - 1.0) * float(f["r"]) + n * float(f["amp"])
+		if e >= 0.0: continue
+		var r2 := int((quartiers[k] as Dictionary)["rang"])
+		# ⚠ À RANG ÉGAL, LA TACHE LA PLUS ENFONCÉE GAGNE — sinon deux faubourgs
+		# voisins se disputeraient leur frontière au gré de l'ordre de la table,
+		# et la couture se verrait comme une ligne droite entre deux tirages.
+		if r2 > rang or (r2 == rang and e < marge):
+			rang = r2
+			marge = e
+			gagnant = k
+	return gagnant
+
 # ══════════════════════════════════════════════════════════════════ utilitaires
 
 static func _rect(a) -> Rect2i:
@@ -2146,7 +2785,7 @@ static func enregistrer(plan: Dictionary, chemin: String) -> bool:
 	f.close()
 	return true
 
-static func charger(chemin: String) -> Dictionary:
+static func charger(chemin := PLAN_CUIT) -> Dictionary:
 	if not FileAccess.file_exists(chemin):
 		push_warning("plan de l'archipel introuvable : " + chemin)
 		return {}

@@ -138,6 +138,7 @@ extends RefCounted
 
 const PLAN := preload("res://commun/ville2/plan_pays.gd")
 const PROPRETE := preload("res://commun/ville2/proprete.gd")
+const REMPLISSEUR := preload("res://commun/ville2/remplisseur.gd")
 
 ## ⚠ `preload` ET JAMAIS `class_name` : le cache de classes n'est pas réécrit
 ## par `godot --headless --import`, donc une classe neuve compile au bureau et
@@ -219,15 +220,23 @@ static func fenetre(plan: Dictionary, ctx: Dictionary, f: Rect2i, curseurs := {}
 	_les_voies(plan, v, f)
 	v.rasteriser()
 
-	# 4. LES QUARTIERS BÂTIS. Chaque implantation est bâtie ENTIÈRE puis
-	#    découpée — c'est la garantie de raccord, voir l'en-tête.
+	# 4. ⭐ LES QUARTIERS BÂTIS, D'APRÈS LEUR CHARTE ET PLUS PAR GREFFE. Le
+	#    remplisseur lit `quartier_en` sous chaque case et `regles_quartier`
+	#    pour savoir quoi y poser. Aucun témoin n'est appelé : ils ne sont plus
+	#    des tampons, ils sont la source des chartes.
 	if bool(curseurs.get("temoins", true)):
+		REMPLISSEUR.remplir(plan, ctx, v, f.position)
+		# Les grandes pièces posées à l'unité (ferme, aérodrome) passent encore
+		# par la greffe — elles n'ont pas de charte, elles ont un plan.
 		for k2 in dedans:
 			_implanter(plan, v, f, k2)
 		v.rasteriser()
 
-	# 5. LES OUVRAGES.
+	# 5. LES OUVRAGES, puis L'AUTOROUTE AÉRIENNE.
 	_les_ponts(plan, v, f)
+	# ⚠ APRÈS LES LOTS, ET C'EST TOUT L'INTÉRÊT : une pile ne doit jamais se
+	# poser sur un bâtiment, donc il faut que les bâtiments existent déjà.
+	_les_autoroutes(plan, ctx, v, f)
 
 	# 6. LES DÉTAILS, tirés par case et non en suite.
 	_semer(plan, ctx, v, f, float(curseurs.get("densite", 1.0)),
@@ -261,6 +270,13 @@ static func _implantations_visibles(plan: Dictionary, f: Rect2i) -> Array:
 static func _les_routes(plan: Dictionary, v: Ville2, f: Rect2i) -> void:
 	for r in plan["routes"]:
 		var d: Dictionary = r
+		# ⚠⚠ LE PRIMAIRE NE TOUCHE PLUS LE SOL. « Toutes les autoroutes doivent
+		# se trouver sur des voies aériennes posées sur des pylônes » (client,
+		# 15/09) : le réseau primaire est l'autoroute, il passe en viaduc, et
+		# poser en plus sa chaussée au sol ferait deux routes superposées — la
+		# ville se retrouverait coupée en deux par une bande de bitume sous son
+		# propre viaduc. Voir `_les_autoroutes`.
+		if String(d.get("classe", "")) == PLAN.V_PRIMAIRE: continue
 		for seg in _decouper(d["points"], f):
 			var s: Array = seg
 			v.ajouter_route(String(d["genre"]), s, String(d.get("nom", "")), 0)
@@ -612,12 +628,17 @@ static func _semer(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
 		for i in v.taille.x:
 			var c := Vector2i(i, j)
 			if not v.terre(c) or v.plate(c): continue
-			# ⚠ ON NE SÈME PAS SUR UN QUARTIER. Un témoin greffé a déjà rempli
-			# son carré, et un arbre de plus au milieu d'une rue du centre est
-			# exactement ce que le client a refusé trois fois. Le registre des
-			# demi-cases et `plate()` s'en chargent ; ce test-ci est la
-			# dernière ligne de défense, et il ne coûte rien.
-			if v.quartier_en(c) >= 0: continue
+			# ⚠⚠ ON NE SÈME PAS DANS UN QUARTIER BÂTI — MAIS ON SÈME DANS SES
+			# JARDINS. Un arbre au milieu d'une rue du centre est ce que le
+			# client a refusé trois fois ; un pavillonnaire sans un arbre, et un
+			# parc pelé, c'est le défaut inverse et il est tout aussi visible.
+			# La différence tient en un mot : la MATIÈRE que la charte a posée.
+			# Dalle et terre battue = quartier bâti, on ne sème pas. Herbe et
+			# sable = jardin, parc, grève — on sème.
+			var q := v.quartier_en(c)
+			if q >= 0:
+				var mq := v.matiere_de(c)
+				if mq != Ville2.M_HERBE and mq != Ville2.M_SABLE: continue
 			if not v.demi_libre(i * 2, j * 2, 2, 2): continue
 			var alea := _alea_en(g, f.position.x + i, f.position.y + j)
 			var x := (float(i) + alea.randf()) * CASE
@@ -770,3 +791,120 @@ static func _l_aerodrome(graine: int) -> Ville2:
 #    même table par fenêtre, plus la colonne que seul un pays réclame : deux
 #    fenêtres voisines rendent-elles EXACTEMENT la même chose sur leur bande
 #    commune ? Ça se teste sans les yeux, en comparant deux découpes décalées.
+
+
+# ══════════════════════════════════════════════════ L'AUTOROUTE AÉRIENNE
+
+## ⭐⭐ LE VIADUC — « elle peut traverser les villes mais les pylônes ne doivent
+## jamais être reposés sur un bâtiment » (client, 15/09).
+##
+## Trois règles, et chacune vient d'un défaut qu'on aurait eu sans elle :
+##
+## 1. LE TABLIER SUIT LE RELIEF, IL N'EST PAS DE NIVEAU. Une autoroute posée à
+##    une altitude constante au-dessus de la mer plonge dans la première colline
+##    — et nos monts font soixante-dix mètres. Le tablier se cale donc sur le
+##    sol de chaque case, PLUS un dégagement fixe.
+## 2. MAIS IL EST LISSÉ. Case par case, le sol bouge d'un palier d'un coup : le
+##    tablier ferait un escalier. On prend la MOYENNE GLISSANTE du sol sur une
+##    douzaine de cases, et le viaduc monte comme une route monte.
+## 3. LE LISSAGE SE CALCULE SUR TOUTE LA ROUTE, PAS SUR LA PART VISIBLE. Une
+##    moyenne prise sur la tranche de la fenêtre donnerait deux altitudes
+##    différentes de part et d'autre d'une couture — un décroché d'un mètre en
+##    plein milieu du tablier, tous les deux kilomètres.
+const HAUT_VIADUC := 11.0            ## dégagement sous tablier, en unités
+const LARGE_VIADUC := 22.0           ## un peu plus large qu'une avenue
+const ECART_PILES := 4               ## une pile toutes les 4 cases (80 m)
+const CHERCHE_PILE := 3              ## de combien de cases on décale une pile gênée
+const LISSAGE := 6                   ## demi-fenêtre de la moyenne glissante
+
+static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i) -> void:
+	for r in plan["routes"]:
+		var d: Dictionary = r
+		if String(d.get("classe", "")) != PLAN.V_PRIMAIRE: continue
+		var cases := _cases_suivies(d["points"])
+		if cases.size() < 2: continue
+		var haut := _profil_du_tablier(plan, ctx, cases)
+		var piles := _ou_poser_les_piles(v, f, cases)
+		for i in cases.size():
+			var c: Vector2i = cases[i]
+			if not f.has_point(c): continue
+			var l := c - f.position
+			var x := (float(l.x) + 0.5) * CASE
+			var z := (float(l.y) + 0.5) * CASE
+			var selon_x := true
+			if i + 1 < cases.size():
+				selon_x = (cases[i + 1] as Vector2i).y == c.y
+			elif i > 0:
+				selon_x = (cases[i - 1] as Vector2i).y == c.y
+			# ⚠ `zone: true` : le tablier est du mobilier de voirie posé en l'air.
+			# Sans ce drapeau la passe de propreté retire l'autoroute entière.
+			v.objets.append({"m": "viaduc", "x": x, "z": z,
+				"r": 0.0 if selon_x else PI * 0.5, "h": 0.0,
+				"w": LARGE_VIADUC, "d": CASE + 0.6, "y_abs": haut[i], "zone": true})
+			if piles.has(i):
+				v.objets.append({"m": "pile", "x": x, "z": z, "h": 0.0,
+					"w": 3.4, "y": haut[i], "zone": true})
+
+## Les cases d'une polyligne, dans l'ordre et sans trou.
+static func _cases_suivies(points: Array) -> Array:
+	var sortie: Array = []
+	for k in range(1, points.size()):
+		var a := PLAN.case_de(points[k - 1])
+		var b := PLAN.case_de(points[k])
+		var pas := (b - a).sign()
+		if pas.x != 0 and pas.y != 0: continue
+		var c := a
+		if sortie.is_empty(): sortie.append(c)
+		while c != b:
+			c += pas
+			sortie.append(c)
+	return sortie
+
+## L'altitude du tablier, case par case : le sol lissé plus le dégagement.
+static func _profil_du_tablier(plan: Dictionary, ctx: Dictionary, cases: Array) -> PackedFloat32Array:
+	var brut := PackedFloat32Array()
+	brut.resize(cases.size())
+	for i in cases.size():
+		var sol := PLAN.sol_en(plan, ctx, cases[i])
+		# Au-dessus de l'eau on part du niveau de la mer, pas du fond : sinon le
+		# viaduc s'enfonce de onze mètres à chaque bras de mer franchi.
+		brut[i] = maxf(float(sol[0]), TerrainV2.NIVEAU_MER)
+	var lisse := PackedFloat32Array()
+	lisse.resize(cases.size())
+	for i in cases.size():
+		var somme := 0.0
+		var n := 0
+		for t in range(maxi(0, i - LISSAGE), mini(cases.size(), i + LISSAGE + 1)):
+			somme += brut[t]
+			n += 1
+		lisse[i] = somme / float(n) + HAUT_VIADUC
+	return lisse
+
+## ⭐ OÙ POSER LES PILES. On en veut une toutes les `ECART_PILES` cases ; si
+## l'emplacement prévu tombe sur un bâtiment, on cherche la case libre la plus
+## proche LE LONG DU TRACÉ. La portée du tablier varie donc un peu — c'est ce
+## que font les vrais viaducs urbains, et c'est la seule solution qui ne laisse
+## ni pile sur un toit ni trou dans le tissu.
+##
+## ⚠ UNE CASE HORS FENÊTRE N'A PAS DE LOT CONNU, donc elle a l'air libre. On ne
+## décide donc une pile QUE pour les cases dont le voisinage de recherche est
+## entièrement dans la fenêtre ; les autres seront décidées par la fenêtre
+## voisine, qui les voit en entier.
+static func _ou_poser_les_piles(v: Ville2, f: Rect2i, cases: Array) -> Dictionary:
+	var sortie := {}
+	var i := 0
+	while i < cases.size():
+		var choisi := -1
+		for t in range(0, CHERCHE_PILE + 1):
+			for s in ([0] if t == 0 else [t, -t]):
+				var j: int = i + int(s)
+				if j < 0 or j >= cases.size(): continue
+				var c: Vector2i = cases[j]
+				if not f.has_point(c): continue
+				if v.lot_sur(c - f.position) >= 0: continue
+				choisi = j
+				break
+			if choisi >= 0: break
+		if choisi >= 0: sortie[choisi] = true
+		i += ECART_PILES
+	return sortie

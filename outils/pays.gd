@@ -76,6 +76,22 @@ const C_TABLIER := Color("#5b5f66")
 ## ⚠ LE POINTILLÉ DU MÉTRO N'EST PAS UNE COQUETTERIE : c'est la seule chose qui
 ## dise, sur une carte, qu'une ligne est SOUTERRAINE. Sans lui, le métro qui
 ## traverse un bras de mer se lit comme un train posé sur l'eau.
+## LES QUARTIERS, PAR GENRE. Des teintes franches : sur mille pixels un quartier
+## fait quarante pixels de large, et c'est la COULEUR qui le nomme — pas un
+## libellé qu'on ne pourrait pas lire.
+const C_QUARTIERS := {
+	"centre": Color("#d94f4f"),        ## le cœur, rouge
+	"vieille_ville": Color("#a05ac0"), ## violet
+	"chaud": Color("#e0479a"),         ## rose
+	"campus": Color("#3f9bd6"),        ## bleu
+	"industrie": Color("#7a6a56"),     ## brun
+	"plage": Color("#e8c96a"),         ## sable
+	"pavillons": Color("#e0866a"),     ## orangé
+	"bidonville": Color("#8a8a5a"),    ## kaki
+	"port": Color("#5d6b74"),          ## ardoise
+	"parc": Color("#6aa85e"),          ## vert
+}
+
 const RESEAUX := [
 	["ferry", C_FERRY, 2, 9],
 	["bus", C_BUS, 1, 0],
@@ -144,7 +160,7 @@ func _init() -> void:
 		source = "donnees/aurones/archipel_complet.json (canonique)"
 	print("géographie : " + source)
 	_les_chiffres(plan, v)
-	_l_image(plan, v, _arg("image", "/tmp/aurones.png"), int(_arg("echelle", "1")))
+	_l_image(plan, ctx, v, _arg("image", "/tmp/aurones.png"), int(_arg("echelle", "1")))
 
 	# LA FENÊTRE : la preuve que le remplissage à la demande marche, et ce qu'on
 	# donne à `photo_v2.sh` pour voir l'archipel en 3D.
@@ -335,7 +351,7 @@ func _composantes(v: Ville2) -> int:
 ##
 ## `echelle` : combien de pixels par case. À 1 on a l'image demandée (1000 ×
 ## 1000, un pixel par case) ; à 2 on lit les noms de rues du damier portuaire.
-func _l_image(plan: Dictionary, v: Ville2, sortie: String, echelle: int) -> void:
+func _l_image(plan: Dictionary, ctx: Dictionary, v: Ville2, sortie: String, echelle: int) -> void:
 	var e := clampi(echelle, 1, 4)
 	var t0 := Time.get_ticks_msec()
 	var img := Image.create(v.taille.x * e, v.taille.y * e, false, Image.FORMAT_RGB8)
@@ -346,6 +362,26 @@ func _l_image(plan: Dictionary, v: Ville2, sortie: String, echelle: int) -> void
 			for dj in e:
 				for di in e:
 					img.set_pixel(i * e + di, j * e + dj, c)
+	# 1 bis. LES QUARTIERS, TEINTÉS SOUS LA VOIRIE. Ce ne sont pas des bâtiments
+	#        — l'image du pays ne descend pas au bâtiment — mais les TACHES :
+	#        c'est ce qu'il faut regarder pour dire si une ville est au bon
+	#        endroit et si elle a la bonne forme, et c'est la seule chose qu'une
+	#        capture de vingt kilomètres puisse montrer honnêtement.
+	#        ⚠ On interroge case par case : une tache n'a pas de rectangle.
+	var quartiers: Array = plan.get("quartiers", [])
+	if not quartiers.is_empty():
+		for j2 in v.taille.y:
+			for i2 in v.taille.x:
+				var c3 := Vector2i(i2, j2)
+				if v.eau[v.indice(c3)] == 1: continue
+				var k3 := PLAN.quartier_en(plan, ctx, c3)
+				if k3 < 0: continue
+				var ti: Color = C_QUARTIERS.get(
+					String((quartiers[k3] as Dictionary)["g"]), Color("#b0b0b0"))
+				for dj2 in e:
+					for di2 in e:
+						var px := Vector2i(i2 * e + di2, j2 * e + dj2)
+						img.set_pixelv(px, img.get_pixelv(px).lerp(ti, 0.55))
 	# 2. LA VOIRIE.
 	for reg in VOIRIES:
 		var f: Array = reg

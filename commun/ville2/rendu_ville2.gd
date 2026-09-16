@@ -392,6 +392,19 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 			float(fiche_objet.get("d", CASE)),
 			TerrainV2.NIVEAU_MER + float(fiche_objet.get("y", 2.5)) - ou.y)
 		return
+	# ⭐ L'AUTOROUTE AÉRIENNE. Deux objets et pas un seul : le TABLIER se pose par
+	# case, la PILE se pose là où il y a de la place. Les fondre en un seul
+	# objet — comme le fait `plateforme`, qui descend ses pilotis toute seule —
+	# donnerait des piles tous les six mètres, donc forcément sur des toits :
+	# c'est exactement ce que le client interdit.
+	if modele == "viaduc":
+		_viaduc(parent, ou, tourne, float(fiche_objet.get("w", 22.0)),
+			float(fiche_objet.get("d", CASE)))
+		return
+	if modele == "pile":
+		_pile(parent, ou, float(fiche_objet.get("w", 3.2)),
+			float(fiche_objet.get("y", 0.0)))
+		return
 	if modele == "roue":
 		_grande_roue(parent, ou, tourne, float(fiche_objet.get("w", 40.0)))
 		return
@@ -487,7 +500,26 @@ static func _poser_rail(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 			var a: Vector2i = cases[k - 1]
 			var b: Vector2i = cases[k]
 			if not zone.has_point(a): continue
-			var y := float(ville.carte.palier(a)) * PALIER + 0.3
+			# ⚠ UNE CASE D'EAU N'A PAS DE PALIER, ET LA VOIE DOIT QUAND MÊME
+			# PASSER (ajouté le 14/09 avec les ponts ferroviaires de la grande
+			# carte). `CarteVille.palier` rend −999 pour une case sans sol — et
+			# une case d'eau n'en a pas, puisque `rasteriser` ne pose de sol que
+			# sur la terre. La voie se dessinait donc à cinq kilomètres sous la
+			# carte, c'est-à-dire nulle part : les deux ponts ferroviaires
+			# étaient des trous, sans un mot dans la console.
+			#
+			# Sur l'eau, un rail est sur un pont, et le tablier des ponts de
+			# cette carte est posé au niveau du palier 0 (voir `TABLIER` dans
+			# `generateur_carte.gd` : un tablier plus haut ferait une marche à
+			# la culée). On retombe donc sur le palier 0, ce qui pose les
+			# traverses exactement sur le tablier.
+			#
+			# ⚠ AUCUN DES NEUF TÉMOINS NE PASSE PAR LÀ : aucun n'a de voie sur
+			# l'eau, et `palier` ne leur rend jamais −999. Cette branche est
+			# neuve et ne peut rien leur changer.
+			var niveau_rail := ville.carte.palier(a)
+			var y := 0.3
+			if niveau_rail > -900: y = float(niveau_rail) * PALIER + 0.3
 			var pa := Vector3((float(a.x) + 0.5) * CASE, y, (float(a.y) + 0.5) * CASE)
 			var pb := Vector3((float(b.x) + 0.5) * CASE, y, (float(b.y) + 0.5) * CASE)
 			var selon_x := a.y == b.y
@@ -692,6 +724,31 @@ static func _plateforme(parent: Node3D, ou: Vector3, tourne: float, largeur: flo
 			var p := haut + base * Vector3(s * (largeur * 0.5 - 0.9), 0, t * profondeur)
 			_boite_tournee(parent, base, Vector3(0.9, hauteur, 0.9),
 				Vector3(p.x, fond + hauteur * 0.5, p.z), TEINTE_PILOTIS)
+
+## LE TABLIER D'AUTOROUTE : une dalle et ses deux bordures. `ou` est DÉJÀ à
+## l'altitude du tablier (posé par `y_abs`) — le tablier ne cherche pas le sol,
+## c'est la pile qui l'atteint.
+const TEINTE_VIADUC := Color("#b9bcc0")
+const TEINTE_PILE := Color("#a2a6ab")
+const BORDURE := 0.55
+
+static func _viaduc(parent: Node3D, ou: Vector3, tourne: float, largeur: float,
+		profondeur: float) -> void:
+	var base := Basis(Vector3.UP, tourne)
+	_boite_tournee(parent, base, Vector3(largeur, 0.8, profondeur), ou, TEINTE_VIADUC)
+	# Les deux bordures : sans elles le tablier est une planche, et une voiture
+	# qui roule dessus semble flotter au-dessus du vide.
+	for s in [-1.0, 1.0]:
+		var p := ou + base * Vector3(s * (largeur * 0.5 - BORDURE * 0.5), 0.85, 0)
+		_boite_tournee(parent, base, Vector3(BORDURE, 1.1, profondeur), p, TEINTE_VIADUC)
+
+## LA PILE : une colonne du sol au tablier. `ou` est au sol, `sommet` est
+## l'altitude du tablier.
+static func _pile(parent: Node3D, ou: Vector3, largeur: float, sommet: float) -> void:
+	var haut := sommet - 0.4 - ou.y
+	if haut <= 0.5: return
+	_boite_tournee(parent, Basis(), Vector3(largeur, haut, largeur),
+		Vector3(ou.x, ou.y + haut * 0.5, ou.z), TEINTE_PILE)
 
 ## LA GRANDE ROUE (cahier § 3 : « une jetée avec bar et grande roue »). Le kit
 ## n'en a pas : deux jantes, des rayons, des nacelles et deux jambes en A.
