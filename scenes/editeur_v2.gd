@@ -157,6 +157,9 @@ var _champ_decalage: SpinBox
 var _boutons_outils: Array[Button] = []
 var _liste: Array[String] = []          ## ce que la palette montre en ce moment
 var _decalage := 0.0                    ## la hauteur ajoutée à l'objet posé
+var _centre_pays := Vector2i(500, 500)  ## le centre de la fenêtre ouverte, en cases
+var _cote_pays := 160                   ## son côté, en cases
+var _minicarte: Control                 ## le plan du pays entier, cliquable
 var _tourne_apercu := 0.0
 var _photo_sortie := ""
 var _manque := ""                       ## la carte demandée et introuvable
@@ -191,6 +194,9 @@ func _la_fenetre_du_pays(ou: String, large: int) -> Ville2:
 	var c := Vector2i(500, 500)
 	if m.size() == 2: c = Vector2i(int(m[0]), int(m[1]))
 	var cote := clampi(large, 40, 400)
+	# La minicarte a besoin de savoir OÙ l'on regarde pour dessiner son cadre.
+	_centre_pays = c
+	_cote_pays = cote
 	var f := Rect2i(c - Vector2i(cote, cote) / 2, Vector2i(cote, cote))
 	var ctx := PLAN_PAYS.contexte(plan)
 	return PAYS.fenetre(plan, ctx, f, {"nom": "Aurones %d,%d" % [c.x, c.y]})
@@ -565,7 +571,17 @@ func _interface() -> void:
 	_libre.focus_mode = Control.FOCUS_NONE
 	gb.add_child(_libre)
 	gb.add_child(_ligne_reglage("Pinceau", _regle_rayon(), "cases"))
-	gb.add_child(_ligne_reglage("Hauteur", _regle_decalage(), "unités"))
+	gb.add_child(_ligne_reglage("Hauteur", _regle_decalage(), "cases"))
+	# ⚠ « JE PENSAIS VOIR TOUTE LA MAP ET NON UNE PETITE ZONE » (client, 16/09).
+	# Une fenêtre du pays fait au mieux 400 cases de côté sur une carte qui en
+	# fait MILLE : bâtir le pays entier en bâtiments tiendrait des minutes et
+	# des gigaoctets. La réponse n'est pas de tout bâtir, c'est de ne jamais
+	# perdre la vue d'ensemble : le plan cuit des Aurones s'affiche ici en
+	# entier, le cadre jaune dit où l'on travaille, et un clic déplace la
+	# fenêtre n'importe où sur les vingt kilomètres.
+	if _est_le_pays():
+		gb.add_child(_entete("Le pays"))
+		gb.add_child(_la_minicarte())
 	gb.add_child(_entete("Sélection"))
 	_info = RichTextLabel.new()
 	_info.fit_content = true
@@ -678,6 +694,59 @@ func _interface() -> void:
 	_remplir_palette()
 	_maj_compteur()
 
+const PLAN_IMAGE := "res://cartes/aurones-plan.png"
+const PAYS_COTE := 1000.0               ## le côté de la carte, en cases
+
+## LE PLAN DU PAYS, en entier, dans cent soixante-quatorze pixels. Il se
+## dessine à la main plutôt que par un TextureRect parce qu'il porte deux
+## choses de plus que l'image : le cadre de la fenêtre ouverte, et la croix du
+## curseur. Un clic gauche recentre la fenêtre là où l'on a cliqué.
+func _la_minicarte() -> Control:
+	var t: Texture2D = null
+	if ResourceLoader.exists(PLAN_IMAGE):
+		t = load(PLAN_IMAGE) as Texture2D
+	var c := Control.new()
+	c.custom_minimum_size = Vector2(LARGE_GAUCHE - 16, LARGE_GAUCHE - 16)
+	c.mouse_filter = Control.MOUSE_FILTER_STOP
+	c.tooltip_text = "Le plan des Aurones. Clique pour déplacer la fenêtre de travail."
+	c.draw.connect(func() -> void:
+		var r := Rect2(Vector2.ZERO, c.size)
+		if t != null:
+			c.draw_texture_rect(t, r, false)
+		else:
+			c.draw_rect(r, Color("#1b2430"), true)
+			c.draw_string(POLICE, Vector2(8, 24), "plan absent",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, CORPS_ENTETE, Color("#8d95a6"))
+		c.draw_rect(r, C_TRAIT, false, 1.0)
+		# Le cadre de ce qu'on regarde, à l'échelle du plan.
+		var u := c.size.x / PAYS_COTE
+		var cote := maxf(float(_cote_pays) * u, 3.0)
+		var coin := Vector2(float(_centre_pays.x), float(_centre_pays.y)) * u \
+			- Vector2(cote, cote) * 0.5
+		c.draw_rect(Rect2(coin, Vector2(cote, cote)), Color("#101418", 0.35), true)
+		c.draw_rect(Rect2(coin, Vector2(cote, cote)), Color("#ffd23f"), false, 2.0))
+	c.gui_input.connect(func(ev: InputEvent) -> void:
+		var clic := ev as InputEventMouseButton
+		if clic == null or not clic.pressed: return
+		if clic.button_index != MOUSE_BUTTON_LEFT: return
+		var u := c.size.x / PAYS_COTE
+		if u <= 0.0: return
+		var vise := Vector2i(roundi(clic.position.x / u), roundi(clic.position.y / u))
+		_aller_au_pays(vise))
+	_minicarte = c
+	return c
+
+## Recharger l'éditeur sur une autre fenêtre du pays. On repasse par l'écran
+## plutôt que de rebâtir en place : la fenêtre est une VILLE entière, avec son
+## terrain, ses lots et son historique d'annulation — la remplacer sous les
+## pieds de l'éditeur laisserait derrière elle une sélection et des annulations
+## qui désignent une ville qui n'existe plus.
+func _aller_au_pays(vise: Vector2i) -> void:
+	var c := Vector2i(clampi(vise.x, 0, 1000), clampi(vise.y, 0, 1000))
+	_dire("Le pays : on déplace la fenêtre en %d,%d…" % [c.x, c.y])
+	demande_ecran.emit("editeur2", {"pays": "1",
+		"ou": "%d,%d" % [c.x, c.y], "large": str(_cote_pays)})
+
 ## Un panneau de dock : un fond plein, une bordure, et la souris qui S'ARRÊTE.
 func _panneau(couleur: Color) -> PanelContainer:
 	var p := PanelContainer.new()
@@ -775,13 +844,21 @@ func _regle_rayon() -> SpinBox:
 		_montrer_apercu())
 	return _champ_rayon
 
+## ⚠⚠ CE CHAMP ÉTAIT EN UNITÉS, ET C'EST POUR ÇA QU'IL NE FAISAIT RIEN.
+## Le client écrit « impossible de mettre un objet flottant à 1 de hauteur ou 2 »
+## (16/09) : il pensait en ÉTAGES, le champ comptait en unités Kenney. Une case
+## fait VINGT unités — taper 1 levait l'objet d'un vingtième de case, soit un
+## déplacement qu'aucun œil ne voit à la caméra de l'éditeur. Le champ compte
+## désormais en CASES, comme tout le reste de l'éditeur, et la conversion se
+## fait à un seul endroit : `_decalage`, lui, reste en unités pour le rendu.
 func _regle_decalage() -> SpinBox:
 	_champ_decalage = SpinBox.new()
-	_champ_decalage.min_value = -40
-	_champ_decalage.max_value = 200
-	_champ_decalage.step = 0.5
-	_champ_decalage.value = _decalage
-	_champ_decalage.value_changed.connect(func(v: float) -> void: _decalage = v)
+	_champ_decalage.min_value = -2.0
+	_champ_decalage.max_value = 10.0
+	_champ_decalage.step = 0.25
+	_champ_decalage.value = _decalage / CASE
+	_champ_decalage.tooltip_text = "La hauteur à laquelle l'objet est posé, en cases au-dessus du sol.\nPage Haut / Page Bas montent et descendent d'un quart de case.\nUne hauteur non nulle autorise la pose au-dessus d'une rue ou d'un toit."
+	_champ_decalage.value_changed.connect(func(v: float) -> void: _decalage = v * CASE)
 	return _champ_decalage
 
 ## Le compte de la barre du haut : ce que porte la ville en ce moment.
@@ -1229,11 +1306,13 @@ func _touche(k: InputEventKey) -> void:
 			_tourner_selection(-1)
 			_montrer_apercu()
 		KEY_PAGEUP:
-			_decalage += 1.0
-			if _champ_decalage != null: _champ_decalage.value = _decalage
+			_decalage = minf(_decalage + CASE * 0.25, CASE * 10.0)
+			if _champ_decalage != null: _champ_decalage.value = _decalage / CASE
+			_dire("Hauteur de pose : %.2f case." % (_decalage / CASE))
 		KEY_PAGEDOWN:
-			_decalage -= 1.0
-			if _champ_decalage != null: _champ_decalage.value = _decalage
+			_decalage = maxf(_decalage - CASE * 0.25, CASE * -2.0)
+			if _champ_decalage != null: _champ_decalage.value = _decalage / CASE
+			_dire("Hauteur de pose : %.2f case." % (_decalage / CASE))
 		KEY_PLUS, KEY_KP_ADD, KEY_EQUAL:
 			_rayon_terrain = mini(8, _rayon_terrain + 1)
 			if _champ_rayon != null: _champ_rayon.value = _rayon_terrain
@@ -1403,6 +1482,13 @@ func _modele_objet() -> String:
 func _objet_possible(m: String, c: Vector2i) -> bool:
 	if m == "": return false
 	if _libre != null and _libre.button_pressed: return true
+	# ⚠ UN OBJET EN L'AIR NE POSE PAS SUR LE SOL, DONC LE SOL N'A PAS SON MOT.
+	# Le refus « une rue, l'eau ou un bâtiment » interrogeait la case même quand
+	# la hauteur demandée mettait la pièce à deux cases au-dessus : impossible de
+	# suspendre une enseigne au-dessus d'une rue, une passerelle entre deux
+	# toits, un lampadaire sur un quai. Dès que la hauteur n'est pas nulle, la
+	# seule condition qui reste est d'être dans la carte.
+	if absf(_decalage) > 0.01: return _ville.dedans(c)
 	if not _ville.terre(c): return false
 	if _ville.carte.route(c) and not m.begins_with("voitures/"): return false
 	if _ville.lot_sur(c) >= 0: return false
@@ -1411,7 +1497,7 @@ func _objet_possible(m: String, c: Vector2i) -> bool:
 func _poser_objet() -> void:
 	var m := _modele_objet()
 	if not _objet_possible(m, _case):
-		_dire("Impossible ici : une rue, l'eau ou un bâtiment.")
+		_dire("Impossible ici : une rue, l'eau ou un bâtiment. Règle la Hauteur pour poser au-dessus.")
 		return
 	_empiler()
 	var o := {"m": m, "x": _aimanter(_point.x), "z": _aimanter(_point.z),

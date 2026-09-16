@@ -297,10 +297,17 @@ func tuile(c: Vector2i) -> Array:
 ## Les variantes équivalentes d'une même tuile : même raccordement, même
 ## rotation, dessin différent.
 const VARIANTES := {
-	"road-crossroad": ["road-crossroad", "road-crossroad-line", "road-crossroad-path",
+	# ⚠⚠ PAS DE TUILE ZÉBRÉE DANS CE TIRAGE. Les `-path` portent un passage
+	# piéton sur chacun de leurs quatre bras ; tirées au sort une case sur
+	# quatre, elles en semaient partout, y compris deux côte à côte et au milieu
+	# d'une chaussée large (« il ne faut pas mettre de passage piéton l'un à
+	# côté de l'autre », client, 16/09). Le zébra ne se tire plus : il se
+	# DÉCIDE, au bord d'un carrefour et jamais contre un autre — voir
+	# `RenduVille2._zebre_ici`, qui repose la tuile `-path` là où elle a un sens.
+	"road-crossroad": ["road-crossroad", "road-crossroad-line", "road-crossroad",
 		"road-crossroad-line"],
 	"road-intersection": ["road-intersection", "road-intersection-line",
-		"road-intersection-path", "road-intersection-line"],
+		"road-intersection", "road-intersection-line"],
 	"road-end-round": ["road-end-round", "road-end"],
 	# Les trois virages du kit se raccordent pareil ; `road-bend` a ses coins
 	# vides, mais il reçoit sa dalle (voir AJOUREES), donc il peut servir.
@@ -310,6 +317,11 @@ const VARIANTES := {
 
 static func _tirage(c: Vector2i) -> int:
 	return absi(hash(c.x * 73856093 + c.y * 19349663))
+
+## Le même tirage, ouvert au rendu : il arbitre quelle case garde son passage
+## piéton quand deux voisines y ont droit (voir `RenduVille2._zebre_ici`).
+static func tirage_de(c: Vector2i) -> int:
+	return _tirage(c)
 
 ## LE PASSAGE PIÉTON. Il se met au PIED d'un carrefour, pas au milieu d'une rue
 ## — c'est là qu'on traverse. Une case sur deux seulement : une avenue dont

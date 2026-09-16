@@ -391,6 +391,12 @@ static func _mobilier(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
 		var c: Vector2i = cases[i]
 		var l := c - f.position
 		if not v.dedans(l): continue
+		# ⚠ UNE CASE PRISE PAR UN BÂTIMENT N'A PAS DE TROTTOIR. Un lampadaire,
+		# une cabine ou un arbre pouvait se retrouver dans un salon. Et c'est
+		# `demi_libre` qu'il faut interroger, pas `lot_sur` — voir
+		# `_case_de_mobilier` pour pourquoi le second ment pendant le
+		# remplissage.
+		if not v.demi_libre(l.x * 2, l.y * 2, 2, 2): continue
 		if lampes > 0 and i % lampes == 0:
 			v.ajouter_objet("lampadaire", (float(l.x) + 0.12) * CASE,
 				(float(l.y) + 0.12) * CASE, 0.0)
@@ -549,25 +555,59 @@ static func _emprise_libre(plan: Dictionary, ctx: Dictionary, k: int, c: Vector2
 ## ville il y a un trottoir, pas une allée de garage.
 const ALLEE := "pavillons/driveway-long"
 
+## Une case où l'on a le droit de poser du mobilier de jardin : dans la fenêtre,
+## sur la terre, et ni dans un bâtiment ni sur la chaussée.
+##
+## ⚠⚠ `lot_sur()` NE SERT À RIEN ICI, ET C'EST CE QUI M'A FAIT CROIRE QUE LA
+## CORRECTION MARCHAIT ALORS QU'ELLE EMPIRAIT LE DÉFAUT. `_lot_de`, le registre
+## que `lot_sur` interroge, n'est reconstruit que par `rasteriser()` — c'est-à-
+## dire UNE FOIS, avant que le remplisseur ne pose le moindre bâtiment. Pendant
+## tout le remplissage il ne contient que des −1 : il répond « libre » partout,
+## y compris au milieu de la maison posée trois lignes plus haut. Le registre
+## VIVANT, celui qui sait, est `demi_prises`, qu'on lit par `demi_libre` — c'est
+## déjà ce que fait `Lotisseur.terrain_libre`, et pour la même raison.
+static func _case_de_mobilier(v: Ville2, c: Vector2i) -> bool:
+	if not v.dedans(c): return false
+	if not v.terre(c): return false
+	if v.carte.route(c) or v.carte.case_prise(c): return false
+	return v.demi_libre(c.x * 2, c.y * 2, 2, 2)
+
 static func _devant_la_maison(v: Ville2, f: Rect2i, charte: Dictionary,
 		alea: RandomNumberGenerator, b: Vector2i, n: Vector2i, genre: String) -> void:
 	if int(charte["sol"]) != Ville2.M_HERBE: return
 	if int(charte["recul"]) <= 0: return
 	var l := b - f.position
 	if not v.dedans(l): return
-	# L'allée part du bord de la chaussée vers la façade — donc dans le sens de
-	# la normale, sur la profondeur du recul.
-	var x0 := (float(l.x) + 0.5 + float(n.x) * 0.5) * CASE
-	var z0 := (float(l.y) + 0.5 + float(n.y) * 0.5) * CASE
+	# ⚠⚠ L'ALLÉE PARTAIT DU BORD DU BÂTIMENT, DONC À MOITIÉ DEDANS. Son origine
+	# était le centre de la case de la maison plus une DEMI-case : c'est-à-dire
+	# pile sur le mur de façade. Mesuré : six cent soixante-cinq allées, cent
+	# vingt-deux bornes et cent quarante voitures plantées dans un bâtiment sur
+	# une seule fenêtre — « certains bâtiments se chevauchent », et ce n'étaient
+	# pas deux lots, c'était le mobilier qui entrait dans les murs.
+	#
+	# L'allée commence donc UNE CASE ENTIÈRE devant la façade, sur la case du
+	# recul, et chaque pièce vérifie sa propre case avant de se poser : le
+	# lotisseur ne connaît que les lots, personne ne relisait pour le mobilier.
+	var devant := l + n
+	if not _case_de_mobilier(v, devant): return
+	var x0 := (float(devant.x) + 0.5) * CASE
+	var z0 := (float(devant.y) + 0.5) * CASE
 	var r := 0.0 if n.x == 0 else PI * 0.5
 	for t in 2:
-		v.ajouter_objet(ALLEE, x0 + float(n.x) * float(t) * DEMI * 0.8,
-			z0 + float(n.y) * float(t) * DEMI * 0.8, r)
+		var c := devant + n * t
+		if not _case_de_mobilier(v, c): break
+		v.ajouter_objet(ALLEE, (float(c.x) + 0.5) * CASE, (float(c.y) + 0.5) * CASE, r)
 	if alea.randf() < 0.55:
 		var m := String(KitVille2.VOITURES[alea.randi() % KitVille2.VOITURES.size()])
-		v.ajouter_objet(m, x0 + float(n.x) * DEMI * 0.5, z0 + float(n.y) * DEMI * 0.5, r)
+		v.ajouter_objet(m, x0, z0, r)
 	if alea.randf() < 0.5:
-		v.ajouter_objet("borne", x0 - float(n.y) * 5.0, z0 + float(n.x) * 5.0, 0.0)
+		# La boîte aux lettres se décale LE LONG de la rue, pas en travers : de
+		# côté elle rentrait dans la maison une fois sur deux.
+		var cote := Vector2i(-n.y, n.x)
+		var bl := devant + cote
+		if _case_de_mobilier(v, bl):
+			v.ajouter_objet("borne", (float(bl.x) + 0.5) * CASE,
+				(float(bl.y) + 0.5) * CASE, 0.0)
 
 ## Le registre des chaussées DÉJÀ posées dans la fenêtre — les axes du plan,
 ## rastérisés avant que le remplisseur n'arrive. En cases ABSOLUES : c'est la
@@ -656,6 +696,22 @@ static func _les_gares(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
 		if not f.grow(12).has_point(c): continue
 		_la_gare(v, f, c, String(st.get("nom", "")))
 
+## De combien on rentre le mobilier depuis le bord de la case : assez pour ne
+## pas mordre sur la chaussée, assez peu pour la toucher.
+const MARGE_TROTTOIR := 2.2
+
+## De quel côté est la rue ? Les quatre côtés d'abord — c'est là qu'un arrêt
+## se colle — puis les diagonales, qui donnent au moins un cap plausible quand
+## la station tombe au coin d'un pâté. `ZERO` si la rue est trop loin.
+static func _vers_la_rue(v: Ville2, l: Vector2i) -> Vector2i:
+	for d in [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]:
+		var n: Vector2i = l + d
+		if v.dedans(n) and v.carte.route(n): return d
+	for d in [Vector2i(1, -1), Vector2i(1, 1), Vector2i(-1, 1), Vector2i(-1, -1)]:
+		var n2: Vector2i = l + d
+		if v.dedans(n2) and v.carte.route(n2): return Vector2i(d.x, 0)
+	return Vector2i.ZERO
+
 static func _les_stations(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i) -> void:
 	for e in plan.get("stations", []):
 		var st: Dictionary = e
@@ -668,41 +724,125 @@ static func _les_stations(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2
 			continue
 		var l := c - f.position
 		if not v.dedans(l): continue
-		# L'abribus se met AU BORD de la case, pas au milieu : au milieu il est
-		# sur la chaussée, et la passe de propreté le balaie.
-		var x := (float(l.x) + 0.18) * CASE
-		var z := (float(l.y) + 0.82) * CASE
-		v.ajouter_objet(ABRIBUS, x, z, 0.0, 0.0, "")
-		v.ajouter_objet("banc", x + 9.0, z, PI, 0.0, "")
+		# ⭐⭐ « LES ARRÊTS DE BUS DOIVENT ÊTRE COLLÉS À LA ROUTE » (client, 16/09).
+		#
+		# L'abribus se posait à un coin FIXE de sa case — toujours le même, en
+		# haut à gauche — quel que soit le côté où passait la chaussée. Une fois
+		# sur quatre il touchait la rue ; les trois autres fois il attendait le
+		# bus au fond d'une pelouse, dos à la route.
+		#
+		# On cherche donc la RUE, et tout le mobilier se range par rapport à
+		# elle : l'abri contre le bord, tourné vers la chaussée, le banc à côté
+		# de lui LE LONG du trottoir, le rack à vélos un peu plus loin sur la
+		# même ligne. Sans rue voisine (une station posée en pleine campagne),
+		# on garde l'ancien coin plutôt que de ne rien poser.
+		# ⚠ LA CASE DE LA STATION PEUT AVOIR ÉTÉ BÂTIE ENTRE-TEMPS. Les stations
+		# se posent en dernier, après les lots : dix-neuf abribus, bancs et
+		# racks se retrouvaient dans un mur. On glisse alors d'une case le long
+		# de la rue, et on renonce plutôt que de meubler un salon.
+		if not _case_de_mobilier(v, l):
+			var repli := Vector2i(-999, -999)
+			for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				var n2: Vector2i = l + d
+				if _case_de_mobilier(v, n2) and _vers_la_rue(v, n2) != Vector2i.ZERO:
+					repli = n2
+					break
+			if repli.x == -999: continue
+			l = repli
+		var vers := _vers_la_rue(v, l)
+		var bord := Vector2(float(l.x) + 0.5, float(l.y) + 0.5) * CASE
+		var cap := 0.0
+		var long := Vector2(1.0, 0.0)
+		if vers != Vector2i.ZERO:
+			var u := Vector2(float(vers.x), float(vers.y))
+			bord += u * (CASE * 0.5 - MARGE_TROTTOIR)
+			cap = atan2(-u.x, -u.y)
+			long = u.orthogonal()
+		else:
+			bord = Vector2((float(l.x) + 0.18) * CASE, (float(l.y) + 0.82) * CASE)
+		var x := bord.x
+		var z := bord.y
+		v.ajouter_objet(ABRIBUS, x, z, cap, 0.0, "")
+		var banc := bord + long * 9.0
+		v.ajouter_objet("banc", banc.x, banc.y, cap, 0.0, "")
 		if alea.randf() < 0.55:
-			var xr := (float(l.x) + 0.78) * CASE
-			var zr := (float(l.y) + 0.22) * CASE
-			v.ajouter_objet(RACK, xr, zr, 0.0, 0.0, "")
+			var r := bord - long * 9.0
+			v.ajouter_objet(RACK, r.x, r.y, cap, 0.0, "")
 			for t in (1 + alea.randi() % 3):
-				v.ajouter_objet(VELO, xr - 3.0 + float(t) * 3.0, zr + 1.2,
-					PI * 0.5, 0.0, "")
+				var vv := r + long * (float(t) * 3.0 - 3.0)
+				v.ajouter_objet(VELO, vv.x, vv.y, cap + PI * 0.5, 0.0, "")
 		if alea.randf() < 0.30:
-			v.ajouter_objet("poubelle", x - 4.0, z - 4.0, 0.0, 0.0, "")
+			var pb := bord + long * 14.0
+			v.ajouter_objet("poubelle", pb.x, pb.y, cap, 0.0, "")
 
 ## LA GARE, POSÉE À CÔTÉ DE SA STATION ET PAS DESSUS. Huit cases de long : posée
 ## sur le point de la station, elle enjamberait la voie qu'elle est censée
 ## desservir. On la décale d'une demi-longueur, du côté où il y a de la terre.
+## ⭐⭐ « LES GARES DOIVENT ÊTRE COLLÉES AUX RAILS » (client, 16/09).
+##
+## Elle cherchait sa place « du côté où il y a de la terre », dans un ordre fixe
+## de quatre décalages de trois cases, sans jamais regarder OU PASSE LA VOIE.
+## Une gare finissait donc à soixante mètres du rail, de travers, séparée de son
+## quai par un pré — un bâtiment de gare qui ne dessert rien.
+##
+## Maintenant on lit d'abord l'AXE DE LA VOIE sous le point de station, puis :
+##
+## 1. le bâtiment se tourne pour présenter son LONG CÔTÉ à la voie — c'est ce
+##    côté-là qui porte le quai ;
+## 2. on l'approche PERPENDICULAIREMENT à la voie, du plus près au plus loin, et
+##    des deux côtés : la première position libre gagne, donc la plus collée ;
+## 3. on garde un jeu d'une case, parce que le couloir du rail est réservé
+##    (`_reserver`) et qu'une gare POSÉE SUR la voie est le défaut d'à côté.
+##
+## Sans voie repérée (une station de bus principale, un bord de fenêtre), on
+## retombe sur l'ancienne recherche en croix plutôt que de ne rien poser.
+static func _axe_du_rail(v: Ville2, lc: Vector2i) -> Vector2i:
+	for r in v.rail:
+		var cases := Ville2.cases_de_route(r)
+		for k in cases.size():
+			var a: Vector2i = cases[k]
+			if absi(a.x - lc.x) + absi(a.y - lc.y) > 3: continue
+			var b: Vector2i = cases[k + 1] if k + 1 < cases.size() else cases[maxi(0, k - 1)]
+			if b == a: continue
+			return Vector2i(1, 0) if b.y == a.y else Vector2i(0, 1)
+	return Vector2i.ZERO
+
 static func _la_gare(v: Ville2, f: Rect2i, c: Vector2i, nom: String) -> void:
 	var modele := String(KitVille2.REPERES["gare"])
-	for q in [0, 2, 1, 3]:
+	var lc := c - f.position
+	var axe := _axe_du_rail(v, lc)
+	var essais: Array = []
+	if axe != Vector2i.ZERO:
+		# Le quart de tour qui met le long côté le long de la voie, puis son
+		# opposé : si la première orientation ne rentre nulle part, mieux vaut
+		# une gare tournée que pas de gare.
+		var e0 := KitVille2.emprise_tournee(modele, 0)
+		var long_selon_x := e0.x >= e0.y
+		var veut_x := axe == Vector2i(1, 0)
+		var q0 := 0 if long_selon_x == veut_x else 1
+		var perp := Vector2i(axe.y, axe.x)
+		for q in [q0, q0 + 2, q0 + 1, q0 + 3]:
+			for t in [2, 3, 4, 5]:
+				for sens in [1, -1]:
+					essais.append([posmod(q, 4), perp * (t * sens)])
+	else:
+		for q in [0, 2, 1, 3]:
+			for d0 in [Vector2i(0, 3), Vector2i(0, -3), Vector2i(3, 0), Vector2i(-3, 0)]:
+				essais.append([q, d0])
+	for paire in essais:
+		var q: int = int(paire[0])
+		var d: Vector2i = paire[1]
 		var e := KitVille2.emprise_tournee(modele, q)
-		for d0 in [Vector2i(0, 3), Vector2i(0, -3), Vector2i(3, 0), Vector2i(-3, 0)]:
-			var d: Vector2i = d0
-			var a := c + d
-			var hx := (a.x - f.position.x) * 2 - e.x / 2
-			var hy := (a.y - f.position.y) * 2 - e.y / 2
-			if hx < 0 or hy < 0 or hx + e.x > v.taille.x * 2 or hy + e.y > v.taille.y * 2:
-				continue
-			if not Lotisseur.terrain_libre(v, hx, hy, e): continue
-			v.ajouter_lot(modele, hx, hy, e.x, e.y, q, "gare")
-			v.ajouter_lieu("gare", (float(a.x - f.position.x) + 0.5) * CASE,
-				(float(a.y - f.position.y) + 0.5) * CASE, {"nom": nom})
-			return
+		var a := c + d
+		var hx := (a.x - f.position.x) * 2 - e.x / 2
+		var hy := (a.y - f.position.y) * 2 - e.y / 2
+		if hx < 0 or hy < 0 or hx + e.x > v.taille.x * 2 or hy + e.y > v.taille.y * 2:
+			continue
+		if not Lotisseur.terrain_libre(v, hx, hy, e): continue
+		v.ajouter_lot(modele, hx, hy, e.x, e.y, q, "gare")
+		v.ajouter_lieu("gare", (float(a.x - f.position.x) + 0.5) * CASE,
+			(float(a.y - f.position.y) + 0.5) * CASE, {"nom": nom})
+		return
 
 # ─────────────────────────────────────────────── LES REPÈRES HABITABLES
 
@@ -766,7 +906,12 @@ static func _les_cabines(v: Ville2, f: Rect2i, cases: Array, tous_les: int,
 ## La demi-largeur réservée, en cases, de part et d'autre de l'axe.
 ## ⚠ Le viaduc est plus large que le rail : son tablier fait 22 unités, plus
 ## l'ombre des piles et le recul qu'on veut voir sous un ouvrage.
-const LARGE_RESERVE_RAIL := 1
+## ⚠ LE COULOIR DU RAIL EST PLUS LARGE QUE SON TRACÉ. Depuis que la voie est
+## lissée (voir `RenduVille2._trace_arrondi`), elle COUPE ses virages : elle
+## passe à une case et demie à l'intérieur de l'angle que décrit le tracé. Un
+## couloir réservé à la largeur du tracé laissait donc bâtir pile où la courbe
+## passe, et le train traversait une maison à chaque coude.
+const LARGE_RESERVE_RAIL := 2
 const LARGE_RESERVE_VIADUC := 1
 
 static func _reserver(plan: Dictionary, v: Ville2, f: Rect2i) -> void:

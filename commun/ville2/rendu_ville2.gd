@@ -63,6 +63,19 @@ static func batir(ville: Ville2, zone: Rect2i = Rect2i(), passes: int = P_TOUT,
 
 static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 	var carte := ville.carte
+	# ⚠⚠ LES RONDS-POINTS SE CALCULENT UNE FOIS, PAS PAR CASE. La règle demande
+	# de comparer un candidat à tous ceux d'un rayon de quatre cases ; appelée
+	# depuis la boucle, et une seconde fois pour les huit voisines de chaque
+	# case, elle coûtait six cents examens PAR CASE DE RUE — des millions sur
+	# une fenêtre, et le triple sur une grande. On balaie donc la zone une fois,
+	# élargie d'une case pour attraper un rond-point dont le centre est juste
+	# dehors et dont un bras entre dans la vue.
+	var ronds := {}
+	var large := zone.grow(1)
+	for j0 in range(large.position.y, large.end.y):
+		for i0 in range(large.position.x, large.end.x):
+			var c0 := Vector2i(i0, j0)
+			if _rond_point_ici(ville, c0): ronds[c0] = true
 	for j in range(zone.position.y, zone.end.y):
 		for i in range(zone.position.x, zone.end.x):
 			var c := Vector2i(i, j)
@@ -79,13 +92,29 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 			if carte.case_prise(c):
 				continue
 			if carte.route(c):
+				if ronds.has(c):
+					# Le rond-point tient les neuf cases : il se pose seul, à
+					# trois cases de large, et ses voisines s'abstiennent.
+					_tuile(racine, "road-roundabout", centre, 0, Color.WHITE, 3.0)
+					continue
+				if _sous_un_rond(ronds, c): continue
 				var f: Array = carte.tuile(c)
 				var nom := String(f[0])
 				nom = _variante_avenue(ville, c, nom)
 				nom = _variante_campagne(ville, c, nom)
 				_tuile(racine, nom, centre, int(f[1]))
-				# Les voies rapides sont bordées de glissières.
-				if ville.genre_de_route(c) == Ville2.R_VOIE_RAPIDE and CarteVille.BARRIERES.has(nom):
+				# ⭐ LES GLISSIÈRES. Systématiques sur une voie rapide, et POSÉES
+				# AU BORD DU VIDE partout ailleurs : « de temps en temps place les
+				# objets avec la terminaison barrier pour ajouter des sécurités
+				# de sortir de la route en se cognant dessus » (client, 16/09).
+				# Le bon « de temps en temps » n'est pas un tirage au sort : c'est
+				# là où la chaussée SURPLOMBE quelque chose — un remblai, un
+				# quai, l'eau. Une glissière au milieu d'un lotissement plat ne
+				# protège de rien et encombre le trottoir ; une glissière au bord
+				# d'une descente, c'est ce qui rend le dénivelé lisible.
+				if CarteVille.BARRIERES.has(nom) \
+						and (ville.genre_de_route(c) == Ville2.R_VOIE_RAPIDE
+							or _au_bord_du_vide(ville, c)):
 					_tuile(racine, String(CarteVille.BARRIERES[nom]), centre, int(f[1]))
 			elif ville.matiere_de(c) == Ville2.M_DALLE:
 				_tuile(racine, _dalle_de(ville, c), centre, 0, TEINTE_DALLE)
@@ -125,19 +154,116 @@ static func _teinte_du_sol(ville: Ville2, c: Vector2i) -> Color:
 	if not ANGLES.a_la_campagne(ville, c): return TEINTE_DALLE
 	return TerrainV2.COULEURS.get(ville.matiere_de(c), TEINTE_DALLE)
 
-## LES PASSAGES PIÉTONS (cahier § 5 : « feux tricolores aux carrefours
-## d'avenues », § 8 : « piétons sur les passages »). Sur une avenue, un
-## carrefour prend la variante à zébras du kit, et le tronçon droit qui y
-## mène prend `road-crossing`. Les rues gardent le tirage de `CarteVille`.
+## ⭐⭐ LES PASSAGES PIÉTONS — « il ne faut pas mettre de passage piéton l'un à
+## côté de l'autre » (client, 16/09, capture à l'appui : une avenue entière
+## pavée de zébras, en long ET en large).
+##
+## D'où venait le tapis rayé : les tuiles `-path` du kit portent leurs propres
+## passages sur CHACUN de leurs quatre bras, et toute case d'avenue entourée de
+## chaussée porte le masque d'un carrefour. Sur une avenue large de trois
+## cases, l'INTÉRIEUR de la chaussée est donc « un carrefour » du point de vue
+## du masque : chaque case prenait sa tuile zébrée, et l'avenue devenait un
+## passage clouté de deux cents mètres de long.
+##
+## Deux règles, et il faut les deux :
+##
+## 1. UN ZÉBRA SE POSE AU BORD D'UN CARREFOUR, PAS DANS SON VENTRE. On traverse
+##    là où le trottoir commence : une case dont les quatre voisines sont de la
+##    chaussée est au milieu du bitume, personne n'y traverse. Cette seule règle
+##    vide l'intérieur des avenues larges.
+## 2. JAMAIS DEUX CÔTE À CÔTE. Parmi deux voisines qui remplissent toutes deux
+##    la règle 1, une seule garde son zébra : celle dont le tirage de position
+##    est le plus bas. Le tirage ne dépend que de la case, donc l'arbitrage
+##    donne le même résultat d'une reconstruction à l'autre et d'une fenêtre à
+##    la voisine — sans quoi le passage sauterait d'un côté à l'autre de la rue
+##    à chaque coup de pinceau.
+## La chaussée surplombe-t-elle quelque chose ? Une voisine sous l'eau, ou plus
+## basse d'un palier entier : dans les deux cas on tombe si on sort de la route.
+static func _au_bord_du_vide(ville: Ville2, c: Vector2i) -> bool:
+	var mien := ville.carte.palier(c)
+	for d in CarteVille.COTES:
+		var n: Vector2i = c + d
+		if not ville.carte.terre(n): return true
+		if mien - ville.carte.palier(n) >= 1: return true
+	return false
+
+## ⭐⭐ LE ROND-POINT, « avec parcimonie » (client, 16/09, photo à l'appui).
+##
+## ⚠ IL FAIT TROIS CASES SUR TROIS, PAS UNE. Mesuré : `road-roundabout` va de
+## −1,5 à +1,5 dans les deux sens. Posé comme une tuile ordinaire il serait
+## neuf fois trop petit, et posé à sa taille sans rien dégager il écraserait
+## les huit cases autour de lui. Le centre le dessine à trois cases, et ses huit
+## voisines ne posent plus rien : c'est LUI, leur chaussée.
+##
+## Quatre conditions, et la parcimonie vient de la troisième :
+## 1. un vrai carrefour à quatre branches (masque 15) ;
+## 2. une rue ordinaire — ni avenue, ni voie rapide : un rond-point sur une
+##    deux fois deux voies ne se lit pas ;
+## 3. les quatre bras sont de la chaussée et les quatre COINS sont libres —
+##    le modèle apporte ses propres coins, il lui faut la place ;
+## 4. un carrefour sur quatorze environ, et jamais deux dans un rayon de
+##    quatre cases : entre deux candidats, celui dont le tirage de position est
+##    le plus bas gagne, donc le choix ne dépend pas de la fenêtre regardée.
+const RARETE_ROND := 14
+const ECART_RONDS := 4
+
+static func _candidat_rond(ville: Ville2, c: Vector2i) -> bool:
+	if not ville.carte.route(c): return false
+	if ville.carte.masque(c) != 15: return false
+	var genre := ville.genre_de_route(c)
+	if genre == Ville2.R_AVENUE or genre == Ville2.R_VOIE_RAPIDE: return false
+	for d in CarteVille.COTES:
+		if not ville.carte.route(c + d): return false
+	for d in [Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]:
+		var coin: Vector2i = c + d
+		if ville.carte.route(coin): return false
+		if ville.lot_sur(coin) >= 0: return false
+		if not ville.carte.terre(coin): return false
+		if ville.carte.palier(coin) != ville.carte.palier(c): return false
+	return CarteVille.tirage_de(c) % RARETE_ROND == 0
+
+static func _rond_point_ici(ville: Ville2, c: Vector2i) -> bool:
+	if not _candidat_rond(ville, c): return false
+	var mien := CarteVille.tirage_de(c)
+	for dy in range(-ECART_RONDS, ECART_RONDS + 1):
+		for dx in range(-ECART_RONDS, ECART_RONDS + 1):
+			if dx == 0 and dy == 0: continue
+			var n := c + Vector2i(dx, dy)
+			if _candidat_rond(ville, n) and CarteVille.tirage_de(n) < mien:
+				return false
+	return true
+
+## Cette case est-elle SOUS un rond-point voisin ? Alors elle ne pose rien.
+static func _sous_un_rond(ronds: Dictionary, c: Vector2i) -> bool:
+	for dy in [-1, 0, 1]:
+		for dx in [-1, 0, 1]:
+			if dx == 0 and dy == 0: continue
+			if ronds.has(c + Vector2i(dx, dy)): return true
+	return false
+
+static func _bord_de_carrefour(ville: Ville2, c: Vector2i) -> bool:
+	if not ville.carte.route(c): return false
+	var m := ville.carte.masque(c)
+	if m != 15 and m != 7 and m != 11 and m != 13 and m != 14: return false
+	for d in CarteVille.COTES:
+		if not ville.carte.route(c + d): return true
+	return false
+
+static func _zebre_ici(ville: Ville2, c: Vector2i) -> bool:
+	if not _bord_de_carrefour(ville, c): return false
+	var mien := CarteVille.tirage_de(c)
+	for d in CarteVille.COTES:
+		var n: Vector2i = c + d
+		if not _bord_de_carrefour(ville, n): continue
+		if CarteVille.tirage_de(n) < mien: return false
+	return true
+
 static func _variante_avenue(ville: Ville2, c: Vector2i, nom: String) -> String:
-	if ville.genre_de_route(c) != Ville2.R_AVENUE: return nom
-	if nom.begins_with("road-crossroad"): return "road-crossroad-path"
-	if nom.begins_with("road-intersection"): return "road-intersection-path"
-	# ⚠ AUCUN PASSAGE PIÉTON À CÔTÉ D'UN CARREFOUR : IL EN A DÉJÀ (demande du
-	# client, 12/09). Les tuiles `-path` du kit — celles qu'on pose sur les
-	# carrefours et les T d'avenue — portent leurs propres passages sur chacun
-	# de leurs bras. En ajouter un sur la case d'à côté, c'était traverser deux
-	# fois la même rue à deux mètres d'intervalle.
+	var zebre := _zebre_ici(ville, c)
+	if nom.begins_with("road-crossroad"):
+		return "road-crossroad-path" if zebre else "road-crossroad-line"
+	if nom.begins_with("road-intersection"):
+		return "road-intersection-path" if zebre else "road-intersection-line"
 	return nom
 
 ## Quelle dalle sous une case pavée sans rue : le trottoir du kit. Les cases
@@ -379,6 +505,24 @@ static func _poser_objets(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 
 ## Pose un objet : `modele` est un nom du catalogue (`KitVille2.PROPS`), une
 ## voiture (`voitures/...`), ou un chemin `res://` posé à l'échelle du kit.
+## ⭐ L'ASSIETTE D'UNE PIÈCE : son cap, PUIS son inclinaison.
+##
+## Le moteur ne savait poser quà plat. Ça suffit pour une maison ; ça ne suffit
+## pas pour une chaussée d'autoroute, qui monte et descend avec le tablier. Une
+## tuile de route posée à plat sur un tablier en pente laisse une MARCHE à
+## chaque case — un escalier de vingt centimètres tous les vingt mètres, sur
+## vingt kilomètres.
+##
+## ⚠ L'ORDRE COMPTE, ET IL N'EST PAS INTERCHANGEABLE. On tourne d'abord la
+## pièce vers son cap (autour de la verticale), puis on la bascule autour de son
+## propre axe TRANSVERSAL — le X local, celui qui vient de tourner avec elle.
+## Basculer d'abord et tourner ensuite ferait pencher la route sur le côté dès
+## qu'elle ne va plus vers l'est.
+static func _assiette(tourne: float, pente: float) -> Basis:
+	var b := Basis(Vector3.UP, tourne)
+	if absf(pente) < 0.0005: return b
+	return b * Basis(Vector3.RIGHT, pente)
+
 static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0.0,
 		hauteur := 0.0, teinte := "", fiche_objet := {}) -> void:
 	if modele == "pelouse":
@@ -447,7 +591,7 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 		n.transform = Transform3D(Basis(Vector3.UP, tourne), ou)
 	elif h > 0.0:
 		n.mesh = FormesCarnage.maillage_kenney(chemin, h, Vector3.AXIS_Y, 0.0)
-		n.transform = Transform3D(Basis(Vector3.UP, tourne), ou)
+		n.transform = Transform3D(_assiette(tourne, float(fiche_objet.get("pente", 0.0))), ou)
 	else:
 		# À l'échelle du kit (auvents, conteneurs, dalles de sentier…).
 		# ⚠ PAS `CASE` EN DUR : les accessoires du kit nature sont dessinés pour
@@ -481,7 +625,7 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 		# tuile se lit comme du sol, plus comme une dalle.
 		var aplat := float(fiche_objet.get("aplat", 1.0))
 		var e := KitVille2.echelle_libre(chemin)
-		n.transform = Transform3D(Basis(Vector3.UP, tourne).scaled(
+		n.transform = Transform3D(_assiette(tourne, float(fiche_objet.get("pente", 0.0))).scaled(
 			Vector3(e, e * aplat, e)), ou)
 	n.material_override = _matiere(chemin, couleur) if toit_o == "" \
 		else _matiere_toit(chemin, couleur, toit_o)
@@ -493,47 +637,290 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 
 ## Le rail : deux files et des traverses, en boîtes — le kit n'a pas de voie
 ## ferrée. Posé au sol, entre les cases, au niveau du palier.
-static func _poser_rail(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
+## ⭐⭐ LA VOIE NE S'ÉTALE PAS SUR LA CHAUSSÉE, ELLE LA FRANCHIT.
+##
+## « Une voie ferrée doit couper une route en passant par-dessus mais jamais
+## être étalée dessus » (client, 16/09), et sa capture le montrait : les
+## traverses couraient à plat sur l'avenue, comme un tapis posé sur la route.
+##
+## La voie porte donc un PROFIL D'ALTITUDE, pas une hauteur par case :
+##
+## 1. Au repos elle est au sol, sur le palier de sa case.
+## 2. Au-dessus d'une chaussée elle est à `HAUT_FRANCHIT` au-dessus du sol —
+##    de quoi laisser passer un camion.
+## 3. ENTRE LES DEUX, ELLE MONTE, elle ne saute pas. Le profil brut est lissé
+##    sur une dizaine de cases : la rampe s'étale de part et d'autre du
+##    croisement, et c'est ce qui fait un remblai plutôt qu'une marche.
+## 4. Là où elle est en l'air, elle prend son TABLIER et ses PILES. Sans ça la
+##    voie volerait, ce qui est le même défaut d'un cran plus haut.
+const HAUT_FRANCHIT := 9.0           ## le gabarit libre au-dessus d'une chaussée
+const LISSAGE_RAIL := 5              ## demi-fenêtre de la rampe, en cases
+const AU_SOL := 1.2                  ## en dessous, la voie est réputée au sol
+const ECART_PILES_RAIL := 3          ## une pile toutes les 3 cases
+const TEINTE_TABLIER_RAIL := Color("#9aa0a8")
+
+## Le sol sous une case de voie. ⚠ Une case d'eau n'a pas de palier (`palier`
+## rend −999) : la voie y est sur un pont, dont le tablier de cette carte est au
+## palier 0 — on y retombe, ce qui pose les traverses exactement dessus.
+static func _sol_du_rail(ville: Ville2, c: Vector2i) -> float:
+	var niveau := ville.carte.palier(c)
+	return 0.3 if niveau <= -900 else float(niveau) * PALIER + 0.3
+
+## Le profil d'une voie : au sol partout, en l'air au-dessus des chaussées, et
+## une rampe pour relier les deux.
+static func _profil_du_rail(ville: Ville2, cases: Array) -> PackedFloat32Array:
+	var brut := PackedFloat32Array()
+	brut.resize(cases.size())
+	for i in cases.size():
+		var c: Vector2i = cases[i]
+		brut[i] = _sol_du_rail(ville, c) + (HAUT_FRANCHIT if ville.carte.route(c) else 0.0)
+	var lisse := PackedFloat32Array()
+	lisse.resize(cases.size())
+	for i in cases.size():
+		# ⚠ LA MOYENNE NE DOIT JAMAIS FAIRE REDESCENDRE LA VOIE SOUS SON GABARIT.
+		# Un lissage seul rabote le sommet de la rampe : au-dessus de la
+		# chaussée la voie retomberait à mi-hauteur, et le camion passerait
+		# dedans. On prend donc le PLUS HAUT des deux, la moyenne pour la
+		# douceur et le brut pour la sécurité.
+		var somme := 0.0
+		var n := 0
+		for t in range(maxi(0, i - LISSAGE_RAIL), mini(cases.size(), i + LISSAGE_RAIL + 1)):
+			somme += brut[t]
+			n += 1
+		lisse[i] = maxf(somme / float(n), brut[i])
+	return lisse
+
+## ⭐⭐ UN CHEMIN DE FER N'A AUCUN ANGLE DROIT. AUCUN.
+##
+## « Il n'y a aucun virage dans un vrai chemin de fer, aucun angle droit n'est
+## accepté, que des courbes petit à petit » (client, 16/09).
+##
+## Ma première réponse coupait les coins un par un, avec une courbe par virage.
+## Elle laissait passer tout ce qui n'était pas un virage franc et isolé : deux
+## coudes rapprochés restaient vifs, et les embranchements aussi — c'est ce que
+## montrait sa capture, trois voies qui se rejoignent à l'équerre.
+##
+## La bonne réponse n'est pas de rattraper les coins : c'est de ne jamais en
+## fabriquer. Le tracé du pays est posé sur une grille de cases, donc il est fait
+## d'angles droits par construction. On le LISSE ENTIÈREMENT, en deux temps :
+##
+## 1. ON DÉCIME. Une case sur `DECIME` devient un point de conduite. Un polygone
+##    de conduite plus lâche donne un rayon de courbure plus grand — c'est le
+##    seul réglage qui décide si la voie tourne comme un train ou comme un
+##    tramway.
+## 2. ON COUPE LES COINS, ENCORE ET ENCORE (Chaikin). À chaque passe, chaque
+##    segment perd ses deux quarts d'extrémité au profit de deux points neufs :
+##    un angle devient deux angles moitié moins vifs, puis quatre, puis huit.
+##    Après quatre passes il n'y a plus d'angle du tout, seulement une courbe —
+##    et une portion droite, dont les points sont alignés, reste parfaitement
+##    droite parce que couper le coin d'une ligne droite ne donne rien d'autre
+##    que la même ligne droite.
+##
+## ⚠ LES DEUX BOUTS NE BOUGENT PAS. Une voie se termine là où une autre commence
+## — un embranchement, une gare, le bord de la carte. Si le lissage déplaçait les
+## extrémités, chaque raccord s'ouvrirait de quelques mètres : « les rails se
+## collent mal ». Chaikin garde donc le premier et le dernier point tels quels.
+const DECIME := 2              ## une case de conduite sur deux
+const PASSES_LISSAGE := 4      ## le nombre de fois qu'on coupe les coins
+
+## Le profil, lu à un rang flottant.
+static func _haut_a(haut: PackedFloat32Array, u: float) -> float:
+	var n := haut.size()
+	if n == 0: return 0.0
+	var f := clampf(u, 0.0, float(n - 1))
+	var i := int(floor(f))
+	var j := mini(i + 1, n - 1)
+	return lerpf(haut[i], haut[j], f - float(i))
+
+## Le centre d'une case, à l'altitude du profil.
+static func _point_rail(cases: Array, haut: PackedFloat32Array, u: float) -> Vector3:
+	var n := cases.size()
+	var f := clampf(u, 0.0, float(n - 1))
+	var i := int(floor(f))
+	var j := mini(i + 1, n - 1)
+	var a: Vector2i = cases[i]
+	var b: Vector2i = cases[j]
+	var t := f - float(i)
+	return Vector3((lerpf(float(a.x), float(b.x), t) + 0.5) * CASE,
+		_haut_a(haut, f),
+		(lerpf(float(a.y), float(b.y), t) + 0.5) * CASE)
+
+## Une passe de Chaikin, les deux bouts tenus.
+static func _couper_les_coins(pts: Array) -> Array:
+	if pts.size() < 3: return pts
+	var sortie: Array = [pts[0]]
+	for k in range(pts.size() - 1):
+		var a: Vector3 = pts[k]
+		var b: Vector3 = pts[k + 1]
+		sortie.append(a.lerp(b, 0.25))
+		sortie.append(a.lerp(b, 0.75))
+	sortie.append(pts[pts.size() - 1])
+	return sortie
+
+## La voie dessinée : plus un seul angle droit, du premier mètre au dernier.
+static func _trace_arrondi(cases: Array, haut: PackedFloat32Array) -> Array:
+	var n := cases.size()
+	if n < 2: return []
+	var pts: Array = []
+	var u := 0.0
+	while u < float(n - 1):
+		pts.append(_point_rail(cases, haut, u))
+		u += float(DECIME)
+	pts.append(_point_rail(cases, haut, float(n - 1)))
+	for _t in PASSES_LISSAGE:
+		pts = _couper_les_coins(pts)
+	return _reechantillonner(pts)
+
+## ⚠ QUATRE PASSES DE CHAIKIN MULTIPLIENT LES POINTS PAR SEIZE, et chaque point
+## de plus est un bout de rail, un tablier et une traverse : la voie coûtait
+## huit fois son prix pour un dessin identique. On repasse donc la courbe à pas
+## CONSTANT — une traverse tous les `PAS_TRAVERSE`, en ville comme en courbe —
+## ce qui rend au passage l'espacement des traverses régulier, alors qu'il se
+## resserrait dans les virages.
+const PAS_TRAVERSE := 6.0
+
+static func _reechantillonner(pts: Array) -> Array:
+	if pts.size() < 2: return pts
+	var sortie: Array = [pts[0]]
+	var reste := 0.0
+	for k in range(1, pts.size()):
+		var a: Vector3 = pts[k - 1]
+		var b: Vector3 = pts[k]
+		var d := a.distance_to(b)
+		if d < 0.0001: continue
+		var parcouru := PAS_TRAVERSE - reste
+		while parcouru <= d:
+			sortie.append(a.lerp(b, parcouru / d))
+			parcouru += PAS_TRAVERSE
+		reste = d - (parcouru - PAS_TRAVERSE)
+	var dernier: Vector3 = pts[pts.size() - 1]
+	if (sortie[sortie.size() - 1] as Vector3).distance_to(dernier) > 0.5:
+		sortie.append(dernier)
+	return sortie
+
+## ⭐⭐⭐ RABOUTER AVANT DE LISSER — ET C'EST POURQUOI MON LISSAGE NE FAISAIT RIEN.
+##
+## « Je vois toujours des angles droits dans les rails » (client, 16/09), après
+## une correction qui supprimait tous les angles. Les deux étaient vrais, et
+## voici pourquoi : le réseau n'est pas fait de voies, il est fait de TRONÇONS
+## DROITS. Mesuré sur une fenêtre de 45 cases — douze polylignes, dont neuf
+## extrémités partagées avec une voisine : chaque coin du réseau est le point où
+## DEUX POLYLIGNES SE TOUCHENT, pas un coude à l'intérieur d'une polyligne.
+##
+## Or le lissage tient ses deux bouts (il le faut, sinon les raccords s'ouvrent).
+## Chaque tronçon était donc lissé… et restait une ligne parfaitement droite,
+## pendant que tous les angles du réseau, qui vivent exactement aux jointures,
+## passaient entre les mailles. Je lissais consciencieusement ce qui n'avait
+## aucun coin.
+##
+## On recoud donc la voie AVANT de la lisser. Deux tronçons qui partagent un bout
+## que personne d'autre ne touche sont la même voie : on les colle. Là où trois
+## tronçons se rejoignent — un embranchement — on s'arrête : c'est un vrai nœud,
+## il a le droit d'être un nœud, et coller deux branches au hasard inventerait
+## une voie qui n'existe pas.
+static func _chaines_de_rail(ville: Ville2) -> Array:
+	var voies: Array = []
 	for r in ville.rail:
-		var cases := Ville2.cases_de_route(r)
-		for k in range(1, cases.size()):
-			var a: Vector2i = cases[k - 1]
-			var b: Vector2i = cases[k]
-			if not zone.has_point(a): continue
-			# ⚠ UNE CASE D'EAU N'A PAS DE PALIER, ET LA VOIE DOIT QUAND MÊME
-			# PASSER (ajouté le 14/09 avec les ponts ferroviaires de la grande
-			# carte). `CarteVille.palier` rend −999 pour une case sans sol — et
-			# une case d'eau n'en a pas, puisque `rasteriser` ne pose de sol que
-			# sur la terre. La voie se dessinait donc à cinq kilomètres sous la
-			# carte, c'est-à-dire nulle part : les deux ponts ferroviaires
-			# étaient des trous, sans un mot dans la console.
-			#
-			# Sur l'eau, un rail est sur un pont, et le tablier des ponts de
-			# cette carte est posé au niveau du palier 0 (voir `TABLIER` dans
-			# `generateur_carte.gd` : un tablier plus haut ferait une marche à
-			# la culée). On retombe donc sur le palier 0, ce qui pose les
-			# traverses exactement sur le tablier.
-			#
-			# ⚠ AUCUN DES NEUF TÉMOINS NE PASSE PAR LÀ : aucun n'a de voie sur
-			# l'eau, et `palier` ne leur rend jamais −999. Cette branche est
-			# neuve et ne peut rien leur changer.
-			var niveau_rail := ville.carte.palier(a)
-			var y := 0.3
-			if niveau_rail > -900: y = float(niveau_rail) * PALIER + 0.3
-			var pa := Vector3((float(a.x) + 0.5) * CASE, y, (float(a.y) + 0.5) * CASE)
-			var pb := Vector3((float(b.x) + 0.5) * CASE, y, (float(b.y) + 0.5) * CASE)
-			var selon_x := a.y == b.y
+		var c := Ville2.cases_de_route(r)
+		if c.size() >= 2: voies.append(c)
+	# Le degré de chaque extrémité : combien de tronçons s'y touchent.
+	var degre := {}
+	for c in voies:
+		for e in [(c as Array)[0], (c as Array)[(c as Array).size() - 1]]:
+			degre[e] = int(degre.get(e, 0)) + 1
+	# Qui part de quel bout.
+	var par_bout := {}
+	for k in voies.size():
+		var c: Array = voies[k]
+		for e in [c[0], c[c.size() - 1]]:
+			if not par_bout.has(e): par_bout[e] = []
+			(par_bout[e] as Array).append(k)
+	var vus := {}
+	var chaines: Array = []
+	# On démarre par les tronçons dont un bout N'EST PAS un simple raccord :
+	# une extrémité libre ou un embranchement. Ce qui reste ensuite est une
+	# boucle fermée, qu'on ouvre n'importe où.
+	for depart in [false, true]:
+		for k in voies.size():
+			if vus.has(k): continue
+			var c: Array = voies[k]
+			var tete: Vector2i = c[0]
+			var queue: Vector2i = c[c.size() - 1]
+			var libre_tete := int(degre.get(tete, 0)) != 2
+			var libre_queue := int(degre.get(queue, 0)) != 2
+			if not depart and not libre_tete and not libre_queue: continue
+			# On part du bout libre, pour parcourir la voie dans son sens.
+			var suite: Array = c.duplicate()
+			if libre_queue and not libre_tete: suite.reverse()
+			vus[k] = true
+			# Et on avance tant que le bout suivant n'est qu'un raccord.
+			while true:
+				var bout: Vector2i = suite[suite.size() - 1]
+				if int(degre.get(bout, 0)) != 2: break
+				var voisin := -1
+				for j in (par_bout.get(bout, []) as Array):
+					if not vus.has(int(j)): voisin = int(j)
+				if voisin < 0: break
+				var d: Array = (voies[voisin] as Array).duplicate()
+				if d[0] != bout: d.reverse()
+				vus[voisin] = true
+				for t in range(1, d.size()): suite.append(d[t])
+			chaines.append(suite)
+	return chaines
+
+static func _poser_rail(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
+	for cases in _chaines_de_rail(ville):
+		if cases.size() < 2: continue
+		var haut := _profil_du_rail(ville, cases)
+		var pts := _trace_arrondi(cases, haut)
+		# ⚠ UNE PILE PAR CASE, PAS UNE PAR SEGMENT. Dans un virage arrondi, huit
+		# segments courts tombent sur la même case : sans ce registre, huit
+		# poteaux se plantaient au même endroit.
+		var posees := {}
+		for k in range(1, pts.size()):
+			var pa: Vector3 = pts[k - 1]
+			var pb: Vector3 = pts[k]
 			var milieu := (pa + pb) * 0.5
+			var a := Vector2i(int(floor(milieu.x / CASE)), int(floor(milieu.z / CASE)))
+			if not zone.has_point(a): continue
 			var ecart := 3.2
+			# ⚠⚠ « TES CHEMINS DE FER SE CASSENT DES FOIS » (client, 16/09), et
+			# la faute était à moi, d'un cran en amont : les rails et les
+			# traverses étaient des boîtes ALIGNÉES SUR LES AXES, posées à
+			# l'altitude du milieu du tronçon. Tant que la voie était à plat
+			# c'était invisible. Depuis qu'elle monte pour franchir les routes,
+			# deux tronçons voisins ne sont plus à la même hauteur : chacun
+			# restait horizontal, et la voie devenait un escalier de bouts de
+			# rail qui ne se touchent plus — cassée, exactement.
+			#
+			# Le tronçon se dessine donc dans SON PROPRE REPÈRE : l'axe X suit
+			# la pente réelle de A vers B, et la longueur est la vraie distance
+			# en trois dimensions, pas la largeur d'une case. Deux tronçons se
+			# rejoignent alors bout à bout quelle que soit la rampe.
+			var av := (pb - pa)
+			var longueur := av.length()
+			if longueur < 0.001: continue
+			av = av / longueur
+			var cote := av.cross(Vector3.UP).normalized()
+			var dessus := cote.cross(av).normalized()
+			var base := Basis(av, dessus, cote)
+			# L'ouvrage, quand la voie a quitté le sol : un tablier plein sous
+			# les traverses, et des piles jusqu'au terrain.
+			var sol := _sol_du_rail(ville, a)
+			var creux := milieu.y - sol
+			if creux > AU_SOL:
+				_boite_tournee(racine, base, Vector3(longueur, 1.1, 9.4),
+					milieu - dessus * 0.75, TEINTE_TABLIER_RAIL)
+				if posmod(a.x + a.y, ECART_PILES_RAIL) == 0 and not posees.has(a):
+					posees[a] = true
+					_boite(racine, Vector3(2.6, creux, 2.6),
+						Vector3(milieu.x, sol + creux * 0.5 - 0.7, milieu.z), TEINTE_TABLIER_RAIL)
 			for s in [-1.0, 1.0]:
-				var d := Vector3(0, 0, ecart * s) if selon_x else Vector3(ecart * s, 0, 0)
-				_boite(racine, Vector3(CASE, 0.5, 0.6) if selon_x else Vector3(0.6, 0.5, CASE),
-					milieu + d + Vector3(0, 0.25, 0), TEINTE_RAIL)
-			for t in 5:
-				var f := (float(t) + 0.5) / 5.0
-				var p := pa.lerp(pb, f)
-				_boite(racine, Vector3(1.2, 0.3, 9.0) if selon_x else Vector3(9.0, 0.3, 1.2),
-					p + Vector3(0, 0.15, 0), TEINTE_TRAVERSE)
+				_boite_tournee(racine, base, Vector3(longueur, 0.5, 0.6),
+					milieu + cote * (ecart * s) + dessus * 0.25, TEINTE_RAIL)
+			# Une traverse par tronçon : le pas est déjà celui des traverses.
+			_boite_tournee(racine, base, Vector3(1.2, 0.3, 9.0),
+				milieu + dessus * 0.15, TEINTE_TRAVERSE)
 
 # ------------------------------------------------------------------ les panneaux pub
 
@@ -874,7 +1261,8 @@ static func _boite(racine: Node3D, dims: Vector3, ou: Vector3, teinte: Color) ->
 
 # ------------------------------------------------------------------ outils
 
-static func _tuile(parent: Node3D, nom: String, ou: Vector3, quarts: int, teinte := Color.WHITE) -> void:
+static func _tuile(parent: Node3D, nom: String, ou: Vector3, quarts: int,
+		teinte := Color.WHITE, cases := 1.0) -> void:
 	var chemin := ROUTES + nom + ".glb"
 	if not ResourceLoader.exists(chemin):
 		push_warning("tuile absente : " + chemin)
@@ -895,7 +1283,7 @@ static func _tuile(parent: Node3D, nom: String, ou: Vector3, quarts: int, teinte
 	# Une case sur deux descend d'un cheveu : voir `DECALAGE_DAMIER`.
 	var damier := float((posmod(roundi(ou.x / CASE) + roundi(ou.z / CASE), 2)))
 	n.transform = Transform3D(Basis(Vector3.UP, PI * 0.5 * float(quarts)).scaled(
-		Vector3.ONE * CASE * RECOUVREMENT),
+		Vector3.ONE * CASE * RECOUVREMENT * cases),
 		ou - Vector3(0.0, damier * DECALAGE_DAMIER, 0.0))
 	n.set_meta("tuile", nom)
 	_noter(chemin)

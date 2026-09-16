@@ -812,15 +812,59 @@ static func _l_aerodrome(graine: int) -> Ville2:
 ##    différentes de part et d'autre d'une couture — un décroché d'un mètre en
 ##    plein milieu du tablier, tous les deux kilomètres.
 const HAUT_VIADUC := 11.0            ## dégagement sous tablier, en unités
-const LARGE_VIADUC := 22.0           ## un peu plus large qu'une avenue
+const LARGE_VIADUC := 21.0           ## la largeur du tablier porteur
 const ECART_PILES := 4               ## une pile toutes les 4 cases (80 m)
 const CHERCHE_PILE := 3              ## de combien de cases on décale une pile gênée
 const LISSAGE := 6                   ## demi-fenêtre de la moyenne glissante
-## La pièce de route du kit posée sur le tablier, à l'échelle de la case.
-const CHAUSSEE_VIADUC := "ville/road-straight"
-const EPAISSEUR_TABLIER := 0.45
+const EPAISSEUR_TABLIER := 0.45      ## où la chaussée se pose sur son tablier
+
+## ⭐⭐ LE KIT DE L'AUTOROUTE — liste donnée par le client le 16/09, après
+## « vraiment ton autoroute rime à rien ». Il avait raison : le viaduc était une
+## dalle grise avec une tuile de rue posée dessus, alors que le kit Kenney
+## contient une VOIE RAPIDE COMPLÈTE, virages, ponts, bretelles et panneaux.
+##
+## Ce que chaque pièce sait faire, mesuré sur son maillage (`AABB`) et non
+## deviné, parce que deux d'entre elles ne font PAS une case :
+##
+##   road-straight            1 × 1, plate            la chaussée courante
+##   road-bend                1 × 1, virage sec       un quart de tour
+##   road-curve               2 × 2  ← DEUX CASES     inutilisable case par case
+##   road-curve-intersection  2 × 2  ← DEUX CASES     idem
+##   road-bridge              1 × 1, 0,52 de haut     une travée avec sa structure
+##   road-side-exit / entry   1 × 1,31 ← DÉBORDE      la bretelle, sortie et entrée
+##   road-split               1 × 2  ← DEUX CASES     la séparation des voies
+##   bridge-pillar            0,10 × 0,50            le poteau, mis à la hauteur
+##   bridge-pillar-wide       0,14 × 0,50            le poteau des grandes portées
+##   sign-highway(-wide)      0,13 × 0,71 × 1        le panneau de bord de voie
+##
+## ⚠ ET CE QUE JE N'UTILISE PAS, AVEC LA RAISON. Les `road-slant-*` montent de
+## 0,27 unité de kit sur une case, c'est-à-dire CINQ MÈTRES SUR VINGT : 27 % de
+## pente. Une bretelle de parking, pas une autoroute — et surtout un escalier,
+## puisque le tablier, lui, monte de quelques centimètres par case. La montée et
+## la descente se font donc en INCLINANT la chaussée droite sur la pente réelle
+## du tablier (`pente`, voir `RenduVille2._assiette`), ce qui donne une voie
+## continue au lieu d'une suite de marches. Les pièces à deux cases sont
+## écartées pour la même raison de justesse : elles se chevaucheraient d'une
+## case sur deux.
+const AUTO_DROIT := "routes/road-straight"
+const AUTO_VIRAGE := "routes/road-bend"
+const AUTO_PONT := "routes/road-bridge"
+const AUTO_SORTIE := "routes/road-side-exit"
+const AUTO_ENTREE := "routes/road-side-entry"
+const AUTO_PILE := "routes/bridge-pillar"
+const AUTO_PILE_LARGE := "routes/bridge-pillar-wide"
+const PANNEAUX := ["routes/sign-highway", "routes/sign-highway-detailed",
+	"routes/sign-highway-wide"]
+const ECART_PANNEAUX := 23           ## un panneau toutes les 23 cases (460 m)
+const PORTEE_LARGE := 6              ## au-delà, la pile large
 
 static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i) -> void:
+	# Les cases où une AUTRE primaire passe : là, la voie se croise.
+	var croisements := {}
+	for r0 in plan["routes"]:
+		if String((r0 as Dictionary).get("classe", "")) != PLAN.V_PRIMAIRE: continue
+		for c0 in _cases_suivies((r0 as Dictionary)["points"]):
+			croisements[c0] = int(croisements.get(c0, 0)) + 1
 	for r in plan["routes"]:
 		var d: Dictionary = r
 		if String(d.get("classe", "")) != PLAN.V_PRIMAIRE: continue
@@ -828,41 +872,137 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 		if cases.size() < 2: continue
 		var haut := _profil_du_tablier(plan, ctx, cases)
 		var piles := _ou_poser_les_piles(v, f, cases)
+		var precedente := -99
 		for i in cases.size():
 			var c: Vector2i = cases[i]
 			if not f.has_point(c): continue
 			var l := c - f.position
 			var x := (float(l.x) + 0.5) * CASE
 			var z := (float(l.y) + 0.5) * CASE
-			var selon_x := true
-			if i + 1 < cases.size():
-				selon_x = (cases[i + 1] as Vector2i).y == c.y
-			elif i > 0:
-				selon_x = (cases[i - 1] as Vector2i).y == c.y
+			# Le cap : d'où l'on vient, où l'on va.
+			var avant: Vector2i = cases[i - 1] if i > 0 else c
+			var apres: Vector2i = cases[i + 1] if i + 1 < cases.size() else c
+			var entre := c - avant
+			var sort := apres - c
+			if entre == Vector2i.ZERO: entre = sort
+			if sort == Vector2i.ZERO: sort = entre
+			var tourne := _cap(entre)
+			# La pente réelle du tablier sur cette case, en radians. C'est elle
+			# qui incline la chaussée : la route monte, elle ne s'escalade pas.
+			var pente := 0.0
+			if i > 0 and i + 1 < cases.size():
+				pente = atan2(haut[i - 1] - haut[i + 1], 2.0 * CASE)
 			# ⚠ `zone: true` : le tablier est du mobilier de voirie posé en l'air.
 			# Sans ce drapeau la passe de propreté retire l'autoroute entière.
-			var tourne := 0.0 if selon_x else PI * 0.5
 			v.objets.append({"m": "viaduc", "x": x, "z": z,
 				"r": tourne, "h": 0.0,
 				"w": LARGE_VIADUC, "d": CASE + 0.6, "y_abs": haut[i], "zone": true})
-			# ⭐ ET UNE VRAIE CHAUSSÉE DU KIT PAR-DESSUS, pas une dalle grise.
-			# « Tu n'as pas utilisé une road du Kenney » : le tablier n'est que
-			# la structure — le revêtement, ses bandes et ses bordures viennent
-			# de la même pièce que toutes les autres routes de la carte, sinon
-			# l'autoroute est le seul ruban de la ville à ne pas être une route.
-			# ⚠⚠ HAUTEUR ZÉRO, ET C'EST UN PIÈGE QUI M'A COÛTÉ UNE LIVRAISON.
-			# Le troisième paramètre de `ajouter_objet` est une HAUTEUR en
-			# unités, pas une largeur : `h = CASE` a mis à l'échelle chaque
-			# tuile de route pour qu'elle fasse VINGT MÈTRES DE HAUT. Le pays
-			# s'est couvert de dalles blanches géantes qui cachaient la ville,
-			# et j'ai d'abord accusé le terrassement des parcelles. Zéro = la
-			# pièce à sa taille du kit, c'est-à-dire une case de côté.
-			v.objets.append({"m": CHAUSSEE_VIADUC, "x": x, "z": z,
-				"r": tourne, "h": 0.0,
+			# ⭐ LA PIÈCE JUSTE POUR CETTE CASE-LÀ.
+			var piece := AUTO_DROIT
+			var cap := tourne
+			var incline := pente
+			if entre != sort:
+				# Un quart de tour : `road-bend` tourne en une case. Son cap se
+				# lit sur le COUPLE (entrée, sortie), pas sur l'une des deux.
+				piece = AUTO_VIRAGE
+				cap = _cap_du_virage(entre, sort)
+				incline = 0.0
+			elif int(croisements.get(c, 0)) > 1:
+				# Deux primaires au même endroit : la travée passe par-dessus.
+				piece = AUTO_PONT
+				incline = 0.0
+			elif _coupee_dessous(v, l, entre):
+				# Une rue COUPE dessous : une travée de pont, qui a sa structure
+				# apparente — c'est là qu'un viaduc se voit de la rue.
+				piece = AUTO_PONT
+				incline = 0.0
+			v.objets.append({"m": piece, "x": x, "z": z,
+				"r": cap, "h": 0.0, "pente": incline,
 				"y_abs": haut[i] + EPAISSEUR_TABLIER, "zone": true})
+			# ⭐ LES BRETELLES. Une sortie se pose là où une rue de la ville
+			# croise le tracé : c'est le seul endroit où une voiture qui quitte
+			# l'autoroute a quelque chose à rejoindre. Entrée puis sortie, de
+			# part et d'autre du croisement, comme sur un vrai échangeur.
+			if piece == AUTO_PONT and i - precedente > 8:
+				precedente = i
+				for paire in [[AUTO_SORTIE, -2], [AUTO_ENTREE, 2]]:
+					var j: int = i + int(paire[1])
+					if j < 0 or j >= cases.size(): continue
+					var cj: Vector2i = cases[j]
+					if not f.has_point(cj): continue
+					if (cases[j] as Vector2i) - (cases[j - 1] as Vector2i) != entre: continue
+					var lj := cj - f.position
+					v.objets.append({"m": String(paire[0]),
+						"x": (float(lj.x) + 0.5) * CASE, "z": (float(lj.y) + 0.5) * CASE,
+						"r": tourne, "h": 0.0,
+						"y_abs": haut[j] + EPAISSEUR_TABLIER + 0.02, "zone": true})
+			# ⭐ LES PANNEAUX, au bord de la voie et tournés vers le conducteur.
+			# Ils se posent sur la POSITION ABSOLUE et non sur l'indice : une
+			# fenêtre décalée doit retrouver les mêmes panneaux aux mêmes cases.
+			if posmod(c.x * 7 + c.y * 13, ECART_PANNEAUX) == 0 and entre == sort:
+				var cote := Vector2(sin(tourne), cos(tourne)).orthogonal() * (LARGE_VIADUC * 0.5 + 1.2)
+				v.objets.append({"m": String(PANNEAUX[posmod(c.x + c.y, PANNEAUX.size())]),
+					"x": x + cote.x, "z": z + cote.y,
+					"r": tourne, "h": 0.0,
+					"y_abs": haut[i] + EPAISSEUR_TABLIER, "zone": true})
+			# ⭐ LE POTEAU DU KIT, MIS À SA HAUTEUR RÉELLE.
+			# `bridge-pillar` est dessiné pour une portée de 0,5 case : mis à
+			# l'échelle sur la hauteur voulue, il reste proportionné, et un
+			# tablier de trente mètres reçoit un fût plus épais — ce que fait un
+			# vrai ouvrage. La pile LARGE marque les grandes portées.
 			if piles.has(i):
-				v.objets.append({"m": "pile", "x": x, "z": z, "h": 0.0,
-					"w": 3.4, "y": haut[i], "zone": true})
+				var sol := PLAN.sol_en(plan, ctx, c)
+				var pied := maxf(float(sol[0]), TerrainV2.NIVEAU_MER)
+				var creux := maxf(haut[i] - pied, 2.0)
+				v.objets.append({"m": AUTO_PILE_LARGE if creux > CASE * 0.9 else AUTO_PILE,
+					"x": x, "z": z, "r": tourne, "h": creux,
+					"y_abs": pied, "zone": true})
+
+## ⭐⭐ UNE ROUTE QUI PASSE DESSOUS N'EST PAS UNE ROUTE QUI COUPE.
+##
+## `road-bridge` se posait dès qu'il y avait de la chaussée sous le tablier. Or
+## l'autoroute longe des avenues sur des kilomètres : chaque case était « au-
+## dessus d'une route », donc chaque case devenait une travée de pont, et le
+## viaduc entier se couvrait de parapets — « si une route en dessous passe en la
+## coupant, pas partout » (client, 16/09).
+##
+## La travée de pont marque un FRANCHISSEMENT, et un franchissement se
+## reconnaît à ce que la voie du dessous est PERPENDICULAIRE à celle du dessus :
+## elle entre d'un côté du tablier et ressort de l'autre. Une rue parallèle, si
+## près soit-elle, ne se franchit pas — on roule au-dessus d'elle, c'est tout.
+##
+## Une avenue large qui croise donne plusieurs travées d'affilée, et c'est juste :
+## le pont fait la largeur de ce qu'il enjambe.
+static func _coupee_dessous(v: Ville2, l: Vector2i, entre: Vector2i) -> bool:
+	if not v.carte.route(l): return false
+	# Le travers de l'autoroute : là où la rue du dessous doit se poursuivre.
+	var travers := Vector2i(entre.y, entre.x)
+	if travers == Vector2i.ZERO: return false
+	var a: Vector2i = l + travers
+	var b: Vector2i = l - travers
+	if not v.dedans(a) or not v.dedans(b): return false
+	return v.carte.route(a) and v.carte.route(b)
+
+## Le cap d'un pas d'une case : vers l'est, le sud, l'ouest ou le nord.
+static func _cap(pas: Vector2i) -> float:
+	if pas.x > 0: return 0.0
+	if pas.x < 0: return PI
+	if pas.y > 0: return -PI * 0.5
+	return PI * 0.5
+
+## ⚠ LE CAP D'UN VIRAGE NE SE LIT PAS SUR SON ENTRÉE. `road-bend` est dessiné
+## dans UNE orientation : la table dit, pour chaque couple (on arrivait comme
+## ça, on repart comme ça), le quart de tour qui met la pièce au bon sens. Les
+## quatre entrées manquantes sont les mêmes lues à l'envers.
+const VIRAGES := {
+	"1,0|0,1": 0, "0,-1|-1,0": 0,
+	"0,1|-1,0": 1, "1,0|0,-1": 1,
+	"-1,0|0,-1": 2, "0,1|1,0": 2,
+	"0,-1|1,0": 3, "-1,0|0,1": 3}
+
+static func _cap_du_virage(entre: Vector2i, sort: Vector2i) -> float:
+	var cle := "%d,%d|%d,%d" % [entre.x, entre.y, sort.x, sort.y]
+	return PI * 0.5 * float(int(VIRAGES.get(cle, 0)))
 
 ## Les cases d'une polyligne, dans l'ordre et sans trou.
 static func _cases_suivies(points: Array) -> Array:

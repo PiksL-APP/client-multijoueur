@@ -1,4 +1,7 @@
 extends Node3D
+
+const PLAN_PAYS := preload("res://commun/ville2/plan_pays.gd")
+const PAYS := preload("res://commun/ville2/generateur_pays.gd")
 ## PHOTOGRAPHIE LA VILLE V2. Trois caméras du cahier (§ 11) : `--vue=dessus`
 ## (verticale, tout le témoin), `--vue=oblique` (le diorama, 35°) et
 ## `--vue=derriere` (à hauteur de voiture, dans une rue). `--vise=i,j` en
@@ -69,7 +72,19 @@ func _ready() -> void:
 
 	var ville: Ville2
 	var chemin := _arg("carte", "")
-	if chemin != "":
+	var fen := _arg("fenetre", "")
+	if fen != "":
+		# ⭐ UNE FENÊTRE DU PAYS, comme l'éditeur la bâtit :
+		# `--fenetre=470,430,60,60` (coin x, coin y, largeur, hauteur, en cases).
+		# Sans ça le banc rendait toujours le témoin du centre, et on croyait
+		# regarder l'autoroute alors qu'on regardait une carte qui n'en a pas.
+		var m: PackedStringArray = fen.split(",")
+		var plan: Dictionary = PLAN_PAYS.charger(_arg("plan", "res://cartes/aurones-plan.json"))
+		var ctx: Dictionary = PLAN_PAYS.contexte(plan)
+		var r := Rect2i(int(m[0]), int(m[1]), int(m[2]), int(m[3]))
+		ville = PAYS.fenetre(plan, ctx, r, {"nom": "aurones"})
+		print("fenêtre %d,%d %d×%d" % [r.position.x, r.position.y, r.size.x, r.size.y])
+	elif chemin != "":
 		ville = Ville2.charger(chemin)
 	elif _arg("temoin", "centre") == "plage":
 		ville = GenerateurPlage.generer(int(_arg("graine", "2")))

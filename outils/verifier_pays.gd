@@ -78,6 +78,51 @@ func _init() -> void:
 					sous_viaduc += 1
 					break
 	print("3. lots sous le viaduc : %d (tablier : %d cases)" % [sous_viaduc, tabliers])
+
+	# 4. MOBILIER POSÉ DANS UN BÂTIMENT. « Certains bâtiments se chevauchent » —
+	# et quand ce ne sont pas deux lots, c'est un banc, un arbre ou une voiture
+	# planté au milieu d'un mur. Le lotisseur connaît les lots ; le mobilier,
+	# lui, ne consultait personne.
+	var dedans := 0
+	var coupables := {}
+	for o2 in v.objets:
+		var fo2: Dictionary = o2
+		# Ce qui est EN L'AIR n'est pas dans un bâtiment : viaduc, piles,
+		# chaussée d'autoroute, panneaux. On ne compte que ce qui est au sol.
+		if fo2.has("y_abs") or bool(fo2.get("zone", false)): continue
+		var c6 := Vector2i(floori(float(fo2["x"]) / 20.0), floori(float(fo2["z"]) / 20.0))
+		if not v.dedans(c6): continue
+		if v.lot_sur(c6) >= 0:
+			dedans += 1
+			coupables[String(fo2.get("m", "?"))] = int(coupables.get(String(fo2.get("m", "?")), 0)) + 1
+	var pire: Array = []
+	for cle in coupables: pire.append([int(coupables[cle]), String(cle)])
+	pire.sort_custom(func(a, b): return int(a[0]) > int(b[0]))
+	print("4. objets plantés dans un bâtiment : %d" % dedans)
+	for t in mini(6, pire.size()):
+		print("     %5d  %s" % [int((pire[t] as Array)[0]), String((pire[t] as Array)[1])])
+
+	# 5. LOTS FLOTTANTS. Un bâtiment est posé sur le palier de son coin ; si une
+	# autre de ses cases est plus basse, ce coin-là est en l'air.
+	var flottants := 0
+	var pire_creux := 0
+	for l4 in v.lots:
+		var m3: Dictionary = l4
+		var cx := floori(float(int(m3["x"])) * 0.5)
+		var cy := floori(float(int(m3["y"])) * 0.5)
+		var ref := v.carte.palier(Vector2i(cx, cy))
+		var bas := ref
+		for b5 in int(m3["h"]):
+			for a5 in int(m3["w"]):
+				var c7 := Vector2i(floori(float(int(m3["x"]) + a5) * 0.5),
+					floori(float(int(m3["y"]) + b5) * 0.5))
+				var pp := v.carte.palier(c7)
+				if pp > -900: bas = mini(bas, pp)
+		if ref - bas >= 1:
+			flottants += 1
+			pire_creux = maxi(pire_creux, ref - bas)
+	print("5. lots dont un coin est en l\'air : %d (pire creux : %d paliers)"
+		% [flottants, pire_creux])
 	quit()
 
 ## ⚠ LES POINTS DU RAIL SONT DES `Vector2i`, PAS DES `[x, y]`. Les routes du
