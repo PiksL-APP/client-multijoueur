@@ -78,6 +78,15 @@ static func remplir(plan: Dictionary, ctx: Dictionary, v: Ville2, origine: Vecto
 	v.rasteriser()
 	# 2. LE SOL du quartier, hors chaussée.
 	_le_sol(plan, ctx, v, f, vus)
+	# 2 bis. ⭐⭐ RÉSERVER CE QUI N'EST PAS UNE ROUTE ET QUI INTERDIT DE BÂTIR.
+	#        `Lotisseur.terrain_libre` connaît trois choses : la terre, les
+	#        routes et les lots. Le RAIL n'est aucune des trois, et le TABLIER
+	#        DE L'AUTOROUTE non plus — il est en l'air, donc invisible pour le
+	#        sol. Résultat mesuré sur une fenêtre de 2,2 km : 74 maisons posées
+	#        SUR la voie ferrée et 529 sous le viaduc, qui leur passait au
+	#        travers. On réserve donc les deux emprises dans `demi_prises`, et
+	#        on le fait AVANT les lots — après, il est trop tard.
+	_reserver(plan, v, f)
 	# 3. ⭐ LES REPÈRES ET LES GARES AVANT LES LOTS, ET C'EST UN ORDRE QU'ON NE
 	#    DEVINE PAS : posés en dernier, ils ne trouvaient PLUS UNE SEULE PLACE
 	#    LIBRE — la rue était déjà bordée sur toute sa longueur, et l'hôpital,
@@ -317,8 +326,38 @@ static func _poser(v: Ville2, f: Rect2i, m: String, hx: int, hy: int, e: Vector2
 	var ly := hy - f.position.y * 2
 	if lx < 0 or ly < 0 or lx + e.x > v.taille.x * 2 or ly + e.y > v.taille.y * 2: return false
 	if not Lotisseur.terrain_libre(v, lx, ly, e): return false
+	if not _assez_plat(v, lx, ly, e): return false
 	v.ajouter_lot(m, lx, ly, e.x, e.y, q, genre)
 	return true
+
+## ⭐⭐ ON NE BÂTIT QUE SUR DU PLAT — « certains bâtiments flottent ».
+##
+## `Lotisseur.terrain_libre` exige que les cases d'une parcelle soient au même
+## PALIER. Sur un témoin, où le sol est un plateau, palier égal veut dire
+## altitude égale. Sur le pays, le terrain est CONTINU : deux cases voisines
+## partagent le même palier arrondi et diffèrent d'un mètre en altitude réelle.
+## Le moteur pose alors le bâtiment à l'altitude de sa case centrale, et le coin
+## aval décolle.
+##
+## ⚠ ET ON NE TERRASSE PAS. J'ai d'abord aplani la parcelle à l'altitude de son
+## centre : `poser_terre` remet aussi `eau` à zéro et écrase le relief case par
+## case, et le quartier entier s'est transformé en un empilement de dalles
+## grises — la ville avait perdu ses bâtiments et son sol. Refuser un terrain
+## trop penché ne casse rien : on perd quelques maisons sur les fortes pentes,
+## là où une vraie ville n'en met pas non plus.
+const PENTE_TOLEREE := 0.9           ## écart d'altitude admis sous une parcelle, en unités
+
+static func _assez_plat(v: Ville2, hx: int, hy: int, e: Vector2i) -> bool:
+	var mini := 1.0e20
+	var maxi := -1.0e20
+	for b in range(0, e.y + 1):
+		for a in range(0, e.x + 1):
+			var c := Vector2i(floori(float(hx + a) * 0.5), floori(float(hy + b) * 0.5))
+			if not v.dedans(c): return false
+			var y := v.sol(c)
+			mini = minf(mini, y)
+			maxi = maxf(maxi, y)
+	return maxi - mini <= PENTE_TOLEREE
 
 static func _tirer(charte: Dictionary, alea: RandomNumberGenerator) -> String:
 	var t := alea.randf()
@@ -721,3 +760,52 @@ static func _les_cabines(v: Ville2, f: Rect2i, cases: Array, tous_les: int,
 		if alea.randf() > 0.5: continue
 		v.ajouter_objet(CABINE, (float(l.x) + 0.86) * CASE, (float(l.y) + 0.14) * CASE,
 			PI * 0.5)
+
+# ──────────────────────────────────────────── CE QU'ON NE BÂTIT PAS DESSUS
+
+## La demi-largeur réservée, en cases, de part et d'autre de l'axe.
+## ⚠ Le viaduc est plus large que le rail : son tablier fait 22 unités, plus
+## l'ombre des piles et le recul qu'on veut voir sous un ouvrage.
+const LARGE_RESERVE_RAIL := 1
+const LARGE_RESERVE_VIADUC := 1
+
+static func _reserver(plan: Dictionary, v: Ville2, f: Rect2i) -> void:
+	for r in v.rail:
+		var fr: Dictionary = r
+		_reserver_la_ligne(v, _cases_de(fr["points"]), LARGE_RESERVE_RAIL, Vector2i.ZERO)
+	for r2 in plan.get("routes", []):
+		var f2: Dictionary = r2
+		if String(f2.get("classe", "")) != "primaire": continue
+		_reserver_la_ligne(v, _cases_de(f2["points"]), LARGE_RESERVE_VIADUC, f.position)
+
+## Les cases d'une polyligne, qu'elle soit en `Vector2i` (une voie bâtie en
+## mémoire) ou en `[x, y]` (une route relue du plan JSON).
+static func _cases_de(points: Array) -> Array:
+	var sortie: Array = []
+	for k in range(1, points.size()):
+		var a := _vers_case(points[k - 1])
+		var b := _vers_case(points[k])
+		var pas := (b - a).sign()
+		if pas.x != 0 and pas.y != 0: continue
+		var c := a
+		if sortie.is_empty(): sortie.append(c)
+		while c != b:
+			c += pas
+			sortie.append(c)
+	return sortie
+
+static func _vers_case(p) -> Vector2i:
+	if typeof(p) == TYPE_VECTOR2I: return p
+	var t: Array = p
+	return Vector2i(int(t[0]), int(t[1]))
+
+static func _reserver_la_ligne(v: Ville2, cases: Array, large: int, origine: Vector2i) -> void:
+	for e in cases:
+		var c: Vector2i = (e as Vector2i) - origine
+		for dj in range(-large, large + 1):
+			for di in range(-large, large + 1):
+				var d := c + Vector2i(di, dj)
+				if not v.dedans(d): continue
+				for b in 2:
+					for a in 2:
+						v.demi_prises[Vector2i(d.x * 2 + a, d.y * 2 + b)] = true

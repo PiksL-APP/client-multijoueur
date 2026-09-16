@@ -816,6 +816,9 @@ const LARGE_VIADUC := 22.0           ## un peu plus large qu'une avenue
 const ECART_PILES := 4               ## une pile toutes les 4 cases (80 m)
 const CHERCHE_PILE := 3              ## de combien de cases on décale une pile gênée
 const LISSAGE := 6                   ## demi-fenêtre de la moyenne glissante
+## La pièce de route du kit posée sur le tablier, à l'échelle de la case.
+const CHAUSSEE_VIADUC := "ville/road-straight"
+const EPAISSEUR_TABLIER := 0.45
 
 static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i) -> void:
 	for r in plan["routes"]:
@@ -838,9 +841,25 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 				selon_x = (cases[i - 1] as Vector2i).y == c.y
 			# ⚠ `zone: true` : le tablier est du mobilier de voirie posé en l'air.
 			# Sans ce drapeau la passe de propreté retire l'autoroute entière.
+			var tourne := 0.0 if selon_x else PI * 0.5
 			v.objets.append({"m": "viaduc", "x": x, "z": z,
-				"r": 0.0 if selon_x else PI * 0.5, "h": 0.0,
+				"r": tourne, "h": 0.0,
 				"w": LARGE_VIADUC, "d": CASE + 0.6, "y_abs": haut[i], "zone": true})
+			# ⭐ ET UNE VRAIE CHAUSSÉE DU KIT PAR-DESSUS, pas une dalle grise.
+			# « Tu n'as pas utilisé une road du Kenney » : le tablier n'est que
+			# la structure — le revêtement, ses bandes et ses bordures viennent
+			# de la même pièce que toutes les autres routes de la carte, sinon
+			# l'autoroute est le seul ruban de la ville à ne pas être une route.
+			# ⚠⚠ HAUTEUR ZÉRO, ET C'EST UN PIÈGE QUI M'A COÛTÉ UNE LIVRAISON.
+			# Le troisième paramètre de `ajouter_objet` est une HAUTEUR en
+			# unités, pas une largeur : `h = CASE` a mis à l'échelle chaque
+			# tuile de route pour qu'elle fasse VINGT MÈTRES DE HAUT. Le pays
+			# s'est couvert de dalles blanches géantes qui cachaient la ville,
+			# et j'ai d'abord accusé le terrassement des parcelles. Zéro = la
+			# pièce à sa taille du kit, c'est-à-dire une case de côté.
+			v.objets.append({"m": CHAUSSEE_VIADUC, "x": x, "z": z,
+				"r": tourne, "h": 0.0,
+				"y_abs": haut[i] + EPAISSEUR_TABLIER, "zone": true})
 			if piles.has(i):
 				v.objets.append({"m": "pile", "x": x, "z": z, "h": 0.0,
 					"w": 3.4, "y": haut[i], "zone": true})
