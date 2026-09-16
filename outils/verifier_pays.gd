@@ -62,11 +62,17 @@ func _init() -> void:
 	for o in v.objets:
 		var fo: Dictionary = o
 		if String(fo.get("m", "")) != "viaduc": continue
-		tabliers += 1
-		var c4 := Vector2i(floori(float(fo["x"]) / 20.0), floori(float(fo["z"]) / 20.0))
-		for dj in [-1, 0, 1]:
-			for di in [-1, 0, 1]:
-				sous[c4 + Vector2i(di, dj)] = true
+		# ⚠ LE TABLIER EST UN RUBAN DEPUIS LE 16/09, PLUS UNE DALLE PAR CASE.
+		# Compté comme un objet, il donnait « 8 cases de tablier » pour deux
+		# kilomètres d'autoroute, et la mesure « lots sous le viaduc » ne
+		# mesurait plus rien. On parcourt donc ses points.
+		for pt in (fo.get("pts", []) as Array):
+			var q: Array = pt
+			tabliers += 1
+			var c4 := Vector2i(floori(float(q[0]) / 20.0), floori(float(q[2]) / 20.0))
+			for dj in [-1, 0, 1]:
+				for di in [-1, 0, 1]:
+					sous[c4 + Vector2i(di, dj)] = true
 	var sous_viaduc := 0
 	for l3 in v.lots:
 		var m2: Dictionary = l3

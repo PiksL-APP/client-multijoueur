@@ -873,6 +873,18 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 		var haut := _profil_du_tablier(plan, ctx, cases)
 		var piles := _ou_poser_les_piles(v, f, cases)
 		var precedente := -99
+		# ⭐⭐ LE TABLIER EST UN RUBAN, PAS UNE FILE DE CUBES.
+		# « Tes autoroutes sur les ponts sont vraiment mal faites, tu as des
+		# trucs qui passent à travers chaque cube » (client, 16/09). Il avait
+		# raison sur le fond ET sur le mot : c'ÉTAIT des cubes. Une dalle par
+		# case, chacune posée à plat à l'altitude de SA case — donc un joint
+		# visible tous les vingt mètres, une marche à chaque changement de
+		# pente, et deux bordures qui s'arrêtent et repartent à chaque dalle,
+		# ce qui dessinait une échelle en travers de la chaussée.
+		# On accumule donc les points du tablier et on le dessine d'un trait.
+		var ruban: Array = []
+		var rubans: Array = []
+		var dernier_pose := -99
 		for i in cases.size():
 			var c: Vector2i = cases[i]
 			if not f.has_point(c): continue
@@ -892,11 +904,14 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 			var pente := 0.0
 			if i > 0 and i + 1 < cases.size():
 				pente = atan2(haut[i - 1] - haut[i + 1], 2.0 * CASE)
-			# ⚠ `zone: true` : le tablier est du mobilier de voirie posé en l'air.
-			# Sans ce drapeau la passe de propreté retire l'autoroute entière.
-			v.objets.append({"m": "viaduc", "x": x, "z": z,
-				"r": tourne, "h": 0.0,
-				"w": LARGE_VIADUC, "d": CASE + 0.6, "y_abs": haut[i], "zone": true})
+			# Le ruban se COUPE dès que la case précédente n'était pas voisine :
+			# sortie de fenêtre, ou trou dans le tracé. Deux morceaux valent
+			# mieux qu'un tablier qui saute par-dessus le vide en ligne droite.
+			if not ruban.is_empty() and i - dernier_pose > 1:
+				if ruban.size() >= 2: rubans.append(ruban)
+				ruban = []
+			dernier_pose = i
+			ruban.append([x, haut[i], z])
 			# ⭐ LA PIÈCE JUSTE POUR CETTE CASE-LÀ.
 			var piece := AUTO_DROIT
 			var cap := tourne
@@ -957,6 +972,13 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 				v.objets.append({"m": AUTO_PILE_LARGE if creux > CASE * 0.9 else AUTO_PILE,
 					"x": x, "z": z, "r": tourne, "h": creux,
 					"y_abs": pied, "zone": true})
+		# ⚠ `zone: true` : le tablier est du mobilier de voirie posé en l'air.
+		# Sans ce drapeau la passe de propreté retire l'autoroute entière.
+		if ruban.size() >= 2: rubans.append(ruban)
+		for morceau in rubans:
+			var pts: Array = morceau
+			v.objets.append({"m": "viaduc", "x": float(pts[0][0]), "z": float(pts[0][2]),
+				"r": 0.0, "h": 0.0, "w": LARGE_VIADUC, "pts": pts, "zone": true})
 
 ## ⭐⭐ UNE ROUTE QUI PASSE DESSOUS N'EST PAS UNE ROUTE QUI COUPE.
 ##
@@ -1010,13 +1032,20 @@ static func _cases_suivies(points: Array) -> Array:
 	for k in range(1, points.size()):
 		var a := PLAN.case_de(points[k - 1])
 		var b := PLAN.case_de(points[k])
-		var pas := (b - a).sign()
-		if pas.x != 0 and pas.y != 0: continue
+		# ⚠⚠ UN SEGMENT EN DIAGONALE NE SE SAUTE PAS, IL SE MONTE EN L.
+		# Ce `continue` abandonnait le segment ENTIER : le tablier s'arrêtait net
+		# en plein ciel et repartait plus loin — un bout de viaduc de trois cases
+		# posé sur quatre piles au milieu de la ville (client, capture du 16/09).
+		# On passe par le coude : d'abord en X, puis en Y.
 		var c := a
 		if sortie.is_empty(): sortie.append(c)
-		while c != b:
-			c += pas
-			sortie.append(c)
+		var coude := Vector2i(b.x, a.y)
+		for cible0 in [coude, b]:
+			var cible: Vector2i = cible0
+			var pas := (cible - c).sign()
+			while c != cible:
+				c += pas
+				sortie.append(c)
 	return sortie
 
 ## L'altitude du tablier, case par case : le sol lissé plus le dégagement.

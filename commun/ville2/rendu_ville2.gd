@@ -112,9 +112,7 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 				# quai, l'eau. Une glissière au milieu d'un lotissement plat ne
 				# protège de rien et encombre le trottoir ; une glissière au bord
 				# d'une descente, c'est ce qui rend le dénivelé lisible.
-				if CarteVille.BARRIERES.has(nom) \
-						and (ville.genre_de_route(c) == Ville2.R_VOIE_RAPIDE
-							or _au_bord_du_vide(ville, c)):
+				if CarteVille.BARRIERES.has(nom) and _barriere_ici(ville, c):
 					_tuile(racine, String(CarteVille.BARRIERES[nom]), centre, int(f[1]))
 			elif ville.matiere_de(c) == Ville2.M_DALLE:
 				_tuile(racine, _dalle_de(ville, c), centre, 0, TEINTE_DALLE)
@@ -177,6 +175,33 @@ static func _teinte_du_sol(ville: Ville2, c: Vector2i) -> Color:
 ##    donne le même résultat d'une reconstruction à l'autre et d'une fenêtre à
 ##    la voisine — sans quoi le passage sauterait d'un côté à l'autre de la rue
 ##    à chaque coup de pinceau.
+## ⭐⭐⭐ LA GLISSIÈRE EST LA RÈGLE, PAS L'EXCEPTION.
+##
+## « Étudie l'image 1 pour revoir tout ton système de route, et fais tout avec
+## les barrières par-dessus, quitte à fusionner les deux objets ensemble »
+## (client, 16/09). Sa référence montre un réseau où CHAQUE ruban est bordé sur
+## toute sa longueur : ce sont les glissières qui donnent à la route son épaisseur
+## et son tracé lisible, pas le bitume.
+##
+## ⚠ LE KIT SÉPARE LA CHAUSSÉE DE SA GLISSIÈRE, ET C'EST UNE CHANCE. Un
+## `-barrier` n'est pas une tuile, c'est la paire de rails à poser dessus
+## (mesuré au banc : le modèle seul ne montre que deux traits). On ne fusionne
+## donc rien dans les fichiers : on pose SYSTÉMATIQUEMENT les deux pièces, ce
+## qui revient au même à l'écran et laisse le kit intact.
+##
+## ⚠⚠ SAUF AUX CARREFOURS, ET C'EST TOUTE LA RÈGLE. Le modèle `-barrier` porte
+## ses rails sur ses DEUX côtés. Posé partout, il en met donc entre les voies
+## d'une avenue large et en travers de chaque croisement — on grillagerait la
+## ville. Une case dont les quatre voisines sont de la chaussée est un carrefour
+## ou le ventre d'une avenue : elle n'a pas de bord, donc pas de glissière. Dès
+## qu'un côté donne sur autre chose que du bitume, la route a un bord, et ce
+## bord se borde.
+static func _barriere_ici(ville: Ville2, c: Vector2i) -> bool:
+	if ville.genre_de_route(c) == Ville2.R_VOIE_RAPIDE: return true
+	for d in CarteVille.COTES:
+		if not ville.carte.route(c + d): return true
+	return false
+
 ## La chaussée surplombe-t-elle quelque chose ? Une voisine sous l'eau, ou plus
 ## basse d'un palier entier : dans les deux cas on tombe si on sort de la route.
 static func _au_bord_du_vide(ville: Ville2, c: Vector2i) -> bool:
@@ -463,6 +488,10 @@ static func _poser_lots(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 		# Posé SUR la dalle : une tuile du kit a une épaisseur, et un modèle posé
 		# au palier avait le pied enterré de 0,4 unité.
 		var ou := ville.centre_du_lot(l) + Vector3(0, EPAISSEUR_TUILE, 0)
+		# ⭐ UN LOT PEUT ÊTRE EN L'AIR. Une pièce de route posée sur des pylônes
+		# pour relier deux voies n'a pas d'altitude de terrain : elle a la
+		# SIENNE. `y_abs` la porte, comme pour un objet.
+		if l.has("y_abs"): ou.y = float(l["y_abs"]) + EPAISSEUR_TUILE
 		n.transform = Transform3D(Basis(Vector3.UP, PI * 0.5 * float(int(l["q"]))).scaled(Vector3.ONE * KitVille2.echelle(String(l["m"]))), ou)
 		n.set_meta("modele", String(l["m"]))
 		_noter(chemin)
@@ -542,8 +571,11 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 	# donnerait des piles tous les six mètres, donc forcément sur des toits :
 	# c'est exactement ce que le client interdit.
 	if modele == "viaduc":
-		_viaduc(parent, ou, tourne, float(fiche_objet.get("w", 22.0)),
-			float(fiche_objet.get("d", CASE)))
+		if fiche_objet.has("pts"):
+			_viaduc_ruban(parent, fiche_objet["pts"], float(fiche_objet.get("w", 22.0)))
+		else:
+			_viaduc(parent, ou, tourne, float(fiche_objet.get("w", 22.0)),
+				float(fiche_objet.get("d", CASE)))
 		return
 	if modele == "pile":
 		_pile(parent, ou, float(fiche_objet.get("w", 3.2)),
@@ -1118,6 +1150,48 @@ static func _plateforme(parent: Node3D, ou: Vector3, tourne: float, largeur: flo
 const TEINTE_VIADUC := Color("#b9bcc0")
 const TEINTE_PILE := Color("#a2a6ab")
 const BORDURE := 0.55
+
+## ⭐⭐⭐ LE TABLIER D'UN TRAIT, ET PLUS EN CUBES.
+##
+## « Tes autoroutes sur les ponts sont vraiment mal faites, tu as des trucs qui
+## passent à travers chaque cube » (client, 16/09). Le mot était exact : le
+## tablier ÉTAIT une file de cubes. Une dalle par case, chacune posée à plat à
+## l'altitude de sa propre case, chacune avec ses deux bordures qui s'arrêtaient
+## et repartaient. Résultat : un joint visible tous les vingt mètres, une marche
+## à chaque changement de pente, et les bouts de bordure dessinant une échelle
+## en travers de la chaussée.
+##
+## Le tablier se dessine maintenant comme la voie ferrée : segment par segment,
+## chacun dans SON repère — l'axe X suit la pente réelle d'un point au suivant,
+## et la longueur est la vraie distance en trois dimensions. Deux segments se
+## rejoignent alors bout à bout, et les bordures deviennent deux lignes continues
+## au lieu de quarante bouts.
+##
+## ⚠ ET ILS SE CHEVAUCHENT D'UN CHEVEU. Deux boîtes qui se touchent PILE laissent
+## voir un trait de fond entre elles dès que l'angle change : on les rallonge de
+## `RECOUVRE` de chaque côté, ce qui noie le joint dans la matière.
+const RECOUVRE := 0.35
+
+static func _viaduc_ruban(parent: Node3D, pts: Array, largeur: float) -> void:
+	for k in range(1, pts.size()):
+		var a: Array = pts[k - 1]
+		var b: Array = pts[k]
+		var pa := Vector3(float(a[0]), float(a[1]), float(a[2]))
+		var pb := Vector3(float(b[0]), float(b[1]), float(b[2]))
+		var av := pb - pa
+		var longueur := av.length()
+		if longueur < 0.001: continue
+		av = av / longueur
+		var cote := av.cross(Vector3.UP).normalized()
+		var dessus := cote.cross(av).normalized()
+		var base := Basis(av, dessus, cote)
+		var milieu := (pa + pb) * 0.5
+		_boite_tournee(parent, base, Vector3(longueur + RECOUVRE, 0.8, largeur),
+			milieu, TEINTE_VIADUC)
+		for si in [-1.0, 1.0]:
+			_boite_tournee(parent, base, Vector3(longueur + RECOUVRE, 1.1, BORDURE),
+				milieu + cote * (si * (largeur * 0.5 - BORDURE * 0.5)) + dessus * 0.85,
+				TEINTE_VIADUC)
 
 static func _viaduc(parent: Node3D, ou: Vector3, tourne: float, largeur: float,
 		profondeur: float) -> void:

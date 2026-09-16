@@ -1286,6 +1286,18 @@ func _touche(k: InputEventKey) -> void:
 			KEY_UP: _pousser(0, -1)
 			KEY_DOWN: _pousser(0, 1)
 		return
+	# ⚠ À L'OUTIL SÉLECTION, LES FLÈCHES POUSSENT CE QU'ON A SÉLECTIONNÉ.
+	# Le raccourci existait, mais seulement avec Ctrl : personne ne le trouve, et
+	# le client demandait encore « me permettre de déplacer l'objet avec les
+	# flèches, pixel par pixel » (16/09). Quand on tient déjà quelque chose à
+	# l'outil Sélection, déplacer la CAMÉRA n'est pas ce qu'on veut — ZQSD et
+	# Ctrl+flèches restent là pour ça.
+	if _outil == OUTIL_SELECTION and not _selection.is_empty():
+		match k.keycode:
+			KEY_LEFT: _pousser(-1, 0); return
+			KEY_RIGHT: _pousser(1, 0); return
+			KEY_UP: _pousser(0, -1); return
+			KEY_DOWN: _pousser(0, 1); return
 	match k.keycode:
 		KEY_1, KEY_KP_1: _choisir_outil(OUTIL_SELECTION)
 		KEY_2, KEY_KP_2: _choisir_outil(OUTIL_ROUTE)
@@ -1451,6 +1463,18 @@ func _coin_lot(m: String) -> Vector2i:
 func _lot_possible(m: String, coin: Vector2i) -> bool:
 	if m == "": return false
 	if _libre != null and _libre.button_pressed: return true
+	# ⚠⚠ UN BÂTIMENT EN L'AIR NON PLUS NE POSE PAS SUR LE SOL.
+	# J'avais corrigé ça pour l'outil OBJET et cru l'affaire close ; le client
+	# travaillait avec l'outil BÂTIMENT — les pièces de route s'y posent comme
+	# des lots — et se faisait toujours refuser sa dalle à deux cases de haut,
+	# Hauteur réglée et Chevauchement coché (capture du 16/09). Un lot n'avait
+	# tout simplement AUCUNE altitude : ni le refus ni le rendu ne savaient qu'un
+	# bâtiment puisse ne pas toucher terre.
+	if absf(_decalage) > 0.01:
+		var eh := KitVille2.emprise_tournee(m, _quarts)
+		var rh := Rect2i(coin, eh)
+		return rh.position.x >= 0 and rh.position.y >= 0 \
+			and rh.end.x <= _ville.taille.x * 2 and rh.end.y <= _ville.taille.y * 2
 	var e := KitVille2.emprise_tournee(m, _quarts)
 	var essai := {"x": coin.x, "y": coin.y, "w": e.x, "h": e.y}
 	for c in Ville2.cases_du_lot(essai):
@@ -1472,8 +1496,13 @@ func _poser_lot() -> void:
 	_empiler()
 	var e := KitVille2.emprise_tournee(m, _quarts)
 	var k := _ville.ajouter_lot(m, coin.x, coin.y, e.x, e.y, _quarts, "editeur")
+	if absf(_decalage) > 0.01:
+		var c: Vector2i = Ville2.cases_du_lot(_ville.lots[k])[0]
+		_ville.lots[k]["y_abs"] = TerrainV2.hauteur_en(_ville,
+			(float(c.x) + 0.5) * CASE, (float(c.y) + 0.5) * CASE) + _decalage
 	_rebatir(Ville2.cases_du_lot(_ville.lots[k]))
-	_dire("Posé : %s (%d x %d demi-cases)." % [m, e.x, e.y])
+	_dire("Posé : %s (%d x %d demi-cases)%s." % [m, e.x, e.y,
+		"" if absf(_decalage) < 0.01 else " à %.2f case de haut" % (_decalage / CASE)])
 
 func _modele_objet() -> String:
 	if _liste.is_empty(): return ""
@@ -1649,7 +1678,10 @@ func _glisser() -> void:
 ## imprécis, exactement ce qu'on cherchait à corriger. On refait au plus tous
 ## les `MS_SUIVI` millièmes, ce qui donne environ vingt-cinq images par seconde
 ## de retour : l'œil suit, la machine tient.
-const MS_SUIVI := 40
+## ⚠ SOIXANTE IMAGES PAR SECONDE, PAS VINGT-CINQ. À quarante millisecondes le
+## glissé avançait par à-coups visibles ; à seize, la pièce colle à la souris.
+## C'est le coût d'un morceau rebâti par image, et il se paie sans broncher.
+const MS_SUIVI := 16
 
 var _dernier_suivi := 0
 
@@ -1763,7 +1795,11 @@ func _montrer_cadre() -> void:
 			for c in cases:
 				r = r.merge(Rect2(float((c as Vector2i).x) * CASE, float((c as Vector2i).y) * CASE, CASE, CASE))
 			y = _ville.sol(c0)
-	_cadre.mesh = _rectangle(r, TEINTE_SELECTION)
+	# ⚠ LE CADRE EST UN VOILE, PAS UN COUVERCLE. À pleine opacité il cachait
+	# précisément la pièce qu'on est en train de placer : « j'aimerais que le
+	# carré jaune dessus soit transparent pour voir mon déplacement » (client,
+	# 16/09). Un aplat à quinze pour cent teinte la zone sans rien masquer.
+	_cadre.mesh = _rectangle(r, Color(TEINTE_SELECTION, 0.15))
 	_cadre.position = Vector3(0, y + 0.9, 0)
 	_cadre.visible = true
 	_maj_info()
