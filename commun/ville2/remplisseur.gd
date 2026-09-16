@@ -67,11 +67,28 @@ static func remplir(plan: Dictionary, ctx: Dictionary, v: Ville2, origine: Vecto
 	#    d'avoir sa contre-allée.
 	var prises := _les_chaussees(v, f)
 	var voies: Array = []
+	#    ⭐⭐ ET ON JETTE LES MIETTES. C'est `_ecarter` lui-même qui fabrique les
+	#    moignons : quand une rue longe un axe existant, elle est COUPÉE, et il
+	#    reste de part et d'autre des bouts de deux ou trois cases qui ne mènent
+	#    nulle part.
+	#
+	#    ⚠⚠ ET LA MESURE DIT QUE CE N'EST PAS LA CAUSE DES CULS-DE-SAC. J'ai
+	#    compté avant et après : 3652 cases de chaussée et 124 culs-de-sac dans
+	#    les deux cas, donc AUCUN bout n'était sous le seuil. Les 124 impasses
+	#    viennent d'ailleurs — des rues qui butent sur le trait de côte ou sur la
+	#    limite de leur quartier. Le garde-fou reste, parce qu'une découpe plus
+	#    agressive en produirait, mais il ne faut pas lui attribuer un mérite
+	#    qu'il n'a pas : le vrai chantier des moignons est ailleurs.
+	#
+	#    ⚠ ON LES JETTE, MAIS ON GARDE LEUR TRACE DANS `prises`. Sans ça le
+	#    morceau suivant de la même rue reviendrait se poser à côté d'elles, et
+	#    on retomberait sur la double voie que tout ce registre sert à éviter.
 	for k in vus:
 		for pts in _les_voies(plan, ctx, k):
 			for bout in _ecarter(pts, prises):
-				voies.append({"k": k, "cases": bout})
 				for c in bout: prises[c] = true
+				if (bout as Array).size() < MIN_RUE: continue
+				voies.append({"k": k, "cases": bout})
 	for e in voies:
 		var d: Dictionary = e
 		_tracer(v, f, d["cases"], REGLES.charte(_genre(plan, int(d["k"]))))
@@ -644,6 +661,10 @@ static func _les_chaussees(v: Ville2, f: Rect2i) -> Dictionary:
 ## Une DOUBLE VOIE, c'est une chaussée qui LONGE la nôtre : il faut donc qu'elle
 ## soit là sur PLUSIEURS cases d'affilée du même côté. Trois suffisent — un
 ## carrefour n'en donne qu'une, un doublon les donne toutes.
+## En deçà, ce n'est pas une rue, c'est une miette laissée par la découpe.
+## Cinq cases, c'est cent mètres : de quoi border trois maisons.
+const MIN_RUE := 5
+
 const LONGE := 3
 
 static func _ecarter(cases: Array, prises: Dictionary) -> Array:

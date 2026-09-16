@@ -20,6 +20,29 @@ extends SceneTree
 const BANDE := 0.10          ## au-delà, ce n'est plus une bande mince
 const BORD := 0.40           ## en deçà du bord, on ne parle plus d'un rail
 
+## ⚠⚠ CE BANC NE SAIT LIRE QUE LES RAILS DROITS, ET C'EST VOULU.
+##
+## Il rend 15 pour les pièces FAÇONNÉES — le virage, le carrefour, le T, le
+## cul-de-sac — dont les rails épousent la forme de la tuile au lieu de longer un
+## côté. J'ai essayé deux fois de les lire plus finement, et les deux fois la
+## mesure était pire que le silence :
+##
+##  1. « De la matière près du bord = un rail » comptait les quatre POTEAUX
+##     D'ANGLE d'un carrefour pour quatre rails.
+##  2. « L'étendue de la matière le long du côté » comptait les DEUX BOUTS des
+##     rails est et ouest d'une glissière droite comme un rail au nord — ils
+##     couvrent toute la largeur, alors qu'il n'y a rien entre eux.
+##  3. Retirer le plus grand trou tombait à zéro partout : une glissière Kenney
+##     est faite de poteaux et de panneaux, donc TROUÉE par construction.
+##
+## Et un contrôle bâti sur la mesure fautive m'a fait annoncer « 801 glissières
+## en travers d'une chaussée » qui n'existaient pas.
+##
+## 15 n'est donc pas un échec, c'est la bonne réponse pour ces pièces : elles
+## sont dessinées POUR leur tuile, et `quarts_de_barriere` le lit comme « suis le
+## quart de tour de ta chaussée ». Seules les pièces à rails droits ont besoin
+## d'être orientées, et celles-là, ce banc les lit juste.
+
 func _init() -> void:
 	var noms: Array = []
 	for cle in CarteVille.BARRIERES:
