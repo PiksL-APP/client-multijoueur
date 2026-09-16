@@ -372,6 +372,79 @@ const BARRIERES := {
 	"road-straight-half": "road-straight-barrier-half",
 }
 
+## ⭐⭐⭐ DE QUEL CÔTÉ SONT LES RAILS D'UNE GLISSIÈRE — MESURÉ, PAS DEVINÉ.
+##
+## « Les barrières ne sont pas du bon côté, elles ne doivent pas couper la
+## route » (client, 16/09). Je posais la glissière au MÊME quart de tour que sa
+## chaussée, en supposant que les deux pièces partagent une orientation. Elles
+## ne la partagent pas : `road-straight` non tourné va selon X, alors que les
+## rails de `road-straight-barrier` sont à x = ±0,485 et courent donc selon Z.
+## Un quart de tour d'écart, et la rambarde barrait la chaussée au lieu de la
+## border. Et l'écart n'est même pas le même d'une pièce à l'autre.
+##
+## Ce tableau vient donc du banc `outils/rails_barrieres.gd`, qui lit la
+## géométrie de chaque modèle : un rail est une barre MINCE sur un axe et LONGUE
+## sur l'autre, et l'axe des bandes minces dit sur quels côtés il est posé. Le
+## masque suit la convention des raccords : N=1, E=2, S=4, O=8.
+##
+## ⚠ NE PAS ÉCRIRE À LA MAIN. Relancer le banc et recopier sa sortie.
+const RAILS := {
+	"road-bend-barrier": 15,
+	"road-bend-square-barrier": 15,
+	"road-crossroad-barrier": 15,
+	"road-curve-barrier": 0,
+	"road-curve-intersection-barrier": 1,
+	"road-driveway-double-barrier": 5,
+	"road-driveway-single-barrier": 5,
+	"road-end-barrier": 13,
+	"road-end-round-barrier": 13,
+	"road-intersection-barrier": 15,
+	"road-roundabout-barrier": 0,
+	"road-side-barrier": 10,
+	"road-side-entry-barrier": 3,
+	"road-side-exit-barrier": 6,
+	"road-slant-barrier": 5,
+	"road-slant-curve-barrier": 5,
+	"road-slant-high-barrier": 5,
+	"road-split-barrier": 10,
+	"road-square-barrier": 15,
+	"road-straight-barrier": 10,
+	"road-straight-barrier-half": 10,
+}
+
+## Un quart de tour envoie l'OUEST au SUD (c'est le sens du moteur, mesuré au
+## banc `outils/raccords.gd`) : O→S→E→N→O.
+static func tourner_masque(m: int, q: int) -> int:
+	var r := m
+	for _t in posmod(q, 4):
+		r = ((r & 8) >> 1) | ((r & 4) >> 1) | ((r & 2) >> 1) | ((r & 1) << 3)
+	return r
+
+## ⭐ LE QUART DE TOUR QUI MET LES RAILS SUR LES CÔTÉS LIBRES DE LA CASE.
+##
+## On ne copie plus le quart de tour de la chaussée : on CALCULE celui qui pose
+## les rails là où la route n'a pas de voisine — c'est-à-dire sur ses bords, par
+## définition. Le meilleur recouvrement gagne ; à égalité, le plus petit quart de
+## tour, pour que deux cases voisines ne se contredisent pas.
+static func quarts_de_barriere(nom: String, masque: int) -> int:
+	var rails := int(RAILS.get(nom, 0))
+	if rails == 0 or rails == 15: return 0
+	var libres := 15 & ~masque
+	var meilleur := 0
+	var note := -99
+	for q in 4:
+		var m := tourner_masque(rails, q)
+		# +1 par rail bien placé, −2 par rail en travers de la chaussée.
+		var bon := 0
+		for k in 4:
+			var bit := 1 << k
+			if m & bit == 0: continue
+			bon += 1 if libres & bit else -2
+		if bon > note:
+			note = bon
+			meilleur = q
+	return meilleur
+
 ## LA COURBE LARGE, quart de tour par quart de tour : la case d'ENTRÉE et le
 ## côté par où la rue arrive, puis la case de SORTIE et le côté par où elle
 ## repart — les deux cases sont données EN RELATIF du coin nord-ouest de la

@@ -113,7 +113,12 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 				# protège de rien et encombre le trottoir ; une glissière au bord
 				# d'une descente, c'est ce qui rend le dénivelé lisible.
 				if CarteVille.BARRIERES.has(nom) and _barriere_ici(ville, c):
-					_tuile(racine, String(CarteVille.BARRIERES[nom]), centre, int(f[1]))
+					# ⚠ LA GLISSIÈRE A SON PROPRE QUART DE TOUR, pas celui de la
+					# chaussée : voir `CarteVille.quarts_de_barriere`, et les
+					# rambardes en travers de la route qui l'ont motivé.
+					var nb := String(CarteVille.BARRIERES[nom])
+					_tuile(racine, nb, centre,
+						CarteVille.quarts_de_barriere(nb, carte.masque(c)))
 			elif ville.matiere_de(c) == Ville2.M_DALLE:
 				_tuile(racine, _dalle_de(ville, c), centre, 0, TEINTE_DALLE)
 			# ⚠ SINON, ON NE POSE RIEN — ET SURTOUT PAS DU BÉTON. `plate()` est
