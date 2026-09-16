@@ -145,6 +145,23 @@ static func _arguments_depuis_url(arguments: PackedStringArray) -> PackedStringA
 			"carte": copie.append("--carte=res://cartes/" + String(paire[1]) + ".json")
 			"temoin": copie.append("--temoin=" + String(paire[1]))
 			"onglet": copie.append("--onglet=" + String(paire[1]))
+			# ⚠⚠ ET TOUT LE RESTE PASSE TEL QUEL — c'est la correction du 16/09,
+			# et elle vaut pour tous les paramètres à venir.
+			#
+			# Cette table était une LISTE BLANCHE : un paramètre absent était
+			# jeté EN SILENCE. Le défaut s'est déjà produit avec `ecran` (voir
+			# plus haut), et il vient de se reproduire à l'identique avec
+			# `pays`, `ou` et `large` : `?ecran=editeur2&pays=1` ouvrait
+			# l'éditeur — donc la page avait l'air de marcher — mais sur sa
+			# carte par défaut, un témoin de 40 × 40. Rien dans la page, rien
+			# dans la console, rien dans le déploiement ne le disait. Une heure
+			# passée à chercher du côté de Vercel et de GitHub.
+			#
+			# Un paramètre inconnu devient donc `--clef=valeur`, et l'écran
+			# ouvert le trouve dans `donnees`. Les traductions ci-dessus
+			# restent : elles ne sont pas des passe-plats, elles RÉÉCRIVENT
+			# (« pilote » devient « banc-jeu », « carte » devient un chemin).
+			_: copie.append("--" + String(paire[0]) + "=" + String(paire[1]))
 	return copie
 
 ## Tous les `--clef=valeur` de la ligne de commande, rangés en dictionnaire
