@@ -426,9 +426,16 @@ static func tourner_masque(m: int, q: int) -> int:
 ## les rails là où la route n'a pas de voisine — c'est-à-dire sur ses bords, par
 ## définition. Le meilleur recouvrement gagne ; à égalité, le plus petit quart de
 ## tour, pour que deux cases voisines ne se contredisent pas.
-static func quarts_de_barriere(nom: String, masque: int) -> int:
+static func quarts_de_barriere(nom: String, masque: int, quarts_route: int) -> int:
 	var rails := int(RAILS.get(nom, 0))
-	if rails == 0 or rails == 15: return 0
+	# ⚠ UNE GLISSIÈRE SANS CÔTÉ DISTINCT SUIT SA CHAUSSÉE. Les masques 0 et 15 ne
+	# discriminent rien : soit la pièce n'a pas de rail lisible au bord (le
+	# rond-point, la grande courbe), soit elle en a sur les quatre côtés (le
+	# carrefour, le T, le virage). Dans les deux cas c'est la MÊME forme que sa
+	# pièce mère, donc le quart de tour de la chaussée est le bon — et c'est le
+	# seul qui aligne les angles d'un `road-crossroad-barrier` sur les angles du
+	# `road-crossroad` qu'il couvre.
+	if rails == 0 or rails == 15: return quarts_route
 	var libres := 15 & ~masque
 	var meilleur := 0
 	var note := -99

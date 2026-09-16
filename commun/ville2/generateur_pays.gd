@@ -388,8 +388,11 @@ static func _les_ponts(plan: Dictionary, v: Ville2, f: Rect2i) -> void:
 			# ⚠ `zone: true` — le tablier est posé EXPRÈS dans une zone
 			# interdite. Sans ce drapeau, la passe de propreté retire le pont
 			# qu'on vient de poser.
+			# ⚠ `dalle: false` — la chaussée de la travée est déjà posée case
+			# par case au palier 0. La dalle de la plateforme faisait un SECOND
+			# tablier juste dessous ; on ne garde que les pilotis.
 			v.objets.append({"m": "plateforme", "x": x, "z": z,
-				"r": 0.0 if selon_x else PI * 0.5, "h": 0.0,
+				"r": 0.0 if selon_x else PI * 0.5, "h": 0.0, "dalle": false,
 				"w": LARGE_TABLIER, "d": CASE, "y": TABLIER, "zone": true})
 			if k % 2 != 0: continue
 			for s in [-1.0, 1.0]:
@@ -857,6 +860,7 @@ const PANNEAUX := ["routes/sign-highway", "routes/sign-highway-detailed",
 	"routes/sign-highway-wide"]
 const ECART_PANNEAUX := 23           ## un panneau toutes les 23 cases (460 m)
 const PORTEE_LARGE := 6              ## au-delà, la pile large
+const MINCE_PILE := 0.5              ## ce qu'on reprend en largeur à une pile haute
 
 static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i) -> void:
 	# Les cases où une AUTRE primaire passe : là, la voie se croise.
@@ -969,8 +973,12 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 				var sol := PLAN.sol_en(plan, ctx, c)
 				var pied := maxf(float(sol[0]), TerrainV2.NIVEAU_MER)
 				var creux := maxf(haut[i] - pied, 2.0)
+				# ⚠ `mince` : mise à l'échelle sur sa hauteur, une pile de vingt
+				# unités devient quatre unités de large et mange la rue qu'elle
+				# enjambe. On lui reprend la moitié de sa largeur — un fût de
+				# deux unités, ce qu'est un vrai pilier de viaduc urbain.
 				v.objets.append({"m": AUTO_PILE_LARGE if creux > CASE * 0.9 else AUTO_PILE,
-					"x": x, "z": z, "r": tourne, "h": creux,
+					"x": x, "z": z, "r": tourne, "h": creux, "mince": MINCE_PILE,
 					"y_abs": pied, "zone": true})
 		# ⚠ `zone: true` : le tablier est du mobilier de voirie posé en l'air.
 		# Sans ce drapeau la passe de propreté retire l'autoroute entière.
@@ -1049,7 +1057,36 @@ static func _cases_suivies(points: Array) -> Array:
 	return sortie
 
 ## L'altitude du tablier, case par case : le sol lissé plus le dégagement.
+## ⭐⭐ LE GABARIT DU TRAIN, ET IL NE SE DEVINE PAS.
+##
+## « Le train passe souvent sous des ponts et n'a logiquement pas la place de
+## passer » (client, 16/09). Le tablier se calait sur le SOL plus un dégagement
+## fixe — ce qui suffit au-dessus d'une rue, jamais au-dessus d'une voie ferrée,
+## puisque celle-ci se soulève elle-même pour franchir les routes (voir
+## `RenduVille2._profil_du_rail`) et peut déjà être à neuf unités en l'air.
+##
+## Là où une voie passe dessous, le tablier se cale donc sur le gabarit du
+## TRAIN : la hauteur maximale que la voie peut atteindre, plus la caisse d'un
+## convoi. Ailleurs il reste au ras du sol, sans quoi toute l'autoroute
+## monterait d'un étage pour trois passages à niveau.
+const HAUT_RAIL_MAX := 9.0           ## ce que la voie peut se soulever
+const CAISSE_TRAIN := 9.0            ## la hauteur d'un convoi, toit compris
+
+static func _cases_de_rail(plan: Dictionary) -> Dictionary:
+	var sortie := {}
+	for l in plan.get("lignes", []):
+		var d: Dictionary = l
+		if String(d.get("reseau", "")) not in ["train", "train2"]: continue
+		if bool(d.get("souterrain", false)): continue
+		for c in _cases_suivies(d["points"]):
+			# Une case de part et d'autre : la voie est large, et lissée.
+			for dj in [-1, 0, 1]:
+				for di in [-1, 0, 1]:
+					sortie[(c as Vector2i) + Vector2i(di, dj)] = true
+	return sortie
+
 static func _profil_du_tablier(plan: Dictionary, ctx: Dictionary, cases: Array) -> PackedFloat32Array:
+	var rails := _cases_de_rail(plan)
 	var brut := PackedFloat32Array()
 	brut.resize(cases.size())
 	for i in cases.size():
@@ -1057,6 +1094,8 @@ static func _profil_du_tablier(plan: Dictionary, ctx: Dictionary, cases: Array) 
 		# Au-dessus de l'eau on part du niveau de la mer, pas du fond : sinon le
 		# viaduc s'enfonce de onze mètres à chaque bras de mer franchi.
 		brut[i] = maxf(float(sol[0]), TerrainV2.NIVEAU_MER)
+		if rails.has(cases[i]):
+			brut[i] += HAUT_RAIL_MAX + CAISSE_TRAIN
 	var lisse := PackedFloat32Array()
 	lisse.resize(cases.size())
 	for i in cases.size():

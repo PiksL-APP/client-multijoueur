@@ -95,7 +95,14 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 				if ronds.has(c):
 					# Le rond-point tient les neuf cases : il se pose seul, à
 					# trois cases de large, et ses voisines s'abstiennent.
-					_tuile(racine, "road-roundabout", centre, 0, Color.WHITE, 3.0)
+					# ⚠⚠ PAS DE FACTEUR TROIS ICI, ET J'AVAIS MIS TROIS.
+					# `_tuile` ne normalise pas : `maillage_kenney` avec une
+					# taille voulue de zéro garde la taille du kit, et le
+					# rond-point mesure DÉJÀ trois unités, donc trois cases une
+					# fois multiplié par `CASE`. Mon facteur le posait à neuf
+					# cases de large — un giratoire de cent quatre-vingts mètres.
+					_tuile(racine, "road-roundabout", centre, 0)
+					_tuile(racine, "road-roundabout-barrier", centre, 0)
 					continue
 				if _sous_un_rond(ronds, c): continue
 				var f: Array = carte.tuile(c)
@@ -112,13 +119,25 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 				# quai, l'eau. Une glissière au milieu d'un lotissement plat ne
 				# protège de rien et encombre le trottoir ; une glissière au bord
 				# d'une descente, c'est ce qui rend le dénivelé lisible.
-				if CarteVille.BARRIERES.has(nom) and _barriere_ici(ville, c):
-					# ⚠ LA GLISSIÈRE A SON PROPRE QUART DE TOUR, pas celui de la
-					# chaussée : voir `CarteVille.quarts_de_barriere`, et les
-					# rambardes en travers de la route qui l'ont motivé.
+				# ⭐⭐ CHAQUE TUILE REÇOIT LA GLISSIÈRE DE SA PROPRE FAMILLE.
+				# « Si tu utilises un road-crossroad, alors tu utilises dessus un
+				# road-crossroad-barrier et pas autre chose » (client, 16/09).
+				# `BARRIERES` fait déjà exactement ça — les variantes de MARQUAGE
+				# (`-line`, `-path`) partagent la forme de leur pièce mère, et le
+				# kit n'a donc qu'une glissière par forme. Ce qui manquait, c'est
+				# que je REFUSAIS d'en poser sur un carrefour : la rambarde des
+				# quatre branches s'arrêtait net au bord du croisement, qui
+				# restait nu. Or `road-crossroad-barrier`, ce sont précisément
+				# les quatre angles qui bouchent ces quatre trous.
+				# ⚠ ON NE CLÔTURE PAS UN PASSAGE PIÉTON. Les tuiles `-path`
+				# portent les zébras : une glissière en travers, c'est barrer
+				# l'endroit même par lequel on traverse (client, 16/09, capture
+				# du T avec la bordure en travers du zébra).
+				if CarteVille.BARRIERES.has(nom) and not nom.ends_with("-path") \
+						and _a_quelque_chose_a_border(ville, c):
 					var nb := String(CarteVille.BARRIERES[nom])
-					_tuile(racine, nb, centre,
-						CarteVille.quarts_de_barriere(nb, carte.masque(c)))
+					_tuile(racine, nb, centre, CarteVille.quarts_de_barriere(
+						nb, carte.masque(c), int(f[1])))
 			elif ville.matiere_de(c) == Ville2.M_DALLE:
 				_tuile(racine, _dalle_de(ville, c), centre, 0, TEINTE_DALLE)
 			# ⚠ SINON, ON NE POSE RIEN — ET SURTOUT PAS DU BÉTON. `plate()` est
@@ -180,41 +199,35 @@ static func _teinte_du_sol(ville: Ville2, c: Vector2i) -> Color:
 ##    donne le même résultat d'une reconstruction à l'autre et d'une fenêtre à
 ##    la voisine — sans quoi le passage sauterait d'un côté à l'autre de la rue
 ##    à chaque coup de pinceau.
-## ⭐⭐⭐ LA GLISSIÈRE EST LA RÈGLE, PAS L'EXCEPTION.
+## ⭐⭐ UNE BORDURE TOUTE SEULE DANS UN PRÉ N'EST PAS UNE BORDURE.
 ##
-## « Étudie l'image 1 pour revoir tout ton système de route, et fais tout avec
-## les barrières par-dessus, quitte à fusionner les deux objets ensemble »
-## (client, 16/09). Sa référence montre un réseau où CHAQUE ruban est bordé sur
-## toute sa longueur : ce sont les glissières qui donnent à la route son épaisseur
-## et son tracé lisible, pas le bitume.
+## « Un bout de bordure en L flotte dans l'herbe à côté d'une supérette, sans
+## aucune chaussée » (client, 16/09). Il y avait bien une chaussée : un CUL-DE-
+## SAC, dont la tuile `road-end` est presque entièrement trottoir — vue d'en
+## haut on ne voit que sa glissière, qui en fait le tour sur trois côtés et
+## dessine exactement ce L posé dans le vert.
 ##
-## ⚠ LE KIT SÉPARE LA CHAUSSÉE DE SA GLISSIÈRE, ET C'EST UNE CHANCE. Un
-## `-barrier` n'est pas une tuile, c'est la paire de rails à poser dessus
-## (mesuré au banc : le modèle seul ne montre que deux traits). On ne fusionne
-## donc rien dans les fichiers : on pose SYSTÉMATIQUEMENT les deux pièces, ce
-## qui revient au même à l'écran et laisse le kit intact.
+## ⚠ ET LE VRAI DÉFAUT EST EN AMONT : mesuré, CENT VINGT-QUATRE culs-de-sac sur
+## une seule fenêtre de 110 cases. Ce ne sont pas des impasses résidentielles,
+## ce sont des rues qui s'arrêtent au milieu d'un champ — le tracé lui-même a
+## des moignons. Les couper demande de retoucher le réseau, ce qui se répercute
+## sur les lots, les réservations et le trafic : c'est un chantier à part.
 ##
-## ⚠⚠ SAUF AUX CARREFOURS, ET C'EST TOUTE LA RÈGLE. Le modèle `-barrier` porte
-## ses rails sur ses DEUX côtés. Posé partout, il en met donc entre les voies
-## d'une avenue large et en travers de chaque croisement — on grillagerait la
-## ville. Une case dont les quatre voisines sont de la chaussée est un carrefour
-## ou le ventre d'une avenue : elle n'a pas de bord, donc pas de glissière. Dès
-## qu'un côté donne sur autre chose que du bitume, la route a un bord, et ce
-## bord se borde.
-static func _barriere_ici(ville: Ville2, c: Vector2i) -> bool:
-	if ville.genre_de_route(c) == Ville2.R_VOIE_RAPIDE: return true
-	for d in CarteVille.COTES:
-		if not ville.carte.route(c + d): return true
-	return false
+## En attendant, on arrête au moins d'ATTIRER L'ŒIL dessus : un bout de rue sans
+## rien autour n'a rien à border. Une impasse qui dessert vraiment des maisons
+## garde sa glissière — c'est là qu'elle protège quelqu'un.
+const VOISINAGE_UTILE := 2
 
-## La chaussée surplombe-t-elle quelque chose ? Une voisine sous l'eau, ou plus
-## basse d'un palier entier : dans les deux cas on tombe si on sort de la route.
-static func _au_bord_du_vide(ville: Ville2, c: Vector2i) -> bool:
-	var mien := ville.carte.palier(c)
-	for d in CarteVille.COTES:
-		var n: Vector2i = c + d
-		if not ville.carte.terre(n): return true
-		if mien - ville.carte.palier(n) >= 1: return true
+static func _a_quelque_chose_a_border(ville: Ville2, c: Vector2i) -> bool:
+	var m := ville.carte.masque(c)
+	var branches := 0
+	for k in 4:
+		if m & (1 << k): branches += 1
+	if branches >= 2: return true
+	# Un cul-de-sac : il ne se borde que s'il dessert quelque chose.
+	for dj in range(-VOISINAGE_UTILE, VOISINAGE_UTILE + 1):
+		for di in range(-VOISINAGE_UTILE, VOISINAGE_UTILE + 1):
+			if ville.lot_sur(c + Vector2i(di, dj)) >= 0: return true
 	return false
 
 ## ⭐⭐ LE ROND-POINT, « avec parcimonie » (client, 16/09, photo à l'appui).
@@ -330,7 +343,16 @@ static func _poser_ouvrages(racine: Node3D, ville: Ville2, zone: Rect2i) -> void
 		var y := float(carte.palier(coin)) * PALIER
 		var centre := Vector3((float(coin.x) + float(t.x) * 0.5) * CASE, y,
 			(float(coin.y) + float(t.y) * 0.5) * CASE)
-		_tuile(racine, String(o["t"]), centre, int(o["q"]))
+		var tuile := String(o["t"])
+		_tuile(racine, tuile, centre, int(o["q"]))
+		# ⭐ ET LES GRANDES PIÈCES AUSSI ONT LEUR GLISSIÈRE. « Les courbes
+		# aussi, alors » (client, 16/09) : une `road-curve` fait deux cases sur
+		# deux et se pose comme un OUVRAGE, pas comme une tuile de rue — elle
+		# passait donc à côté de la règle qui borde les chaussées. Sa glissière
+		# est de la même famille, à la même échelle et au même quart de tour :
+		# c'est la seule façon qu'elle épouse la courbe au lieu de la couper.
+		if CarteVille.BARRIERES.has(tuile):
+			_tuile(racine, String(CarteVille.BARRIERES[tuile]), centre, int(o["q"]))
 
 # ------------------------------------------------------------------ les soutènements
 
@@ -564,6 +586,19 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 			float(fiche_objet.get("d", CASE)), String(fiche_objet.get("c", "")))
 		return
 	if modele == "plateforme":
+		# ⭐ SANS SA DALLE, UN PONT N'A PLUS DE DOUBLE FOND. Sur une travée du
+		# pays, la chaussée est DÉJÀ posée case par case au palier 0 : la dalle
+		# de la plateforme venait s'ajouter dessous, et on voyait deux tabliers
+		# superposés avec les lampadaires pris entre les deux (« sur certains
+		# ponts sur l'eau tu as un truc en dessous, enlève la couche du
+		# dessous », client, 16/09). Les PILOTIS, eux, restent : sans eux le
+		# pont flotte. La jetée de la plage, qui n'a pas de chaussée, garde sa
+		# dalle — c'est elle, son sol.
+		if not bool(fiche_objet.get("dalle", true)):
+			_pilotis(parent, ou, tourne, float(fiche_objet.get("w", CASE)),
+				float(fiche_objet.get("d", CASE)),
+				TerrainV2.NIVEAU_MER + float(fiche_objet.get("y", 2.5)) - ou.y)
+			return
 		# Le tablier se compte AU-DESSUS DE LA MER, pas au-dessus du fond :
 		# une jetée est plate, le fond ne l'est pas.
 		_plateforme(parent, ou, tourne, float(fiche_objet.get("w", CASE)),
@@ -628,7 +663,16 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 		n.transform = Transform3D(Basis(Vector3.UP, tourne), ou)
 	elif h > 0.0:
 		n.mesh = FormesCarnage.maillage_kenney(chemin, h, Vector3.AXIS_Y, 0.0)
-		n.transform = Transform3D(_assiette(tourne, float(fiche_objet.get("pente", 0.0))), ou)
+		# ⚠ UNE PILE HAUTE N'EST PAS UNE PILE GROSSE. `maillage_kenney` met à
+		# l'échelle de façon UNIFORME : un poteau mis à vingt unités de haut
+		# devient quatre unités de large, et il mange la moitié de la rue qu'il
+		# enjambe (« les pylônes du dessous sont trop gros et empiètent trop sur
+		# la route du dessous », client, 16/09). `mince` reprend en X et Z ce que
+		# la hauteur a donné, sans toucher à la hauteur.
+		var mince := float(fiche_objet.get("mince", 1.0))
+		var b := _assiette(tourne, float(fiche_objet.get("pente", 0.0)))
+		if absf(mince - 1.0) > 0.001: b = b.scaled(Vector3(mince, 1.0, mince))
+		n.transform = Transform3D(b, ou)
 	else:
 		# À l'échelle du kit (auvents, conteneurs, dalles de sentier…).
 		# ⚠ PAS `CASE` EN DUR : les accessoires du kit nature sont dessinés pour
@@ -815,6 +859,9 @@ static func _trace_arrondi(cases: Array, haut: PackedFloat32Array) -> Array:
 ## ce qui rend au passage l'espacement des traverses régulier, alors qu'il se
 ## resserrait dans les virages.
 const PAS_TRAVERSE := 6.0
+## De combien chaque tronçon mord sur le suivant, pour que le rail et son
+## tablier restent d'un seul tenant dans les virages.
+const RECOUVRE_RAIL := 2.2
 
 static func _reechantillonner(pts: Array) -> Array:
 	if pts.size() < 2: return pts
@@ -946,14 +993,21 @@ static func _poser_rail(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 			var sol := _sol_du_rail(ville, a)
 			var creux := milieu.y - sol
 			if creux > AU_SOL:
-				_boite_tournee(racine, base, Vector3(longueur, 1.1, 9.4),
+				# ⚠⚠ LE TABLIER SE RECOUVRE, SINON LA COURBE SE DISLOQUE. Chaque
+				# tronçon est une boîte DROITE ; dans un virage, deux boîtes
+				# voisines font un angle, et si elles se touchent pile leurs
+				# coins s'écartent — d'où l'ouvrage en morceaux de la capture du
+				# client (« ce genre de chose moche où c'est pas lié ensemble
+				# correctement »). On les rallonge d'un tiers de pas : le joint
+				# se noie dans la matière, en courbe comme en ligne droite.
+				_boite_tournee(racine, base, Vector3(longueur + RECOUVRE_RAIL, 1.1, 9.4),
 					milieu - dessus * 0.75, TEINTE_TABLIER_RAIL)
 				if posmod(a.x + a.y, ECART_PILES_RAIL) == 0 and not posees.has(a):
 					posees[a] = true
 					_boite(racine, Vector3(2.6, creux, 2.6),
 						Vector3(milieu.x, sol + creux * 0.5 - 0.7, milieu.z), TEINTE_TABLIER_RAIL)
 			for s in [-1.0, 1.0]:
-				_boite_tournee(racine, base, Vector3(longueur, 0.5, 0.6),
+				_boite_tournee(racine, base, Vector3(longueur + RECOUVRE_RAIL, 0.5, 0.6),
 					milieu + cote * (ecart * s) + dessus * 0.25, TEINTE_RAIL)
 			# Une traverse par tronçon : le pas est déjà celui des traverses.
 			_boite_tournee(racine, base, Vector3(1.2, 0.3, 9.0),
@@ -1138,10 +1192,17 @@ static func _plateforme(parent: Node3D, ou: Vector3, tourne: float, largeur: flo
 	var base := Basis(Vector3.UP, tourne)
 	var haut := ou + Vector3(0, y, 0)
 	_boite_tournee(parent, base, Vector3(largeur, 0.7, profondeur), haut, TEINTE_TABLIER)
-	# Un pilotis tous les six unités le long de la jetée, par paires.
+	_pilotis(parent, ou, tourne, largeur, profondeur, y)
+
+## Les pilotis seuls : un tous les six unités, par paires.
+static func _pilotis(parent: Node3D, ou: Vector3, tourne: float, largeur: float,
+		profondeur: float, y: float) -> void:
+	var base := Basis(Vector3.UP, tourne)
+	var haut := ou + Vector3(0, y, 0)
 	var n := maxi(2, int(profondeur / 6.0))
 	var fond := TerrainV2.NIVEAU_MER - 3.0
 	var hauteur := (haut.y - 0.35) - fond
+	if hauteur <= 0.2: return
 	for k in n:
 		var t := (float(k) + 0.5) / float(n) - 0.5
 		for s in [-1.0, 1.0]:

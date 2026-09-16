@@ -407,9 +407,16 @@ static func _mobilier(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
 		if i % 34 == 7 and alea.randf() < 0.5:
 			v.ajouter_objet(CABINE, (float(l.x) + 0.86) * CASE,
 				(float(l.y) + 0.14) * CASE, PI * 0.5)
+		# ⚠ UN ARBRE NE POUSSE PAS SUR LE TROTTOIR DE LA RUE QU'IL BORDE.
+		# Il se plantait sur la case de RUE, à quatre-vingt-six centièmes — donc
+		# pile sur la bordure, et deux troncs sortaient du béton juste devant un
+		# passage piéton (client, 16/09). On le met sur la case d'à côté, celle
+		# qui n'est ni chaussée ni bâtie ; si elle n'existe pas, pas d'arbre.
 		if arbres > 0.0 and alea.randf() < arbres:
-			v.ajouter_objet(String(essence[alea.randi() % essence.size()]),
-				(float(l.x) + 0.5) * CASE, (float(l.y) + 0.86) * CASE, 0.0)
+			var ou := _a_cote_libre(v, l)
+			if ou != Vector2i(-999, -999):
+				v.ajouter_objet(String(essence[alea.randi() % essence.size()]),
+					(float(ou.x) + 0.5) * CASE, (float(ou.y) + 0.5) * CASE, 0.0)
 
 ## ⚠ UN SAC PAR GENRE, PAS UN SAC PAR FENÊTRE. `TEINTES.couvrir` tire sans remise
 ## dans un sac : deux fenêtres qui n'ont pas les mêmes lots dans le même ordre
@@ -699,6 +706,14 @@ static func _les_gares(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
 ## De combien on rentre le mobilier depuis le bord de la case : assez pour ne
 ## pas mordre sur la chaussée, assez peu pour la toucher.
 const MARGE_TROTTOIR := 2.2
+
+## La première case voisine où l'on peut planter quelque chose : hors chaussée,
+## hors bâtiment, dans la fenêtre. `(-999, -999)` s'il n'y en a pas.
+static func _a_cote_libre(v: Ville2, l: Vector2i) -> Vector2i:
+	for d in [Vector2i(0, 1), Vector2i(1, 0), Vector2i(0, -1), Vector2i(-1, 0)]:
+		var n: Vector2i = l + d
+		if _case_de_mobilier(v, n): return n
+	return Vector2i(-999, -999)
 
 ## De quel côté est la rue ? Les quatre côtés d'abord — c'est là qu'un arrêt
 ## se colle — puis les diagonales, qui donnent au moins un cap plausible quand
