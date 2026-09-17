@@ -216,7 +216,7 @@ static func fenetre(plan: Dictionary, ctx: Dictionary, f: Rect2i, curseurs := {}
 		v.peindre_quartier(Rect2i(z.position - f.position, z.size), v.quartiers.size() - 1)
 
 	# 3. LES AXES, découpés à la fenêtre.
-	_les_routes(plan, v, f)
+	_les_routes(plan, ctx, v, f)
 	_les_voies(plan, v, f)
 	v.rasteriser()
 
@@ -230,6 +230,9 @@ static func fenetre(plan: Dictionary, ctx: Dictionary, f: Rect2i, curseurs := {}
 		# par la greffe — elles n'ont pas de charte, elles ont un plan.
 		for k2 in dedans:
 			_implanter(plan, v, f, k2)
+		# ⚠ APRÈS LES QUARTIERS, PARCE QUE C'EST EUX QUI POSAIENT LE BITUME SOUS
+		# LES RAILS. Voir `_pas_de_rue_sous_le_rail`.
+		_pas_de_rue_sous_le_rail(v)
 		v.rasteriser()
 
 	# 5. LES OUVRAGES, puis L'AUTOROUTE AÉRIENNE.
@@ -246,6 +249,75 @@ static func fenetre(plan: Dictionary, ctx: Dictionary, f: Rect2i, curseurs := {}
 	# mobilier de voirie, et rien du tout dans une zone interdite.
 	PROPRETE.rien_sur_les_routes(v)
 	return v
+
+## ⭐⭐⭐ LA GRILLE D'UN QUARTIER NE POSE PAS DE RUE SOUS LES RAILS.
+##
+## ⚠ CE N'EST PAS LE MÊME DÉFAUT QUE `_ecarter_du_rail`, ET C'EST POURQUOI IL Y
+## A DEUX REMÈDES. Là-bas, c'est le graphe routier du PLAN qui longe une ligne
+## de train parce que les deux relient les mêmes gares : une route structurante,
+## qu'on ne peut pas couper sans couper le pays en deux — on l'écarte d'une case.
+## Ici, c'est la GRILLE d'un quartier, posée par le remplisseur bien après, qui
+## ne sait rien de la voie et trace ses rues par-dessus. Mesuré sur la fenêtre
+## (400,400,200,200) : 393 cases posées sur la voie par des rues et des avenues
+## SANS NOM — la grille — contre une cinquantaine pour les axes nommés.
+##
+## Une rue de grille, elle, se COUPE : elle a dix sœurs parallèles à vingt
+## mètres, ses rues transversales continuent de traverser la voie (passage à
+## niveau ou pont, selon la classe), et les deux pâtés qu'elle séparait n'en
+## font plus qu'un, de part et d'autre du remblai. C'est exactement ce qu'on voit
+## le long d'une vraie voie ferrée en ville.
+##
+## ⚠ ON NE COUPE QUE CE QUI VA DANS LE MÊME SENS. Une rue qui coupe la voie à
+## angle droit reste où elle est : c'est un croisement, pas un empiètement.
+##
+## ⚠ ET LE TEST EST PUREMENT LOCAL — « cette case porte-t-elle une voie qui va
+## dans le même sens que moi » — donc indépendant du cadre de la fenêtre : deux
+## fenêtres qui se recouvrent coupent aux mêmes endroits.
+static func _pas_de_rue_sous_le_rail(v: Ville2) -> int:
+	var axes: Dictionary = {}
+	for r in v.rail:
+		var cases: Array = Ville2.cases_de_route(r)
+		for i in cases.size():
+			var c: Vector2i = cases[i]
+			var d: Vector2i = (cases[mini(i + 1, cases.size() - 1)] as Vector2i) \
+				- (cases[maxi(i - 1, 0)] as Vector2i)
+			if d == Vector2i.ZERO: continue
+			axes[c] = d.x != 0
+	if axes.is_empty(): return 0
+	var gardees: Array = []
+	var coupees := 0
+	for r2 in v.routes:
+		var d2: Dictionary = r2
+		var cases2: Array = Ville2.cases_de_route(d2)
+		var morceau: Array = []
+		for i2 in cases2.size():
+			var c2: Vector2i = cases2[i2]
+			var dir: Vector2i = (cases2[mini(i2 + 1, cases2.size() - 1)] as Vector2i) \
+				- (cases2[maxi(i2 - 1, 0)] as Vector2i)
+			var conflit: bool = axes.has(c2) and bool(axes[c2]) == (dir.x != 0)
+			if conflit:
+				coupees += 1
+				if morceau.size() >= 2: gardees.append(_route_de(d2, morceau))
+				morceau = []
+				continue
+			morceau.append(c2)
+		if morceau.size() >= 2: gardees.append(_route_de(d2, morceau))
+		elif morceau.size() == 1 and cases2.size() == 1: gardees.append(_route_de(d2, morceau))
+	v.routes = gardees
+	return coupees
+
+## La même route, réduite à ce tronçon-là : même genre, même nom, même niveau.
+static func _route_de(modele: Dictionary, cases: Array) -> Dictionary:
+	var pts: Array = []
+	for i in cases.size():
+		var c: Vector2i = cases[i]
+		if i == 0 or i == cases.size() - 1:
+			pts.append(c)
+			continue
+		if ((c - (cases[i - 1] as Vector2i)) != ((cases[i + 1] as Vector2i) - c)):
+			pts.append(c)
+	return {"genre": String(modele.get("genre", "rue")), "nom": String(modele.get("nom", "")),
+		"points": pts, "niveau": int(modele.get("niveau", 0))}
 
 ## Les implantations qui touchent la fenêtre. La marge d'une case évite le cas
 ## limite d'un quartier qui affleure le bord sans le franchir.
@@ -267,7 +339,34 @@ static func _implantations_visibles(plan: Dictionary, f: Rect2i) -> Array:
 ## s'arrêterait une case avant la limite laisserait un trou d'une case entre
 ## deux fenêtres voisines — un nid-de-poule long de vingt mètres, tous les
 ## quatre kilomètres, et personne ne saurait d'où il vient.
-static func _les_routes(plan: Dictionary, v: Ville2, f: Rect2i) -> void:
+## ⭐⭐⭐ UNE RUE NE SE COUCHE JAMAIS SOUS LES RAILS — ELLE SE RANGE À CÔTÉ.
+##
+## « Une voie ferrée doit couper une route en passant par-dessus, mais jamais
+## être étalée dessus » (client). Dans la ville, la voie a son couloir à elle ;
+## dans le PAYS, non : le graphe routier et les lignes de train relient les
+## mêmes gares, aux mêmes endroits, et se retrouvent donc dans le même couloir.
+## Mesuré sur la fenêtre (400,400,200,200) AVANT correction : **314 des 575
+## cases de rail étaient aussi des cases de rue, dont une suite ININTERROMPUE
+## DE 37 CASES** — 740 mètres de voie posée au milieu d'un boulevard.
+##
+## ⚠ ON ÉCARTE LA ROUTE, PAS LA VOIE. Déplacer la voie la décaserait d'une
+## fenêtre à l'autre (chaque fenêtre déciderait dans son coin) et casserait les
+## ponts et les gares, qui la visent par ses coordonnées du plan. La rue, elle,
+## se pousse d'une case et revient : le train longe le boulevard au lieu de
+## rouler dessus, ce qui est exactement ce qu'on voit dans une vraie ville.
+##
+## ⚠ ET LE CALCUL NE REGARDE QUE LE PLAN, JAMAIS LA FENÊTRE. C'est la règle de
+## l'archipel : le résultat ne doit pas dépendre du cadre. On écarte donc en
+## coordonnées ABSOLUES, puis on découpe — jamais l'inverse, sinon deux fenêtres
+## voisines choisiraient deux côtés différents et la rue ferait une marche sur
+## la couture.
+##
+## ⚠ UN CROISEMENT N'EST PAS UN CONFLIT. Une rue qui coupe la voie à angle
+## droit reste où elle est : c'est le passage à niveau (ou le pont, selon la
+## classe de la rue — voir `RenduVille2._profil_du_rail`). Seules les cases où
+## la rue et la voie vont DANS LE MÊME SENS sont écartées.
+static func _les_routes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i) -> void:
+	var axes := _axes_du_rail(plan)
 	for r in plan["routes"]:
 		var d: Dictionary = r
 		# ⚠⚠ LE PRIMAIRE NE TOUCHE PLUS LE SOL. « Toutes les autoroutes doivent
@@ -277,9 +376,131 @@ static func _les_routes(plan: Dictionary, v: Ville2, f: Rect2i) -> void:
 		# ville se retrouverait coupée en deux par une bande de bitume sous son
 		# propre viaduc. Voir `_les_autoroutes`.
 		if String(d.get("classe", "")) == PLAN.V_PRIMAIRE: continue
-		for seg in _decouper(d["points"], f):
-			var s: Array = seg
-			v.ajouter_route(String(d["genre"]), s, String(d.get("nom", "")), 0)
+		for trace in _ecarter_du_rail(plan, ctx, d["points"], axes):
+			for seg in _decouper(trace, f):
+				var s: Array = seg
+				v.ajouter_route(String(d["genre"]), s, String(d.get("nom", "")), 0)
+
+## Les cases de voie ferrée du plan, avec l'AXE de la voie en chaque case :
+## `true` = elle va d'est en ouest. C'est l'axe qui dit si une rue la longe ou
+## la coupe.
+static func _axes_du_rail(plan: Dictionary) -> Dictionary:
+	var axes: Dictionary = {}
+	for l in plan["lignes"]:
+		var d: Dictionary = l
+		if bool(d.get("souterrain", false)): continue
+		if not EN_SURFACE.has(String(d["reseau"])): continue
+		var pts: Array = d["points"]
+		for k in range(1, pts.size()):
+			var a := PLAN.case_de(pts[k - 1])
+			var b := PLAN.case_de(pts[k])
+			if a.y == b.y:
+				for x in range(mini(a.x, b.x), maxi(a.x, b.x) + 1):
+					axes[Vector2i(x, a.y)] = true
+			elif a.x == b.x:
+				for y in range(mini(a.y, b.y), maxi(a.y, b.y) + 1):
+					axes[Vector2i(a.x, y)] = false
+	return axes
+
+## ⭐ LE DÉTOUR. Rend la (ou les) polyligne(s) absolue(s) à poser à la place de
+## celle du plan : identique partout où la rue ne longe pas la voie, écartée
+## d'une case là où elle la longe, avec ses deux coudes.
+static func _ecarter_du_rail(plan: Dictionary, ctx: Dictionary, points: Array,
+		axes: Dictionary) -> Array:
+	var cases := _cases_du_trace(points)
+	if cases.size() < 2: return [points]
+	# 1. OÙ ÇA COINCE : même case, même axe.
+	var conflit: Array = []
+	var quelconque := false
+	for i in cases.size():
+		var c: Vector2i = cases[i]
+		var d: Vector2i = (cases[mini(i + 1, cases.size() - 1)] - cases[maxi(i - 1, 0)])
+		var selon_x: bool = d.x != 0
+		var pris: bool = axes.has(c) and bool(axes[c]) == selon_x
+		conflit.append(pris)
+		quelconque = quelconque or pris
+	if not quelconque: return [points]
+	# 2. LE DÉTOUR, tronçon par tronçon.
+	var sortie: Array = []
+	var i2 := 0
+	while i2 < cases.size():
+		if not conflit[i2]:
+			sortie.append(cases[i2])
+			i2 += 1
+			continue
+		# ⚠ UN TRONÇON S'ARRÊTE AU COUDE. Pousser d'un seul côté une rue qui
+		# tourne au milieu du tronçon donnerait une diagonale, qu'`ajouter_route`
+		# refuse — à juste titre. Un coude coupe donc le tronçon en deux.
+		var dir: Vector2i = (cases[i2 + 1] as Vector2i) - (cases[i2] as Vector2i) \
+			if i2 + 1 < cases.size() else (cases[i2] as Vector2i) - (cases[i2 - 1] as Vector2i)
+		var j := i2
+		while j < cases.size() and conflit[j]:
+			if j + 1 < cases.size() and (cases[j + 1] as Vector2i) - (cases[j] as Vector2i) != dir:
+				j += 1
+				break
+			j += 1
+		var perp := Vector2i(1, 0) if dir.x == 0 else Vector2i(0, 1)
+		perp = _meilleur_cote(plan, ctx, cases, axes, i2, j, perp)
+		if perp == Vector2i.ZERO:
+			# Les deux côtés sont impossibles (mer, ou voie des deux bords) :
+			# on laisse la rue où elle est plutôt que de la jeter à l'eau.
+			for k in range(i2, j): sortie.append(cases[k])
+			i2 = j
+			continue
+		if i2 > 0: sortie.append(cases[i2 - 1] + perp)
+		for k in range(i2, j): sortie.append(cases[k] + perp)
+		if j < cases.size(): sortie.append(cases[j] + perp)
+		i2 = j
+	return [_sommets(sortie)]
+
+## Le côté vers lequel pousser : celui qui est à terre et sans voie ferrée sur
+## toute la longueur du tronçon. ⚠ On essaie TOUJOURS le même en premier, pour
+## que deux fenêtres voisines tombent sur la même réponse.
+static func _meilleur_cote(plan: Dictionary, ctx: Dictionary, cases: Array,
+		axes: Dictionary, i: int, j: int, perp: Vector2i) -> Vector2i:
+	for cote in [perp, -perp]:
+		var bon := true
+		for k in range(maxi(i - 1, 0), mini(j + 1, cases.size())):
+			var c: Vector2i = (cases[k] as Vector2i) + cote
+			if axes.has(c) or not PLAN.terre_en(plan, ctx, c):
+				bon = false
+				break
+		if bon: return cote
+	return Vector2i.ZERO
+
+## Toutes les cases d'une polyligne du plan, dans l'ordre, sans doublon de coude.
+static func _cases_du_trace(points: Array) -> Array:
+	var cases: Array = []
+	for k in range(1, points.size()):
+		var a := PLAN.case_de(points[k - 1])
+		var b := PLAN.case_de(points[k])
+		if a.x != b.x and a.y != b.y: return []
+		var pas := Vector2i(signi(b.x - a.x), signi(b.y - a.y))
+		var c := a
+		if cases.is_empty(): cases.append(c)
+		while c != b:
+			c += pas
+			cases.append(c)
+	return cases
+
+## L'inverse : on ne garde que les coudes, `ajouter_route` n'attend que ça.
+static func _sommets(cases: Array) -> Array:
+	var pts: Array = []
+	for i in cases.size():
+		var c: Vector2i = cases[i]
+		if i == 0 or i == cases.size() - 1:
+			pts.append(c)
+			continue
+		var avant: Vector2i = cases[i - 1]
+		var apres: Vector2i = cases[i + 1]
+		if (c - avant) != (apres - c): pts.append(c)
+	# ⚠ EN TABLEAUX, PAS EN `Vector2i` : `PLAN.case_de` lit `[x, y]`, comme
+	# partout ailleurs dans le plan.
+	var bruts: Array = []
+	for p0 in pts:
+		var p: Vector2i = p0
+		bruts.append([p.x, p.y])
+	return bruts
 
 ## ⚠⚠ DES SIX RÉSEAUX DU PLAN, DEUX SEULEMENT DESCENDENT EN 3D AUJOURD'HUI :
 ## LA VOIRIE ET LE TRAIN. Ce n'est pas un oubli, c'est une décision, et elle est
