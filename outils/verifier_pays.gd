@@ -71,8 +71,8 @@ func _init() -> void:
 	# d'objet « viaduc » du tout. Une case de tablier, c'est désormais une pièce
 	# de voie rapide posée EN L'AIR : on les reconnaît à leur modèle et à leur
 	# `y_abs` au-dessus du sol. Chercher l'ancien nom ne mesurait plus rien.
-	var PIECES_AUTO := ["routes/road-bridge", "routes/road-straight",
-		"routes/road-bend", "routes/road-side-exit", "routes/road-side-entry"]
+	var PIECES_AUTO := ["routes/road-straight", "routes/road-bend",
+		"routes/road-slant-flat-curve"]
 	for o in v.objets:
 		var fo: Dictionary = o
 		if not PIECES_AUTO.has(String(fo.get("m", ""))): continue
@@ -169,6 +169,49 @@ func _init() -> void:
 	print("6. aller-retour : %s — %d/%d lots, %d/%d objets, terrain %d/%d cases"
 		% ["OK" if bon else "PERDU", r.lots.size(), v.lots.size(),
 			r.objets.size(), v.objets.size(), memes, cases])
+
+	# 7. LE RÉSEAU TIENT-IL EN UN SEUL MORCEAU ?
+	# « Sois sûr que tout le réseau routier soit connecté à quelque chose »
+	# (client, 17/09). Une rue qui ne touche rien n'est pas une rue : c'est une
+	# bande de bitume au milieu d'un pâté. On compte les morceaux connexes de la
+	# chaussée, et ce qui vit hors du plus gros.
+	var rues: Dictionary = {}
+	for j3 in v.taille.y:
+		for i3 in v.taille.x:
+			var c9 := Vector2i(i3, j3)
+			if v.carte.route(c9): rues[c9] = -1
+	var morceaux: Array = []
+	var g3 := 0
+	for cle in rues.keys():
+		var depart: Vector2i = cle
+		if int(rues[depart]) >= 0: continue
+		var pile: Array = [depart]
+		rues[depart] = g3
+		var combien := 0
+		while not pile.is_empty():
+			var p3: Vector2i = pile.pop_back()
+			combien += 1
+			for d3 in CarteVille.COTES:
+				var q3: Vector2i = p3 + d3
+				if rues.has(q3) and int(rues[q3]) < 0:
+					rues[q3] = g3
+					pile.append(q3)
+		morceaux.append(combien)
+		g3 += 1
+	morceaux.sort()
+	morceaux.reverse()
+	var gros: int = int(morceaux[0]) if not morceaux.is_empty() else 0
+	var dehors: int = rues.size() - gros
+	# Un cul-de-sac : une case de rue qui n'a qu'une seule voisine de rue.
+	var bouts := 0
+	for cle2 in rues.keys():
+		var c10: Vector2i = cle2
+		var voisines := 0
+		for d4 in CarteVille.COTES:
+			if rues.has(c10 + d4): voisines += 1
+		if voisines <= 1: bouts += 1
+	print("7. réseau : %d cases de chaussée en %d morceau(x) ; %d hors du réseau, %d culs-de-sac"
+		% [rues.size(), morceaux.size(), dehors, bouts])
 	quit()
 
 ## ⚠ LES POINTS DU RAIL SONT DES `Vector2i`, PAS DES `[x, y]`. Les routes du

@@ -233,6 +233,7 @@ static func fenetre(plan: Dictionary, ctx: Dictionary, f: Rect2i, curseurs := {}
 		# ⚠ APRÈS LES QUARTIERS, PARCE QUE C'EST EUX QUI POSAIENT LE BITUME SOUS
 		# LES RAILS. Voir `_pas_de_rue_sous_le_rail`.
 		_pas_de_rue_sous_le_rail(v)
+		_rien_qui_ne_mene_nulle_part(v)
 		v.rasteriser()
 
 	# 5. LES OUVRAGES, puis L'AUTOROUTE AÉRIENNE.
@@ -305,6 +306,69 @@ static func _pas_de_rue_sous_le_rail(v: Ville2) -> int:
 		elif morceau.size() == 1 and cases2.size() == 1: gardees.append(_route_de(d2, morceau))
 	v.routes = gardees
 	return coupees
+
+## ⭐⭐ TOUTE RUE MÈNE QUELQUE PART, OU ELLE N'EXISTE PAS.
+##
+## « Sois sûr que tout le réseau routier soit connecté à quelque chose »
+## (client). Mesuré avant : sur la fenêtre (400,400,200,200), 12 336 cases de
+## chaussée en TROIS morceaux — 12 325 dans le réseau, et deux îlots de 6 et 5
+## cases qui ne touchaient rien. Onze cases de bitume au milieu d'un pâté, sans
+## une entrée ni une sortie : exactement « une rue qui ne mène nulle part ».
+##
+## Ils viennent de la coupe précédente (`_pas_de_rue_sous_le_rail`) : une rue de
+## grille tranchée des deux côtés laisse son milieu orphelin. On les retire ici
+## plutôt que de compliquer la coupe, parce que la question « ce morceau
+## touche-t-il le réseau » ne se pose qu'une fois tout le monde posé.
+##
+## ⚠ SAUF AU BORD DE LA FENÊTRE. Un morceau qui affleure la limite continue
+## peut-être chez la voisine : le juger sur ce qu'on voit d'ici, c'est refaire
+## dépendre le résultat du cadrage — la faute que l'archipel passe son temps à
+## éviter. Dans le doute, on garde.
+const ILOT_MINI := 8                 ## en dessous, un morceau isolé n'est pas une rue
+
+static func _rien_qui_ne_mene_nulle_part(v: Ville2) -> int:
+	# 1. Toutes les cases de chaussée, et à quelle route chacune appartient.
+	var groupe_de: Dictionary = {}
+	for r in v.routes:
+		for c0 in Ville2.cases_de_route(r):
+			groupe_de[c0] = -1
+	# 2. Les morceaux connexes.
+	var tailles: Array = []
+	var au_bord: Array = []
+	var g := 0
+	for c1 in groupe_de.keys():
+		var depart: Vector2i = c1
+		if int(groupe_de[depart]) >= 0: continue
+		var pile: Array = [depart]
+		groupe_de[depart] = g
+		var combien := 0
+		var touche := false
+		while not pile.is_empty():
+			var p: Vector2i = pile.pop_back()
+			combien += 1
+			if p.x <= 0 or p.y <= 0 or p.x >= v.taille.x - 1 or p.y >= v.taille.y - 1:
+				touche = true
+			for d in CarteVille.COTES:
+				var q: Vector2i = p + d
+				if groupe_de.has(q) and int(groupe_de[q]) < 0:
+					groupe_de[q] = g
+					pile.append(q)
+		tailles.append(combien)
+		au_bord.append(touche)
+		g += 1
+	# 3. On jette les routes dont le morceau est un îlot.
+	var gardees: Array = []
+	var retirees := 0
+	for r2 in v.routes:
+		var cases: Array = Ville2.cases_de_route(r2)
+		if cases.is_empty(): continue
+		var gr: int = int(groupe_de.get(cases[0], -1))
+		if gr >= 0 and int(tailles[gr]) < ILOT_MINI and not bool(au_bord[gr]):
+			retirees += 1
+			continue
+		gardees.append(r2)
+	v.routes = gardees
+	return retirees
 
 ## La même route, réduite à ce tronçon-là : même genre, même nom, même niveau.
 static func _route_de(modele: Dictionary, cases: Array) -> Dictionary:
@@ -1073,11 +1137,22 @@ const LISSAGE := 6                   ## demi-fenêtre de la moyenne glissante
 ## continue au lieu d'une suite de marches. Les pièces à deux cases sont
 ## écartées pour la même raison de justesse : elles se chevaucheraient d'une
 ## case sur deux.
+## ⚠ LA VARIANTE « -barrier » NE DESSINE QUE LA GLISSIÈRE, PAS LA CHAUSSÉE.
+## Sa boîte englobante couvre pourtant la case entière (1 × 0,08 × 1, mesuré), ce
+## qui m'a fait croire qu'elle contenait la route : posée seule, elle a donné des
+## rambardes toutes nues plantées dans l'herbe, sans un mètre de bitume. C'est
+## la convention de la ville qui a raison, et c'est aussi ce que le client
+## demande mot pour mot : « les assets que tu utilises pour la route AVEC LES
+## BARRIÈRES PAR-DESSUS ». Deux pièces, l'une sur l'autre, comme au sol.
 const AUTO_DROIT := "routes/road-straight"
 const AUTO_VIRAGE := "routes/road-bend"
-const AUTO_PONT := "routes/road-bridge"
-const AUTO_SORTIE := "routes/road-side-exit"
-const AUTO_ENTREE := "routes/road-side-entry"
+const BARRIERE_DE := {"routes/road-straight": "routes/road-straight-barrier",
+	"routes/road-bend": "routes/road-bend-barrier"}
+## ⚠ PLUS AUCUN `road-side-*`, NI LEURS VARIANTES À GLISSIÈRE. « Enlève
+## toutes les routes qui se nomment road-side-* ainsi que toutes les barrières »
+## (client, 17/09). Elles marquaient une sortie à plat sur le tablier, qui ne
+## sortait de rien : c'est la rampe courbe qui fait ce travail, et elle le fait
+## en descendant pour de bon.
 const AUTO_PILE := "routes/bridge-pillar"
 const AUTO_PILE_LARGE := "routes/bridge-pillar-wide"
 const PANNEAUX := ["routes/sign-highway", "routes/sign-highway-detailed",
@@ -1108,20 +1183,69 @@ const MINCE_PILE := 0.5              ## ce qu'on reprend en largeur à une pile 
 ## ne touche ni à la largeur du tablier ni à l'emprise) pour que ses pieds
 ## tombent exactement sur le terrain : jamais de jambe en l'air, jamais de pile
 ## en plus, un objet par case.
-## ⚠⚠⚠ ET ON NE L'ÉTIRE PAS, ET ON NE LUI MET RIEN DESSOUS.
+## ⚠⚠⚠ ET CE N'EST MÊME PAS `road-bridge` : C'EST LA ROUTE ORDINAIRE, EN L'AIR.
 ##
-## Le client a monté l'échangeur à la main dans l'éditeur, et l'a dit en une
-## phrase : « j'ai réussi à tout faire sans dalle ni rien en support, juste du
-## Kenney ». C'est la règle, et elle est plus simple que tout ce que j'avais
-## écrit : le tablier de l'autoroute est à LA HAUTEUR DE LA PIÈCE, pas à une
-## hauteur qu'on choisit. Chaque `road-bridge` repose sur le terrain, porte sa
-## chaussée à 10,4 unités (de quoi passer au-dessus d'un train, mesuré :
-## `CAISSE_TRAIN` + `HAUT_RAIL_MAX` = 9) et n'a besoin de RIEN d'autre.
+## Le client a monté l'échangeur à la main dans l'éditeur, puis l'a dit en deux
+## phrases qui ferment le sujet : « j'ai réussi à tout faire sans dalle ni rien
+## en support, juste du Kenney », et « tu peux rester avec les assets de route
+## basique en hauteur 0,5 ».
 ##
-## Ce qui disparaît avec ça : l'étirement (une pièce déformée), les piles
-## ajoutées dessous (un objet de plus), et toute possibilité qu'un morceau
-## flotte — puisque la pièce pose ses pieds elle-même, sur le sol, à chaque case.
-const PONT_HAUT := 10.4              ## `road-bridge` : 0,52 unité de kit, mesuré
+## C'est-à-dire : `road-straight`, `road-bend`, les mêmes pièces qu'au sol, POSÉES
+## À UNE DEMI-CASE DE HAUT. Rien d'autre. Pas de tablier, pas de pile, pas de
+## pièce de pont, pas de déformation. Une demi-case, c'est DIX unités — de quoi
+## laisser passer un train (gabarit mesuré : `HAUT_RAIL_MAX` + `CAISSE_TRAIN` =
+## 9) et un camion sous l'ouvrage.
+##
+## ⚠ J'ai essayé trois choses avant celle-là, et les trois étaient du décor
+## fabriqué à la main : une file de cubes, puis un ruban de tablier avec sa
+## chaussée par-dessus et sa pile en dessous, puis `road-bridge` étirée. À chaque
+## fois la même faute, et à chaque fois la même réponse du client. La voie
+## rapide du kit se suffit : elle n'a besoin de rien sous elle.
+## ⚠ LA HAUTEUR EST 0,5, ET C'EST LE CLIENT QUI TRANCHE. « Si tu places un
+## road-slant à 0, le sommet arrive à 0,5, donc si ton autoroute flotte en l'air
+## à 0,5 ça sera parfait » — et il l'a monté en vrai, ce que je n'ai pas fait.
+##
+## ⚠ CE QUE J'AI MESURÉ, ET QUI NE CHANGE PAS LA CONSIGNE. Sur les .glb du
+## dépôt : `road-slant` monte de 0,27 unité de kit (5,4 unités de monde) et
+## `road-slant-high` de 0,52 (10,4). C'est donc la SECONDE qui rejoint une
+## chaussée à 0,5 case ; la première s'arrêterait à mi-hauteur. On garde la
+## hauteur qu'il donne — 0,5, soit dix unités, la même que `bridge-pillar` posé
+## à sa taille — et l'on prend la rampe qui y arrive. Quatre décimètres de
+## dépassement au sommet, invisibles ; un trou de cinq mètres, non.
+const HAUT_DEMI_CASE := 10.0         ## 0,5 case — la hauteur fixée par le client
+## ⭐⭐ LA BRETELLE TOURNE EN DESCENDANT, ELLE NE PLONGE PAS TOUT DROIT.
+##
+## « Utilise road-slant-flat-curve ou road-slant-curve comme sur le screen »
+## (client) — et ses captures d'échangeur le montrent : une sortie d'autoroute
+## s'écarte en courbe large, elle ne tombe pas à l'équerre.
+##
+## ⚠ CES DEUX PIÈCES FONT DEUX CASES, PAS UNE (mesuré : 2 × 0,52 × 1, origine
+## au milieu des deux). C'est pour ça que je les avais écartées en écrivant
+## l'autoroute — « inutilisable case par case » — et c'était une mauvaise
+## raison : une bretelle n'est pas une chaussée courante, elle se pose UNE FOIS,
+## à un endroit choisi, et on peut très bien lui réserver ses deux cases.
+##
+## ⭐ ET C'EST LA RECETTE DU CLIENT, MOT POUR MOT : « j'ai mis toutes les routes
+## au sol à 0, puis le road-slant-flat-curve à 0 et la route connectée à 0,5, et
+## tout est bien relié ». Donc : la rampe se pose au SOL, comme une route
+## ordinaire, et c'est elle qui va chercher le tablier à 0,5 en tournant. Rien à
+## caler, rien à lever — les trois altitudes sont 0, 0 et 0,5.
+const AUTO_RAMPE := "routes/road-slant-flat-curve"
+const AUTO_RAMPE_BARRIERE := "routes/road-slant-curve-barrier"
+
+## ⭐ ET QUELQUES POTEAUX, SEULEMENT SUR L'HERBE ET LA TERRE.
+##
+## « Si il y a de l'herbe en dessous ou de la terre tu peux te permettre de
+## mettre quelques pillar à 0 au centre sous la route pour faire le soutien »
+## (client). À 0, c'est-à-dire À SA TAILLE DU KIT : `bridge-pillar` mesure
+## exactement 0,5 unité de kit, soit DIX unités — la hauteur du tablier au
+## pouce près. Posé au sol, il touche la chaussée sans qu'on ait à l'étirer.
+##
+## ⚠ ET PAS SOUS UNE RUE. Un poteau planté au milieu d'un carrefour, c'est le
+## défaut que le client a signalé le 16/09 (« les pylônes du dessous …
+## empiètent trop sur la route »). Sur l'eau non plus : un ouvrage sur l'eau,
+## c'est un pont, pas un viaduc urbain.
+const ECART_POTEAUX := 2             ## « quelques » : un toutes les deux cases
 
 static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i) -> void:
 	for r in plan["routes"]:
@@ -1129,14 +1253,14 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 		if String(d.get("classe", "")) != PLAN.V_PRIMAIRE: continue
 		var cases := _cases_suivies(d["points"])
 		if cases.size() < 2: continue
-		var haut := _profil_du_tablier(plan, ctx, cases)
-		var precedente := -99
-		# ⭐⭐ UNE PIÈCE DU KIT PAR CASE, ET C'EST TOUT (voir `PONT_HAUT`).
-		# Il y a eu ici, tour à tour, une file de cubes (« des trucs qui passent
-		# à travers chaque cube », 16/09), puis un ruban de tablier dessiné à la
-		# main avec une chaussée posée dessus et une pile en dessous (« tu
-		# empiles des choses les unes sur les autres », 17/09). Les deux fois,
-		# la faute était la même : fabriquer ce que le kit contient déjà.
+		# ⭐⭐ UN SEUL NIVEAU POUR TOUTE LA VOIE (voir `_niveau_de_la_voie`).
+		var niveau := _niveau_de_la_voie(_profil_du_tablier(plan, ctx, cases))
+		# Où une bretelle se branche : il faut le savoir AVANT de poser les
+		# glissières, puisque c'est là qu'il ne faut pas en mettre.
+		# ⚠ COMBIEN DE DEMI-CASES : c'est aussi le nombre de rampes à enchaîner
+		# pour redescendre au sol, une par demi-case.
+		var etages := int(round(niveau / HAUT_DEMI_CASE))
+		var branches := _ou_brancher(v, f, cases, etages)
 		for i in cases.size():
 			var c: Vector2i = cases[i]
 			if not f.has_point(c): continue
@@ -1150,48 +1274,133 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 			var sort := apres - c
 			if entre == Vector2i.ZERO: entre = sort
 			if sort == Vector2i.ZERO: sort = entre
-			var tourne := _cap(entre)
-			# ⭐ LA PIÈCE JUSTE POUR CETTE CASE-LÀ, ET ELLE EST SEULE.
-			var franchit := _coupee_dessous(v, l, entre)
-			# ⚠ LE PIED SE PREND SUR LE PROFIL LISSÉ, PAS SUR LE SOL BRUT.
-			# Posée sur le terrain tel quel, la file de tables suivrait chaque
-			# palier : des montagnes russes. `_profil_du_tablier` a déjà lissé le
-			# sol ; on lui reprend son dégagement pour retrouver ce sol-là.
-			var assise := haut[i] - HAUT_VIADUC
-			# ⭐ UNE PIÈCE, POSÉE SUR LE TERRAIN, ET RIEN D'AUTRE.
-			# Le cap d'un virage se lit sur le COUPLE (entrée, sortie), pas sur
-			# l'une des deux ; `road-bridge` étant droit, un coude se prend en
-			# gardant le cap de la case, comme un vrai ouvrage à travées.
-			v.objets.append({"m": AUTO_PONT, "x": x, "z": z,
-				"r": tourne, "h": 0.0, "y_abs": assise, "zone": true})
-			# ⭐ LES BRETELLES. Une sortie se pose là où une rue de la ville
-			# croise le tracé : c'est le seul endroit où une voiture qui quitte
-			# l'autoroute a quelque chose à rejoindre. Entrée puis sortie, de
-			# part et d'autre du croisement, comme sur un vrai échangeur.
-			if franchit and i - precedente > 8:
-				precedente = i
-				for paire in [[AUTO_SORTIE, -2], [AUTO_ENTREE, 2]]:
-					var j: int = i + int(paire[1])
-					if j < 0 or j >= cases.size(): continue
-					var cj: Vector2i = cases[j]
-					if not f.has_point(cj): continue
-					if (cases[j] as Vector2i) - (cases[j - 1] as Vector2i) != entre: continue
-					var lj := cj - f.position
-					v.objets.append({"m": String(paire[0]),
-						"x": (float(lj.x) + 0.5) * CASE, "z": (float(lj.y) + 0.5) * CASE,
-						"r": tourne, "h": 0.0,
-						"y_abs": haut[j] - HAUT_VIADUC + PONT_HAUT, "zone": true})
+			# ⭐ LA PIÈCE, À PLAT. Le cap d'un virage se lit sur le COUPLE
+			# (entrée, sortie), pas sur l'une des deux : `road-bend` n'est
+			# dessiné que dans un sens.
+			var piece := AUTO_DROIT
+			var cap := _cap(entre)
+			if entre != sort:
+				piece = AUTO_VIRAGE
+				cap = _cap_du_virage(entre, sort)
+			v.objets.append({"m": piece, "x": x, "z": z,
+				"r": cap, "h": 0.0, "y_abs": niveau, "zone": true})
+			# ⭐ LA GLISSIÈRE, SAUF OÙ LA BRETELLE SE BRANCHE.
+			#
+			# « Quand un road-slant-flat-curve se connecte à une route, la route
+			# ne doit pas avoir de barrière pour que les voitures puissent y
+			# passer » (client). Évident une fois dit : une sortie fermée par un
+			# rail de sécurité n'est pas une sortie.
+			#
+			# ⚠ UN QUART DE TOUR DE PLUS QUE LA CHAUSSÉE, ET CE N'EST PAS UN
+			# DÉTAIL : les rails de `road-straight-barrier` sont à x = ±0,485 et
+			# courent donc SELON Z (mesuré, voir `CarteVille.RAILS`), quand
+			# `road-straight` roule selon X. Au même cap, la glissière COUPE la
+			# chaussée en travers — le défaut signalé le 16/09 sur les rues.
+			if not branches.has(i):
+				v.objets.append({"m": String(BARRIERE_DE[piece]), "x": x, "z": z,
+					"r": cap + PI * 0.5, "h": 0.0, "y_abs": niveau, "zone": true})
+			# Le poteau, quand il y a de quoi le planter (voir `ECART_POTEAUX`).
+			if posmod(c.x + c.y, ECART_POTEAUX) == 0 and v.dedans(l) \
+					and v.terre(l) and not v.carte.route(l):
+				# ⚠ À SA TAILLE DU KIT, SANS RIEN LUI FAIRE : `bridge-pillar`
+				# mesure 0,50 unité de kit, soit exactement une demi-case. Posé
+				# au sol il touche un tablier à 0,5 ; étiré, il grossirait. Sous
+				# un tablier plus haut on en empile donc, on n'en déforme pas.
+				var combien := int(round(niveau / HAUT_DEMI_CASE))
+				for k in combien:
+					v.objets.append({"m": AUTO_PILE, "x": x, "z": z, "r": 0.0,
+						"h": 0.0, "y_abs": float(k) * HAUT_DEMI_CASE, "zone": true})
 			# ⭐ LES PANNEAUX, au bord de la voie et tournés vers le conducteur.
 			# Ils se posent sur la POSITION ABSOLUE et non sur l'indice : une
 			# fenêtre décalée doit retrouver les mêmes panneaux aux mêmes cases.
 			if posmod(c.x * 7 + c.y * 13, ECART_PANNEAUX) == 0 and entre == sort:
-				# ⚠ LA DEMI-LARGEUR EST CELLE DE LA CASE, plus celle du ruban
-				# d'autrefois : le tablier, c'est la pièce du kit, une case.
-				var cote := Vector2(sin(tourne), cos(tourne)).orthogonal() * (CASE * 0.5 - 1.0)
+				var cote := Vector2(sin(cap), cos(cap)).orthogonal() * (CASE * 0.5 - 1.0)
 				v.objets.append({"m": String(PANNEAUX[posmod(c.x + c.y, PANNEAUX.size())]),
 					"x": x + cote.x, "z": z + cote.y,
-					"r": tourne, "h": 0.0,
-					"y_abs": assise + PONT_HAUT, "zone": true})
+					"r": cap, "h": 0.0, "y_abs": niveau, "zone": true})
+		# ⭐⭐ LES BRETELLES, une fois la chaussée posée.
+		for i2 in branches.keys():
+			var fiche: Dictionary = branches[i2]
+			# ⚠ UNE RAMPE PAR DEMI-CASE À DESCENDRE, EN FILE. Une pièce ne fait
+			# qu'une demi-case de dénivelé ; un tablier à une case entière en
+			# demande donc deux, l'une derrière l'autre. La plus proche de la
+			# voie rapide est la plus haute.
+			var milieux: Array = fiche["milieux"]
+			for k in milieux.size():
+				var m: Vector2 = milieux[k]
+				var bas := niveau - float(k + 1) * HAUT_DEMI_CASE
+				v.objets.append({"m": AUTO_RAMPE, "x": m.x * CASE, "z": m.y * CASE,
+					"r": float(fiche["cap"]), "h": 0.0, "y_abs": bas, "zone": true})
+				# Et sa glissière : « rajoute les barrières au
+				# road-slant-flat-curve » (client). Même cap — les deux pièces
+				# sont de la même famille, dessinées dans le même sens.
+				v.objets.append({"m": AUTO_RAMPE_BARRIERE, "x": m.x * CASE,
+					"z": m.y * CASE, "r": float(fiche["cap"]), "h": 0.0,
+					"y_abs": bas, "zone": true})
+
+## ⭐⭐⭐ UNE AUTOROUTE EST À UN NIVEAU, PAS À UNE ALTITUDE QUI SERPENTE.
+##
+## « Tu ne dois jamais faire de dénivelé solo : une autoroute est positionnée à
+## 0,5 de hauteur ou 1, et seuls les road-slant-flat-curve permettent le
+## dénivelé » (client). Donc plus de profil lissé case par case, plus de tuile
+## inclinée, plus de tablier qui suit le terrain de loin : LA VOIE ENTIÈRE est à
+## un multiple de la demi-case, et ce qui change de niveau, c'est la rampe.
+##
+## ⚠ ET LE NIVEAU SE PREND SUR LA VOIE ENTIÈRE, PAS SUR LA FENÊTRE. `cases` est
+## la polyligne du PLAN, la même vue de n'importe quel cadrage : deux fenêtres
+## voisines calculent donc le même niveau, et la voie ne fait pas une marche sur
+## la couture. C'est la règle de l'archipel, et c'est ici qu'elle se gagne.
+##
+## On prend le POINT HAUT : sous le niveau du sol, une voie rapide n'est plus une
+## voie rapide, c'est une tranchée. Un cran au-dessus du plus haut terrain
+## qu'elle traverse, et elle vole partout.
+static func _niveau_de_la_voie(haut: PackedFloat32Array) -> float:
+	var sommet := 0.0
+	for y in haut:
+		sommet = maxf(sommet, float(y) - HAUT_VIADUC)
+	return maxf(1.0, ceilf((sommet + HAUT_DEMI_CASE) / HAUT_DEMI_CASE)) * HAUT_DEMI_CASE
+
+## ⭐ OÙ BRANCHER UNE BRETELLE, et sur quelles cases elle s'étale.
+##
+## Une sortie n'a de sens que là où une rue passe SOUS la voie rapide : c'est le
+## seul endroit où une voiture qui descend a quelque chose à rejoindre. Et il
+## faut deux cases libres à côté — `road-slant-flat-curve` en occupe deux
+## (mesuré : 2 × 0,52 × 1, origine au milieu des deux).
+##
+## Rend, par indice de case : les milieux des rampes à enchaîner et leur cap.
+static func _ou_brancher(v: Ville2, f: Rect2i, cases: Array, etages: int) -> Dictionary:
+	var sortie: Dictionary = {}
+	var precedente := -99
+	for i in cases.size():
+		var c: Vector2i = cases[i]
+		if not f.has_point(c): continue
+		if i - precedente <= 8: continue
+		var l := c - f.position
+		var avant: Vector2i = cases[i - 1] if i > 0 else c
+		var entre := c - avant
+		if entre == Vector2i.ZERO: continue
+		if not _coupee_dessous(v, l, entre): continue
+		var travers := Vector2i(entre.y, entre.x)
+		for cote0 in [travers, -travers]:
+			var cote: Vector2i = cote0
+			# Deux cases par étage, toutes libres et à terre, sinon la bretelle
+			# sort dans l'eau ou traverse un pâté.
+			var milieux: Array = []
+			var bon := true
+			for k in etages:
+				var a: Vector2i = l + cote * (2 * k + 1)
+				var b: Vector2i = a + cote
+				if not v.dedans(a) or not v.dedans(b): bon = false; break
+				if not v.terre(a) or not v.terre(b): bon = false; break
+				if v.carte.route(a) or v.carte.case_prise(a): bon = false; break
+				if v.carte.route(b) or v.carte.case_prise(b): bon = false; break
+				milieux.append(Vector2(float(a.x) + float(b.x), float(a.y) + float(b.y))
+					* 0.5 + Vector2(0.5, 0.5))
+			if not bon or milieux.is_empty(): continue
+			sortie[i] = {"milieux": milieux, "cap": _cap(-cote)}
+			precedente = i
+			break
+	return sortie
 
 ## ⭐⭐ UNE ROUTE QUI PASSE DESSOUS N'EST PAS UNE ROUTE QUI COUPE.
 ##
