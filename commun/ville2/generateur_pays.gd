@@ -1041,11 +1041,9 @@ static func _l_aerodrome(graine: int) -> Ville2:
 ##    différentes de part et d'autre d'une couture — un décroché d'un mètre en
 ##    plein milieu du tablier, tous les deux kilomètres.
 const HAUT_VIADUC := 11.0            ## dégagement sous tablier, en unités
-const LARGE_VIADUC := 21.0           ## la largeur du tablier porteur
 const ECART_PILES := 4               ## une pile toutes les 4 cases (80 m)
 const CHERCHE_PILE := 3              ## de combien de cases on décale une pile gênée
 const LISSAGE := 6                   ## demi-fenêtre de la moyenne glissante
-const EPAISSEUR_TABLIER := 0.45      ## où la chaussée se pose sur son tablier
 
 ## ⭐⭐ LE KIT DE L'AUTOROUTE — liste donnée par le client le 16/09, après
 ## « vraiment ton autoroute rime à rien ». Il avait raison : le viaduc était une
@@ -1088,33 +1086,57 @@ const ECART_PANNEAUX := 23           ## un panneau toutes les 23 cases (460 m)
 const PORTEE_LARGE := 6              ## au-delà, la pile large
 const MINCE_PILE := 0.5              ## ce qu'on reprend en largeur à une pile haute
 
+## ⭐⭐⭐ L'AUTOROUTE VOLANTE EST FAITE DE `road-bridge`, ET DE RIEN D'AUTRE.
+##
+## Capture du client, 17/09 : une pièce `road-bridge` seule, au-dessus d'une rue
+## — un tablier, ses deux bordures, ses quatre jambes. « Voici comment faire une
+## autoroute volante ». Tout est déjà dans la pièce ; il n'y avait rien à
+## fabriquer autour.
+##
+## ⚠⚠ CE QU'ON EMPILAIT AVANT, ET POURQUOI C'ÉTAIT TROIS FOIS TROP. Sur CHAQUE
+## case on posait : (1) un ruban de tablier gris dessiné à la main, (2) une tuile
+## de chaussée par-dessus à `+0,45`, (3) une pile du kit étirée en dessous. Trois
+## objets superposés pour ce qu'une seule pièce du kit fait mieux — « tu empiles
+## des choses les unes sur les autres, je ne comprends pas pourquoi », et « tu
+## mets des dalles blanches … alors que tu n'en as pas besoin » (client, 17/09).
+## La dalle blanche, c'était le ruban.
+##
+## ⚠ LA PIÈCE S'ÉTIRE, ELLE NE FLOTTE PAS. `road-bridge` mesure 0,52 unité de
+## kit, soit 10,4 unités de monde : c'est la hauteur du tablier au-dessus de ses
+## pieds. Le tablier de l'autoroute, lui, est à la hauteur que le profil lui
+## donne, qui varie. On ÉTIRE donc la pièce EN HAUTEUR SEULEMENT (`aplat`, qui
+## ne touche ni à la largeur du tablier ni à l'emprise) pour que ses pieds
+## tombent exactement sur le terrain : jamais de jambe en l'air, jamais de pile
+## en plus, un objet par case.
+## ⚠⚠⚠ ET ON NE L'ÉTIRE PAS, ET ON NE LUI MET RIEN DESSOUS.
+##
+## Le client a monté l'échangeur à la main dans l'éditeur, et l'a dit en une
+## phrase : « j'ai réussi à tout faire sans dalle ni rien en support, juste du
+## Kenney ». C'est la règle, et elle est plus simple que tout ce que j'avais
+## écrit : le tablier de l'autoroute est à LA HAUTEUR DE LA PIÈCE, pas à une
+## hauteur qu'on choisit. Chaque `road-bridge` repose sur le terrain, porte sa
+## chaussée à 10,4 unités (de quoi passer au-dessus d'un train, mesuré :
+## `CAISSE_TRAIN` + `HAUT_RAIL_MAX` = 9) et n'a besoin de RIEN d'autre.
+##
+## Ce qui disparaît avec ça : l'étirement (une pièce déformée), les piles
+## ajoutées dessous (un objet de plus), et toute possibilité qu'un morceau
+## flotte — puisque la pièce pose ses pieds elle-même, sur le sol, à chaque case.
+const PONT_HAUT := 10.4              ## `road-bridge` : 0,52 unité de kit, mesuré
+
 static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i) -> void:
-	# Les cases où une AUTRE primaire passe : là, la voie se croise.
-	var croisements := {}
-	for r0 in plan["routes"]:
-		if String((r0 as Dictionary).get("classe", "")) != PLAN.V_PRIMAIRE: continue
-		for c0 in _cases_suivies((r0 as Dictionary)["points"]):
-			croisements[c0] = int(croisements.get(c0, 0)) + 1
 	for r in plan["routes"]:
 		var d: Dictionary = r
 		if String(d.get("classe", "")) != PLAN.V_PRIMAIRE: continue
 		var cases := _cases_suivies(d["points"])
 		if cases.size() < 2: continue
 		var haut := _profil_du_tablier(plan, ctx, cases)
-		var piles := _ou_poser_les_piles(v, f, cases)
 		var precedente := -99
-		# ⭐⭐ LE TABLIER EST UN RUBAN, PAS UNE FILE DE CUBES.
-		# « Tes autoroutes sur les ponts sont vraiment mal faites, tu as des
-		# trucs qui passent à travers chaque cube » (client, 16/09). Il avait
-		# raison sur le fond ET sur le mot : c'ÉTAIT des cubes. Une dalle par
-		# case, chacune posée à plat à l'altitude de SA case — donc un joint
-		# visible tous les vingt mètres, une marche à chaque changement de
-		# pente, et deux bordures qui s'arrêtent et repartent à chaque dalle,
-		# ce qui dessinait une échelle en travers de la chaussée.
-		# On accumule donc les points du tablier et on le dessine d'un trait.
-		var ruban: Array = []
-		var rubans: Array = []
-		var dernier_pose := -99
+		# ⭐⭐ UNE PIÈCE DU KIT PAR CASE, ET C'EST TOUT (voir `PONT_HAUT`).
+		# Il y a eu ici, tour à tour, une file de cubes (« des trucs qui passent
+		# à travers chaque cube », 16/09), puis un ruban de tablier dessiné à la
+		# main avec une chaussée posée dessus et une pile en dessous (« tu
+		# empiles des choses les unes sur les autres », 17/09). Les deux fois,
+		# la faute était la même : fabriquer ce que le kit contient déjà.
 		for i in cases.size():
 			var c: Vector2i = cases[i]
 			if not f.has_point(c): continue
@@ -1129,46 +1151,24 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 			if entre == Vector2i.ZERO: entre = sort
 			if sort == Vector2i.ZERO: sort = entre
 			var tourne := _cap(entre)
-			# La pente réelle du tablier sur cette case, en radians. C'est elle
-			# qui incline la chaussée : la route monte, elle ne s'escalade pas.
-			var pente := 0.0
-			if i > 0 and i + 1 < cases.size():
-				pente = atan2(haut[i - 1] - haut[i + 1], 2.0 * CASE)
-			# Le ruban se COUPE dès que la case précédente n'était pas voisine :
-			# sortie de fenêtre, ou trou dans le tracé. Deux morceaux valent
-			# mieux qu'un tablier qui saute par-dessus le vide en ligne droite.
-			if not ruban.is_empty() and i - dernier_pose > 1:
-				if ruban.size() >= 2: rubans.append(ruban)
-				ruban = []
-			dernier_pose = i
-			ruban.append([x, haut[i], z])
-			# ⭐ LA PIÈCE JUSTE POUR CETTE CASE-LÀ.
-			var piece := AUTO_DROIT
-			var cap := tourne
-			var incline := pente
-			if entre != sort:
-				# Un quart de tour : `road-bend` tourne en une case. Son cap se
-				# lit sur le COUPLE (entrée, sortie), pas sur l'une des deux.
-				piece = AUTO_VIRAGE
-				cap = _cap_du_virage(entre, sort)
-				incline = 0.0
-			elif int(croisements.get(c, 0)) > 1:
-				# Deux primaires au même endroit : la travée passe par-dessus.
-				piece = AUTO_PONT
-				incline = 0.0
-			elif _coupee_dessous(v, l, entre):
-				# Une rue COUPE dessous : une travée de pont, qui a sa structure
-				# apparente — c'est là qu'un viaduc se voit de la rue.
-				piece = AUTO_PONT
-				incline = 0.0
-			v.objets.append({"m": piece, "x": x, "z": z,
-				"r": cap, "h": 0.0, "pente": incline,
-				"y_abs": haut[i] + EPAISSEUR_TABLIER, "zone": true})
+			# ⭐ LA PIÈCE JUSTE POUR CETTE CASE-LÀ, ET ELLE EST SEULE.
+			var franchit := _coupee_dessous(v, l, entre)
+			# ⚠ LE PIED SE PREND SUR LE PROFIL LISSÉ, PAS SUR LE SOL BRUT.
+			# Posée sur le terrain tel quel, la file de tables suivrait chaque
+			# palier : des montagnes russes. `_profil_du_tablier` a déjà lissé le
+			# sol ; on lui reprend son dégagement pour retrouver ce sol-là.
+			var assise := haut[i] - HAUT_VIADUC
+			# ⭐ UNE PIÈCE, POSÉE SUR LE TERRAIN, ET RIEN D'AUTRE.
+			# Le cap d'un virage se lit sur le COUPLE (entrée, sortie), pas sur
+			# l'une des deux ; `road-bridge` étant droit, un coude se prend en
+			# gardant le cap de la case, comme un vrai ouvrage à travées.
+			v.objets.append({"m": AUTO_PONT, "x": x, "z": z,
+				"r": tourne, "h": 0.0, "y_abs": assise, "zone": true})
 			# ⭐ LES BRETELLES. Une sortie se pose là où une rue de la ville
 			# croise le tracé : c'est le seul endroit où une voiture qui quitte
 			# l'autoroute a quelque chose à rejoindre. Entrée puis sortie, de
 			# part et d'autre du croisement, comme sur un vrai échangeur.
-			if piece == AUTO_PONT and i - precedente > 8:
+			if franchit and i - precedente > 8:
 				precedente = i
 				for paire in [[AUTO_SORTIE, -2], [AUTO_ENTREE, 2]]:
 					var j: int = i + int(paire[1])
@@ -1180,39 +1180,18 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 					v.objets.append({"m": String(paire[0]),
 						"x": (float(lj.x) + 0.5) * CASE, "z": (float(lj.y) + 0.5) * CASE,
 						"r": tourne, "h": 0.0,
-						"y_abs": haut[j] + EPAISSEUR_TABLIER + 0.02, "zone": true})
+						"y_abs": haut[j] - HAUT_VIADUC + PONT_HAUT, "zone": true})
 			# ⭐ LES PANNEAUX, au bord de la voie et tournés vers le conducteur.
 			# Ils se posent sur la POSITION ABSOLUE et non sur l'indice : une
 			# fenêtre décalée doit retrouver les mêmes panneaux aux mêmes cases.
 			if posmod(c.x * 7 + c.y * 13, ECART_PANNEAUX) == 0 and entre == sort:
-				var cote := Vector2(sin(tourne), cos(tourne)).orthogonal() * (LARGE_VIADUC * 0.5 + 1.2)
+				# ⚠ LA DEMI-LARGEUR EST CELLE DE LA CASE, plus celle du ruban
+				# d'autrefois : le tablier, c'est la pièce du kit, une case.
+				var cote := Vector2(sin(tourne), cos(tourne)).orthogonal() * (CASE * 0.5 - 1.0)
 				v.objets.append({"m": String(PANNEAUX[posmod(c.x + c.y, PANNEAUX.size())]),
 					"x": x + cote.x, "z": z + cote.y,
 					"r": tourne, "h": 0.0,
-					"y_abs": haut[i] + EPAISSEUR_TABLIER, "zone": true})
-			# ⭐ LE POTEAU DU KIT, MIS À SA HAUTEUR RÉELLE.
-			# `bridge-pillar` est dessiné pour une portée de 0,5 case : mis à
-			# l'échelle sur la hauteur voulue, il reste proportionné, et un
-			# tablier de trente mètres reçoit un fût plus épais — ce que fait un
-			# vrai ouvrage. La pile LARGE marque les grandes portées.
-			if piles.has(i):
-				var sol := PLAN.sol_en(plan, ctx, c)
-				var pied := maxf(float(sol[0]), TerrainV2.NIVEAU_MER)
-				var creux := maxf(haut[i] - pied, 2.0)
-				# ⚠ `mince` : mise à l'échelle sur sa hauteur, une pile de vingt
-				# unités devient quatre unités de large et mange la rue qu'elle
-				# enjambe. On lui reprend la moitié de sa largeur — un fût de
-				# deux unités, ce qu'est un vrai pilier de viaduc urbain.
-				v.objets.append({"m": AUTO_PILE_LARGE if creux > CASE * 0.9 else AUTO_PILE,
-					"x": x, "z": z, "r": tourne, "h": creux, "mince": MINCE_PILE,
-					"y_abs": pied, "zone": true})
-		# ⚠ `zone: true` : le tablier est du mobilier de voirie posé en l'air.
-		# Sans ce drapeau la passe de propreté retire l'autoroute entière.
-		if ruban.size() >= 2: rubans.append(ruban)
-		for morceau in rubans:
-			var pts: Array = morceau
-			v.objets.append({"m": "viaduc", "x": float(pts[0][0]), "z": float(pts[0][2]),
-				"r": 0.0, "h": 0.0, "w": LARGE_VIADUC, "pts": pts, "zone": true})
+					"y_abs": assise + PONT_HAUT, "zone": true})
 
 ## ⭐⭐ UNE ROUTE QUI PASSE DESSOUS N'EST PAS UNE ROUTE QUI COUPE.
 ##

@@ -805,8 +805,21 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 const HAUT_FRANCHIT := 9.0           ## le gabarit libre au-dessus d'une chaussée
 const LISSAGE_RAIL := 5              ## demi-fenêtre de la rampe, en cases
 const AU_SOL := 1.2                  ## en dessous, la voie est réputée au sol
-const ECART_PILES_RAIL := 3          ## une pile toutes les 3 cases
-const TEINTE_TABLIER_RAIL := Color("#9aa0a8")
+## ⭐⭐⭐ LA VOIE EN L'AIR N'A PAS DE DALLE — ELLE A DES POTEAUX.
+##
+## « Tu mets des dalles blanches sous les rails … alors que tu n'en as pas
+## besoin » (client, 17/09). Il y avait là un caisson blanc de 9,4 unités de
+## large et 1,1 d'épais sous CHAQUE tronçon dès que la voie quittait le sol :
+## une poutre continue, plus large que la voie, qu'on voyait de partout. Ce
+## n'était pas un ouvrage, c'était un cache-misère — les traverses tiennent
+## toutes seules, et une voie ferrée en viaduc, c'est des traverses et des
+## poteaux, rien entre les deux.
+##
+## ⚠ ET UN POTEAU PAR CASE, PAS UN TOUS LES TROIS. Espacés, ils laissaient
+## soixante mètres de rail en l'air sans rien dessous — les « portions
+## flottantes ». Vingt mètres entre deux fûts, c'est la travée d'un vrai viaduc
+## ferroviaire.
+const TEINTE_PILE_RAIL := Color("#6f747c")
 
 ## ⭐⭐⭐ CE QU'UNE VOIE FRANCHIT — ET CE QU'ELLE TRAVERSE À NIVEAU.
 ##
@@ -1080,20 +1093,11 @@ static func _poser_rail(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 			# les traverses, et des piles jusqu'au terrain.
 			var sol := _sol_du_rail(ville, a)
 			var creux := milieu.y - sol
-			if creux > AU_SOL:
-				# ⚠⚠ LE TABLIER SE RECOUVRE, SINON LA COURBE SE DISLOQUE. Chaque
-				# tronçon est une boîte DROITE ; dans un virage, deux boîtes
-				# voisines font un angle, et si elles se touchent pile leurs
-				# coins s'écartent — d'où l'ouvrage en morceaux de la capture du
-				# client (« ce genre de chose moche où c'est pas lié ensemble
-				# correctement »). On les rallonge d'un tiers de pas : le joint
-				# se noie dans la matière, en courbe comme en ligne droite.
-				_boite_tournee(racine, base, Vector3(longueur + RECOUVRE_RAIL, 1.1, 9.4),
-					milieu - dessus * 0.75, TEINTE_TABLIER_RAIL)
-				if posmod(a.x + a.y, ECART_PILES_RAIL) == 0 and not posees.has(a):
-					posees[a] = true
-					_boite(racine, Vector3(2.6, creux, 2.6),
-						Vector3(milieu.x, sol + creux * 0.5 - 0.7, milieu.z), TEINTE_TABLIER_RAIL)
+			if creux > AU_SOL and not posees.has(a):
+				# Voir `TEINTE_PILE_RAIL` : un fût par case, et rien d'autre.
+				posees[a] = true
+				_boite(racine, Vector3(2.2, creux, 2.2),
+					Vector3(milieu.x, sol + creux * 0.5 - 0.5, milieu.z), TEINTE_PILE_RAIL)
 			for s in [-1.0, 1.0]:
 				_boite_tournee(racine, base, Vector3(longueur + RECOUVRE_RAIL, 0.5, 0.6),
 					milieu + cote * (ecart * s) + dessus * 0.25, TEINTE_RAIL)

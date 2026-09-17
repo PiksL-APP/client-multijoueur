@@ -67,20 +67,22 @@ func _init() -> void:
 	# 3. LOTS SOUS LE VIADUC.
 	var sous := {}
 	var tabliers := 0
+	# ⚠ LE TABLIER EST FAIT DE PIÈCES DU KIT DEPUIS LE 17/09 — il n'y a plus
+	# d'objet « viaduc » du tout. Une case de tablier, c'est désormais une pièce
+	# de voie rapide posée EN L'AIR : on les reconnaît à leur modèle et à leur
+	# `y_abs` au-dessus du sol. Chercher l'ancien nom ne mesurait plus rien.
+	var PIECES_AUTO := ["routes/road-bridge", "routes/road-straight",
+		"routes/road-bend", "routes/road-side-exit", "routes/road-side-entry"]
 	for o in v.objets:
 		var fo: Dictionary = o
-		if String(fo.get("m", "")) != "viaduc": continue
-		# ⚠ LE TABLIER EST UN RUBAN DEPUIS LE 16/09, PLUS UNE DALLE PAR CASE.
-		# Compté comme un objet, il donnait « 8 cases de tablier » pour deux
-		# kilomètres d'autoroute, et la mesure « lots sous le viaduc » ne
-		# mesurait plus rien. On parcourt donc ses points.
-		for pt in (fo.get("pts", []) as Array):
-			var q: Array = pt
-			tabliers += 1
-			var c4 := Vector2i(floori(float(q[0]) / 20.0), floori(float(q[2]) / 20.0))
-			for dj in [-1, 0, 1]:
-				for di in [-1, 0, 1]:
-					sous[c4 + Vector2i(di, dj)] = true
+		if not PIECES_AUTO.has(String(fo.get("m", ""))): continue
+		if not fo.has("y_abs"): continue
+		var c4 := Vector2i(floori(float(fo["x"]) / 20.0), floori(float(fo["z"]) / 20.0))
+		if float(fo["y_abs"]) - v.carte.hauteur(c4) < 2.0: continue
+		tabliers += 1
+		for dj in [-1, 0, 1]:
+			for di in [-1, 0, 1]:
+				sous[c4 + Vector2i(di, dj)] = true
 	var sous_viaduc := 0
 	for l3 in v.lots:
 		var m2: Dictionary = l3
