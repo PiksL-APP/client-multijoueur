@@ -394,7 +394,12 @@ static func _les_ponts(plan: Dictionary, v: Ville2, f: Rect2i) -> void:
 			v.objets.append({"m": "plateforme", "x": x, "z": z,
 				"r": 0.0 if selon_x else PI * 0.5, "h": 0.0, "dalle": false,
 				"w": LARGE_TABLIER, "d": CASE, "y": TABLIER, "zone": true})
-			if k % 2 != 0: continue
+			# ⚠ ET PAS DE LAMPADAIRE TOUS LES DEUX PAS SUR UN PONT SUR L'EAU.
+			# Un tous les deux, c'est un tous les quarante mètres : sur une
+			# travée de deux kilomètres ça fait cinquante mâts, et de loin le
+			# pont disparaît sous ses poteaux. Un sur huit suffit, comme sur un
+			# vrai ouvrage.
+			if k % 8 != 0: continue
 			for s in [-1.0, 1.0]:
 				var sf: float = s
 				var ex: float = 0.0 if selon_x else sf * (LARGE_TABLIER * 0.5 - 1.4)

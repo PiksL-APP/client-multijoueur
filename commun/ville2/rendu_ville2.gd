@@ -109,7 +109,9 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 				var nom := String(f[0])
 				nom = _variante_avenue(ville, c, nom)
 				nom = _variante_campagne(ville, c, nom)
-				_tuile(racine, nom, centre, int(f[1]))
+				# Sur l'eau, la case est un TABLIER : pas de damier (voir `_tuile`).
+				var pont := not ville.terre(c)
+				_tuile(racine, nom, centre, int(f[1]), Color.WHITE, 1.0, pont)
 				# ⭐ LES GLISSIÈRES. Systématiques sur une voie rapide, et POSÉES
 				# AU BORD DU VIDE partout ailleurs : « de temps en temps place les
 				# objets avec la terminaison barrier pour ajouter des sécurités
@@ -740,6 +742,26 @@ const AU_SOL := 1.2                  ## en dessous, la voie est réputée au sol
 const ECART_PILES_RAIL := 3          ## une pile toutes les 3 cases
 const TEINTE_TABLIER_RAIL := Color("#9aa0a8")
 
+## ⭐⭐⭐ CE QU'UNE VOIE FRANCHIT — ET CE QU'ELLE TRAVERSE À NIVEAU.
+##
+## Ma première règle disait « la voie passe au-dessus de TOUTE chaussée ». En
+## rase campagne c'est juste ; en ville c'est absurde, et le client l'a vu tout
+## de suite : « t'as fait n'importe quoi là ». Dans un quartier, une rue tous les
+## quatre ou cinq cases veut dire que la voie se soulève, n'a jamais le temps de
+## redescendre entre deux, et finit en métro aérien sur tout le quartier, piles
+## comprises.
+##
+## La vraie règle est celle des chemins de fer : on ne construit un ouvrage que
+## pour ce qui le mérite. Une AVENUE ou une VOIE RAPIDE se franchit — le trafic
+## y est trop dense pour une barrière. Une rue de quartier se traverse À NIVEAU,
+## par un passage à niveau, ce qui est exactement ce que le réseau faisait avant
+## que je m'en mêle. La voie reste donc au sol la plupart du temps, et le tablier
+## ne sort que là où il a une raison d'exister.
+static func _a_franchir(ville: Ville2, c: Vector2i) -> bool:
+	if not ville.carte.route(c): return false
+	var g := ville.genre_de_route(c)
+	return g == Ville2.R_AVENUE or g == Ville2.R_VOIE_RAPIDE
+
 ## Le sol sous une case de voie. ⚠ Une case d'eau n'a pas de palier (`palier`
 ## rend −999) : la voie y est sur un pont, dont le tablier de cette carte est au
 ## palier 0 — on y retombe, ce qui pose les traverses exactement dessus.
@@ -754,7 +776,7 @@ static func _profil_du_rail(ville: Ville2, cases: Array) -> PackedFloat32Array:
 	brut.resize(cases.size())
 	for i in cases.size():
 		var c: Vector2i = cases[i]
-		brut[i] = _sol_du_rail(ville, c) + (HAUT_FRANCHIT if ville.carte.route(c) else 0.0)
+		brut[i] = _sol_du_rail(ville, c) + (HAUT_FRANCHIT if _a_franchir(ville, c) else 0.0)
 	var lisse := PackedFloat32Array()
 	lisse.resize(cases.size())
 	for i in cases.size():
@@ -1199,16 +1221,23 @@ static func _pilotis(parent: Node3D, ou: Vector3, tourne: float, largeur: float,
 		profondeur: float, y: float) -> void:
 	var base := Basis(Vector3.UP, tourne)
 	var haut := ou + Vector3(0, y, 0)
-	var n := maxi(2, int(profondeur / 6.0))
+	# ⭐⭐ UNE PILE, PAS UNE FORÊT DE PILOTIS.
+	#
+	# « Le pont doit voler ou être juste posé sur des pillars qui le soutiennent
+	# et tombent dans l'eau, c'est tout » (client, 16/09), avec la photo d'un
+	# bras de mer hérissé de dizaines de piquets bruns. C'est ce que faisait ce
+	# code : DEUX pilotis de 0,9 tous les six unités, donc sept paires par case
+	# sur une travée — quatorze piquets pour vingt mètres de pont. À l'échelle
+	# d'une jetée de plage c'était le bon dessin ; à l'échelle d'un pont de deux
+	# kilomètres c'est un champ de bambous.
+	#
+	# Une pile par case, au milieu, assez épaisse pour porter : c'est ce qu'on
+	# voit sous un vrai pont, et ça tombe droit dans l'eau.
 	var fond := TerrainV2.NIVEAU_MER - 3.0
 	var hauteur := (haut.y - 0.35) - fond
 	if hauteur <= 0.2: return
-	for k in n:
-		var t := (float(k) + 0.5) / float(n) - 0.5
-		for s in [-1.0, 1.0]:
-			var p := haut + base * Vector3(s * (largeur * 0.5 - 0.9), 0, t * profondeur)
-			_boite_tournee(parent, base, Vector3(0.9, hauteur, 0.9),
-				Vector3(p.x, fond + hauteur * 0.5, p.z), TEINTE_PILOTIS)
+	_boite_tournee(parent, base, Vector3(2.8, hauteur, 2.8),
+		Vector3(haut.x, fond + hauteur * 0.5, haut.z), TEINTE_PILOTIS)
 
 ## LE TABLIER D'AUTOROUTE : une dalle et ses deux bordures. `ou` est DÉJÀ à
 ## l'altitude du tablier (posé par `y_abs`) — le tablier ne cherche pas le sol,
@@ -1402,7 +1431,7 @@ static func _boite(racine: Node3D, dims: Vector3, ou: Vector3, teinte: Color) ->
 # ------------------------------------------------------------------ outils
 
 static func _tuile(parent: Node3D, nom: String, ou: Vector3, quarts: int,
-		teinte := Color.WHITE, cases := 1.0) -> void:
+		teinte := Color.WHITE, cases := 1.0, plat := false) -> void:
 	var chemin := ROUTES + nom + ".glb"
 	if not ResourceLoader.exists(chemin):
 		push_warning("tuile absente : " + chemin)
@@ -1421,7 +1450,14 @@ static func _tuile(parent: Node3D, nom: String, ou: Vector3, quarts: int,
 	# rien déplacer et sans z-fighting — le chanfrein est plus bas que la face
 	# qui le couvre.
 	# Une case sur deux descend d'un cheveu : voir `DECALAGE_DAMIER`.
-	var damier := float((posmod(roundi(ou.x / CASE) + roundi(ou.z / CASE), 2)))
+	# ⚠⚠ ET PAS DE DAMIER SUR UN PONT. Le décalage d'un cheveu existe pour
+	# empêcher deux tuiles VOISINES de clignoter l'une contre l'autre au-dessus
+	# du terrain. Sur un tablier il n'y a pas de terrain : le décalage ne sert
+	# plus à rien et se met à SE VOIR — une case sur deux plus basse, ça fait un
+	# escalier de marches d'un centimètre sur toute la longueur du pont, avec un
+	# liseré sombre à chaque joint (« je vois ce genre de chose partout »,
+	# client, 16/09). Le drapeau `plat` le coupe là où le sol ne le justifie pas.
+	var damier := 0.0 if plat else float((posmod(roundi(ou.x / CASE) + roundi(ou.z / CASE), 2)))
 	n.transform = Transform3D(Basis(Vector3.UP, PI * 0.5 * float(quarts)).scaled(
 		Vector3.ONE * CASE * RECOUVREMENT * cases),
 		ou - Vector3(0.0, damier * DECALAGE_DAMIER, 0.0))

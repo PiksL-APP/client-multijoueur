@@ -142,6 +142,8 @@ static func remplir(plan: Dictionary, ctx: Dictionary, v: Ville2, origine: Vecto
 	#    façade, son toit et sa place dans la rue. Poser un bâtiment de plus
 	#    aurait demandé une place libre qui n'existe plus à ce stade.
 	_les_habitables(plan, v, f)
+	# 7 bis. ⭐⭐ LE CŒUR DES ÎLOTS, qui était nu.
+	_les_coeurs(plan, ctx, v, f, vus)
 	# 8. LE MOBILIER DES STATIONS — la gare des lignes de train, l'abribus et le rack à vélos
 	#    de tout le reste. Trois cent quarante-deux stations sur le pays : c'est
 	#    le mobilier le plus RÉPANDU de la carte, et jusqu'ici aucune n'avait
@@ -735,6 +737,73 @@ static func _a_cote_libre(v: Ville2, l: Vector2i) -> Vector2i:
 		var n: Vector2i = l + d
 		if _case_de_mobilier(v, n): return n
 	return Vector2i(-999, -999)
+
+## ⭐⭐⭐ LE CŒUR DES ÎLOTS — « les cœurs d'îlots sont vides ».
+##
+## Le lotisseur BORDE la rue : il pose les façades le long du trottoir et laisse
+## le milieu du pâté intact. C'est la bonne façon de bâtir une rue, et ça laisse
+## une clairière de béton nu au centre de chaque îlot — vu d'en haut, la moitié
+## du centre-ville est une dalle grise vide.
+##
+## On ne bâtit pas ce milieu : un bâtiment de plus au centre d'un îlot n'aurait
+## ni rue ni entrée. On le MEUBLE, comme un vrai arrière d'immeuble : des
+## voitures garées, une benne, quelques arbres, un banc.
+##
+## ⚠ SEULEMENT LES CASES VRAIMENT ENCLAVÉES. Une case libre au bord de l'îlot
+## donne sur la rue : c'est un trottoir, pas une cour. On ne meuble que celles
+## dont les QUATRE voisines sont prises — par un bâtiment, par une chaussée ou
+## par le bord de la fenêtre. Sinon on remplit des pelouses et des parvis qui
+## n'ont rien demandé.
+##
+## ⚠⚠ ET LE TIRAGE SE FAIT SUR LA POSITION ABSOLUE. Un îlot à cheval sur deux
+## fenêtres doit recevoir la même cour des deux côtés de la couture, sinon la
+## voiture change de place quand on marche.
+const BENNE := "benne"
+const COUR_VOITURES := 0.42          ## part des cases de cour qui reçoivent des voitures
+const COUR_ARBRES := 0.30
+const COUR_BENNE := 0.12
+
+static func _les_coeurs(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
+		vus: Array) -> void:
+	var poses := 0
+	for j in v.taille.y:
+		for i in v.taille.x:
+			var l := Vector2i(i, j)
+			if not _case_de_mobilier(v, l): continue
+			if not _enclavee(v, l): continue
+			var c := f.position + l
+			var alea := RandomNumberGenerator.new()
+			alea.seed = _graine(c.x, c.y, 4211)
+			var k := PLAN.quartier_en(plan, ctx, c)
+			var essence: Array = REGLES.charte(_genre(plan, k))["essence"] if k >= 0 \
+				else ["nature/tree-default"]
+			var x := (float(l.x) + 0.5) * CASE
+			var z := (float(l.y) + 0.5) * CASE
+			var t := alea.randf()
+			if t < COUR_VOITURES:
+				# Deux voitures rangées côte à côte, comme sur un parking d'arrière-cour.
+				for n in 2:
+					var m := String(KitVille2.VOITURES[alea.randi() % KitVille2.VOITURES.size()])
+					v.ajouter_objet(m, x - 4.0 + float(n) * 8.0, z, PI * 0.5, 0.0, "")
+			elif t < COUR_VOITURES + COUR_ARBRES:
+				for n2 in (1 + alea.randi() % 2):
+					v.ajouter_objet(String(essence[alea.randi() % essence.size()]),
+						x - 3.0 + float(n2) * 6.0, z + 2.0, 0.0, 0.0, "")
+			elif t < COUR_VOITURES + COUR_ARBRES + COUR_BENNE:
+				v.ajouter_objet(BENNE, x, z, PI * 0.5, 0.0, "")
+			else:
+				continue
+			poses += 1
+	if poses > 0: print("[cœurs] %d cases de cour meublées" % poses)
+
+## Les quatre voisines sont-elles prises ? Le bord de la fenêtre compte comme
+## pris : ce qui continue dehors n'est pas une cour qu'on peut juger d'ici.
+static func _enclavee(v: Ville2, l: Vector2i) -> bool:
+	for d in [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]:
+		var n: Vector2i = l + d
+		if not v.dedans(n): continue
+		if _case_de_mobilier(v, n): return false
+	return true
 
 ## De quel côté est la rue ? Les quatre côtés d'abord — c'est là qu'un arrêt
 ## se colle — puis les diagonales, qui donnent au moins un cap plausible quand

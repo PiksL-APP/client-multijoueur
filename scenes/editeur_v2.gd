@@ -120,6 +120,8 @@ var _cartes: OptionButton
 var _familles: OptionButton
 var _recherche: LineEdit
 var _libre: CheckBox
+var _sens: CheckBox                     ## afficher les sens de circulation
+var _fleches: Node3D                    ## la surcouche des sens
 var _aimant: OptionButton
 
 ## LES PAS D'AIMANT. « libre » vaut zéro : rien n'est arrondi, l'objet se pose
@@ -294,6 +296,9 @@ func demarrer() -> void:
 
 	_apercu = Node3D.new()
 	monde().add_child(_apercu)
+	_fleches = Node3D.new()
+	_fleches.visible = false
+	monde().add_child(_fleches)
 	_cadre = MeshInstance3D.new()
 	_cadre.visible = false
 	monde().add_child(_cadre)
@@ -582,6 +587,13 @@ func _interface() -> void:
 	if _est_le_pays():
 		gb.add_child(_entete("Le pays"))
 		gb.add_child(_la_minicarte())
+	gb.add_child(_entete("Circulation"))
+	_sens = CheckBox.new()
+	_sens.text = "Sens de circulation"
+	_sens.tooltip_text = "Une flèche par voie : rouge dans un sens, bleu dans l'autre.\nLa conduite est à DROITE."
+	_sens.focus_mode = Control.FOCUS_NONE
+	_sens.toggled.connect(func(_o: bool) -> void: _montrer_les_sens())
+	gb.add_child(_sens)
 	gb.add_child(_entete("Sélection"))
 	_info = RichTextLabel.new()
 	_info.fit_content = true
@@ -855,7 +867,11 @@ func _regle_decalage() -> SpinBox:
 	_champ_decalage = SpinBox.new()
 	_champ_decalage.min_value = -2.0
 	_champ_decalage.max_value = 10.0
-	_champ_decalage.step = 0.25
+	# ⚠ UN DIXIÈME DE CASE, PAS UN QUART. « Je ne peux pas monter la hauteur de
+	# 0,1 par 0,1 » (client, 16/09) : à 0,25 le champ refusait sa saisie et la
+	# ramenait au quart le plus proche. Un dixième de case, c'est deux mètres —
+	# et le champ accepte désormais ce qu'on y tape.
+	_champ_decalage.step = 0.1
 	_champ_decalage.value = _decalage / CASE
 	_champ_decalage.tooltip_text = "La hauteur à laquelle l'objet est posé, en cases au-dessus du sol.\nPage Haut / Page Bas montent et descendent d'un quart de case.\nUne hauteur non nulle autorise la pose au-dessus d'une rue ou d'un toit."
 	_champ_decalage.value_changed.connect(func(v: float) -> void: _decalage = v * CASE)
@@ -1318,11 +1334,11 @@ func _touche(k: InputEventKey) -> void:
 			_tourner_selection(-1)
 			_montrer_apercu()
 		KEY_PAGEUP:
-			_decalage = minf(_decalage + CASE * 0.25, CASE * 10.0)
+			_decalage = minf(_decalage + CASE * 0.1, CASE * 10.0)
 			if _champ_decalage != null: _champ_decalage.value = _decalage / CASE
 			_dire("Hauteur de pose : %.2f case." % (_decalage / CASE))
 		KEY_PAGEDOWN:
-			_decalage = maxf(_decalage - CASE * 0.25, CASE * -2.0)
+			_decalage = maxf(_decalage - CASE * 0.1, CASE * -2.0)
 			if _champ_decalage != null: _champ_decalage.value = _decalage / CASE
 			_dire("Hauteur de pose : %.2f case." % (_decalage / CASE))
 		KEY_PLUS, KEY_KP_ADD, KEY_EQUAL:
@@ -1898,6 +1914,91 @@ func _dalle(r: Rect2, teinte: Color, y: float) -> void:
 	n.mesh = _rectangle(r, Color(teinte, 0.45))
 	n.position = Vector3(0, y, 0)
 	_apercu.add_child(n)
+
+## ⭐⭐⭐ LE SENS DE CIRCULATION, UNE FLÈCHE PAR VOIE.
+##
+## « Voici comment on pourrait faire en sorte que les choses soient logiques, en
+## mettant avec une flèche les sens de direction » (client, 16/09, deux schémas à
+## l'appui). C'est d'abord un outil de CONTRÔLE : une carte où deux flèches se
+## font face au milieu d'une rue, ou bien où tout un quartier tourne dans le même
+## sens, se voit d'un coup d'œil — alors que la même faute ne se lit pas du tout
+## sur le bitume. Et c'est ensuite la base du trafic : une voiture a besoin de
+## savoir de quel côté rouler, pas seulement où est la route.
+##
+## ⚠ LA RÈGLE TIENT EN UNE PHRASE : ON ROULE À DROITE. Sur une rue est-ouest,
+## celui qui va vers l'EST tient le côté SUD ; celui qui va vers l'OUEST tient le
+## côté NORD. Les deux flèches se déduisent donc de l'AXE de la rue et de rien
+## d'autre — pas d'un tirage, pas d'une table à maintenir.
+##
+## ⚠⚠ ET ON NE FLÉCHE PAS UN CARREFOUR. Une case dont les quatre côtés sont de la
+## chaussée n'a pas d'axe : y poser deux flèches, c'est affirmer un sens là où
+## justement tout se croise. On la laisse nue, et le regard suit les branches.
+const C_SENS_ALLER := Color("#e5393c")
+const C_SENS_RETOUR := Color("#2f7fd6")
+const HAUT_FLECHE := 0.6
+
+func _montrer_les_sens() -> void:
+	for n in _fleches.get_children():
+		n.queue_free()
+	_fleches.visible = _sens != null and _sens.button_pressed
+	if not _fleches.visible: return
+	var posees := 0
+	for j in _ville.taille.y:
+		for i in _ville.taille.x:
+			var c := Vector2i(i, j)
+			if not _ville.carte.route(c): continue
+			var axe := _axe_de_la_rue(c)
+			if axe == Vector2i.ZERO: continue
+			var y := _ville.sol(c) + HAUT_FLECHE
+			var centre := Vector3((float(c.x) + 0.5) * CASE, y, (float(c.y) + 0.5) * CASE)
+			# Le côté droit de chaque sens : on roule à droite.
+			var u := Vector2(float(axe.x), float(axe.y))
+			var droite := u.orthogonal()
+			for s0 in [1.0, -1.0]:
+				var s: float = s0
+				var v: Vector2 = u * s
+				var d: Vector2 = droite * s
+				_une_fleche(centre + Vector3(d.x, 0, d.y) * (CASE * 0.22),
+					v, C_SENS_ALLER if s > 0.0 else C_SENS_RETOUR)
+			posees += 1
+	_dire("Sens de circulation : %d cases fléchées." % posees)
+
+## L'axe d'une rue : la direction dans laquelle elle continue. `ZERO` si la case
+## est un carrefour (quatre branches) ou un cul-de-sac isolé.
+func _axe_de_la_rue(c: Vector2i) -> Vector2i:
+	var m := _ville.carte.masque(c)
+	var selon_x := (m & 2) != 0 or (m & 8) != 0
+	var selon_y := (m & 1) != 0 or (m & 4) != 0
+	if selon_x and selon_y: return Vector2i.ZERO
+	if selon_x: return Vector2i(1, 0)
+	if selon_y: return Vector2i(0, 1)
+	return Vector2i.ZERO
+
+## Une flèche plate : un fût et une pointe, posés à plat sur la chaussée.
+func _une_fleche(ou: Vector3, sens: Vector2, teinte: Color) -> void:
+	var im := ImmediateMesh.new()
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = teinte
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var av := Vector3(sens.x, 0, sens.y).normalized()
+	var co := av.cross(Vector3.UP).normalized()
+	var l := CASE * 0.34
+	var e := CASE * 0.055
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES, mat)
+	# le fût
+	var a := -av * l * 0.5
+	var b := av * l * 0.1
+	for v in [a - co * e, b - co * e, b + co * e, a - co * e, b + co * e, a + co * e]:
+		im.surface_add_vertex(v)
+	# la pointe
+	for v in [b - co * e * 2.6, av * l * 0.5, b + co * e * 2.6]:
+		im.surface_add_vertex(v)
+	im.surface_end()
+	var n := MeshInstance3D.new()
+	n.mesh = im
+	n.position = ou
+	_fleches.add_child(n)
 
 func _rectangle(r: Rect2, teinte: Color) -> Mesh:
 	var im := ImmediateMesh.new()
