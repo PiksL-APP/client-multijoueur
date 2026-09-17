@@ -1054,6 +1054,27 @@ static func remplir_terrain(plan: Dictionary, ctx: Dictionary, v: Ville2,
 				v.matiere[k] = Ville2.M_HERBE
 				continue
 			var d := distance_signee(plan, ctx, wi, wj)
+			# ⭐⭐⭐ PAS DE CAILLOU D'UNE CASE AU MILIEU DE L'OCÉAN.
+			#
+			# Mesuré sur toute la carte : VINGT-TROIS masses de terre distinctes
+			# pour ONZE îles déclarées. Les onze vraies y sont, de 67 656 cases à
+			# 1 239 ; les douze autres sont des miettes — une de 328 cases, une
+			# de 16, deux de 2, et HUIT D'UNE SEULE CASE. Vingt mètres de terre
+			# en pleine mer, que le bruit du trait de côte a laissés derrière
+			# lui, et sur lesquels le pays peut poser un quartier.
+			#
+			# ⚠ PAS DE REMPLISSAGE PAR DIFFUSION ICI, ET C'EST LA CONTRAINTE QUI
+			# DÉCIDE DE LA MÉTHODE. Le terrain se remplit PAR FENÊTRE : une
+			# diffusion ne verrait qu'un morceau de chaque île et raserait de la
+			# vraie terre au bord de la fenêtre. On teste donc le VOISINAGE, qui
+			# est local — et on le teste avec `distance_signee`, pas avec la
+			# grille : c'est une fonction de la position absolue, donc elle
+			# répond juste même pour une case qui tombe hors de la fenêtre.
+			if d <= 0.0 and _isolee(plan, ctx, wi, wj):
+				v.eau[k] = 1
+				v.altitude[k] = PREMIER_FOND
+				v.matiere[k] = Ville2.M_SABLE
+				continue
 			if d <= 0.0 and lacs.has(c):
 				v.eau[k] = 1
 				v.altitude[k] = float(lacs[c])
@@ -1118,9 +1139,85 @@ static func _sol_creuse(plan: Dictionary, ctx: Dictionary, c: Vector2i, y: float
 		return [minf(creuse, TerrainV2.NIVEAU_MER - 2.0), 1.0]
 	return [creuse, 0.0]
 
+## ⚠ DEUX VOISINES, PAS UNE. Une case seule n'en a aucune et disparaît ; une
+## PAIRE de cases s'en donne une l'une à l'autre et survivrait au seuil de 1 —
+## or deux cases de terre en pleine mer, c'est le même défaut en plus large. À
+## deux voisines, la paire part aussi, et une pointe de cap en garde toujours
+## trois ou quatre : le trait de côte, lui, n'est pas touché.
+const VOISINES_MINI := 2
+
+## ⚠ CE QUE CETTE RÈGLE NE SAIT PAS FAIRE, ET POURQUOI ON S'ARRÊTE LÀ.
+## Mesuré avant : 23 masses de terre pour 11 îles. Après : 15 — les onze vraies
+## îles intactes, au caillou près, plus un îlot de 328 cases et un de 15 qui sont
+## de vrais bouts de terre, plus DEUX cases seules qui résistent.
+##
+## Elles résistent parce qu'un test de voisinage est LOCAL par construction :
+## ces deux-là s'appuient sur des voisines qui tiennent debout au premier coup
+## d'œil et que la règle noie ensuite, et rien de local ne peut voir cette
+## chaîne. Seul un remplissage par diffusion sur toute la carte la verrait — et
+## on ne peut pas en faire un ici, puisque le terrain se calcule PAR FENÊTRE.
+##
+## Deux cases sur un million, soit quarante mètres carrés de terre perdue au
+## milieu de quatre cents kilomètres carrés : le prix d'un balayage global de la
+## carte à chaque ouverture de fenêtre ne vaut pas ces deux cailloux.
+
+## ⚠⚠⚠ UNE VOISINE « PAS EN MER » N'EST PAS FORCÉMENT DE LA TERRE.
+##
+## Mon premier test comptait comme voisine toute case hors de la mer. Il restait
+## trois cailloux d'une case, et la mesure a dit pourquoi : deux étaient cernés
+## de LAC, le troisième de LIT DE RIVIÈRE. Ni l'un ni l'autre n'est de la mer,
+## donc ils passaient pour de la terre — et le caillou gardait ses deux voisines
+## sur le papier tout en se retrouvant seul au milieu de l'eau dans le terrain.
+## C'est exactement la faute qui avait mis deux stations dans une rivière (voir
+## `sol_en`) : UNE SEULE VÉRITÉ SUR CE QUI EST MOUILLÉ.
+static func _terre_ferme(plan: Dictionary, ctx: Dictionary, x: int, y: int) -> bool:
+	if distance_signee(plan, ctx, x, y) > 0.0: return false
+	var c := Vector2i(x, y)
+	if (ctx["lacs"] as Dictionary).has(c): return false
+	if not (ctx["lit"] as Dictionary).has(c): return true
+	return float(sol_en(plan, ctx, c)[1]) < 0.5
+
+## ⚠⚠ ET IL FAUT DEUX NIVEAUX, PARCE QUE NOYER UNE CASE EN ISOLE UNE AUTRE.
+## Après une passe simple, il restait TROIS cailloux d'une case sur vingt-trois
+## masses : chacun s'appuyait sur deux voisines qui étaient elles-mêmes des
+## cailloux, condamnées au même moment. Une case ne compte donc comme voisine
+## que si elle TIENT toute seule — et le second niveau, lui, s'arrête là :
+## au-delà, on descendrait une chaîne sans fin pour quelques mètres carrés.
+##
+## Le coût reste modeste parce que le test sort tôt : dès quatre voisines
+## franches, la case est manifestement en pleine terre et on ne va pas plus loin
+## — ce qui est le cas de 99 % des cases d'une île.
+static func _isolee(plan: Dictionary, ctx: Dictionary, x: int, y: int,
+		profond := true) -> bool:
+	var n := 0
+	var douteuses: Array = []
+	for dj in [-1, 0, 1]:
+		for di in [-1, 0, 1]:
+			if di == 0 and dj == 0: continue
+			if not _terre_ferme(plan, ctx, x + di, y + dj): continue
+			n += 1
+			if n >= 4: return false
+			douteuses.append(Vector2i(x + di, y + dj))
+	if n < VOISINES_MINI: return true
+	if not profond: return false
+	# Deux ou trois voisines seulement : elles ne comptent que si elles tiennent.
+	var solides := 0
+	for c0 in douteuses:
+		var c: Vector2i = c0
+		if _isolee(plan, ctx, c.x, c.y, false): continue
+		solides += 1
+		if solides >= VOISINES_MINI: return false
+	return true
+
 static func terre_en(plan: Dictionary, ctx: Dictionary, c: Vector2i) -> bool:
 	if c.x < 0 or c.y < 0 or c.x >= TAILLE.x or c.y >= TAILLE.y: return false
 	if distance_signee(plan, ctx, c.x, c.y) > 0.0: return false
+	# ⚠ LA MÊME RÈGLE QUE LE TERRAIN, SINON LES DEUX SE CONTREDISENT. Le plan
+	# décide où l'on peut poser une rue ou un port ; le terrain décide où il y a
+	# du sol. Si le premier croit qu'un caillou d'une case est de la terre et que
+	# le second l'a noyé, on pose une station sur l'eau — c'est déjà arrivé avec
+	# les lits de rivière (voir `sol_en`), et c'est la même leçon.
+	if _isolee(plan, ctx, c.x, c.y): return false
 	var lit: Dictionary = ctx["lit"]
 	if not lit.has(c): return true
 	return float(sol_en(plan, ctx, c)[1]) < 0.5

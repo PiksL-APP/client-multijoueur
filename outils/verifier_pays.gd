@@ -6,6 +6,14 @@ extends SceneTree
 const PLAN := preload("res://commun/ville2/plan_pays.gd")
 const PAYS := preload("res://commun/ville2/generateur_pays.gd")
 
+## ⚠ LA TOLÉRANCE N'EST PAS ARBITRAIRE, C'EST LA PRÉCISION DU FICHIER.
+## `Ville2.vers_json` arrondit chaque altitude au centième (`snappedf(a, 0.01)`)
+## — un choix délibéré, qui divise par trois le poids d'une carte. Mon premier
+## contrôle comparait au millième et annonçait « aller-retour PERDU » sur 61
+## cases d'un lit de rivière dont l'altitude avait bougé de CINQ MILLIMÈTRES.
+## Comparer plus finement que ce qu'on écrit, c'est mesurer sa propre règle.
+const PAS_ALTITUDE := 0.01
+
 func _init() -> void:
 	var plan := PLAN.charger()
 	var ctx := PLAN.contexte(plan)
@@ -129,6 +137,36 @@ func _init() -> void:
 			pire_creux = maxi(pire_creux, ref - bas)
 	print("5. lots dont un coin est en l\'air : %d (pire creux : %d paliers)"
 		% [flottants, pire_creux])
+
+	# 6. L'ALLER-RETOUR. Une fenêtre du pays retouchée dans l'éditeur doit
+	# revenir telle quelle : c'est la condition pour que le Ctrl+S serve à
+	# quelque chose. On vérifie le compte, mais SURTOUT le terrain — c'est lui
+	# qui pèse, et c'est lui qu'on perd sans s'en apercevoir, parce qu'une carte
+	# au bon nombre de lots posés sur un sol plat a l'air correcte jusqu'au
+	# moment où l'on regarde le relief.
+	var ou := "user://cartes/controle-aller-retour.json"
+	if not v.enregistrer(ou):
+		print("6. aller-retour : ÉCHEC — écriture impossible")
+		quit()
+		return
+	var r := Ville2.charger(ou)
+	if r == null:
+		print("6. aller-retour : ÉCHEC — relecture impossible")
+		quit()
+		return
+	var memes := 0
+	var cases := 0
+	for j2 in mini(v.taille.y, r.taille.y):
+		for i2 in mini(v.taille.x, r.taille.x):
+			var c8 := Vector2i(i2, j2)
+			cases += 1
+			if absf(v.sol(c8) - r.sol(c8)) <= PAS_ALTITUDE and v.terre(c8) == r.terre(c8):
+				memes += 1
+	var bon := r.lots.size() == v.lots.size() and r.objets.size() == v.objets.size() \
+		and r.rail.size() == v.rail.size() and r.taille == v.taille and memes == cases
+	print("6. aller-retour : %s — %d/%d lots, %d/%d objets, terrain %d/%d cases"
+		% ["OK" if bon else "PERDU", r.lots.size(), v.lots.size(),
+			r.objets.size(), v.objets.size(), memes, cases])
 	quit()
 
 ## ⚠ LES POINTS DU RAIL SONT DES `Vector2i`, PAS DES `[x, y]`. Les routes du

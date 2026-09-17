@@ -138,6 +138,15 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 				if CarteVille.BARRIERES.has(nom) and not nom.ends_with("-path") \
 						and _a_quelque_chose_a_border(ville, c):
 					var nb := String(CarteVille.BARRIERES[nom])
+					# ⭐⭐ LA BARRIÈRE QUI ENCADRE UN PASSAGE PIÉTON.
+					# « Voici un passage piéton parfait avec les barrières
+					# road-driveway-double-barrier dessus » (client, 16/09).
+					# Elle ne va pas SUR le zébra — on ne clôture pas l'endroit
+					# où l'on traverse — mais sur les deux cases qui l'encadrent
+					# le long de la rue : c'est ce qui canalise le piéton vers
+					# le passage au lieu de le laisser traverser n'importe où,
+					# et c'est exactement ce que montre sa référence.
+					if _contre_un_zebre(ville, c): nb = BARRIERE_PASSAGE
 					_tuile(racine, nb, centre, CarteVille.quarts_de_barriere(
 						nb, carte.masque(c), int(f[1])))
 			elif ville.matiere_de(c) == Ville2.M_DALLE:
@@ -429,6 +438,17 @@ static func _poser_soutenements(racine: Node3D, ville: Ville2, zone: Rect2i) -> 
 				var bas := _pied_du_mur(ville, v)
 				if haut - bas < seuil: continue
 				var teinte: Color = TEINTE_BETON if en_ville else TEINTE_ROCHE
+				# ⭐⭐⭐ UN REMBLAI EN RASE CAMPAGNE SE TALUTE, IL NE SE MURE PAS.
+				# Le client a entouré en rouge un pan de béton aveugle de huit
+				# mètres sous une rampe, au milieu de l'herbe, et choisi « un
+				# talus en pente » (17/09). Un mur vertical est juste quand la
+				# route borde une autre surface bâtie — un quai, une terrasse,
+				# un autre lot. Face à un terrain nu, c'est de la terre en pente
+				# qu'on voit dans la vraie vie, et c'est ce qui rend le dénivelé
+				# lisible sans coller une dalle blanche dans le paysage.
+				if not vers_le_haut and _talus_ici(ville, c, v):
+					_talus(racine, i, j, d, bas, haut, TerrainV2.COULEURS.get(ville.matiere_de(v), TerrainV2.COULEURS[Ville2.M_HERBE]))
+					continue
 				if vers_le_haut == Vector2i.ZERO or d == -vers_le_haut:
 					_mur(racine, i, j, d, bas, haut, 1.0, 0.0, teinte)
 				elif d == vers_le_haut:
@@ -438,7 +458,53 @@ static func _poser_soutenements(racine: Node3D, ville: Ville2, zone: Rect2i) -> 
 					_mur(racine, i, j, d, bas, haut + PALIER * 0.25, 0.5, -0.25, teinte)
 					_mur(racine, i, j, d, bas, haut + PALIER * 0.75, 0.5, 0.25, teinte)
 
-## Un pan de mur le long du côté `d` de la case (i, j), de `bas` à `haut`.
+## La pièce du kit qui encadre un passage piéton : deux lisses basses le long
+## du trottoir, celles qu'on voit de part et d'autre d'un passage protégé.
+const BARRIERE_PASSAGE := "road-driveway-double-barrier"
+
+## Cette case est-elle collée à un passage piéton, le long de la rue ?
+## ⚠ LE LONG DE LA RUE, PAS EN TRAVERS : la barrière borde le trottoir, elle ne
+## se met pas en face du zébra — ce serait barrer la traversée d'un cran plus
+## loin, ce qu'on vient précisément de corriger.
+static func _contre_un_zebre(ville: Ville2, c: Vector2i) -> bool:
+	for d in CarteVille.COTES:
+		var n: Vector2i = c + d
+		if not ville.carte.route(n): continue
+		if _zebre_ici(ville, n): return true
+	return false
+
+## Un remblai se talute quand il tombe sur du terrain NU : ni chaussée, ni lot,
+## ni dalle de trottoir. Contre du bâti, c'est un mur qu'il faut.
+static func _talus_ici(ville: Ville2, c: Vector2i, v: Vector2i) -> bool:
+	if not ville.dedans(v): return false
+	if not ville.terre(v): return false
+	if ville.carte.route(v) or ville.lot_sur(v) >= 0: return false
+	if ville.matiere_de(v) == Ville2.M_DALLE: return false
+	# Et seulement si la case du haut est bâtie : un talus sous une pelouse
+	# n'existe pas, c'est simplement du terrain.
+	return ville.carte.route(c) or ville.lot_sur(c) >= 0
+
+## ⚠ LE TALUS EMPIÈTE SUR LA CASE D'À CÔTÉ, ET C'EST NORMAL. Une pente de terre
+## tenable fait à peu près une fois et demie sa hauteur en longueur : huit
+## mètres de dénivelé mangent douze mètres de pré. C'est le prix d'un remblai
+## qui ne soit pas un mur, et l'herbe se referme dessus.
+const PENTE_TALUS := 1.5
+
+static func _talus(racine: Node3D, i: int, j: int, d: Vector2i, bas: float,
+		haut: float, teinte: Color) -> void:
+	var dh := haut - bas
+	if dh < MUR_MINI: return
+	var course := dh * PENTE_TALUS
+	# Le repère du talus : X le long du côté, Z dans la pente.
+	var av := Vector3(float(d.x), 0.0, float(d.y))
+	var le_long := Vector3(float(d.y), 0.0, float(d.x))
+	var pente := (av * course + Vector3(0, -dh, 0)).normalized()
+	var base := Basis(le_long, pente.cross(le_long).normalized(), pente)
+	var haut_du_bord := Vector3((float(i) + 0.5 + float(d.x) * 0.5) * CASE, haut,
+		(float(j) + 0.5 + float(d.y) * 0.5) * CASE)
+	var milieu := haut_du_bord + av * (course * 0.5) - Vector3(0, dh * 0.5, 0)
+	var longueur := sqrt(course * course + dh * dh)
+	_boite_tournee(racine, base, Vector3(CASE * 1.02, 0.5, longueur), milieu, teinte)
 ## `part` est la fraction de la case couverte, `glisse` le décalage du centre
 ## le long de ce côté (en fraction de case) : c'est ce qui permet de poser deux
 ## demi-murs à deux hauteurs pour suivre une rampe.

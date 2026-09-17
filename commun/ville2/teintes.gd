@@ -51,6 +51,30 @@ const TOLE := ["#c2a184", "#b9917a", "#a89a86", "#c8b79d", "#9fa89b",
 ## L'industrie : béton, tôle peinte, rouille.
 const INDUSTRIE := ["#d5d7d2", "#c3c7c4", "#d8cdbc", "#bfae9c", "#cdd4d8", "#c9b7a4"]
 
+## ⭐⭐⭐ LE CENTRE-VILLE, EN DEUX PALETTES — « les deux, par quartier » (client,
+## 17/09), après plusieurs captures où tout le centre lisait gris.
+##
+## ⚠ POURQUOI UN CENTRE EST GRIS ALORS QU'ON A VINGT MODÈLES. Les immeubles du
+## kit partagent tous le même atlas : murs blancs, toit ardoise, pour TOUS. La
+## variété de FORME ne se lit pas à la distance où l'on juge un quartier — la
+## variété de COULEUR, si. Mille blocs blancs sous des toits gris font une
+## bouillie, et c'est exactement ce qu'on voyait sur une capture à six
+## kilomètres.
+##
+## PIERRE_DE_TAILLE : le centre ancien européen. Crème, ocre, sable, brique
+## cuite. Aucun blanc pur — une façade de pierre est beige, jamais blanche — et
+## une seule brique vraiment sombre, qui sert d'accent : au-delà, la rue vire au
+## rouge et ne lit plus comme de la pierre.
+const PIERRE_DE_TAILLE := ["#e8dcc0", "#e0cfae", "#d9b98a", "#cba07a", "#c08a5e",
+	"#e3d6b8", "#d2b593", "#9c5a44", "#dcc9a4", "#c89a72"]
+
+## BETON_VERRE : le quartier d'affaires. Gris chauds et froids, anthracite, et
+## deux bleus de vitrage qui font les tours. ⚠ Les bleus restent MINORITAIRES :
+## une tour sur quatre en verre se lit comme une ville moderne, une sur deux se
+## lit comme un aquarium.
+const BETON_VERRE := ["#c9cbcf", "#b4b8be", "#9aa0a8", "#8d9299", "#5b6672",
+	"#d5d8dc", "#a8c4d8", "#7f9db5", "#c0c4c8", "#6e7883"]
+
 ## Repeint tous les lots d'un genre (ou tous, si `genre` est vide) dans une
 ## palette, sans deux voisins de même couleur : on tire dans un sac, donc la
 ## palette passe en entier avant qu'une couleur revienne.

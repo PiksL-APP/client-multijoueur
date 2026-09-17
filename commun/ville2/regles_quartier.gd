@@ -102,8 +102,30 @@ const CHARTES := {
 		## kilomètres, le même quartier vire au GRIS UNIFORME — mille immeubles
 		## blancs sous mille toits d'ardoise. À 0,55 de « garder », un immeuble
 		## sur deux prend une façade colorée et le quartier reprend du relief.
-		"sol": Ville2.M_DALLE, "toits": "VIEILLE", "murs": "PAVILLONS", "garder": 0.55,
+		## ⭐⭐ LA PIERRE DE TAILLE, choisie par le client le 17/09 : « les deux,
+		## par quartier » — pierre et brique sur le centre historique et la
+		## vieille ville, béton et verre sur le quartier d'affaires. Ici c'est
+		## donc le centre ANCIEN : crème, ocre, sable, une brique en accent.
+		## `garder` descend à 0,35 : quand la palette est celle du quartier et
+		## non une variation, il faut qu'elle se voie.
+		"sol": Ville2.M_DALLE, "toits": "VIEILLE", "murs": "PIERRE_DE_TAILLE",
+		"garder": 0.35,
 		"lampes": 3, "voitures": 5, "arbres": 0.22, "essence": ALIGNEMENT,
+	},
+	## ⭐⭐ LE QUARTIER D'AFFAIRES — même tissu que le centre, autre matière.
+	##
+	## ⚠ IL N'EXISTE PAS DANS LE PLAN, ET C'EST VOULU. Le plan ne connaît que le
+	## genre « centre » ; ce genre-ci est déduit du NOM du quartier (voir
+	## `Remplisseur._genre`), ce qui évite de recuire les vingt kilomètres de
+	## plan pour un changement de peinture. Les tours y sont plus fréquentes,
+	## parce que c'est ce qui distingue un quartier d'affaires d'un centre
+	## ancien bien plus que sa couleur.
+	"affaires": {
+		"pas": 5, "meandre": 0.8, "recul": 0, "densite": 0.94,
+		"sacs": [[0.55, IMMEUBLES + COMMERCES], [0.80, IMMEUBLES_HAUTS], [1.0, TOURS]],
+		"sol": Ville2.M_DALLE, "toits": "VIEILLE", "murs": "BETON_VERRE",
+		"garder": 0.30,
+		"lampes": 3, "voitures": 6, "arbres": 0.14, "essence": ALIGNEMENT,
 	},
 	"vieille_ville": {
 		## Les ruelles de la vieille ville sont serrées et tordues : c'est le
@@ -111,7 +133,7 @@ const CHARTES := {
 		"pas": 4, "meandre": 2.0, "recul": 0, "densite": 0.95,
 		"sacs": [[0.68, MAISONS_ANCIENNES], [0.89, MAISONS_ANCIENNES],
 			[0.96, NOTABLES], [1.0, IMMEUBLES]],
-		"sol": Ville2.M_TERRE, "toits": "VIEILLE", "murs": "VIEILLE_PIERRE",
+		"sol": Ville2.M_TERRE, "toits": "VIEILLE", "murs": "PIERRE_DE_TAILLE",
 		"garder": 0.16, "lampes": 4, "voitures": 12, "arbres": 0.0,
 		"essence": ALIGNEMENT,
 	},

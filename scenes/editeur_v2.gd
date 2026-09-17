@@ -199,9 +199,45 @@ func _la_fenetre_du_pays(ou: String, large: int) -> Ville2:
 	# La minicarte a besoin de savoir OÙ l'on regarde pour dessiner son cadre.
 	_centre_pays = c
 	_cote_pays = cote
+	# ⭐⭐⭐ UNE FENÊTRE RETOUCHÉE GAGNE SUR LA FENÊTRE ENGENDRÉE.
+	#
+	# Jusqu'ici, tout ce qu'on posait en mode pays était perdu à la fermeture :
+	# l'éditeur rebâtissait la fenêtre depuis le plan à chaque ouverture, et le
+	# Ctrl+S écrivait un fichier que personne ne relisait jamais. C'est la même
+	# règle que pour les témoins (« la version enregistrée gagne sur celle
+	# livrée ») — elle manquait simplement ici.
+	#
+	# ⚠ LA CLÉ DOIT PORTER LA TAILLE, PAS SEULEMENT LE CENTRE. Deux fenêtres
+	# centrées au même endroit mais larges de 60 et de 200 cases ne sont pas la
+	# même carte ; sans la taille dans le nom, la petite écrasait la grande.
+	_chemin = _carte_du_pays(c, cote)
+	# ⚠ ON PASSE PAR `carte_modifiee`, PAS PAR `FileAccess` EN DIRECT. C'est la
+	# même question que se posent la liste des cartes, le bouton Rétablir et la
+	# pastille « ● modifiée » ; s'ils ne la posent pas de la même façon, l'un
+	# d'eux finit par répondre autrement que les autres.
+	if Ville2.carte_modifiee(_chemin):
+		var reprise := Ville2.charger(_chemin)
+		if reprise != null and reprise.taille.x == cote:
+			_dire("Fenêtre %d,%d : ta version enregistrée (%d lots)." % [c.x, c.y,
+				reprise.lots.size()])
+			return reprise
 	var f := Rect2i(c - Vector2i(cote, cote) / 2, Vector2i(cote, cote))
 	var ctx := PLAN_PAYS.contexte(plan)
 	return PAYS.fenetre(plan, ctx, f, {"nom": "Aurones %d,%d" % [c.x, c.y]})
+
+## Relit le centre et le côté écrits dans le nom d'une fenêtre du pays.
+## `pays-472-505-160` → centre (472, 505), côté 160. Sans effet sur un témoin.
+func _relire_le_cadre(nom: String) -> void:
+	if not nom.begins_with("pays-"): return
+	var m := nom.trim_prefix("pays-").split("-")
+	if m.size() != 3: return
+	_centre_pays = Vector2i(int(m[0]), int(m[1]))
+	_cote_pays = int(m[2])
+	if _minicarte != null: _minicarte.queue_redraw()
+
+## Le nom de fichier d'une fenêtre du pays : son centre ET son côté.
+func _carte_du_pays(c: Vector2i, cote: int) -> String:
+	return "res://cartes/pays-%d-%d-%d.json" % [c.x, c.y, cote]
 
 func demarrer() -> void:
 	# ⚠ `donnees` D'ABORD, LA LIGNE DE COMMANDE ENSUITE. Dans le navigateur la
@@ -262,8 +298,11 @@ func demarrer() -> void:
 		if a2.begins_with("--ou="): ou = a2.trim_prefix("--ou=")
 		if a2.begins_with("--large="): large = int(a2.trim_prefix("--large="))
 	if pays != "" and pays != "0":
+		# ⚠ `_chemin` EST POSÉ PAR `_la_fenetre_du_pays` : c'est lui qui connaît
+		# le centre et la taille effectivement retenus (bornés), donc lui seul
+		# peut nommer la carte que le Ctrl+S écrira et que la prochaine
+		# ouverture relira.
 		_ville = _la_fenetre_du_pays(ou, large)
-		_chemin = "res://cartes/pays-%s.json" % ou.replace(",", "-")
 	elif temoin == "plage":
 		_ville = GenerateurPlage.generer(2)
 		_chemin = "res://cartes/temoin-plage.json"
@@ -512,7 +551,8 @@ func _interface() -> void:
 	hb.add_child(_separateur())
 	for paire in [["Enregistrer", _enregistrer], ["Rétablir", _retablir],
 			["Annuler", _annuler],
-			["Refaire", _refaire_geste], ["Photo", _photographier], ["Tout voir", _tout_voir]]:
+			["Refaire", _refaire_geste], ["Exporter", _exporter],
+			["Photo", _photographier], ["Tout voir", _tout_voir]]:
 		var b := Button.new()
 		b.text = String(paire[0])
 		b.focus_mode = Control.FOCUS_NONE
@@ -997,8 +1037,32 @@ func _cartes_du_dossier() -> Array:
 			for f in d.get_files():
 				if f.ends_with(".json") and f != "index.json":
 					noms.append(f.get_basename())
+	# ⭐⭐⭐ LES FENÊTRES DU PAYS QU'ON A ENREGISTRÉES ENTRENT DANS LA LISTE.
+	#
+	# `res://cartes/` ne contient que les cartes LIVRÉES : les neuf témoins. Une
+	# fenêtre du pays retouchée n'existe que dans `user://cartes/`, sous un nom
+	# que le plan ne connaît pas — elle n'apparaissait donc nulle part, et le
+	# seul moyen d'y revenir était de retaper son URL à la main. Enregistrer un
+	# travail qu'on ne sait pas rouvrir, ce n'est pas l'enregistrer.
+	#
+	# ⚠ ON NE LES INVENTE PAS : on lit le dossier des versions personnelles et on
+	# ne garde que ce qui porte le préfixe `pays-`. Un témoin retouché est déjà
+	# dans la liste par son nom livré — l'ajouter deux fois ferait deux entrées
+	# pour la même carte.
+	for f2 in _fenetres_enregistrees():
+		if not noms.has(f2): noms.append(f2)
 	noms.sort()
 	return noms
+
+## Les fenêtres du pays présentes dans les versions personnelles.
+func _fenetres_enregistrees() -> Array:
+	var sortie: Array = []
+	var d := DirAccess.open("user://cartes")
+	if d == null: return sortie
+	for f in d.get_files():
+		if f.begins_with("pays-") and f.ends_with(".json"):
+			sortie.append(f.get_basename())
+	return sortie
 
 func _changer_de_carte(k: int) -> void:
 	var nom := _nom_de_carte(k)
@@ -1026,6 +1090,10 @@ func _changer_de_carte(k: int) -> void:
 	_refaire.clear()
 	_recharger(v.vers_json())
 	_dernier_enregistre = _ville.vers_json()
+	# ⚠ UNE FENÊTRE DU PAYS DOIT RETROUVER SON CADRE. Le nom porte son centre et
+	# son côté ; sans les relire, la minicarte continuerait d'encadrer la
+	# fenêtre précédente et le Ctrl+S écrirait sous l'ancien nom.
+	_relire_le_cadre(nom)
 	_remplir_les_cartes()
 	_tout_voir()
 	_maj_compteur()
@@ -2090,7 +2158,16 @@ func _retablir() -> void:
 	# Le geste est annulable : on empile l'état courant avant d'écraser.
 	_pile.append(_ville.vers_json())
 	Ville2.oublier_les_modifications(_chemin)
-	var v := Ville2.charger(_chemin)
+	# ⚠⚠ UNE FENÊTRE DU PAYS N'A PAS DE CARTE LIVRÉE À RÉTABLIR : elle n'existe
+	# que dans le plan. `charger` sur son nom aurait rendu une ville VIDE, et
+	# Rétablir aurait effacé le quartier au lieu de le remettre d'aplomb. On la
+	# REFABRIQUE depuis le plan, ce qui est exactement ce que « la version
+	# livrée » veut dire pour elle.
+	var v: Ville2 = null
+	if _chemin.get_file().begins_with("pays-"):
+		v = _la_fenetre_du_pays("%d,%d" % [_centre_pays.x, _centre_pays.y], _cote_pays)
+	else:
+		v = Ville2.charger(_chemin)
 	_recharger(v.vers_json())
 	_dernier_enregistre = _ville.vers_json()
 	_remplir_les_cartes()
@@ -2121,6 +2198,39 @@ func _enregistrer() -> void:
 			_chemin.get_file(), _ville.lots.size(), _ville.objets.size()])
 	else:
 		_dire("Impossible d'écrire " + ou)
+
+## ⭐⭐⭐ EXPORTER — sortir une carte du navigateur pour de bon.
+##
+## ⚠ CE QUI EST ENREGISTRÉ N'EST PAS CONSERVÉ. Au navigateur, `Ctrl+S` écrit
+## dans `user://`, c'est-à-dire dans le STOCKAGE DU NAVIGATEUR : ça survit à un
+## rechargement de page, pas à un vidage du cache, pas à un changement de
+## machine, et ça n'atteint jamais le dépôt. Une fenêtre du pays retouchée
+## pendant une heure vivait donc dans un endroit dont le client ne peut rien
+## sortir — ce qui est une façon coûteuse de perdre du travail sans le savoir.
+##
+## Exporter télécharge le JSON de la carte courante. C'est ce fichier-là qu'on
+## dépose dans `cartes/` pour que la retouche devienne définitive et parte avec
+## le paquet.
+##
+## ⚠ AU BUREAU IL N'Y A PAS DE TÉLÉCHARGEMENT : on écrit directement dans le
+## dossier des cartes du projet, ce qui revient au même et évite un aller-retour
+## par le dossier des téléchargements.
+func _exporter() -> void:
+	var nom := _chemin.get_file()
+	var texte := _ville.vers_json()
+	if OS.has_feature("web"):
+		JavaScriptBridge.download_buffer(texte.to_utf8_buffer(), nom, "application/json")
+		_dire("Exporté : %s — dépose-le dans cartes/ du dépôt pour le rendre définitif." % nom)
+		return
+	var ou := "res://cartes/" + nom
+	var f := FileAccess.open(ou, FileAccess.WRITE)
+	if f == null:
+		_dire("Impossible d'écrire " + ou)
+		return
+	f.store_string(texte)
+	f.close()
+	_dire("Écrit dans le projet : %s — %d lots, %d objets." % [ou, _ville.lots.size(),
+		_ville.objets.size()])
 
 func _photographier() -> void:
 	await get_tree().process_frame

@@ -36,6 +36,7 @@ const GAMMES_TOIT := {
 const GAMMES_MUR := {
 	"PAVILLONS": TEINTES.PAVILLONS, "INDUSTRIE": TEINTES.INDUSTRIE,
 	"VIEILLE_PIERRE": TEINTES.VIEILLE_PIERRE, "PIERRE_DU_SUD": TEINTES.PIERRE_DU_SUD,
+	"PIERRE_DE_TAILLE": TEINTES.PIERRE_DE_TAILLE, "BETON_VERRE": TEINTES.BETON_VERRE,
 }
 const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
@@ -150,8 +151,28 @@ static func remplir(plan: Dictionary, ctx: Dictionary, v: Ville2, origine: Vecto
 	#    autre chose qu'un point dans un fichier.
 	_les_stations(plan, ctx, v, f)
 
+## ⭐⭐ LE GENRE D'UN QUARTIER, avec une exception qui ne coûte pas un recuit.
+##
+## Le plan ne connaît qu'un genre « centre » pour les quatre quartiers centraux.
+## Le client en veut deux matières : pierre et brique sur le centre historique,
+## béton et verre sur le quartier d'affaires (17/09). Plutôt que de rouvrir le
+## plan des vingt kilomètres et de le recuire pour une question de peinture, on
+## déduit le quartier d'affaires de son NOM — « La Cité », et toute Gare
+## Centrale — et on lui donne sa propre charte.
+##
+## ⚠ LE NOM EST UNE DONNÉE DU PLAN, DONC STABLE d'une fenêtre à l'autre : deux
+## fenêtres voisines déduisent le même genre pour le même quartier, et la
+## couture ne se voit pas.
+const AFFAIRES := ["cité", "cite", "gare centrale", "affaires"]
+
 static func _genre(plan: Dictionary, k: int) -> String:
-	return String((plan["quartiers"][k] as Dictionary)["g"])
+	var q: Dictionary = plan["quartiers"][k]
+	var g := String(q["g"])
+	if g != "centre": return g
+	var nom := String(q.get("n", q.get("nom", ""))).to_lower()
+	for mot in AFFAIRES:
+		if nom.contains(String(mot)): return "affaires"
+	return g
 
 ## Les quartiers qui touchent la fenêtre. La marge couvre le bruit du contour.
 static func _visibles(plan: Dictionary, f: Rect2i) -> Array:
