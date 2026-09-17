@@ -35,6 +35,20 @@ const OBSTACLES := {"lampadaire": 14.0, "lampadaire_double": 14.0, "lampadaire_p
 	"feu": 12.0, "arbre": 18.0, "arbre_oak": 16.0, "arbre_rond": 16.0, "arbre_petit": 14.0,
 	"palmier": 16.0, "monument": 22.0, "res://modeles/ville/pavement-fountain.glb": 80.0}
 
+## ⭐⭐ LE DÉCALAGE DE FENÊTRE — ce qui rend ce plan utilisable pour LE PAYS.
+##
+## Le jeu pose toutes ses questions en coordonnées ABSOLUES : un point du monde,
+## une case du monde. Une `Ville2` de ville tient tout entière dans ce repère, et
+## `decalage` vaut zéro — rien ne change, et c'est la seule chose qui compte pour
+## les neuf témoins d'aujourd'hui.
+##
+## Mais une FENÊTRE du pays (`FenetresPays`) compte depuis SON PROPRE COIN : sa
+## case (0,0) est la case (600,400) du monde. `decalage` porte ce coin, et `_l()`
+## est le seul endroit où l'on traduit. Tout ce qui SORT d'ici — `centre_case`,
+## `coeur`, `depart`, les lieux, les obstacles — reste absolu ; seul ce qui ENTRE
+## dans `ville`/`carte` passe par `_l()`.
+var decalage := Vector2i.ZERO
+
 var ville: Ville2
 var carte: CarteVille
 var cases_x := 0
@@ -42,11 +56,15 @@ var cases_y := 0
 var _tuiles: Dictionary = {}          ## indice de tuile -> fiche
 var _lieux_par_secteur: Dictionary = {}
 var _lieux_prets := false
+var _id_lieu := 0
 var _coeur_d := Vector2.ZERO
 var _obstacles_par_case: Dictionary = {}   ## Vector2i -> [Rect2] en pixels
 
 func _init(code_de_manche: String, chemin: String = CHEMIN_PAR_DEFAUT) -> void:
 	super(code_de_manche)
+	# ⚠ Un chemin vide : le plan n'a pas de `Ville2` à lui. C'est le cas du
+	# PAYS (`plan_jeu_pays.gd`), qui pose lui-même la fenêtre du moment.
+	if chemin == "": return
 	ville = Ville2.charger(chemin)
 	carte = ville.carte
 	cases_x = ville.taille.x
@@ -75,6 +93,15 @@ func banlieue() -> float:
 static func case_de_tuile(colonne: int, ligne: int) -> Vector2i:
 	return Vector2i(floori(float(colonne) / TUILES_PAR_CASE), floori(float(ligne) / TUILES_PAR_CASE))
 
+## Une case du monde → la même case, vue par la `Ville2` d'ici.
+func _l(c: Vector2i) -> Vector2i:
+	return c - decalage
+
+## Le coin de la fenêtre, en pixels de jeu : ce qu'il faut AJOUTER à un point lu
+## dans la `Ville2` pour le rendre absolu.
+func _px() -> Vector2:
+	return Vector2(decalage) * CASE_PX
+
 func case_de_point(p: Vector2) -> Vector2i:
 	return Vector2i(floori(p.x / CASE_PX), floori(p.y / CASE_PX))
 
@@ -84,10 +111,10 @@ func centre_case(c: Vector2i) -> Vector2:
 # ------------------------------------------------------------ l'eau et le relief
 
 func eau(colonne: int, ligne: int) -> bool:
-	return not carte.terre(case_de_tuile(colonne, ligne))
+	return not carte.terre(_l(case_de_tuile(colonne, ligne)))
 
 func sur_le_rail(colonne: int, ligne: int) -> bool:
-	var c := case_de_tuile(colonne, ligne)
+	var c := _l(case_de_tuile(colonne, ligne))
 	for r in ville.rail:
 		for rc in Ville2.cases_de_route(r):
 			if rc == c: return true
@@ -97,38 +124,55 @@ func sur_le_rail(colonne: int, ligne: int) -> bool:
 func rail() -> Vector3:
 	if ville.rail.is_empty():
 		return Vector3(0.0, 1.0, -1.0e9)
-	var p: Vector2i = ville.rail[0]["points"][0]
+	var p: Vector2i = Vector2i(ville.rail[0]["points"][0]) + decalage
 	return Vector3((float(p.x) + 0.5) * CASE_PX, 1.0, (float(p.y) + 0.5) * CASE_PX)
 
 ## L'altitude du sol en un point, en unités 3D. Sur une rampe, on interpole
 ## entre le bas et le haut de la case dans le sens de la montée.
 func hauteur_en(p: Vector2) -> float:
-	var c := case_de_point(p)
-	if not carte.terre(c):
+	var c := case_de_point(p)          # absolue : `p` vient du jeu
+	var lc := _l(c)                    # locale : c'est elle qui interroge la carte
+	if not carte.terre(lc):
 		return Quartiers.NIVEAU_MER
-	var y := carte.hauteur(c)
-	if not carte.route(c):
+	var y := carte.hauteur(lc)
+	if not carte.route(lc):
 		return y
 	for d in CarteVille.COTES:
-		var v: Vector2i = c + d
+		var v: Vector2i = lc + d
 		if not carte.route(v): continue
-		var ecart := carte.palier(v) - carte.palier(c)
+		var ecart := carte.palier(v) - carte.palier(lc)
 		if ecart <= 0 or ecart > 2: continue
 		var t: float = ((p.x / CASE_PX - float(c.x)) if d.x != 0 else (p.y / CASE_PX - float(c.y)))
 		if d.x < 0 or d.y < 0: t = 1.0 - t
 		return y + float(ecart) * CarteVille.PALIER * clampf(t, 0.0, 1.0)
 	return y
 
+## ⭐ CE QUE LES AUTRES DOIVENT DEMANDER, PLUTÔT QUE `plan.carte.terre(c)`.
+##
+## ⚠ Un lecteur extérieur (le radar, le GPS) qui interroge `carte` en direct
+## court-circuite `_l()` : il parle en cases du MONDE à une `Ville2` qui compte
+## depuis son coin. Sur une ville ça ne se voit pas — le décalage vaut zéro ;
+## sur le pays, tout serait décalé d'une fenêtre. Ces trois-là sont la porte.
+func terre_de_case(c: Vector2i) -> bool:
+	return carte.terre(_l(c))
+
+func route_de_case(c: Vector2i) -> bool:
+	return carte.route(_l(c))
+
+func lot_de_case(c: Vector2i) -> int:
+	return ville.lot_sur(_l(c))
+
 # ------------------------------------------------------------ districts et gangs
 
 func district_de_case(c: Vector2i) -> int:
-	if not ville.dedans(c): return EAU
-	if not ville.terre(c): return EAU
-	var g := ville.genre_du_quartier(c)
+	var lc := _l(c)
+	if not ville.dedans(lc): return EAU
+	if not ville.terre(lc): return EAU
+	var g := ville.genre_du_quartier(lc)
 	return int(DISTRICT_DE.get(g, PARC))
 
 func gang_de_case(c: Vector2i) -> int:
-	var q := ville.quartier_en(c)
+	var q := ville.quartier_en(_l(c))
 	if q < 0 or q >= ville.quartiers.size(): return -1
 	return int(ville.quartiers[q].get("gang", -1))
 
@@ -139,7 +183,7 @@ func territoire(point: Vector2) -> int:
 	return gang_de_case(case_de_point(point))
 
 func nom_du_quartier(point: Vector2) -> String:
-	var q := ville.quartier_en(case_de_point(point))
+	var q := ville.quartier_en(_l(case_de_point(point)))
 	if q >= 0 and q < ville.quartiers.size():
 		return String(ville.quartiers[q].get("nom", ""))
 	return NOMS_QUARTIERS[quartier(point)]
@@ -172,25 +216,27 @@ func coeur() -> Vector2:
 	var meilleur := 1.0e18
 	for j in cases_y:
 		for i in cases_x:
+			# ⚠ On balaie la grille de la `Ville2` (locale) et l'on ne rend
+			# qu'un point ABSOLU : `centre_case(c + decalage)`.
 			var c := Vector2i(i, j)
 			if not carte.route(c) or carte.case_prise(c): continue
 			var d := Vector2(c - c0).length_squared()
 			if d < meilleur:
 				meilleur = d
-				_coeur_d = centre_case(c)
+				_coeur_d = centre_case(c + decalage)
 	return _coeur_d
 
 func un_pont() -> Vector2:
 	for o in ville.ouvrages:
 		if String(o["t"]) == "road-bridge":
-			return centre_case(Vector2i(int(o["i"]), int(o["j"])))
+			return centre_case(Vector2i(int(o["i"]), int(o["j"])) + decalage)
 	return coeur()
 
 func meme_terre(a: Vector2, b: Vector2) -> bool:
 	var pas := int(ceilf(a.distance_to(b) / (PAS * 0.5)))
 	for i in range(1, maxi(2, pas)):
 		var p: Vector2 = a.lerp(b, float(i) / float(pas))
-		if not carte.terre(case_de_point(p)):
+		if not carte.terre(_l(case_de_point(p))):
 			return false
 	return true
 
@@ -202,7 +248,9 @@ func _classer_obstacles() -> void:
 		var m := String(o["m"])
 		if not OBSTACLES.has(m): continue
 		var demi: float = float(OBSTACLES[m]) * 0.5
-		var p := Vector2(float(o["x"]), float(o["z"])) / Decor.ECHELLE
+		# ⚠ Les objets sont posés dans le repère de la `Ville2` ; on les range en
+		# ABSOLU, parce que `tuile()` les rappellera avec une case du monde.
+		var p := Vector2(float(o["x"]), float(o["z"])) / Decor.ECHELLE + _px()
 		var r := Rect2(p - Vector2(demi, demi), Vector2(demi, demi) * 2.0)
 		var c := case_de_point(p)
 		if not _obstacles_par_case.has(c): _obstacles_par_case[c] = []
@@ -219,10 +267,11 @@ func tuile(colonne: int, ligne: int) -> Dictionary:
 	if _tuiles.has(indice):
 		return _tuiles[indice]
 	var c := case_de_tuile(colonne, ligne)
+	var lc := _l(c)
 	var f: Dictionary
-	if not carte.terre(c):
+	if not carte.terre(lc):
 		f = _mer(colonne, ligne)
-	elif carte.route(c) or carte.case_prise(c) and carte.piece_sur(c).get("r", false):
+	elif carte.route(lc) or carte.case_prise(lc) and carte.piece_sur(lc).get("r", false):
 		f = _vierge(colonne, ligne, S_ROUTE)
 	else:
 		var lot := _lot_de_tuile(colonne, ligne)
@@ -246,18 +295,21 @@ func tuile(colonne: int, ligne: int) -> Dictionary:
 ## Le lot qui couvre une tuile : les lots sont en demi-cases, une demi-case
 ## est une tuile.
 func _lot_de_tuile(colonne: int, ligne: int) -> int:
-	var c := case_de_tuile(colonne, ligne)
-	var k := ville.lot_sur(c)
+	# ⚠ Les lots sont en DEMI-CASES dans le repère de la `Ville2` : on ramène la
+	# tuile du monde dans ce repère avant de comparer.
+	var cl := colonne - decalage.x * TUILES_PAR_CASE
+	var ll := ligne - decalage.y * TUILES_PAR_CASE
+	var k := ville.lot_sur(_l(case_de_tuile(colonne, ligne)))
 	if k < 0: return -1
 	var l: Dictionary = ville.lots[k]
-	if colonne >= int(l["x"]) and colonne < int(l["x"]) + int(l["w"]) \
-			and ligne >= int(l["y"]) and ligne < int(l["y"]) + int(l["h"]):
+	if cl >= int(l["x"]) and cl < int(l["x"]) + int(l["w"]) \
+			and ll >= int(l["y"]) and ll < int(l["y"]) + int(l["h"]):
 		return k
 	# La case est partagée entre deux lots : on cherche parmi tous.
 	for i in ville.lots.size():
 		var m: Dictionary = ville.lots[i]
-		if colonne >= int(m["x"]) and colonne < int(m["x"]) + int(m["w"]) \
-				and ligne >= int(m["y"]) and ligne < int(m["y"]) + int(m["h"]):
+		if cl >= int(m["x"]) and cl < int(m["x"]) + int(m["w"]) \
+				and ll >= int(m["y"]) and ll < int(m["y"]) + int(m["h"]):
 			return i
 	return -1
 
@@ -306,20 +358,21 @@ func place_etoile() -> Vector2:
 
 func sur_la_chaussee(point: Vector2) -> bool:
 	var c := case_de_point(point)
-	if not carte.route(c): return false
-	var f: Array = carte.tuile(c)
+	var lc := _l(c)
+	if not carte.route(lc): return false
+	var f: Array = carte.tuile(lc)
 	var selon_x: bool = int(f[1]) % 2 == 0
 	var centre_c := centre_case(c)
 	var ecart: float = absf(point.y - centre_c.y) if selon_x else absf(point.x - centre_c.x)
-	return ecart < CASE_PX * 0.30 or carte.masque(c) not in [5, 10]
+	return ecart < CASE_PX * 0.30 or carte.masque(lc) not in [5, 10]
 
 func sur_une_rue(point: Vector2, tolerance: float = 0.0) -> bool:
-	var c := case_de_point(point)
+	var c := _l(case_de_point(point))
 	if carte.route(c): return true
 	if tolerance <= 0.0: return false
 	for d in CarteVille.COTES:
 		if carte.route(c + d):
-			var bord := centre_case(c + d)
+			var bord := centre_case(c + d + decalage)
 			if absf(point.x - bord.x) <= CASE_PX * 0.5 + tolerance \
 					and absf(point.y - bord.y) <= CASE_PX * 0.5 + tolerance:
 				return true
@@ -327,7 +380,9 @@ func sur_une_rue(point: Vector2, tolerance: float = 0.0) -> bool:
 
 ## L'axe de la rue et le prochain carrefour, le long de la rue où l'on est.
 func carrefour_proche(point: Vector2) -> Vector2:
-	var c := case_de_point(point)
+	# ⚠ On raisonne en cases LOCALES (c'est la carte qu'on interroge) et l'on ne
+	# rend que des points ABSOLUS, via `_centre_l()`.
+	var c := _l(case_de_point(point))
 	if not carte.route(c):
 		var meilleur := c
 		var dist := 1.0e18
@@ -335,7 +390,7 @@ func carrefour_proche(point: Vector2) -> Vector2:
 			for di in range(-2, 3):
 				var v := c + Vector2i(di, dj)
 				if not carte.route(v): continue
-				var d := centre_case(v).distance_squared_to(point)
+				var d := _centre_l(v).distance_squared_to(point)
 				if d < dist:
 					dist = d
 					meilleur = v
@@ -344,9 +399,9 @@ func carrefour_proche(point: Vector2) -> Vector2:
 			return point
 	var m := carte.masque(c)
 	if m != 5 and m != 10:
-		return centre_case(c)
+		return _centre_l(c)
 	var axe: Vector2i = CarteVille.E if m == 10 else CarteVille.S
-	var proche := centre_case(c)
+	var proche := _centre_l(c)
 	var dist := 1.0e18
 	for sens in [1, -1]:
 		var v := c
@@ -355,14 +410,18 @@ func carrefour_proche(point: Vector2) -> Vector2:
 			if not carte.route(v): break
 			var mv := carte.masque(v)
 			if mv != 5 and mv != 10:
-				var d := centre_case(v).distance_squared_to(point)
+				var d := _centre_l(v).distance_squared_to(point)
 				if d < dist:
 					dist = d
-					proche = centre_case(v)
+					proche = _centre_l(v)
 				break
 	if m == 10:
-		return Vector2(proche.x, centre_case(c).y)
-	return Vector2(centre_case(c).x, proche.y)
+		return Vector2(proche.x, _centre_l(c).y)
+	return Vector2(_centre_l(c).x, proche.y)
+
+## Le centre, en pixels absolus, d'une case donnée dans le repère de la `Ville2`.
+func _centre_l(c: Vector2i) -> Vector2:
+	return centre_case(c + decalage)
 
 func voie_proche(valeur: float) -> float:
 	return (floorf(valeur / CASE_PX) + 0.5) * CASE_PX
@@ -398,16 +457,21 @@ const PLURIELS := {"garage": "garages", "cabine": "cabines", "arene": "arenes", 
 func _preparer_lieux() -> void:
 	if _lieux_prets: return
 	_lieux_prets = true
-	var id := 0
+	_ranger_les_lieux()
+
+## ⚠ RANGER UNE `Ville2`, ET SE SOUVENIR QU'ON L'A FAIT, SONT DEUX CHOSES.
+## Une ville en a une seule, une fois pour toutes ; le pays en a neuf, qui vont
+## et viennent, et c'est `plan_jeu_pays.gd` qui appelle ceci fenêtre par fenêtre.
+func _ranger_les_lieux() -> void:
 	for l in ville.lieux:
 		# Le modèle nomme au singulier, le jeu au pluriel.
 		var pluriel := String(PLURIELS.get(String(l["genre"]), ""))
 		if pluriel == "": continue
-		var p := Vector2(float(l["x"]), float(l["z"])) / Decor.ECHELLE
-		var lieu := {"p": p, "id": id, "pate": case_de_point(p)}
-		id += 1
+		var p := Vector2(float(l["x"]), float(l["z"])) / Decor.ECHELLE + _px()
+		var lieu := {"p": p, "id": _id_lieu, "pate": case_de_point(p)}
+		_id_lieu += 1
 		if pluriel == "planques":
-			lieu["prix"] = int(l.get("prix", PRIX_PLANQUE[posmod(id, PRIX_PLANQUE.size())]))
+			lieu["prix"] = int(l.get("prix", PRIX_PLANQUE[posmod(_id_lieu, PRIX_PLANQUE.size())]))
 		if pluriel == "repaires":
 			lieu["gang"] = int(l.get("gang", -1))
 		var s := _secteur_de(p)
@@ -444,6 +508,9 @@ func peindre_pate(image: Image, indice: int) -> void:
 	var i := posmod(indice, cases_x)
 	var j := indice / cases_x
 	if j >= cases_y: return
+	# ⚠ Ici `i`,`j` numérotent la grille de la `Ville2` (le radar peint son
+	# image) : c'est un repère LOCAL, et l'on n'ajoute le décalage que pour les
+	# deux questions qui, elles, parlent au monde.
 	var c := Vector2i(i, j)
 	var couleur: Color
 	if not carte.terre(c):
@@ -451,9 +518,9 @@ func peindre_pate(image: Image, indice: int) -> void:
 	elif carte.route(c):
 		couleur = CARTE_AVENUE if ville.genre_de_route(c) == Ville2.R_AVENUE else CARTE_RUE
 	else:
-		var d := district_de_case(c)
+		var d := district_de_case(c + decalage)
 		couleur = COULEURS_CARTE.get(d, COULEURS_CARTE[PARC])
-		var g := gang_de_case(c)
+		var g := gang_de_case(c + decalage)
 		if g >= 0:
 			couleur = couleur.lerp(couleur_du_gang(g), 0.25)
 		if ville.lot_sur(c) < 0:

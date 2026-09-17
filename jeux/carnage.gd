@@ -18,6 +18,9 @@ extends Partie
 ## (`jeux/carnage/plan.gd`). Même code, même ville, chez tout le monde, y
 ## compris pour qui rejoint en retard.
 
+const PLAN_JEU_PAYS := preload("res://commun/ville2/plan_jeu_pays.gd")
+const PLAN_PAYS_CUIT := preload("res://commun/ville2/plan_pays.gd")
+
 const DUREE := 240.0
 
 # ------------------------------------------------------- conduite
@@ -225,6 +228,8 @@ var _chantier: MorceauVille = null   ## le morceau en cours de construction, une
 ## ville v2 du cahier), qui répondent aux mêmes appels — `suivre`,
 ## `morceaux_batis`, `par_image`.
 var _ville_dessinee = null
+## Le pays, quand on le joue : les neuf fenêtres autour du joueur. `null` en ville.
+var _fenetres_du_pays: FenetresPays = null
 var _cachees: Dictionary = {}        ## id dormante -> vrai : déjà effacée de sa nappe
 
 # ------------------------------------------------------- le joueur local
@@ -522,6 +527,21 @@ var _sortie_de_banc := false
 var _rentre_de_banc := false
 var _pulsation := false
 
+## `--pays=1` en ligne de commande, `pays=1` dans les données d'écran : le plan
+## cuit de l'archipel, ou un dictionnaire vide si l'on joue la ville.
+func _le_plan_du_pays() -> Dictionary:
+	var veut: bool = String(donnees.get("pays", "")) not in ["", "0"]
+	if not veut:
+		for a in OS.get_cmdline_args():
+			if a.begins_with("--pays=") and a.trim_prefix("--pays=") not in ["", "0"]:
+				veut = true
+	if not veut: return {}
+	var plan: Dictionary = PLAN_PAYS_CUIT.charger()
+	if plan.is_empty():
+		push_warning("pays demandé, mais %s manque : on joue la ville."
+			% PLAN_PAYS_CUIT.PLAN_CUIT)
+	return plan
+
 func duree_manche() -> float:
 	return DUREE
 
@@ -544,7 +564,17 @@ func preparer() -> void:
 	# ⚠ LA VILLE V2 D'ABORD. Si `cartes/temoin-centre.json` existe (le modèle
 	# du cahier des charges du 12/09), c'est elle qu'on joue : `PlanV2` répond
 	# aux mêmes questions. Pikstown reste le repli tant que la v2 n'a pas tout.
-	if FileAccess.file_exists(PlanV2.CHEMIN_PAR_DEFAUT):
+	# ⭐⭐⭐ LE PAYS, SI ON LE DEMANDE. `--pays=1` (ou `pays=1` dans les
+	# données d'écran) joue l'Archipel des Aurones au lieu du témoin :
+	# `PlanJeuPays` répond aux mêmes questions que `PlanV2`, mais depuis les
+	# neuf fenêtres que `FenetresPays` bâtit autour du joueur. Sans le drapeau,
+	# rien ne change — c'est toujours la ville qu'on joue.
+	var plan_pays := _le_plan_du_pays()
+	if not plan_pays.is_empty():
+		_fenetres_du_pays = FenetresPays.new()
+		_fenetres_du_pays.regler(plan_pays)
+		carte = PLAN_JEU_PAYS.new(code, _fenetres_du_pays, plan_pays)
+	elif FileAccess.file_exists(PlanV2.CHEMIN_PAR_DEFAUT):
 		carte = PlanV2.new(code)
 	else:
 		carte = PlanDessine.new(code)
@@ -910,7 +940,21 @@ func _planter_decor() -> void:
 ## départ. Un morceau complet coûte quelques dizaines de millisecondes : en
 ## bâtir un d'un bloc en pleine course ferait une saccade au passage de chaque
 ## rue.
+## ⚠ LE PAYS N'A PAS DE `MorceauxV2` À LUI : chacune de ses fenêtres a le sien,
+## et c'est `FenetresPays` qui les fait vivre. Il suit le joueur, comme le
+## reste — la seule différence est qu'il peut aussi FABRIQUER, dans un fil.
 func _diffuser_la_ville(entiers: int = 0) -> void:
+	if _fenetres_du_pays != null:
+		if _fenetres_du_pays.get_parent() == null:
+			monde().add_child(_fenetres_du_pays)
+			if entiers > 0:
+				# Le départ : on monte ce qui est déjà prêt, une fenêtre par
+				# passe, pour ne pas commencer devant la mer.
+				_fenetres_du_pays.suivre(_en3d(_position))
+				for k in 9:
+					_fenetres_du_pays._process(0.0)
+		_fenetres_du_pays.suivre(_en3d(_position))
+		return
 	if _ville_dessinee == null:
 		if carte is PlanV2:
 			_ville_dessinee = MorceauxV2.new()
@@ -993,7 +1037,6 @@ func _peindre_le_plan() -> void:
 func _exit_tree() -> void:
 	Tactile.carte_ouverte = false
 	Tactile.affaire_possible = false
-	Tactile.detonateur_possible = false
 	super()
 
 func _basculer_la_carte() -> void:
@@ -1554,7 +1597,7 @@ func _basculer_portiere() -> void:
 			_vider_les_evenements()
 		if not id_rendu in _bombes_posees:
 			_bombes_posees.append(id_rendu)
-		_dire_affaire("bombe armée — %s à pied pour la faire sauter" % _nom_du_detonateur())
+		_dire_affaire("bombe armée — %s à pied pour la faire sauter" % Reglages.nom_de_touche("klaxon"))
 	# Le reste du matériel reste avec la carrosserie : on descend les mains
 	# vides, comme on est monté.
 	_mods = {}
@@ -3621,7 +3664,7 @@ func recevoir(evenement: String, charge: Dictionary) -> void:
 			if String(charge.get("j", "")) == Session.cle:
 				_lance_flammes = true
 				_annoncer("LE PATRON VOUS LAISSE LE LANCE-FLAMMES", Palette.AVERTISSEMENT, 3.2)
-				_dire_affaire(_au_doigt("lance-flammes : au volant d'un camion de pompiers, F bascule la lance"))
+				_dire_affaire("lance-flammes : au volant d'un camion de pompiers, F bascule la lance")
 				Sons.jouer("bonus", 1.0, -8.0)
 				if Commandes.pilote_automatique:
 					print("[banc] lance-flammes reçu")
@@ -5099,22 +5142,6 @@ func _le_mieux_pour(envie: String) -> String:
 			meilleur = String(cle)
 	return meilleur
 
-## UN MESSAGE SANS TOUCHE AU DOIGT. Les textes du jeu nomment `E` et `F` —
-## sur un téléphone ces lettres n'existent pas, les boutons s'appellent ENTRER
-## et AFFAIRE. On traduit à la sortie, en un seul endroit, plutôt que
-## d'écrire chaque message deux fois.
-func _au_doigt(texte: String) -> String:
-	if not Tactile.actif():
-		return texte
-	return texte.replace("F : ", "AFFAIRE : ").replace("E : ", "ENTRER : ") \
-		.replace("E pour ", "ENTRER pour ").replace("F bascule", "AFFAIRE bascule")
-
-## Comment on fait sauter la voiture piégée : la touche du klaxon au clavier,
-## le bouton BOUM de l'éventail au doigt. Aucun message ne nomme une touche
-## sur un téléphone.
-func _nom_du_detonateur() -> String:
-	return "BOUM (menu ≡)" if Tactile.actif() else Reglages.nom_de_touche("klaxon")
-
 # ------------------------------------------------------------- la pause
 
 func _basculer_la_pause() -> void:
@@ -5170,9 +5197,7 @@ func _naviguer_dans_la_pause() -> void:
 	_pause_vue.sous_titre = "$%d sur soi · $%d au coffre" % [_argent, _banque]
 	_pause_vue.lignes = [
 		{"texte": "REPRENDRE", "detail": "", "couleur": Palette.BON},
-		{"texte": "LES COMMANDES" if Tactile.actif() else "LES TOUCHES",
-			"detail": "le manche et les boutons" if Tactile.actif() else "toutes, à pied et au volant",
-			"couleur": Charte.ORANGE},
+		{"texte": "LES TOUCHES", "detail": "toutes, à pied et au volant", "couleur": Charte.ORANGE},
 		{"texte": "QUITTER LA VILLE", "detail": "la manche s'arrête pour la table",
 			"couleur": Palette.SERIEUX},
 	]
@@ -5487,7 +5512,7 @@ func _sentir_le_train(delta: float) -> void:
 	if not quai.is_empty() and ville.point_de_voie(float(quai["s"])).distance_to(_position) \
 			< PORTEE_TRAIN + VilleVivante.longueur_de_rame():
 		_quai_dit = 4.0
-		_annoncer(_au_doigt("train à quai — E pour monter"), Palette.AVERTISSEMENT, 2.6)
+		_annoncer("train à quai — E pour monter", Palette.AVERTISSEMENT, 2.6)
 
 ## VOYAGER. Le passager n'a rien à piloter : il se tient dans la rame et
 ## regarde la ville défiler. `E` le fait descendre — mais seulement à l'arrêt,
@@ -5510,7 +5535,7 @@ func _voyager(delta: float) -> void:
 		_affaire = ""
 		if _quai_dit <= 0.0:
 			_quai_dit = 3.0
-			_annoncer(_au_doigt("à quai — E pour descendre"), Palette.AVERTISSEMENT, 2.4)
+			_annoncer("à quai — E pour descendre", Palette.AVERTISSEMENT, 2.4)
 
 func _monter_dans_le_train() -> bool:
 	var t := ville.rame_a_quai(_position)
@@ -5722,7 +5747,8 @@ func fiche_joueur() -> Dictionary:
 	elif _affaire != "":
 		# Au doigt il n'y a pas de F : la puce nomme le bouton, et le bouton
 		# AFFAIRE du pavé n'apparaît que quand il y a une affaire.
-		puces.append({"texte": _au_doigt(_affaire), "couleur": Palette.SERIE})
+		puces.append({"texte": _affaire.replace("F : ", "affaire : ") if Tactile.actif() else _affaire,
+			"couleur": Palette.SERIE})
 	Tactile.affaire_possible = _affaire.begins_with("F : ")
 	if _hors_service > 0.0:
 		puces.append({"texte": "à terre — %d s" % int(ceil(_hors_service)), "couleur": Palette.CRITIQUE})
@@ -5783,14 +5809,11 @@ func fiche_joueur() -> Dictionary:
 		# Le détonateur, tant qu'une voiture piégée attend : sans la puce, on
 		# oubliait qu'on l'avait, et la voiture sautait sous un passant trois
 		# rues plus loin sans qu'on sache pourquoi.
-		puces.append({"texte": "détonateur : %s à pied (×%d)" % [_nom_du_detonateur(), _bombes_posees.size()],
+		puces.append({"texte": "détonateur : %s à pied (×%d)" % [Reglages.nom_de_touche("klaxon"), _bombes_posees.size()],
 			"couleur": Color("#e07a3c")})
-	# Au doigt, le détonateur est un bouton de l'éventail — qui n'apparaît que
-	# tant qu'une voiture piégée attend.
-	Tactile.detonateur_possible = not _bombes_posees.is_empty()
 	if _pied:
 		var auto := ville.vehicule_proche(_position, PORTEE_ENTREE)
-		puces.append({"texte": _au_doigt("E : monter") if not auto.is_empty() else "à pied", "couleur": Palette.AVERTISSEMENT if not auto.is_empty() else Palette.ENCRE_DOUCE})
+		puces.append({"texte": "E : monter" if not auto.is_empty() else "à pied", "couleur": Palette.AVERTISSEMENT if not auto.is_empty() else Palette.ENCRE_DOUCE})
 	if _hors_ville > 0.2:
 		puces.append({"texte": "VOUS QUITTEZ LA VILLE", "couleur": Palette.CRITIQUE})
 	fiche["puces"] = puces

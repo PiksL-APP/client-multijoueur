@@ -356,7 +356,7 @@ static func _case_de_rue_proche(plan, p: Vector2) -> Vector2i:
 				if maxi(absi(dk), absi(dl)) != rayon:
 					continue
 				var c: Vector2i = c0 + Vector2i(dk, dl)
-				if not plan.carte.route(c):
+				if not plan.route_de_case(c):
 					continue
 				var d: float = plan.centre_case(c).distance_squared_to(p)
 				if d < d_mieux:
@@ -391,7 +391,7 @@ static func _itineraire_dessine(plan, depart: Vector2, arrivee: Vector2) -> Pack
 		var ici := Vector2i(id % large, id / large)
 		for d in CarteVille.COTES:
 			var v: Vector2i = ici + d
-			if not plan.carte.route(v):
+			if not plan.route_de_case(v):
 				continue
 			var vid := v.x + v.y * large
 			var nc := c + PlanDessine.CASE_PX

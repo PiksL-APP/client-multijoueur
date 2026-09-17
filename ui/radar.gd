@@ -92,9 +92,12 @@ func _fond_v2(plan: PlanV2, cadre: Rect2, centre: Vector2, rayon_vue: float) -> 
 			if visible.size.x <= 0.0 or visible.size.y <= 0.0:
 				continue
 			var couleur: Color
-			if not plan.carte.terre(c):
+			# ⚠ ON PASSE PAR LE PLAN, PAS PAR SA `carte`. Sur le pays, la
+			# `Ville2` du moment compte depuis son propre coin ; `terre_de_case`
+			# et ses deux sœurs sont les seules à savoir traduire.
+			if not plan.terre_de_case(c):
 				couleur = Color(Palette.SERIE, 0.22)
-			elif plan.carte.route(c):
+			elif plan.route_de_case(c):
 				couleur = bitume
 			else:
 				if plan.district_de_case(c) == PlanVille.PARC:
@@ -102,7 +105,7 @@ func _fond_v2(plan: PlanV2, cadre: Rect2, centre: Vector2, rayon_vue: float) -> 
 				else:
 					var gang := plan.gang_de_case(c)
 					couleur = Color(plan.couleur_du_gang(gang), 0.24) if gang >= 0 else Color(Palette.ENCRE, 0.10)
-				if plan.ville.lot_sur(c) >= 0:
+				if plan.lot_de_case(c) >= 0:
 					couleur = Color(couleur.darkened(0.5), couleur.a + 0.35)
 			draw_rect(visible, couleur, true)
 

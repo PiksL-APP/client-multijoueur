@@ -76,6 +76,11 @@ func banlieue() -> float:
 static func case_de_tuile(colonne: int, ligne: int) -> Vector2i:
 	return Vector2i(floori(float(colonne) / TUILES_PAR_CASE), floori(float(ligne) / TUILES_PAR_CASE))
 
+## La même porte que sur `PlanV2` : le GPS et le radar demandent au PLAN, pas à
+## sa `carte`. Ici les deux repères se confondent — Pikstown n'a qu'une fenêtre.
+func route_de_case(c: Vector2i) -> bool:
+	return carte.route(c)
+
 func case_de_point(p: Vector2) -> Vector2i:
 	return Vector2i(floori(p.x / CASE_PX), floori(p.y / CASE_PX))
 

@@ -57,12 +57,29 @@ var ctx: Dictionary = {}
 var _fenetres: Dictionary = {}
 var _centre := Vector2i(999999, 999999)
 
+## ⚠⚠⚠ LA TOUTE PREMIÈRE FENÊTRE SE BÂTIT SUR LE FIL PRINCIPAL, ET C'EST
+## OBLIGATOIRE.
+##
+## Mesuré, et cela a coûté une matinée : une fenêtre fabriquée dans un fil
+## AVANT que le fil principal en ait jamais fabriqué une NE FINIT JAMAIS — le
+## jeu se fige au démarrage, sans erreur, sans trace. (Le générateur charge des
+## choses la première fois qu'on les lui demande ; ce premier chargement-là ne
+## supporte pas d'être demandé d'ailleurs que du fil principal.) Une fois la
+## première faite, toutes les suivantes passent dans un fil sans broncher :
+## vérifié au banc `outils/verifier_plan_pays.gd`.
+##
+## On ne perd rien à ça : cette première fenêtre est celle où l'on commence, on
+## l'attend de toute façon (`exiger`), et l'écran n'a pas encore commencé à
+## tourner quand elle se bâtit.
+var _chauffe := false
+
 func regler(p: Dictionary, c: Dictionary = {}) -> void:
 	plan = p
 	ctx = c if not c.is_empty() else PLAN.contexte(p)
 	for f in _fenetres.values():
 		_defaire(f)
 	_fenetres.clear()
+	_chauffe = false
 	_centre = Vector2i(999999, 999999)
 	set_process(true)
 
@@ -82,6 +99,39 @@ func ville_en(point: Vector3) -> Ville2:
 	var f: Dictionary = _fenetres.get(cle, {})
 	return f.get("ville", null)
 
+## ⭐ LA FENÊTRE QUI PORTE CETTE CASE DU MONDE, ou `null` si elle n'est pas
+## encore fabriquée. C'est par ici que `PlanJeuPays` interroge le pays : lui
+## compte en CASES (le jeu ne connaît que ça), pas en mètres.
+func ville_de_case(c: Vector2i) -> Ville2:
+	var f: Dictionary = _fenetres.get(cle_de_case(c), {})
+	return f.get("ville", null)
+
+## La fenêtre à laquelle appartient une case du monde, et son coin.
+static func cle_de_case(c: Vector2i) -> Vector2i:
+	return Vector2i(floori(float(c.x) / float(COTE)), floori(float(c.y) / float(COTE)))
+
+static func coin_de_case(c: Vector2i) -> Vector2i:
+	return cle_de_case(c) * COTE
+
+## ⭐ LA PREMIÈRE FENÊTRE SE FAIT ATTENDRE — et une seule fois.
+##
+## ⚠ CELLE-CI BLOQUE LE FIL PRINCIPAL, exprès. Au tout début d'une partie, le
+## jeu demande où poser les joueurs AVANT d'avoir affiché quoi que ce soit :
+## répondre « mer » là reviendrait à les noyer. On paie donc les quelques
+## secondes une fois, sur un écran qui n'a pas encore commencé à tourner ;
+## partout ailleurs, `ville_de_case` rend `null` et le pays se remplit dans son
+## fil, sans jamais faire attendre une image.
+func exiger(c: Vector2i) -> Ville2:
+	var cle := cle_de_case(c)
+	if not _fenetres.has(cle):
+		if not _dans_le_pays(cle): return null
+		_commander(cle)
+	var f: Dictionary = _fenetres[cle]
+	if f.has("tache"):
+		WorkerThreadPool.wait_for_task_completion(int(f["tache"]))
+		f.erase("tache")
+	return f.get("ville", null)
+
 func suivre(point: Vector3) -> void:
 	var cle := _fenetre_de(point)
 	# Les morceaux de chaque fenêtre suivent le joueur, même quand il ne change
@@ -92,6 +142,15 @@ func suivre(point: Vector3) -> void:
 	if cle == _centre: return
 	_centre = cle
 	_revoir()
+
+## Combien de morceaux de décor sont bâtis, toutes fenêtres confondues — la
+## même question que `MorceauxV2.morceaux_batis()`, pour la même trace au départ.
+func morceaux_batis() -> int:
+	var total := 0
+	for f0 in _fenetres.values():
+		var f: Dictionary = f0
+		if f.has("morceaux"): total += (f["morceaux"] as MorceauxV2).morceaux_batis()
+	return total
 
 func _fenetre_de(point: Vector3) -> Vector2i:
 	var local := global_transform.affine_inverse() * point
@@ -136,19 +195,28 @@ func _commander(c: Vector2i) -> void:
 	if taille.x <= 0 or taille.y <= 0: return
 	var f := Rect2i(coin, taille)
 	var fiche := {"coin": coin, "rect": f, "ville": null}
+	var nom := {"nom": "Aurones %d,%d" % [coin.x, coin.y]}
+	if not _chauffe:
+		# Voir `_chauffe` : la première ne passe PAS par un fil.
+		_chauffe = true
+		fiche["ville"] = PAYS.fenetre(plan, ctx, f, nom)
+		_fenetres[c] = fiche
+		return
 	fiche["tache"] = WorkerThreadPool.add_task(func() -> void:
-		fiche["ville"] = PAYS.fenetre(plan, ctx, f,
-			{"nom": "Aurones %d,%d" % [coin.x, coin.y]}),
+		fiche["ville"] = PAYS.fenetre(plan, ctx, f, nom),
 		true, "fenêtre du pays %s" % coin)
 	_fenetres[c] = fiche
 
 func _process(_dt: float) -> void:
 	for c0 in _fenetres.keys():
 		var f: Dictionary = _fenetres[c0]
-		if f.has("morceaux") or not f.has("tache"): continue
-		if not WorkerThreadPool.is_task_completed(int(f["tache"])): continue
-		WorkerThreadPool.wait_for_task_completion(int(f["tache"]))
-		f.erase("tache")
+		if f.has("morceaux"): continue
+		# ⚠ Une fenêtre sans tâche est déjà faite (la première, ou une qu'on a
+		# attendue) : elle n'a plus qu'à monter.
+		if f.has("tache"):
+			if not WorkerThreadPool.is_task_completed(int(f["tache"])): continue
+			WorkerThreadPool.wait_for_task_completion(int(f["tache"]))
+			f.erase("tache")
 		var v: Ville2 = f.get("ville", null)
 		if v == null: continue
 		_monter(f, v)
