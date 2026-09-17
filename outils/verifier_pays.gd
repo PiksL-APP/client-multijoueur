@@ -62,7 +62,17 @@ func _init() -> void:
 				if rails.has(c3):
 					sur_rail += 1
 					break
-	print("2. lots posés sur la voie ferrée : %d (rail : %d cases)" % [sur_rail, rails.size()])
+	# ⚠ ET LES POTEAUX AUSSI : « aucun pillar ne doit être sur un rail »
+	# (client, 17/09). Un fût planté entre les rails, c'est un train qui le
+	# traverse à chaque passage.
+	var poteaux_sur_rail := 0
+	for o0 in v.objets:
+		var fo0: Dictionary = o0
+		if not String(fo0.get("m", "")).begins_with("routes/bridge-pillar"): continue
+		var cp := Vector2i(floori(float(fo0["x"]) / 20.0), floori(float(fo0["z"]) / 20.0))
+		if rails.has(cp): poteaux_sur_rail += 1
+	print("2. sur la voie ferrée : %d lots, %d poteaux (rail : %d cases)"
+		% [sur_rail, poteaux_sur_rail, rails.size()])
 
 	# 3. LOTS SOUS LE VIADUC.
 	var sous := {}

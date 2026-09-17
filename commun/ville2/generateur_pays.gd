@@ -1248,6 +1248,13 @@ const AUTO_RAMPE_BARRIERE := "routes/road-slant-curve-barrier"
 const ECART_POTEAUX := 2             ## « quelques » : un toutes les deux cases
 
 static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i) -> void:
+	# ⚠ AUCUN POTEAU SUR UNE VOIE FERRÉE (client, 17/09). Un fût planté entre
+	# les rails, c'est un train qui le traverse à chaque passage. On relève donc
+	# les cases de rail UNE FOIS, avant de poser quoi que ce soit.
+	var rails: Dictionary = {}
+	for voie in v.rail:
+		for rc in Ville2.cases_de_route(voie):
+			rails[rc] = true
 	for r in plan["routes"]:
 		var d: Dictionary = r
 		if String(d.get("classe", "")) != PLAN.V_PRIMAIRE: continue
@@ -1301,15 +1308,21 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 					"r": cap + PI * 0.5, "h": 0.0, "y_abs": niveau, "zone": true})
 			# Le poteau, quand il y a de quoi le planter (voir `ECART_POTEAUX`).
 			if posmod(c.x + c.y, ECART_POTEAUX) == 0 and v.dedans(l) \
-					and v.terre(l) and not v.carte.route(l):
+					and v.terre(l) and not v.carte.route(l) and not rails.has(l):
 				# ⚠ À SA TAILLE DU KIT, SANS RIEN LUI FAIRE : `bridge-pillar`
 				# mesure 0,50 unité de kit, soit exactement une demi-case. Posé
 				# au sol il touche un tablier à 0,5 ; étiré, il grossirait. Sous
-				# un tablier plus haut on en empile donc, on n'en déforme pas.
-				var combien := int(round(niveau / HAUT_DEMI_CASE))
-				for k in combien:
-					v.objets.append({"m": AUTO_PILE, "x": x, "z": z, "r": 0.0,
-						"h": 0.0, "y_abs": float(k) * HAUT_DEMI_CASE, "zone": true})
+				# un tablier plus haut on en EMPILE donc, on n'en déforme pas.
+				#
+				# ⚠ ET LE LARGE VA EN BAS. « Utilise le bridge-pillar-wide en
+				# dessous du bridge-pillar quand tu en utilises deux » (client) :
+				# c'est la règle de tout ouvrage, la charge se reprend en
+				# s'élargissant vers le sol. Un fût unique reste le mince.
+				for k in etages:
+					v.objets.append({
+						"m": AUTO_PILE_LARGE if etages > 1 and k == 0 else AUTO_PILE,
+						"x": x, "z": z, "r": 0.0, "h": 0.0,
+						"y_abs": float(k) * HAUT_DEMI_CASE, "zone": true})
 			# ⭐ LES PANNEAUX, au bord de la voie et tournés vers le conducteur.
 			# Ils se posent sur la POSITION ABSOLUE et non sur l'indice : une
 			# fenêtre décalée doit retrouver les mêmes panneaux aux mêmes cases.
