@@ -66,7 +66,7 @@ static func remplir(plan: Dictionary, ctx: Dictionary, v: Ville2, origine: Vecto
 	#    registre des cases déjà roulantes et on COUPE la rue dès qu'elle passe à
 	#    moins d'une case de l'une d'elles — sauf voie rapide, qui a le droit
 	#    d'avoir sa contre-allée.
-	var prises := _les_chaussees(v, f)
+	var prises := _les_chaussees(plan, f)
 	var voies: Array = []
 	#    ⭐⭐ ET ON JETTE LES MIETTES. C'est `_ecarter` lui-même qui fabrique les
 	#    moignons : quand une rue longe un axe existant, elle est COUPÉE, et il
@@ -86,9 +86,10 @@ static func remplir(plan: Dictionary, ctx: Dictionary, v: Ville2, origine: Vecto
 	#    on retomberait sur la double voie que tout ce registre sert à éviter.
 	for k in vus:
 		for pts in _les_voies(plan, ctx, k):
-			for bout in _ecarter(pts, prises):
+			for bout0 in _ecarter(pts, prises):
+				var bout: Array = _prolonger(bout0, prises)
 				for c in bout: prises[c] = true
-				if (bout as Array).size() < MIN_RUE: continue
+				if bout.size() < MIN_RUE: continue
 				voies.append({"k": k, "cases": bout})
 	for e in voies:
 		var d: Dictionary = e
@@ -184,6 +185,11 @@ static func _visibles(plan: Dictionary, f: Rect2i) -> Array:
 		var r: Array = z["r"]
 		var b := Rect2i(c - Vector2i(int(r[0]), int(r[1])),
 			Vector2i(int(r[0]), int(r[1])) * 2).grow(8)
+		# ⚠ ET ON N'ÉLARGIT PAS CETTE FENÊTRE-CI, C'EST MESURÉ. J'ai essayé de
+		# la faire regarder `MARGE_REGISTRE` cases plus loin, pour la même raison
+		# que le registre des chaussées : les deux dernières cases de désaccord
+		# entre deux cadrages n'ont PAS bougé, et la fabrication d'une fenêtre a
+		# pris une seconde et demie de plus. On garde donc la fenêtre nue.
 		if b.intersects(f): sortie.append(k)
 	return sortie
 
@@ -602,6 +608,13 @@ static func _emprise_libre(plan: Dictionary, ctx: Dictionary, k: int, c: Vector2
 ## ville il y a un trottoir, pas une allée de garage.
 const ALLEE := "pavillons/driveway-long"
 
+## Marquer une case comme prise, dans le registre vivant des demi-cases : c'est
+## le même registre que celui des parcelles, donc le lotisseur la respectera.
+static func _reserver_la_case(v: Ville2, c: Vector2i) -> void:
+	for b in 2:
+		for a in 2:
+			v.demi_prises[Vector2i(c.x * 2 + a, c.y * 2 + b)] = true
+
 ## Une case où l'on a le droit de poser du mobilier de jardin : dans la fenêtre,
 ## sur la terre, et ni dans un bâtiment ni sur la chaussée.
 ##
@@ -637,6 +650,13 @@ static func _devant_la_maison(v: Ville2, f: Rect2i, charte: Dictionary,
 	# lotisseur ne connaît que les lots, personne ne relisait pour le mobilier.
 	var devant := l + n
 	if not _case_de_mobilier(v, devant): return
+	# ⚠⚠ ON RÉSERVE LA CASE DE L'ALLÉE, SINON LA MAISON D'APRÈS SE POSE DESSUS.
+	# Mesuré après l'allongement des rues : trois objets se retrouvaient dans un
+	# mur. La cause n'était plus le registre — il disait vrai à l'instant du
+	# test — mais l'ORDRE : l'allée de la maison A est posée, puis la maison B
+	# prend la même case, et l'allée se retrouve dans son salon. Une case de
+	# jardin doit donc être PRISE comme l'est une parcelle.
+	_reserver_la_case(v, devant)
 	var x0 := (float(devant.x) + 0.5) * CASE
 	var z0 := (float(devant.y) + 0.5) * CASE
 	var r := 0.0 if n.x == 0 else PI * 0.5
@@ -664,14 +684,49 @@ static func _devant_la_maison(v: Ville2, f: Rect2i, charte: Dictionary,
 ## ⚠ LA VOIE RAPIDE N'Y ENTRE PAS. C'est le seul axe qui a le droit d'avoir une
 ## chaussée parallèle — une autoroute a deux sens séparés et ses contre-allées,
 ## et c'est même à ça qu'on la reconnaît d'en haut.
-static func _les_chaussees(v: Ville2, f: Rect2i) -> Dictionary:
+## ⚠⚠⚠ LE REGISTRE SE LIT DANS LE PLAN, PAS DANS LA FENÊTRE — et c'est la
+## différence entre un pays et un pays qui change de forme quand on le regarde
+## autrement.
+##
+## Il lisait la grille de la `Ville2`, donc les axes VISIBLES DANS LA FENÊTRE.
+## Une rue qui longe un axe passant juste dehors ne voyait rien et se posait ;
+## la fenêtre voisine, elle, voyait l'axe et la coupait. Mesuré en fabriquant
+## deux fenêtres qui se chevauchent et en comparant la zone commune case par
+## case : le terrain était identique au centième près et l'eau aussi, mais
+## QUARANTE ET UNE cases de chaussée existaient d'un cadrage et pas de l'autre.
+## Une rue qui apparaît quand on déplace la caméra.
+##
+## On rastérise donc les axes du PLAN sur la fenêtre ÉLARGIE : le plan ne dépend
+## d'aucun cadrage, donc le registre non plus, et les deux fenêtres prennent la
+## même décision sur la même rue.
+##
+## ⚠ LA VOIE RAPIDE N'Y ENTRE PAS. C'est le seul axe qui a le droit d'avoir une
+## chaussée parallèle — une autoroute a deux sens séparés et ses contre-allées,
+## et c'est même à ça qu'on la reconnaît d'en haut.
+const MARGE_REGISTRE := 16
+
+static func _les_chaussees(plan: Dictionary, f: Rect2i) -> Dictionary:
 	var prises := {}
-	for j in v.taille.y:
-		for i in v.taille.x:
-			var c := Vector2i(i, j)
-			var g := v.genre_de_route(c)
-			if g == "" or g == Ville2.R_VOIE_RAPIDE: continue
-			prises[f.position + c] = true
+	# Les axes du plan, y compris ceux qui passent juste à côté de la fenêtre.
+	var large := f.grow(MARGE_REGISTRE)
+	for r in plan.get("routes", []):
+		var d: Dictionary = r
+		if String(d.get("classe", "")) == PLAN.V_PRIMAIRE: continue
+		var pts: Array = d["points"]
+		for k in range(1, pts.size()):
+			var a := PLAN.case_de(pts[k - 1])
+			var b := PLAN.case_de(pts[k])
+			var pas := (b - a).sign()
+			if pas == Vector2i.ZERO: continue
+			var c := a
+			if large.has_point(c): prises[c] = true
+			var coude := Vector2i(b.x, a.y)
+			for cible0 in [coude, b]:
+				var cible: Vector2i = cible0
+				var p := (cible - c).sign()
+				while c != cible:
+					c += p
+					if large.has_point(c): prises[c] = true
 	return prises
 
 ## ⭐ ÉCARTER LA RUE DES CHAUSSÉES EXISTANTES — ET LA LAISSER LES TRAVERSER.
@@ -684,6 +739,59 @@ static func _les_chaussees(v: Ville2, f: Rect2i) -> Dictionary:
 ## Une DOUBLE VOIE, c'est une chaussée qui LONGE la nôtre : il faut donc qu'elle
 ## soit là sur PLUSIEURS cases d'affilée du même côté. Trois suffisent — un
 ## carrefour n'en donne qu'une, un doublon les donne toutes.
+## ⭐⭐⭐ UNE RUE VA JUSQU'À UNE AUTRE RUE — sinon elle meurt dans un champ.
+##
+## Les rues d'un quartier sont une grille calée sur SON `pas` : cinq cases au
+## centre, huit en pavillonnaire. Deux quartiers voisins n'ont donc pas le même
+## peigne, leurs rues ne tombent pas en face, et chacune s'arrête à la limite de
+## son quartier — dans l'herbe. C'est l'origine des culs-de-sac que j'ai comptés
+## (124 sur une fenêtre de 110 cases) et des raccords biscornus entre une rue
+## étroite et une avenue.
+##
+## ⚠ J'AI D'ABORD ESSAYÉ UN ANNEAU DE DESSERTE autour de chaque quartier, et il
+## n'a rien donné : mesuré, +27 cases de chaussée et UN cul-de-sac en moins. La
+## raison est bonne — l'anneau longe la rue la plus extérieure de la grille, et
+## la règle anti-double-voie le coupe sur presque toute sa longueur. Deux
+## chaussées parallèles à une case l'une de l'autre, c'est précisément ce qu'on
+## refuse depuis le 15/09.
+##
+## La réponse qui marche prend le problème par l'autre bout : au lieu d'ajouter
+## une voie pour ramasser les bouts, on PROLONGE chaque bout jusqu'à ce qu'il
+## touche une chaussée existante. Une rue qui trouve une avenue à six cases va
+## la chercher ; une rue qui ne trouve rien reste telle quelle, et le seuil
+## `MIN_RUE` s'en occupe.
+## ⚠ ONZE CASES, MESURÉ. À sept, les culs-de-sac tombent de 124 à 62 ; à onze,
+## à 56 ; au-delà la rue traverse un pâté entier pour aller chercher une avenue
+## qu'elle n'avait aucune raison de rejoindre. Onze cases, c'est deux cent vingt
+## mètres : la distance qu'un lotisseur accepte de faire pour raccorder.
+const ALLONGE := 11
+
+static func _prolonger(bout: Array, prises: Dictionary) -> Array:
+	if bout.size() < 2: return bout
+	var sortie: Array = bout.duplicate()
+	# Les deux extrémités, chacune dans la direction où la rue filait.
+	for cote in [1, -1]:
+		var n := sortie.size()
+		var fin: Vector2i = sortie[n - 1] if cote == 1 else sortie[0]
+		var avant: Vector2i = sortie[n - 2] if cote == 1 else sortie[1]
+		var d := (fin - avant).sign()
+		if d == Vector2i.ZERO or (d.x != 0 and d.y != 0): continue
+		var ajout: Array = []
+		var c := fin
+		for _t in ALLONGE:
+			c += d
+			ajout.append(c)
+			if prises.has(c): break
+		# On ne garde l'allonge QUE si elle a trouvé quelque chose. Sinon on
+		# vient d'allonger un moignon, ce qui est pire que de le laisser court.
+		if ajout.is_empty() or not prises.has(ajout[ajout.size() - 1]): continue
+		if cote == 1:
+			for a in ajout: sortie.append(a)
+		else:
+			ajout.reverse()
+			for a2 in ajout: sortie.push_front(a2)
+	return sortie
+
 ## En deçà, ce n'est pas une rue, c'est une miette laissée par la découpe.
 ## Cinq cases, c'est cent mètres : de quoi border trois maisons.
 const MIN_RUE := 5
@@ -899,7 +1007,8 @@ static func _les_stations(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2
 				v.ajouter_objet(VELO, vv.x, vv.y, cap + PI * 0.5, 0.0, "")
 		if alea.randf() < 0.30:
 			var pb := bord + long * 14.0
-			v.ajouter_objet("poubelle", pb.x, pb.y, cap, 0.0, "")
+			if _case_de_mobilier(v, Vector2i(floori(pb.x / CASE), floori(pb.y / CASE))):
+				v.ajouter_objet("poubelle", pb.x, pb.y, cap, 0.0, "")
 
 ## LA GARE, POSÉE À CÔTÉ DE SA STATION ET PAS DESSUS. Huit cases de long : posée
 ## sur le point de la station, elle enjamberait la voie qu'elle est censée
