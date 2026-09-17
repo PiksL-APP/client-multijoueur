@@ -233,6 +233,7 @@ static func fenetre(plan: Dictionary, ctx: Dictionary, f: Rect2i, curseurs := {}
 		# ⚠ APRÈS LES QUARTIERS, PARCE QUE C'EST EUX QUI POSAIENT LE BITUME SOUS
 		# LES RAILS. Voir `_pas_de_rue_sous_le_rail`.
 		_pas_de_rue_sous_le_rail(v)
+		_pas_de_voie_double(v)
 		_rien_qui_ne_mene_nulle_part(v)
 		v.rasteriser()
 
@@ -304,6 +305,79 @@ static func _pas_de_rue_sous_le_rail(v: Ville2) -> int:
 			morceau.append(c2)
 		if morceau.size() >= 2: gardees.append(_route_de(d2, morceau))
 		elif morceau.size() == 1 and cases2.size() == 1: gardees.append(_route_de(d2, morceau))
+	v.routes = gardees
+	return coupees
+
+## ⭐⭐ DEUX CHAUSSÉES COLLÉES L'UNE À L'AUTRE N'EN FONT PAS UNE LARGE.
+##
+## « Enlève aussi les doubles routes collées comme celle-là » (client, 17/09) :
+## deux rues parallèles à une case d'écart, séparées par un filet de trottoir,
+## avec leurs deux jeux de passages piétons face à face. Ce n'est pas un
+## boulevard, c'est une grille de quartier qui a posé deux fois la même rue
+## parce que deux emprises voisines se touchaient.
+##
+## ⚠ ON NE COUPE QUE CE QUI VA DANS LE MÊME SENS, comme pour le rail : deux
+## rues perpendiculaires qui se touchent, c'est un carrefour.
+##
+## ⚠ ET LE PERDANT SE DÉSIGNE PAR SA POSITION, PAS PAR SON RANG. Choisir « la
+## seconde rencontrée » ferait dépendre le résultat de l'ordre des routes, donc
+## du cadrage de la fenêtre ; on garde celle dont la case a la plus petite
+## coordonnée, ce qui est vrai de n'importe où l'on regarde.
+const SUITE_DOUBLE := 3              ## en dessous, c'est un carrefour, pas une voie double
+
+static func _pas_de_voie_double(v: Ville2) -> int:
+	var axe: Dictionary = {}
+	for r in v.routes:
+		var cases: Array = Ville2.cases_de_route(r)
+		for i in cases.size():
+			var c: Vector2i = cases[i]
+			var d: Vector2i = (cases[mini(i + 1, cases.size() - 1)] as Vector2i) \
+				- (cases[maxi(i - 1, 0)] as Vector2i)
+			if d == Vector2i.ZERO: continue
+			axe[c] = d.x != 0
+	# 1. LES CASES QUI ONT UNE JUMELLE PARALLÈLE JUSTE À CÔTÉ.
+	var double: Dictionary = {}
+	for c0 in axe.keys():
+		var c: Vector2i = c0
+		var selon_x: bool = bool(axe[c])
+		var perp := Vector2i(0, 1) if selon_x else Vector2i(1, 0)
+		for signe in [1, -1]:
+			var q: Vector2i = c + perp * signe
+			if not axe.has(q) or bool(axe[q]) != selon_x: continue
+			var cle_c: int = c.y * 100000 + c.x
+			var cle_q: int = q.y * 100000 + q.x
+			double[q if cle_c < cle_q else c] = true
+	# 2. ⚠⚠ ET SEULEMENT SI ÇA DURE. Deux rues perpendiculaires se frôlent sur
+	# une case à chaque carrefour ; couper là-dessus hache le réseau. Mesuré :
+	# sans ce filtre, 321 cases coupées, SIX morceaux de réseau et 210 culs-de-
+	# sac au lieu de 61. Une vraie voie double, elle, court sur des dizaines de
+	# cases — on exige donc trois cases de suite dans l'axe.
+	var jeter: Dictionary = {}
+	for c1 in double.keys():
+		var c2: Vector2i = c1
+		var pas := Vector2i(1, 0) if bool(axe[c2]) else Vector2i(0, 1)
+		var longueur := 1
+		for signe2 in [1, -1]:
+			var q2: Vector2i = c2 + pas * signe2
+			while double.has(q2):
+				longueur += 1
+				q2 += pas * signe2
+		if longueur >= SUITE_DOUBLE: jeter[c2] = true
+	if jeter.is_empty(): return 0
+	var gardees: Array = []
+	var coupees := 0
+	for r2 in v.routes:
+		var d2: Dictionary = r2
+		var cases2: Array = Ville2.cases_de_route(d2)
+		var morceau: Array = []
+		for c2 in cases2:
+			if jeter.has(c2):
+				coupees += 1
+				if morceau.size() >= 2: gardees.append(_route_de(d2, morceau))
+				morceau = []
+				continue
+			morceau.append(c2)
+		if morceau.size() >= 2: gardees.append(_route_de(d2, morceau))
 	v.routes = gardees
 	return coupees
 
@@ -1148,6 +1222,36 @@ const AUTO_DROIT := "routes/road-straight"
 const AUTO_VIRAGE := "routes/road-bend"
 const BARRIERE_DE := {"routes/road-straight": "routes/road-straight-barrier",
 	"routes/road-bend": "routes/road-bend-barrier"}
+
+## ⚠⚠ LE QUART DE TOUR N'EST PAS LE MÊME D'UNE PIÈCE À L'AUTRE, ET J'AI PAYÉ
+## POUR L'APPRENDRE DEUX FOIS.
+##
+## `road-straight-barrier` porte ses rails à x = ±0,485 : ils courent selon Z,
+## quand `road-straight` roule selon X. Un quart de tour d'écart, obligatoire.
+## `road-bend-barrier`, LUI, est une pièce FORMÉE : son masque de rails vaut 15
+## (`CarteVille.RAILS`, relevé au banc), ce qui veut dire « je suis dessiné dans
+## le sens de ma chaussée ». Lui appliquer le même quart de tour qu'à la ligne
+## droite le met en travers du virage — « tu as encore des curve et leur barrier
+## mal placés » (client, 17/09).
+const QUART_BARRIERE := {"routes/road-straight": PI * 0.5, "routes/road-bend": 0.0}
+
+## ⚠⚠⚠ ET LE VIRAGE LUI-MÊME EST À CENT QUATRE-VINGTS DEGRÉS. Mesuré, enfin,
+## au lieu d'être déduit de la table de la ville.
+##
+## J'ai lu les SOMMETS des pièces, en comptant sur chaque bord ce qui est au ras
+## (la chaussée) et ce qui est surélevé (le trottoir, la glissière) :
+##
+##   road-straight          bordures à l'OUEST et à l'EST → on roule NORD-SUD
+##   road-straight-barrier  rails au NORD et au SUD         → on roule EST-OUEST
+##   road-bend              bordures à l'OUEST et au SUD    → il joint EST et NORD
+##   road-bend-barrier      mêmes côtés que son virage      → même cap
+##
+## `CarteVille.VIRAGES` donne le quart de tour dans la convention de la VILLE,
+## qui ne part pas de la même pièce au repos : appliqué tel quel à `road-bend`,
+## il joint les deux côtés OPPOSÉS à ceux qu'il faut — le virage tourne le dos
+## à la route et sa glissière barre le tablier. Un demi-tour remet les deux
+## bouts en face de la voie. C'est ce que montre la capture du client du 17/09.
+const DEMI_TOUR_DU_VIRAGE := PI
 ## ⚠ PLUS AUCUN `road-side-*`, NI LEURS VARIANTES À GLISSIÈRE. « Enlève
 ## toutes les routes qui se nomment road-side-* ainsi que toutes les barrières »
 ## (client, 17/09). Elles marquaient une sortie à plat sur le tablier, qui ne
@@ -1230,7 +1334,22 @@ const HAUT_DEMI_CASE := 10.0         ## 0,5 case — la hauteur fixée par le cl
 ## tout est bien relié ». Donc : la rampe se pose au SOL, comme une route
 ## ordinaire, et c'est elle qui va chercher le tablier à 0,5 en tournant. Rien à
 ## caler, rien à lever — les trois altitudes sont 0, 0 et 0,5.
-const AUTO_RAMPE := "routes/road-slant-flat-curve"
+## ⚠⚠ ET C'EST `road-slant-curve`, PAS `road-slant-flat-curve`, PARCE QUE
+## C'EST LA SEULE DES DEUX QUI A UNE GLISSIÈRE.
+##
+## Le client a nommé les deux (« road-slant-flat-curve OU road-slant-curve »),
+## puis a demandé des barrières dessus. Or le kit ne contient que
+## `road-slant-curve-barrier` : il n'existe pas de barrière pour la version
+## « flat ». Posée sur elle, la glissière de l'autre suit une courbe qui n'est
+## pas la sienne — « tu as encore des curve et leur barrier mal placés ». On
+## prend donc la paire assortie.
+##
+## ⭐ GÉOMÉTRIE MESURÉE SUR LES SOMMETS, pas devinée (les deux pièces font
+## 2 × 0,52 × 1, origine au milieu des deux cases) :
+##   bord X− : y de 0,000 à 0,020  → LE BAS, c'est le sol
+##   bord X+ : y jusqu'à 0,520      → LE HAUT, c'est le tablier
+## Le cap doit donc mettre le +X local du côté de la voie rapide.
+const AUTO_RAMPE := "routes/road-slant-curve"
 const AUTO_RAMPE_BARRIERE := "routes/road-slant-curve-barrier"
 
 ## ⭐ ET QUELQUES POTEAUX, SEULEMENT SUR L'HERBE ET LA TERRE.
@@ -1288,7 +1407,7 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 			var cap := _cap(entre)
 			if entre != sort:
 				piece = AUTO_VIRAGE
-				cap = _cap_du_virage(entre, sort)
+				cap = _cap_du_virage(entre, sort) + DEMI_TOUR_DU_VIRAGE
 			v.objets.append({"m": piece, "x": x, "z": z,
 				"r": cap, "h": 0.0, "y_abs": niveau, "zone": true})
 			# ⭐ LA GLISSIÈRE, SAUF OÙ LA BRETELLE SE BRANCHE.
@@ -1305,7 +1424,8 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 			# chaussée en travers — le défaut signalé le 16/09 sur les rues.
 			if not branches.has(i):
 				v.objets.append({"m": String(BARRIERE_DE[piece]), "x": x, "z": z,
-					"r": cap + PI * 0.5, "h": 0.0, "y_abs": niveau, "zone": true})
+					"r": cap + float(QUART_BARRIERE[piece]), "h": 0.0,
+					"y_abs": niveau, "zone": true})
 			# Le poteau, quand il y a de quoi le planter (voir `ECART_POTEAUX`).
 			if posmod(c.x + c.y, ECART_POTEAUX) == 0 and v.dedans(l) \
 					and v.terre(l) and not v.carte.route(l) and not rails.has(l):
@@ -1384,15 +1504,26 @@ static func _niveau_de_la_voie(haut: PackedFloat32Array) -> float:
 static func _ou_brancher(v: Ville2, f: Rect2i, cases: Array, etages: int) -> Dictionary:
 	var sortie: Dictionary = {}
 	var precedente := -99
+	# ⚠⚠ LES DEUX BOUTS DE LA VOIE DESCENDENT, TOUJOURS.
+	# « Tes autoroutes ne reviennent pas au niveau 0 avec les slant comme prévu
+	# à certains endroits » (client, 17/09) : une voie rapide qui s'arrête en
+	# l'air, c'est une route qui ne mène nulle part, en pire. Les extrémités se
+	# prennent sur la polyligne DU PLAN, pas sur ce que la fenêtre en montre :
+	# le milieu d'un tracé coupé par le cadre continue chez la voisine et n'a
+	# rien à redescendre.
+	var bouts := {0: true, cases.size() - 1: true}
 	for i in cases.size():
 		var c: Vector2i = cases[i]
 		if not f.has_point(c): continue
-		if i - precedente <= 8: continue
+		var force: bool = bouts.has(i)
+		if not force and i - precedente <= 8: continue
 		var l := c - f.position
 		var avant: Vector2i = cases[i - 1] if i > 0 else c
 		var entre := c - avant
+		if entre == Vector2i.ZERO and i + 1 < cases.size():
+			entre = (cases[i + 1] as Vector2i) - c
 		if entre == Vector2i.ZERO: continue
-		if not _coupee_dessous(v, l, entre): continue
+		if not force and not _coupee_dessous(v, l, entre): continue
 		var travers := Vector2i(entre.y, entre.x)
 		for cote0 in [travers, -travers]:
 			var cote: Vector2i = cote0

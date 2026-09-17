@@ -149,8 +149,13 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 					if _contre_un_zebre(ville, c): nb = BARRIERE_PASSAGE
 					_tuile(racine, nb, centre, CarteVille.quarts_de_barriere(
 						nb, carte.masque(c), int(f[1])))
-			elif ville.matiere_de(c) == Ville2.M_DALLE:
-				_tuile(racine, _dalle_de(ville, c), centre, 0, TEINTE_DALLE)
+			# ⚠⚠ PLUS AUCUNE DALLE DE BÉTON. « Enlève aussi toutes les dalles de
+			# béton que tu utilises, qui passent des fois sur les ronds-points »
+			# (client, 17/09), capture à l'appui : une dalle `tile-low` posée sur
+			# une case déjà occupée par un rond-point, un gros carré blanc en
+			# travers de l'anneau. Le défaut n'était pas le placement, c'était la
+			# dalle : une pièce de décor posée sur une case dont le TERRAIN dit
+			# déjà ce qu'elle est. On ne pose plus rien — la matière du sol suffit.
 			# ⚠ SINON, ON NE POSE RIEN — ET SURTOUT PAS DU BÉTON. `plate()` est
 			# vrai dès qu'un LOT occupe la case : jusqu'ici, poser un bâtiment
 			# faisait donc apparaître une dalle de trottoir sous lui, quelle que
@@ -319,11 +324,6 @@ static func _variante_avenue(ville: Ville2, c: Vector2i, nom: String) -> String:
 	if nom.begins_with("road-intersection"):
 		return "road-intersection-path" if zebre else "road-intersection-line"
 	return nom
-
-## Quelle dalle sous une case pavée sans rue : le trottoir du kit. Les cases
-## de terrain ne passent pas par ici (voir `_poser_terrain`).
-static func _dalle_de(_ville: Ville2, _c: Vector2i) -> String:
-	return "tile-low"
 
 # ------------------------------------------------------------------ le terrain
 

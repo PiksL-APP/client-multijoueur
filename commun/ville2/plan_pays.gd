@@ -998,8 +998,31 @@ static func distance_signee(plan: Dictionary, ctx: Dictionary, i: int, j: int) -
 ## L'ALTITUDE DE LA TERRE, en unités 3D, à `inl` cases de la côte. La pente de
 ## chaque terme est bornée (voir `MONTS`) : c'est ce qui remplace les six passes
 ## de rabotage de l'ancienne carte.
+## ⭐⭐⭐ LE PAYS EST PLAT, ET C'EST UNE DÉCISION DU CLIENT.
+##
+## « Tu vas faire en sorte que la map n'ait aucune hauteur car ça rend moche :
+## tout doit être au niveau 0 sauf les autoroutes et les rails » (17/09).
+##
+## Le relief du pays — plaines, collines, monts, aplanissement urbain — est
+## donc ÉTEINT, pas effacé : tout le calcul reste écrit juste en dessous, et
+## `RELIEF` le rallume d'un mot. Le supprimer aurait coûté une semaine à
+## réécrire le jour où il le redemande.
+##
+## ⚠ CE QUI RESTE, ET POURQUOI. La MER et les LITS DE RIVIÈRE gardent leur
+## creusement (ce n'est pas du relief, c'est ce qui fait qu'on voit de l'eau),
+## et l'ESTRAN garde ses deux cases de descente vers la mer : sans lui, une
+## terre à zéro contre une mer à −2,85 ferait une falaise de trois mètres tout
+## autour de chaque île. Le reste est plat.
+##
+## ⚠ ET UN SEUL ENDROIT SUFFIT. `remplir_terrain` (le décor), `sol_en` (le
+## plan, les ponts, les chemins) et `palier_en` passent TOUS par ici : il ne
+## peut donc pas y avoir de désaccord entre ce qu'on regarde et ce qu'on
+## traverse. C'est pour ça que le levier est ici et nulle part ailleurs.
+const RELIEF := false
+
 static func _altitude_terre(plan: Dictionary, ctx: Dictionary, i: int, j: int,
 		inl: float) -> float:
+	if not RELIEF: return 0.0
 	var p := P_PLAINE * clampf(inl / LARGEUR_PLAINE, 0.0, 1.0)
 	var b: FastNoiseLite = ctx["colline"]
 	var col := b.get_noise_2d(float(i), float(j)) * 0.5 + 0.5
