@@ -1231,7 +1231,9 @@ static func _reserver(plan: Dictionary, v: Ville2, f: Rect2i) -> void:
 	for r2 in plan.get("routes", []):
 		var f2: Dictionary = r2
 		if String(f2.get("classe", "")) != "primaire": continue
-		_reserver_la_ligne(v, _cases_de(f2["points"]), LARGE_RESERVE_VIADUC, f.position)
+		var cases_v := _cases_de(f2["points"])
+		_reserver_la_ligne(v, cases_v, LARGE_RESERVE_VIADUC, f.position)
+		_sous_le_viaduc(v, f, cases_v)
 
 ## Les cases d'une polyligne, qu'elle soit en `Vector2i` (une voie bâtie en
 ## mémoire) ou en `[x, y]` (une route relue du plan JSON).
@@ -1286,6 +1288,42 @@ static func _l_emprise_du_rail(v: Ville2, f: Rect2i, cases: Array) -> void:
 				var m := String(BUISSONS_DU_RAIL[alea.randi() % BUISSONS_DU_RAIL.size()])
 				v.ajouter_objet(m, (float(d.x) + 0.2 + alea.randf() * 0.6) * CASE,
 					(float(d.y) + 0.2 + alea.randf() * 0.6) * CASE, alea.randf() * TAU, 0.0, "")
+
+## ⭐ SOUS LE VIADUC, UN PARKING. Le couloir de l'autoroute (l'axe et une case
+## de chaque côté) est réservé, donc nu : au centre, une bande de dalle de
+## soixante mètres le long du viaduc. Ce qu'on trouve sous un vrai viaduc
+## urbain, c'est des voitures garées en épi. On en pose sur les deux cases
+## de bord (jamais sur l'axe : c'est là que tombent les poteaux et les pieds
+## de rampe), par paires, perpendiculaires au tablier.
+const VIADUC_VOITURES := 0.30
+
+static func _sous_le_viaduc(v: Ville2, f: Rect2i, cases: Array) -> void:
+	var axe: Dictionary = {}
+	for e in cases:
+		axe[(e as Vector2i) - f.position] = true
+	var vues: Dictionary = {}
+	for e2 in cases:
+		var c: Vector2i = (e2 as Vector2i) - f.position
+		# Le sens du tablier ici : une voisine d'axe à gauche ou à droite.
+		var horizontal := axe.has(c + Vector2i(1, 0)) or axe.has(c + Vector2i(-1, 0))
+		var cotes: Array = [Vector2i(0, 1), Vector2i(0, -1)] if horizontal else [Vector2i(1, 0), Vector2i(-1, 0)]
+		for dc in cotes:
+			var d: Vector2i = c + dc
+			if vues.has(d) or axe.has(d): continue
+			vues[d] = true
+			if not v.dedans(d) or not v.terre(d) or v.carte.route(d): continue
+			var alea := RandomNumberGenerator.new()
+			alea.seed = _graine(f.position.x + d.x, f.position.y + d.y, 4219)
+			if alea.randf() >= VIADUC_VOITURES: continue
+			var x := (float(d.x) + 0.5) * CASE
+			var z := (float(d.y) + 0.5) * CASE
+			for n in 2:
+				var m := String(KitVille2.VOITURES[alea.randi() % KitVille2.VOITURES.size()])
+				var dx := -4.0 + float(n) * 8.0
+				if horizontal:
+					v.ajouter_objet(m, x + dx, z, PI * 0.5, 0.0, "")
+				else:
+					v.ajouter_objet(m, x, z + dx, 0.0, 0.0, "")
 
 static func _reserver_la_ligne(v: Ville2, cases: Array, large: int, origine: Vector2i) -> void:
 	for e in cases:

@@ -715,6 +715,7 @@ var _fiche: GridContainer               ## les champs de la sélection (x, z, an
 var _champs_fiche: Dictionary = {}      ## clé → SpinBox
 var _remplit_la_fiche := false          ## vrai pendant qu'on écrit dans les champs
 var _etiquette_case: Label
+var _point_etiquete := Vector3(-1e9, 0, 0)   ## la visée déjà étiquetée
 var _etiquette_chantier: Label          ## « bâtit… 42 morceaux » tant que la tuile monte
 var _pastille_modifiee: Label
 
@@ -1292,6 +1293,8 @@ func _la_barre_d_etat() -> Control:
 	bb.add_child(_etiquette_chantier)
 	_etiquette_case = Atelier.texte("", Atelier.CORPS_PETIT, Atelier.ENCRE_FAIBLE)
 	_etiquette_case.custom_minimum_size.x = 120
+	_etiquette_case.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_etiquette_case.custom_minimum_size.x = 260
 	_etiquette_case.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	bb.add_child(_etiquette_case)
 	_aide = Atelier.texte("H  aide   ·   Tab  la ville seule", Atelier.CORPS_PETIT, Atelier.ENCRE_FAIBLE)
@@ -2175,7 +2178,25 @@ func _process(delta: float) -> void:
 			var t := "bâtit…  %d morceaux" % reste
 			if _etiquette_chantier.text != t: _etiquette_chantier.text = t
 	if _etiquette_case != null and _case.x >= 0:
+		# La case visée, et CE QU'IL Y A DESSUS : le nom de l'objet ou du
+		# bâtiment sous le curseur, avant même de cliquer — c'est ce que la
+		# pipette va reprendre, et c'est la réponse à « c'est quoi, ça ? ».
 		var texte_case := "case %d, %d" % [_case.x, _case.y]
+		# ⚠ Pas de piochage à chaque image : seulement quand la souris a bougé
+		# (vingt-cinq mille objets à mesurer soixante fois par seconde, non).
+		if _point == _point_etiquete:
+			texte_case = _etiquette_case.text
+		elif _outil == OUTIL_SELECTION and _ville != null and _ville.dedans(_case):
+			var ko := _objet_pique(false)
+			if ko >= 0:
+				texte_case = "%s  ·  " % _nom_lisible(String(_ville.objets[ko]["m"])) + texte_case
+			else:
+				var kl := _ville.lot_sur(_case)
+				if kl >= 0:
+					texte_case = "%s  ·  " % _nom_lisible(String(_ville.lots[kl]["m"])) + texte_case
+				elif _ville.carte != null and _ville.carte.route(_case):
+					texte_case = "rue  ·  " + texte_case
+		_point_etiquete = _point
 		if _etiquette_case.text != texte_case: _etiquette_case.text = texte_case
 	if _apercu3d == null: return
 	var pivot := _apercu3d.get_node_or_null("Pivot") as Node3D
