@@ -119,6 +119,14 @@ var _quarts := 0
 var _rayon_terrain := 2
 var _trace: Array = []                  ## les sommets de la route en cours
 var _selection := {}                    ## {"genre": "lot"|"objet"|"route", "k": int}
+## LA SÉLECTION AU LASSO (19/09) : à l'outil Sélection, tirer sur du vide
+## dessine un rectangle au sol ; au relâchement, tout objet et tout bâtiment
+## dedans est retenu dans `_multi`, et Suppr les efface d'un coup. C'est la
+## seule façon de nettoyer un pâté sans cliquer cent fois.
+var _multi: Array = []                  ## [{"genre": "objet"|"lot", "k": int}, …]
+var _presse_papier := {}                ## Ctrl+C : {"objets": [...], "lots": [...]} en relatif à l'ancre
+var _lasso_depart := Vector3(-1e9, 0, 0)
+var _lasso_fin := Vector3.ZERO
 
 var _pivot := Vector3.ZERO
 var _distance := 420.0
@@ -473,6 +481,17 @@ func _essai() -> void:
 	print("[essai] glissé : x %.1f -> %.1f (%s)" % [ox, float(cible["x"]), _etat.text])
 	_annuler()
 	print("[essai] glissé annulé : x %.1f" % float((_ville.objets[_ville.objets.size() / 2] as Dictionary)["x"]))
+	# Le lasso : un rectangle de dix cases sur dix, tout ce qui est dedans, Suppr.
+	_choisir_outil(OUTIL_SELECTION)
+	_lasso_depart = Vector3(5.0 * CASE, 0, 5.0 * CASE)
+	_lasso_fin = Vector3(15.0 * CASE, 0, 15.0 * CASE)
+	_finir_le_lasso()
+	var avant_l := _ville.objets.size() + _ville.lots.size()
+	var pris := _multi.size()
+	_supprimer_selection()
+	print("[essai] lasso : %d pris, %d -> %d objets+lots — %s" % [pris, avant_l,
+		_ville.objets.size() + _ville.lots.size(), _etat.text])
+	_annuler()
 	# Dupliquer (Ctrl+D) et la pose en série (Maj + deux clics).
 	_selectionner()
 	if not _selection.is_empty() and String(_selection["genre"]) == "objet":
@@ -572,6 +591,43 @@ func _essai() -> void:
 	_appliquer(true)
 	print("[essai] sol : matière %d -> %d en (20,20) — %s" % [avant_m, _ville.matiere_de(_case), _etat.text])
 	_annuler()
+	# La pipette : on sélectionne un objet de la ville, I le met en main.
+	if not _ville.objets.is_empty():
+		var o_p: Dictionary = _ville.objets[0]
+		_choisir_outil(OUTIL_SELECTION)
+		_selection = {"genre": "objet", "k": 0}
+		_pipette()
+		print("[essai] pipette : « %s » -> outil %d, modèle « %s », %d quart(s) — %s" % [
+			String(o_p["m"]), _outil, _modele_objet(), _quarts, _etat.text])
+		if _outil != OUTIL_OBJET or _chemin_de(_modele_objet()) != _chemin_de(String(o_p["m"])):
+			push_error("[essai] LA PIPETTE N'A PAS REPRIS LE BON MODÈLE")
+	# Copier / coller : le lasso de tout à l'heure a été annulé, on en refait
+	# un petit autour de la série d'arbres, Ctrl+C, puis Ctrl+V trois cases
+	# plus loin.
+	_choisir_outil(OUTIL_SELECTION)
+	var k_a := _ville.objets.size() - 1
+	var k_b := k_a - 1
+	var pa := Vector2(float(_ville.objets[k_a]["x"]), float(_ville.objets[k_a]["z"]))
+	for kk in range(k_a - 1, -1, -1):
+		var ob: Dictionary = _ville.objets[kk]
+		if pa.distance_to(Vector2(float(ob["x"]), float(ob["z"]))) < 3.0 * CASE:
+			k_b = kk
+			break
+	_multi = [{"genre": "objet", "k": k_a}, {"genre": "objet", "k": k_b}]
+	var objets_c := _ville.objets.size()
+	_copier()
+	_case = Vector2i(10, 30)
+	_point = Vector3(10.5 * CASE, 0, 30.5 * CASE)
+	_coller()
+	print("[essai] copier/coller : %d -> %d objets, %d collé(s) — %s" % [objets_c, _ville.objets.size(), _multi.size(), _etat.text])
+	if _ville.objets.size() != objets_c + 2:
+		push_error("[essai] LE COLLAGE N'A PAS POSÉ LES DEUX OBJETS")
+	var r_avant := float(_ville.objets[_ville.objets.size() - 1].get("r", 0.0))
+	_tourner_multi(1)
+	print("[essai] groupe tourné : cap %.2f -> %.2f — %s" % [r_avant,
+		float(_ville.objets[_ville.objets.size() - 1].get("r", 0.0)), _etat.text])
+	_annuler()
+	_annuler()
 	# Le contrôle de la boîte Publier : on plante un bâtiment dans l'eau exprès
 	# (Chevauchement coché), et la boîte doit le dire et fermer le bouton.
 	_libre.button_pressed = true
@@ -633,7 +689,7 @@ const COLONNE := 88                     ## la largeur d'une tuile du catalogue (
 
 ## Un mot pour dire à quoi sert chaque outil, sous son nom, dans le contexte.
 const CONSEILS_OUTILS := [
-	"Clique un lot, un objet ou une rue. Tire pour déplacer, A / E pour tourner, Suppr pour effacer, flèches pour pousser d'un pas.",
+	"Clique un lot, un objet ou une rue. Tire pour déplacer, A / E pour tourner, Suppr pour effacer, flèches pour pousser d'un pas. I ou Alt + clic reprend le modèle (pipette). Tire sur du vide : un lasso.",
 	"Un clic par sommet ; Entrée ou clic droit termine. G change le genre (rue, avenue, voie rapide).",
 	"Choisis un modèle dans le catalogue, tourne avec A / E, clique pour poser. Refusé sur une rue, un lot ou l'eau.",
 	"Choisis un objet dans le catalogue, clique pour le poser au sol. Page haut / bas le lève. Maj + deux clics : une rangée.",
@@ -1272,7 +1328,7 @@ func _l_aide() -> Control:
 		[["1", "…", "7"], "choisir l'outil"], [["Z", "Q", "S", "D"], "déplacer la caméra"],
 		[["clic droit"], "tourner la caméra"], [["molette"], "zoomer"],
 		[["clic milieu"], "faire glisser la vue"], [["Début"], "tout voir"],
-		[["A", "E"], "tourner la pièce"], [["Pg↑", "Pg↓"], "hauteur de pose"],
+		[["A", "E"], "tourner la pièce (ou tout le lasso)"], [["Pg↑", "Pg↓"], "hauteur de pose"],
 		[["G"], "genre de route"], [["Entrée"], "finir la route"],
 		[["+", "−"], "rayon du pinceau"], [["Suppr"], "effacer la sélection"],
 		[["flèches"], "pousser la sélection d'un pas"], [["Échap"], "lâcher"],
@@ -1280,7 +1336,9 @@ func _l_aide() -> Control:
 		[["Ctrl", "S"], "enregistrer"], [["P"], "photographier"],
 		[["Tab"], "la ville seule"], [["M"], "le plan du pays"],
 		[["V"], "vue de dessus / oblique"], [["H"], "cette aide"],
-		[["Ctrl", "D"], "dupliquer la sélection"], [["F"], "cadrer la sélection"],
+		[["Ctrl", "D"], "dupliquer la sélection"], [["Ctrl", "C"], "copier la sélection (lasso compris)"], [["Ctrl", "V"], "coller sous le curseur"], [["F"], "cadrer la sélection"],
+		[["I"], "pipette : reprendre le modèle visé"], [["Alt", "clic"], "la même pipette, à la souris"],
+		[["tirer"], "lasso : sélectionner tout un rectangle"], [["Suppr"], "… et l'effacer d'un coup"],
 		[["Maj", "clic"], "pose en série (outil Objet)"], [["Maj", "clic"], "glisser la vue (autres outils)"],
 	]
 	for l in lignes:
@@ -1651,6 +1709,84 @@ func _noter_recent(m: String) -> void:
 			_palette.select(k)
 			_palette_choisie(k)
 
+# ------------------------------------------------------------------ le lasso
+
+func _rect_du_lasso() -> Rect2:
+	var a := Vector2(minf(_lasso_depart.x, _lasso_fin.x), minf(_lasso_depart.z, _lasso_fin.z))
+	var b := Vector2(maxf(_lasso_depart.x, _lasso_fin.x), maxf(_lasso_depart.z, _lasso_fin.z))
+	return Rect2(a, b - a)
+
+func _montrer_le_lasso() -> void:
+	var r := _rect_du_lasso()
+	if r.size.x < 1.0 and r.size.y < 1.0: return
+	_cadre.mesh = _rectangle(r, Color(Atelier.ACCENT, 0.18))
+	_cadre.position = Vector3(0, _ville.sol(_case) + 0.9, 0)
+	_cadre.visible = true
+
+## Le relâchement : ce qui est dans le rectangle devient la sélection multiple.
+## Un rectangle plus petit qu'une demi-case est un simple clic dans le vide.
+func _finir_le_lasso() -> void:
+	var r := _rect_du_lasso()
+	_lasso_depart = Vector3(-1e9, 0, 0)
+	_multi.clear()
+	if r.size.x < DEMI * 0.5 and r.size.y < DEMI * 0.5:
+		_cadre.visible = false
+		return
+	for k in _ville.objets.size():
+		var o: Dictionary = _ville.objets[k]
+		if bool(o.get("zone", false)): continue   # le mobilier posé par le générateur d'une zone
+		if r.has_point(Vector2(float(o["x"]), float(o["z"]))):
+			_multi.append({"genre": "objet", "k": k})
+	for k2 in _ville.lots.size():
+		var c := _ville.centre_du_lot(_ville.lots[k2])
+		if r.has_point(Vector2(c.x, c.z)):
+			_multi.append({"genre": "lot", "k": k2})
+	_selection = {}
+	if _multi.is_empty():
+		_cadre.visible = false
+		_dire("Rien dans le rectangle.")
+		return
+	var nb_o := 0
+	var nb_l := 0
+	for m in _multi:
+		if String((m as Dictionary)["genre"]) == "objet": nb_o += 1
+		else: nb_l += 1
+	_cadre.mesh = _rectangle(r, Color(TEINTE_SELECTION, 0.15))
+	_cadre.visible = true
+	_maj_info()
+	_dire("Sélection : %d objet(s), %d bâtiment(s) — Suppr efface tout, Échap lâche." % [nb_o, nb_l])
+	if _info != null:
+		_info.text = "[color=#9ea5b4]lasso[/color]\n[b][color=#e9ebf1]%d objets, %d bâtiments[/color][/b]" % [nb_o, nb_l]
+		_bloc_selection.visible = true
+
+## Suppr sur une sélection multiple : les index du plus grand au plus petit,
+## pour qu'un retrait ne décale pas les suivants.
+func _supprimer_multi() -> void:
+	_empiler()
+	var objets: Array = []
+	var lots: Array = []
+	var touchees: Array = []
+	for m in _multi:
+		var d: Dictionary = m
+		if String(d["genre"]) == "objet": objets.append(int(d["k"]))
+		else: lots.append(int(d["k"]))
+	objets.sort(); objets.reverse()
+	lots.sort(); lots.reverse()
+	for k in objets:
+		var o: Dictionary = _ville.objets[k]
+		touchees.append(Vector2i(floori(float(o["x"]) / CASE), floori(float(o["z"]) / CASE)))
+		_ville.objets.remove_at(k)
+	for k2 in lots:
+		touchees.append_array(Ville2.cases_du_lot(_ville.lots[k2]))
+		_ville.lots.remove_at(k2)
+	var n := _multi.size()
+	_multi.clear()
+	_selection = {}
+	_cadre.visible = false
+	_rebatir(touchees)
+	_maj_info()
+	_dire("Effacé : %d élément(s). (Ctrl+Z annule)" % n)
+
 # ------------------------------------------------------------------ dupliquer, cadrer, série
 
 ## Ctrl+D : une copie de ce qu'on tient, une case plus loin, et c'est elle
@@ -1682,6 +1818,126 @@ func _dupliquer_selection() -> void:
 			return
 	_montrer_cadre()
 	_dire("Dupliqué. Tire-le où tu veux, A / E pour tourner.")
+
+## ⭐ CTRL+C / CTRL+V : UN GROUPE ENTIER, RECOLLÉ SOUS LE CURSEUR. Ctrl+D
+## double une pièce ; le lasso en prend cinquante. Entre les deux il manquait
+## le geste qui fait un éditeur : garnir un bout de rue (deux bancs, trois
+## arbres, un abribus, une voiture), le copier, et le recoller dix fois le
+## long de la même rue. On garde tout en RELATIF à une ancre (le centre du
+## groupe), et Ctrl+V le repose autour de la case visée : les objets à
+## l'aimant, les bâtiments à la demi-case, ceux qui ne trouvent pas leur
+## place sautés (sauf Chevauchement coché). Ce qui vient d'être collé devient
+## la sélection : Suppr l'ôte, un second Ctrl+V en repose un autre.
+func _copier() -> void:
+	var groupe: Array = []
+	if not _multi.is_empty():
+		groupe = _multi
+	elif not _selection.is_empty() and String(_selection["genre"]) != "route":
+		groupe = [_selection]
+	if groupe.is_empty():
+		_dire("Rien à copier — sélectionne un objet, un bâtiment, ou un lasso.")
+		return
+	var objets: Array = []
+	var lots: Array = []
+	var somme := Vector2.ZERO
+	var n := 0
+	for m in groupe:
+		var d: Dictionary = m
+		if String(d["genre"]) == "objet":
+			var o: Dictionary = _ville.objets[int(d["k"])]
+			var oc := o.duplicate()
+			if oc.has("y_abs"):
+				# Une hauteur absolue ne veut rien dire ailleurs : on garde la
+				# hauteur AU-DESSUS DU SOL, et le sol d'arrivée fera le reste.
+				oc["_h"] = float(oc["y_abs"]) - TerrainV2.hauteur_en(_ville, float(o["x"]), float(o["z"]))
+				oc.erase("y_abs")
+			objets.append(oc)
+			somme += Vector2(float(o["x"]), float(o["z"]))
+		else:
+			var l: Dictionary = _ville.lots[int(d["k"])]
+			lots.append(l.duplicate())
+			var c := _ville.centre_du_lot(l)
+			somme += Vector2(c.x, c.z)
+		n += 1
+	var ancre := somme / float(n)
+	for o2 in objets:
+		var od: Dictionary = o2
+		od["x"] = float(od["x"]) - ancre.x
+		od["z"] = float(od["z"]) - ancre.y
+	for l2 in lots:
+		var ld: Dictionary = l2
+		ld["x"] = int(ld["x"]) - roundi(ancre.x / DEMI)
+		ld["y"] = int(ld["y"]) - roundi(ancre.y / DEMI)
+	_presse_papier = {"objets": objets, "lots": lots}
+	_dire("Copié : %d objet(s), %d bâtiment(s) — Ctrl+V les recolle sous le curseur." % [objets.size(), lots.size()])
+
+func _coller() -> void:
+	if _presse_papier.is_empty():
+		_dire("Rien dans le presse-papier — Ctrl+C d'abord.")
+		return
+	if not _ville.dedans(_case):
+		_dire("Vise la carte pour coller.")
+		return
+	_empiler()
+	var ancre := Vector2(_aimanter(_point.x), _aimanter(_point.z))
+	var demi := Vector2i(roundi(ancre.x / DEMI), roundi(ancre.y / DEMI))
+	var touchees: Array = []
+	var poses: Array = []
+	var sautes := 0
+	for l in _presse_papier["lots"]:
+		var ld: Dictionary = (l as Dictionary).duplicate()
+		ld["x"] = int(ld["x"]) + demi.x
+		ld["y"] = int(ld["y"]) + demi.y
+		if not _lot_possible(String(ld["m"]), Vector2i(int(ld["x"]), int(ld["y"]))) \
+				and not (_libre != null and _libre.button_pressed):
+			sautes += 1
+			continue
+		_ville.lots.append(ld)
+		poses.append({"genre": "lot", "k": _ville.lots.size() - 1})
+		touchees.append_array(Ville2.cases_du_lot(ld))
+		# Le registre des demi-cases suit, pour que le lot suivant du même
+		# groupe ne se pose pas dessus.
+		_ville.rasteriser()
+	for o in _presse_papier["objets"]:
+		var od: Dictionary = (o as Dictionary).duplicate()
+		od["x"] = float(od["x"]) + ancre.x
+		od["z"] = float(od["z"]) + ancre.y
+		var c := _case_de(float(od["x"]), float(od["z"]))
+		if not _ville.dedans(c):
+			sautes += 1
+			continue
+		if od.has("_h"):
+			od["y_abs"] = TerrainV2.hauteur_en(_ville, float(od["x"]), float(od["z"])) + float(od["_h"])
+			od.erase("_h")
+		_ville.objets.append(od)
+		poses.append({"genre": "objet", "k": _ville.objets.size() - 1})
+		touchees.append(c)
+	if poses.is_empty():
+		_pile.pop_back()
+		_dire("Rien n'a pu se poser ici (%d sauté(s)) — une rue, l'eau ou un bâtiment. Coche Chevauchement pour forcer." % sautes)
+		return
+	_multi = poses
+	_selection = {}
+	_rebatir(touchees)
+	for m in _multi:
+		var d: Dictionary = m
+		if String(d["genre"]) == "objet": _noter_recent(String(_ville.objets[int(d["k"])]["m"]))
+	# Le cadre autour de ce qu'on vient de coller.
+	var r := Rect2(ancre, Vector2.ZERO)
+	for m2 in _multi:
+		var d2: Dictionary = m2
+		if String(d2["genre"]) == "objet":
+			var o3: Dictionary = _ville.objets[int(d2["k"])]
+			r = r.expand(Vector2(float(o3["x"]), float(o3["z"])))
+		else:
+			var c3 := _ville.centre_du_lot(_ville.lots[int(d2["k"])])
+			r = r.expand(Vector2(c3.x, c3.z))
+	r = r.grow(DEMI * 0.5)
+	_cadre.mesh = _rectangle(r, Color(TEINTE_SELECTION, 0.15))
+	_cadre.visible = true
+	_maj_info()
+	_dire("Collé : %d élément(s)%s — Ctrl+V encore pour un autre, Suppr pour l'ôter." % [poses.size(),
+		(", %d sauté(s)" % sautes) if sautes > 0 else ""])
 
 ## F : la caméra vient sur ce qu'on tient (ou sur la case visée).
 func _cadrer_selection() -> void:
@@ -2114,6 +2370,7 @@ func _choisir_outil(k: int) -> void:
 	if k < _boutons_outils.size() and not _boutons_outils[k].button_pressed:
 		_boutons_outils[k].button_pressed = true
 	_selection = {}
+	_multi.clear()
 	_cadre.visible = false
 	# LE CONTEXTE NE MONTRE QUE CE QUI SERT À L'OUTIL.
 	if _titre_outil != null:
@@ -2247,6 +2504,10 @@ func _unhandled_input(ev: InputEvent) -> void:
 		elif _tire:
 			_viser()
 			_glisser()
+		elif _presse and _lasso_depart.x > -1e8:
+			_viser()
+			_lasso_fin = _point
+			_montrer_le_lasso()
 		else:
 			_viser()
 			_montrer_apercu()
@@ -2291,6 +2552,12 @@ func _unhandled_input(ev: InputEvent) -> void:
 							_poser_en_serie(_point)
 				elif b.shift_pressed:
 					_glisse = b.pressed
+				elif b.alt_pressed:
+					# Alt + clic : la pipette à la souris, quel que soit l'outil.
+					if b.pressed:
+						get_viewport().gui_release_focus()
+						_viser()
+						_pipette(true)
 				elif b.pressed:
 					# ⚠ NE PLUS TESTER « EST-CE QUE JE SUIS SUR L'INTERFACE ».
 					# Depuis la refonte en logiciel, le premier enfant de la
@@ -2307,9 +2574,16 @@ func _unhandled_input(ev: InputEvent) -> void:
 					_presse = true
 					_appliquer(true)
 					_armer_le_glisse()
+					# Rien sous le clic à l'outil Sélection : on arme le lasso.
+					if _outil == OUTIL_SELECTION and _selection.is_empty():
+						_multi.clear()
+						_lasso_depart = _point
+						_lasso_fin = _point
 				else:
 					_presse = false
 					_poser_le_glisse()
+					if _lasso_depart.x > -1e8:
+						_finir_le_lasso()
 	elif ev is InputEventKey and (ev as InputEventKey).pressed:
 		_touche(ev as InputEventKey)
 
@@ -2320,6 +2594,8 @@ func _touche(k: InputEventKey) -> void:
 			KEY_Y: _refaire_geste()
 			KEY_S: _enregistrer()
 			KEY_D: _dupliquer_selection()
+			KEY_C: _copier()
+			KEY_V: _coller()
 			# ⚠ AVEC Ctrl, LES FLÈCHES POUSSENT LA SÉLECTION, PAS LA CAMÉRA.
 			# C'est le seul moyen d'être VRAIMENT au pixel près : à cette
 			# distance la souris ne peut pas viser un dixième d'unité, le
@@ -2356,11 +2632,13 @@ func _touche(k: InputEventKey) -> void:
 			_dire("Genre de route : " + GENRES_ROUTE[_genre_route])
 		KEY_A:
 			_quarts = posmod(_quarts + 1, 4)
-			_tourner_selection(1)
+			if not _multi.is_empty(): _tourner_multi(1)
+			else: _tourner_selection(1)
 			_montrer_apercu()
 		KEY_E:
 			_quarts = posmod(_quarts - 1, 4)
-			_tourner_selection(-1)
+			if not _multi.is_empty(): _tourner_multi(-1)
+			else: _tourner_selection(-1)
 			_montrer_apercu()
 		KEY_PAGEUP:
 			_decalage = minf(_decalage + CASE * 0.1, CASE * 10.0)
@@ -2382,6 +2660,8 @@ func _touche(k: InputEventKey) -> void:
 			_basculer_l_aide()
 		KEY_F:
 			_cadrer_selection()
+		KEY_I:
+			_pipette()
 		KEY_V:
 			# La vue de dessus, et retour : la seule façon de juger un tracé
 			# de rues comme sur un plan.
@@ -2401,6 +2681,8 @@ func _touche(k: InputEventKey) -> void:
 				_boite_publier.visible = false
 				return
 			_serie_depart = Vector3(-1e9, 0, 0)
+			_lasso_depart = Vector3(-1e9, 0, 0)
+			_multi.clear()
 			_finir_route(false)
 			_selection = {}
 			_cadre.visible = false
@@ -2901,6 +3183,9 @@ func _montrer_cadre() -> void:
 	_maj_info()
 
 func _supprimer_selection() -> void:
+	if not _multi.is_empty():
+		_supprimer_multi()
+		return
 	if _selection.is_empty(): return
 	_empiler()
 	var touchees: Array = []
@@ -2923,6 +3208,135 @@ func _supprimer_selection() -> void:
 	_cadre.visible = false
 	_rebatir(touchees)
 	_dire("Effacé.")
+
+## LA PIPETTE (I). « Le même que celui-là » est le geste le plus fréquent
+## quand on garnit une rue : on a un banc sous les yeux, on en veut un
+## deuxième, et le retrouver dans un catalogue de mille modèles prend plus
+## de temps que de le poser. La pipette reprend le modèle ET l'orientation
+## de ce qu'on a sélectionné — ou, sans sélection, de ce qui est sous le
+## curseur — et le met en main dans l'outil qui va avec (Bâtiment ou Objet).
+## Le catalogue se cale dessus : dans la famille affichée s'il y est, sinon
+## dans « tout », la recherche effacée.
+func _pipette(sous_le_curseur := false) -> void:
+	var genre := ""
+	var k := -1
+	if not sous_le_curseur and not _selection.is_empty() and String(_selection["genre"]) != "route":
+		genre = String(_selection["genre"])
+		k = int(_selection["k"])
+	else:
+		k = _objet_pique(false)
+		if k >= 0:
+			genre = "objet"
+		else:
+			k = _ville.lot_sur(_case)
+			if k >= 0: genre = "lot"
+	if genre == "" or k < 0:
+		_dire("Pipette : rien sous le curseur — vise un bâtiment ou un objet, ou sélectionne-le d'abord.")
+		return
+	var m := ""
+	var quarts := 0
+	var outil := OUTIL_OBJET
+	if genre == "objet":
+		var o: Dictionary = _ville.objets[k]
+		m = String(o["m"])
+		quarts = posmod(roundi(float(o.get("r", 0.0)) / (PI * 0.5)), 4)
+	else:
+		var l: Dictionary = _ville.lots[k]
+		m = String(l["m"])
+		quarts = posmod(int(l.get("q", 0)), 4)
+		outil = OUTIL_LOT
+	_choisir_outil(outil)
+	_quarts = quarts
+	var rang := _rang_dans_la_liste(m)
+	if rang < 0 and _familles != null:
+		# Pas dans la famille affichée : on ouvre « tout », sans filtre.
+		_recherche.text = ""
+		_familles.selected = 2
+		_remplir_palette()
+		rang = _rang_dans_la_liste(m)
+	if rang < 0:
+		_dire("Pipette : « %s » n'est pas dans le catalogue." % _nom_lisible(m))
+		return
+	_palette.select(rang)
+	_palette.ensure_current_is_visible()
+	_palette_choisie(rang)
+	_noter_recent(m)
+	_montrer_apercu()
+	_dire("Pipette : « %s » en main%s — clique pour en poser un autre." % [_nom_lisible(m),
+		(", tourné de %d quart(s)" % quarts) if quarts > 0 else ""])
+
+## Le rang d'un modèle dans la liste affichée du catalogue, −1 s'il n'y est
+## pas. On compare par le chemin `res://` : un objet posé depuis un raccourci
+## porte le nom du raccourci, un lot du générateur porte le chemin.
+func _rang_dans_la_liste(m: String) -> int:
+	var cible := _chemin_de(m)
+	for i in _liste.size():
+		var e := String(_liste[i])
+		if e == m: return i
+		if cible != "" and _chemin_de(e) == cible: return i
+	return -1
+
+## A / E SUR UN LASSO : TOUT LE GROUPE TOURNE D'UN QUART, autour de son
+## centre. Un bout de rue garni, copié, collé — puis la rue d'à côté est
+## perpendiculaire, et il fallait tout retourner pièce par pièce. Les objets
+## tournent en position ET en cap ; les bâtiments changent d'emprise avec
+## leur quart et gardent leur centre. Aucune vérification de place : c'est un
+## geste, Ctrl+Z le défait.
+func _tourner_multi(sens: int) -> void:
+	if _multi.is_empty(): return
+	_empiler()
+	var somme := Vector2.ZERO
+	var touchees: Array = []
+	for m in _multi:
+		var d: Dictionary = m
+		if String(d["genre"]) == "objet":
+			var o: Dictionary = _ville.objets[int(d["k"])]
+			somme += Vector2(float(o["x"]), float(o["z"]))
+			touchees.append(_case_de(float(o["x"]), float(o["z"])))
+		else:
+			var l: Dictionary = _ville.lots[int(d["k"])]
+			var c := _ville.centre_du_lot(l)
+			somme += Vector2(c.x, c.z)
+			touchees.append_array(Ville2.cases_du_lot(l))
+	var centre := somme / float(_multi.size())
+	# Le centre à la demi-case, pour que les bâtiments retombent sur la trame.
+	centre = Vector2(roundf(centre.x / DEMI) * DEMI, roundf(centre.y / DEMI) * DEMI)
+	var angle := PI * 0.5 * float(sens)
+	for m2 in _multi:
+		var d2: Dictionary = m2
+		if String(d2["genre"]) == "objet":
+			var o2: Dictionary = _ville.objets[int(d2["k"])]
+			var p := (Vector2(float(o2["x"]), float(o2["z"])) - centre).rotated(angle) + centre
+			o2["x"] = p.x
+			o2["z"] = p.y
+			o2["r"] = float(o2.get("r", 0.0)) + angle
+			touchees.append(_case_de(p.x, p.y))
+		else:
+			var l2: Dictionary = _ville.lots[int(d2["k"])]
+			var c2 := _ville.centre_du_lot(l2)
+			var pc := (Vector2(c2.x, c2.z) - centre).rotated(angle) + centre
+			var q := posmod(int(l2["q"]) + sens, 4)
+			var e := KitVille2.emprise_tournee(String(l2["m"]), q)
+			l2["q"] = q
+			l2["w"] = e.x
+			l2["h"] = e.y
+			l2["x"] = roundi(pc.x / DEMI - float(e.x) * 0.5)
+			l2["y"] = roundi(pc.y / DEMI - float(e.y) * 0.5)
+			touchees.append_array(Ville2.cases_du_lot(l2))
+	_rebatir(touchees)
+	# Le cadre suit le groupe.
+	var r := Rect2(centre, Vector2.ZERO)
+	for m3 in _multi:
+		var d3: Dictionary = m3
+		if String(d3["genre"]) == "objet":
+			var o3: Dictionary = _ville.objets[int(d3["k"])]
+			r = r.expand(Vector2(float(o3["x"]), float(o3["z"])))
+		else:
+			var c3 := _ville.centre_du_lot(_ville.lots[int(d3["k"])])
+			r = r.expand(Vector2(c3.x, c3.z))
+	_cadre.mesh = _rectangle(r.grow(DEMI * 0.5), Color(TEINTE_SELECTION, 0.15))
+	_cadre.visible = true
+	_dire("Groupe tourné d'un quart (%d élément(s)). Ctrl+Z annule." % _multi.size())
 
 func _tourner_selection(sens: int) -> void:
 	if _selection.is_empty(): return

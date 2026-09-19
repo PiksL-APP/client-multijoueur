@@ -343,25 +343,38 @@ static func _border(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
 				continue
 			var n: Vector2i = Vector2i(-d.y, d.x) * cote
 			var q := _face_vers(-n)
-			var m := _tirer(charte, alea)
-			if m == "":
-				i += 1
+			if alea.randf() >= densite:
+				# Le trou voulu par la charte : la largeur d'un lot moyen.
+				i += 2
 				continue
-			var e := KitVille2.emprise_tournee(m, q)
-			# Le coin du lot, en demi-cases ABSOLUES, collé au bord de la case de
-			# rue puis reculé de `recul`.
-			var hx := 0
-			var hy := 0
-			if n.x > 0: hx = (b.x + 1) * 2 + recul
-			elif n.x < 0: hx = b.x * 2 - e.x - recul
-			else: hx = b.x * 2
-			if n.y > 0: hy = (b.y + 1) * 2 + recul
-			elif n.y < 0: hy = b.y * 2 - e.y - recul
-			else: hy = b.y * 2
-			if alea.randf() < densite:
+			# ⭐ TROIS TIRAGES AVANT DE RENONCER, ET UN PAS D'UNE CASE SI RIEN
+			# NE PASSE. Photographié sur la Gare Centrale (19/09) : le front de
+			# rue du centre était troué de dalles blanches larges comme un
+			# immeuble. La cause : un seul tirage par place, et quand la pièce
+			# tirée ne tenait pas (une réserve, le lot d'en face au coin, la
+			# voie ferrée), on avançait de TOUTE SA LARGEUR sans rien poser —
+			# là où un immeuble étroit serait entré. On retire deux fois, et si
+			# rien n'entre on avance d'une seule case.
+			var avance := 1
+			for essai in 3:
+				var m := _tirer(charte, alea)
+				if m == "": continue
+				var e := KitVille2.emprise_tournee(m, q)
+				# Le coin du lot, en demi-cases ABSOLUES, collé au bord de la
+				# case de rue puis reculé de `recul`.
+				var hx := 0
+				var hy := 0
+				if n.x > 0: hx = (b.x + 1) * 2 + recul
+				elif n.x < 0: hx = b.x * 2 - e.x - recul
+				else: hx = b.x * 2
+				if n.y > 0: hy = (b.y + 1) * 2 + recul
+				elif n.y < 0: hy = b.y * 2 - e.y - recul
+				else: hy = b.y * 2
 				if _poser(v, f, m, hx, hy, e, q, genre):
 					_devant_la_maison(v, f, charte, alea, b, n, genre)
-			i += maxi(1, (e.x if absi(d.x) > 0 else e.y) / 2)
+					avance = maxi(1, (e.x if absi(d.x) > 0 else e.y) / 2)
+					break
+			i += avance
 	return
 
 ## La pose, en demi-cases absolues → demi-cases de la fenêtre. Hors fenêtre, on
@@ -891,6 +904,24 @@ const BENNE := "benne"
 const COUR_VOITURES := 0.42          ## part des cases de cour qui reçoivent des voitures
 const COUR_ARBRES := 0.30
 const COUR_BENNE := 0.12
+const COUR_OUVERTE_VIDE := 0.5     ## part des cases de cœur NON enclavées qu'on laisse nues
+
+## ⭐ LA ZONE INDUSTRIELLE SE MEUBLE PLUS LARGE (19/09). Ses pâtés sont grands
+## et ses hangars espacés : presque aucune case n'y est « enclavée » au sens
+## des quatre voisines prises, et la photo de contrôle de la Zone de l'Ouest
+## montrait des hectares de dalle blanche entre les usines. Là, toute case
+## libre qui n'est pas collée à une rue est une cour d'usine : camions garés,
+## conteneurs, benne — au même tirage par position que les cœurs.
+const INDUSTRIE_CAMIONS := 0.30
+const INDUSTRIE_CONTENEURS := 0.22
+const INDUSTRIE_BENNE := 0.08
+const CAMIONS := ["voitures/truck", "voitures/delivery", "voitures/box"]
+
+static func _cour_d_usine(v: Ville2, l: Vector2i) -> bool:
+	for d in [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]:
+		var n: Vector2i = l + d
+		if v.dedans(n) and v.carte.route(n): return false
+	return true
 
 static func _les_coeurs(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
 		vus: Array) -> void:
@@ -899,11 +930,53 @@ static func _les_coeurs(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
 		for i in v.taille.x:
 			var l := Vector2i(i, j)
 			if not _case_de_mobilier(v, l): continue
-			if not _enclavee(v, l): continue
 			var c := f.position + l
+			var k := PLAN.quartier_en(plan, ctx, c)
+			var usine := k >= 0 and _genre(plan, k) == "industrie"
+			if usine:
+				if not _cour_d_usine(v, l): continue
+				var alea_u := RandomNumberGenerator.new()
+				alea_u.seed = _graine(c.x, c.y, 4213)
+				var x_u := (float(l.x) + 0.5) * CASE
+				var z_u := (float(l.y) + 0.5) * CASE
+				var t_u := alea_u.randf()
+				if t_u < INDUSTRIE_CAMIONS:
+					var cap := PI * 0.5 * float(alea_u.randi() % 2)
+					for n in 2:
+						var m := String(CAMIONS[alea_u.randi() % CAMIONS.size()])
+						var dx := -4.5 + float(n) * 9.0
+						v.ajouter_objet(m, x_u + (dx if cap == 0.0 else 0.0), z_u + (0.0 if cap == 0.0 else dx), cap, 0.0, "")
+				elif t_u < INDUSTRIE_CAMIONS + INDUSTRIE_CONTENEURS:
+					var cap2 := PI * 0.5 * float(alea_u.randi() % 2)
+					v.ajouter_objet("conteneur", x_u, z_u, cap2, 0.0, "")
+					if alea_u.randf() < 0.5:
+						v.ajouter_objet("conteneur", x_u, z_u, cap2, 0.0, "")
+				elif t_u < INDUSTRIE_CAMIONS + INDUSTRIE_CONTENEURS + INDUSTRIE_BENNE:
+					v.ajouter_objet(BENNE, x_u, z_u, PI * 0.5, 0.0, "")
+				else:
+					continue
+				poses += 1
+				continue
+			# ⚠ UNE COUR N'EST PAS SEULEMENT UNE CASE ENCLAVÉE. Photographié sur
+			# la Gare Centrale (19/09) : les cœurs d'îlot du centre étaient des
+			# dalles blanches de plusieurs cases, parce que seule une case aux
+			# QUATRE voisines prises comptait comme cour. Une case libre qui ne
+			# touche aucune rue est une arrière-cour aussi — elle se meuble, mais
+			# une fois sur deux, pour que le cœur respire encore.
+			var enclavee := _enclavee(v, l)
+			if not enclavee and not _cour_d_usine(v, l): continue
+			# ⚠ LE CŒUR D'UN ÎLOT DE CENTRE-VILLE N'EST PAS UNE DALLE. Vu d'en
+			# haut, le centre était blanc d'un bord à l'autre : la charte y met de
+			# la dalle (le trottoir, la place), et l'arrière des immeubles la
+			# recevait aussi. Une arrière-cour, c'est de la terre et un peu
+			# d'herbe ; on la repeint, et les voitures et les arbres qui suivent
+			# se posent dessus.
+			if k >= 0 and int(REGLES.charte(_genre(plan, k))["sol"]) == Ville2.M_DALLE \
+					and v.matiere_de(l) == Ville2.M_DALLE:
+				v.poser_matiere(l, Ville2.M_HERBE)
 			var alea := RandomNumberGenerator.new()
 			alea.seed = _graine(c.x, c.y, 4211)
-			var k := PLAN.quartier_en(plan, ctx, c)
+			if not enclavee and alea.randf() < COUR_OUVERTE_VIDE: continue
 			var essence: Array = REGLES.charte(_genre(plan, k))["essence"] if k >= 0 \
 				else ["nature/tree-default"]
 			var x := (float(l.x) + 0.5) * CASE
@@ -1152,7 +1225,9 @@ const LARGE_RESERVE_VIADUC := 1
 static func _reserver(plan: Dictionary, v: Ville2, f: Rect2i) -> void:
 	for r in v.rail:
 		var fr: Dictionary = r
-		_reserver_la_ligne(v, _cases_de(fr["points"]), LARGE_RESERVE_RAIL, Vector2i.ZERO)
+		var cases_r := _cases_de(fr["points"])
+		_reserver_la_ligne(v, cases_r, LARGE_RESERVE_RAIL, Vector2i.ZERO)
+		_l_emprise_du_rail(v, f, cases_r)
 	for r2 in plan.get("routes", []):
 		var f2: Dictionary = r2
 		if String(f2.get("classe", "")) != "primaire": continue
@@ -1178,6 +1253,39 @@ static func _vers_case(p) -> Vector2i:
 	if typeof(p) == TYPE_VECTOR2I: return p
 	var t: Array = p
 	return Vector2i(int(t[0]), int(t[1]))
+
+## ⭐ L'EMPRISE FERROVIAIRE SE VOIT. Le couloir réservé au rail fait cinq
+## cases de large et rien ne s'y bâtit — c'était le but. Mais photographié
+## sur la Gare Centrale (19/09), il restait de la couleur du quartier : au
+## centre, une bande de DALLE BLANCHE de cent mètres de large qui traverse
+## la ville, avec un fil de rail au milieu. Une vraie emprise, c'est du
+## ballast et de la terre battue, et des broussailles au bord. On repeint le
+## couloir en terre (hors chaussée : un passage à niveau reste du bitume) et
+## on sème des buissons sur ses deux lisières, jamais sur la voie — qui,
+## lissée, coupe ses virages à une case et demie du tracé.
+const BUISSONS_DU_RAIL := ["nature/plant_bush", "nature/plant_bushDetailed",
+	"nature/grass_large", "nature/plant_bushLarge"]
+const RAIL_BUISSONS := 0.28
+
+static func _l_emprise_du_rail(v: Ville2, f: Rect2i, cases: Array) -> void:
+	var vues: Dictionary = {}
+	for e in cases:
+		var c: Vector2i = e
+		for dj in range(-LARGE_RESERVE_RAIL, LARGE_RESERVE_RAIL + 1):
+			for di in range(-LARGE_RESERVE_RAIL, LARGE_RESERVE_RAIL + 1):
+				var d := c + Vector2i(di, dj)
+				if vues.has(d) or not v.dedans(d) or not v.terre(d): continue
+				vues[d] = true
+				if v.carte.route(d): continue
+				v.poser_matiere(d, Ville2.M_TERRE)
+				# La lisière : l'anneau extérieur seulement.
+				if maxi(absi(di), absi(dj)) < LARGE_RESERVE_RAIL: continue
+				var alea := RandomNumberGenerator.new()
+				alea.seed = _graine(f.position.x + d.x, f.position.y + d.y, 4217)
+				if alea.randf() >= RAIL_BUISSONS: continue
+				var m := String(BUISSONS_DU_RAIL[alea.randi() % BUISSONS_DU_RAIL.size()])
+				v.ajouter_objet(m, (float(d.x) + 0.2 + alea.randf() * 0.6) * CASE,
+					(float(d.y) + 0.2 + alea.randf() * 0.6) * CASE, alea.randf() * TAU, 0.0, "")
 
 static func _reserver_la_ligne(v: Ville2, cases: Array, large: int, origine: Vector2i) -> void:
 	for e in cases:
