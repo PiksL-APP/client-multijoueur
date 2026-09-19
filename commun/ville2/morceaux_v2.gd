@@ -38,6 +38,10 @@ func regler(v: Ville2, r: int = 3) -> void:
 func morceaux_batis() -> int:
 	return _morceaux.size()
 
+## Ce qui reste à bâtir : ce que l'éditeur affiche pendant que la tuile monte.
+func en_attente() -> int:
+	return _file.size() + (1 if _chantier_noeud != null else 0)
+
 func suivre(point: Vector3) -> void:
 	var local := global_transform.affine_inverse() * point
 	var c := Vector2i(floori(local.x / Ville2.CASE / float(COTE)),

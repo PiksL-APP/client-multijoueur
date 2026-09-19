@@ -14,8 +14,12 @@ const ECRANS := {
 	"options": "res://scenes/options.gd",
 	"salon": "res://scenes/salon.gd",
 	"carnage": "res://jeux/carnage.gd",
+	# ⚠ UN SEUL ÉDITEUR (19/09). L'ancien dessin ASCII de Pikstown et son
+	# éditeur sont partis avec lui : le jeu ne tourne que sur le pays. Le nom
+	# `editeur2` reste en ALIAS pour les liens déjà envoyés — il ouvre le même
+	# écran.
 	"editeur": "res://scenes/editeur.gd",
-	"editeur2": "res://scenes/editeur_v2.gd",
+	"editeur2": "res://scenes/editeur.gd",
 }
 ## Où l'on entre, et où l'on revient. Une constante plutôt qu'un littéral
 ## répété : le jour où l'accueil change encore, il change à un seul endroit.
@@ -139,7 +143,7 @@ static func _arguments_depuis_url(arguments: PackedStringArray) -> PackedStringA
 			# ligne de commande, `--ecran=` marche sans passer par ici.
 			"ecran": copie.append("--ecran=" + String(paire[1]))
 			"lieu": copie.append("--lieu=" + String(paire[1]))
-			# L'éditeur de la ville v2 : `?ecran=editeur2&carte=temoin-plage`
+			# L'éditeur de la ville v2 : `?ecran=editeur&carte=temoin-plage`
 			# ouvre directement une autre carte, et `&temoin=plage` engendre un
 			# témoin neuf sans passer par un fichier.
 			"carte": copie.append("--carte=res://cartes/" + String(paire[1]) + ".json")
@@ -151,7 +155,7 @@ static func _arguments_depuis_url(arguments: PackedStringArray) -> PackedStringA
 			# Cette table était une LISTE BLANCHE : un paramètre absent était
 			# jeté EN SILENCE. Le défaut s'est déjà produit avec `ecran` (voir
 			# plus haut), et il vient de se reproduire à l'identique avec
-			# `pays`, `ou` et `large` : `?ecran=editeur2&pays=1` ouvrait
+			# `pays`, `ou` et `large` : `?ecran=editeur&pays=1` ouvrait
 			# l'éditeur — donc la page avait l'air de marcher — mais sur sa
 			# carte par défaut, un témoin de 40 × 40. Rien dans la page, rien
 			# dans la console, rien dans le déploiement ne le disait. Une heure

@@ -222,6 +222,112 @@ func _init() -> void:
 		if voisines <= 1: bouts += 1
 	print("7. réseau : %d cases de chaussée en %d morceau(x) ; %d hors du réseau, %d culs-de-sac"
 		% [rues.size(), morceaux.size(), dehors, bouts])
+
+	# 8. UNE VOIE RAPIDE QUI FINIT EN L'AIR.
+	# « Fais en sorte que chaque autoroute retombe bien au sol plutôt que de
+	# finir en l'air » (client, 17/09). Une case de voie rapide qui n'a qu'une
+	# seule voisine ET qui est en l'air, c'est un tablier qui s'arrête dans le
+	# vide. ⚠ Sauf au bord de la fenêtre : là, la voie continue chez la voisine.
+	var voie: Dictionary = {}
+	for o1 in v.objets:
+		var fo1: Dictionary = o1
+		var m1 := String(fo1.get("m", ""))
+		if not m1.begins_with("routes/road-"): continue
+		if not fo1.has("y_abs"): continue
+		var cv := Vector2i(floori(float(fo1["x"]) / 20.0), floori(float(fo1["z"]) / 20.0))
+		voie[cv] = maxf(float(voie.get(cv, -1.0e9)), float(fo1["y_abs"]))
+	var en_l_air := 0
+	var bords := 0
+	for cle3 in voie.keys():
+		var cv2: Vector2i = cle3
+		if float(voie[cv2]) <= 1.0: continue
+		var amies := 0
+		for d5 in CarteVille.COTES:
+			if voie.has(cv2 + d5): amies += 1
+		if amies > 1: continue
+		if cv2.x <= 0 or cv2.y <= 0 or cv2.x >= v.taille.x - 1 or cv2.y >= v.taille.y - 1:
+			bords += 1
+			continue
+		en_l_air += 1
+		print("   ⚠ bout en l'air : case %s, altitude %.1f, terre autour=%s%s%s%s" % [cv2,
+			float(voie[cv2]), v.terre(cv2 + CarteVille.N), v.terre(cv2 + CarteVille.E),
+			v.terre(cv2 + CarteVille.S), v.terre(cv2 + CarteVille.O)])
+	print("8. voie rapide : %d cases, %d bouts en l'air (hors bord), %d au bord de la fenêtre"
+		% [voie.size(), en_l_air, bords])
+
+	# 9. LE PIED DES RAMPES.
+	# « Une fois l'autoroute au sol, elle doit rejoindre une route et pas
+	# s'arrêter devant un bâtiment » (client, 19/09). Une rampe posée au ras du
+	# sol doit avoir de la chaussée sur sa case ou juste à côté.
+	var pieds := 0
+	var pieds_perdus := 0
+	for o2 in v.objets:
+		var fo2: Dictionary = o2
+		if not String(fo2.get("m", "")).begins_with("routes/road-slant"): continue
+		if absf(float(fo2.get("y_abs", 99.0))) > 0.5: continue
+		var cp2 := Vector2i(floori(float(fo2["x"]) / 20.0), floori(float(fo2["z"]) / 20.0))
+		if cp2.x <= 1 or cp2.y <= 1 or cp2.x >= v.taille.x - 2 or cp2.y >= v.taille.y - 2:
+			continue
+		pieds += 1
+		var touche := v.carte.route(cp2)
+		if not touche:
+			for d6 in CarteVille.COTES:
+				if v.carte.route(cp2 + d6): touche = true
+		if not touche:
+			pieds_perdus += 1
+			# ⚠ LA TRACE, PARCE QU'ELLE A SERVI. C'est elle qui a montré que les
+			# deux pieds « sans rue » étaient EN FAIT DANS L'EAU : la faute
+			# n'était pas le raccord manquant, c'était la rampe posée sur la mer.
+			print("   ⚠ pied sans rue : case %s, terre=%s" % [cp2, v.terre(cp2)])
+	print("9. pieds de rampe : %d au sol, %d qui ne touchent aucune rue" % [pieds, pieds_perdus])
+
+	# 10. LA VOIE RAPIDE CONTRE LE RESTE DE LA VILLE.
+	# « Je vois des erreurs, des pylônes sur la route ou encore des choses
+	# bizarres » (client, 19/09). Plutôt que de chercher à l'œil, on compte : un
+	# poteau doit être sur du VIDE, une rampe sur du vide aussi, et deux pièces
+	# ne doivent jamais occuper la même case à la même altitude.
+	var pot_rue := 0
+	var pot_lot := 0
+	var pot_piece := 0
+	var rampe_rue := 0
+	var rampe_lot := 0
+	var rampe_rail := 0
+	var doublons := 0
+	var occupe: Dictionary = {}
+	for o3 in v.objets:
+		var fo3: Dictionary = o3
+		var m3 := String(fo3.get("m", ""))
+		if not m3.begins_with("routes/"): continue
+		var c11 := Vector2i(floori(float(fo3["x"]) / 20.0), floori(float(fo3["z"]) / 20.0))
+		if not v.dedans(c11): continue
+		var y11 := float(fo3.get("y_abs", 0.0))
+		if m3.begins_with("routes/bridge-pillar"):
+			if v.carte.route(c11): pot_rue += 1
+			if v.lot_sur(c11) >= 0: pot_lot += 1
+			if v.carte.case_prise(c11): pot_piece += 1
+			continue
+		if m3.begins_with("routes/road-slant"):
+			if m3.ends_with("-barrier"): continue
+			if v.carte.route(c11): rampe_rue += 1
+			if v.lot_sur(c11) >= 0: rampe_lot += 1
+			if rails.has(c11): rampe_rail += 1
+			continue
+		if m3.ends_with("-barrier"): continue
+		# ⚠ LES PANNEAUX NE SONT PAS DES CHAUSSÉES. Ils se posent au bord du
+		# tablier, donc sur la même case que lui : les compter comme un doublon
+		# donnait 36 fausses alertes et m'a fait chercher un défaut qui n'existe
+		# pas. On ne compare que ce qui se roule dessus.
+		if m3.contains("sign-"): continue
+		# Les chaussées : une seule par case et par altitude.
+		var cle4 := "%d,%d,%d" % [c11.x, c11.y, roundi(y11)]
+		if occupe.has(cle4):
+			doublons += 1
+			if doublons <= 5: print("   ⚠ double : %s sur %s, déjà %s" % [m3, c11, occupe[cle4]])
+		occupe[cle4] = m3
+	print("10. poteaux : %d sur une rue, %d dans un lot, %d sur une pièce" % [
+		pot_rue, pot_lot, pot_piece])
+	print("11. rampes : %d sur une rue, %d dans un lot, %d sur la voie ferrée ; %d chaussées en double"
+		% [rampe_rue, rampe_lot, rampe_rail, doublons])
 	quit()
 
 ## ⚠ LES POINTS DU RAIL SONT DES `Vector2i`, PAS DES `[x, y]`. Les routes du

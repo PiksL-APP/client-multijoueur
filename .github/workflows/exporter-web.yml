@@ -105,16 +105,25 @@ jobs:
           } > commun/version.gd
           cat commun/version.gd
 
-      - name: Vérifier le plan de la ville
+      # (Jusqu'au 19/09, une étape vérifiait ici le dessin ASCII de Pikstown
+      # avec `outils/verifier.gd`. Pikstown est parti avec son éditeur ; ce qui
+      # se vérifie maintenant, ce sont les tuiles du pays, juste en dessous.)
+      - name: Importer le projet
         run: |
           export PATH="$HOME/godot:$PATH"
           godot --headless --path . --import 2>&1 | tail -3
-          # `outils/verifier.gd` passe le dessin aux règles de `Quartiers.fautes`.
-          # Un plan fautif ne doit pas partir en ligne.
-          sortie="$(godot --headless --path . --script res://outils/verifier.gd 2>&1)"
-          echo "$sortie"
-          echo "$sortie" | grep -q "PLAN PROPRE" \
-            || { echo "::error::le plan a des fautes — export annulé." >&2; exit 1; }
+
+      # LES TUILES PUBLIÉES DEPUIS L'ÉDITEUR (`cartes/pays-<kx>-<ky>.json`) :
+      # le jeu les relit telles quelles, donc elles passent le même contrôle
+      # que le bouton Publier (`commun/ville2/controle_tuile.gd`), plus la
+      # taille et la lisibilité du fichier. Une tuile fautive ne part pas.
+      - name: Vérifier les tuiles publiées
+        run: |
+          export PATH="$HOME/godot:$PATH"
+          sortie="$(godot --headless --path . --script res://outils/verifier_tuiles.gd 2>&1)"
+          echo "$sortie" | grep -v "SpatialMaterial\|material.cpp\|^\s*at:\|backtrace\|^\s*\[[0-9]\]"
+          echo "$sortie" | grep -q "TUILES PROPRES" \
+            || { echo "::error::une tuile publiée a des fautes — export annulé." >&2; exit 1; }
 
       - name: Exporter
         run: |
@@ -130,6 +139,26 @@ jobs:
           touch sortie/.gdignore
           rm -f sortie/*.import
           ls -la sortie/
+
+      # LA PAGE DE L'ÉDITEUR : multijoueur.piks-l.com/editeur. Même moteur,
+      # même paquet, mais sa propre coque (`web/editeur.html`), sans le kit ni
+      # les portails, qui ouvre directement l'écran de l'éditeur sur le pays.
+      # Le moteur n'exporte qu'UNE page ; on fabrique la seconde en recopiant
+      # dans la coque de l'éditeur la configuration que l'export a écrite dans
+      # index.html (le nom du paquet, les tailles de fichiers, les options).
+      # Vercel sert `sortie/editeur.html` sous `/editeur` grâce à `cleanUrls`.
+      - name: La page de l'éditeur
+        run: |
+          python3 - <<'PY'
+          import re
+          index = open("sortie/index.html", encoding="utf-8").read()
+          config = re.search(r"const GODOT_CONFIG = (\{.*?\});", index).group(1)
+          fils = re.search(r"const GODOT_THREADS_ENABLED = (\w+);", index).group(1)
+          page = open("web/editeur.html", encoding="utf-8").read()
+          page = page.replace("$GODOT_CONFIG", config).replace("$GODOT_THREADS_ENABLED", fils)
+          open("sortie/editeur.html", "w", encoding="utf-8").write(page)
+          print("sortie/editeur.html écrit,", len(page), "octets")
+          PY
 
       - name: Recommitter sortie/
         run: |

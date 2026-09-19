@@ -219,15 +219,14 @@ var _mission_banc := ""              ## `--banc-mission=mallette|lieutenant` : l
 var _depuis_mission_banc := 1.5      ## s avant de la demander — la ville doit exister
 var _morceaux: Dictionary = {}       ## Vector2i -> MorceauVille, les morceaux bâtis ou en chantier
 var _chantier: MorceauVille = null   ## le morceau en cours de construction, une étape par image
-## ⚠ LE DÉCOR EST CELUI DE LA VILLE DESSINÉE. `VilleMorcelee` bâtit Pikstown par
+## ⚠ LE DÉCOR EST CELUI DE LA VILLE V2. `MorceauxV2` bâtit la ville par
 ## morceaux de seize cases autour d'un point, une passe par image — le même
 ## objet que l'éditeur. Les `MorceauVille` voxel restent déclarés pour la casse
 ## et les voitures dormantes, qui n'ont pas encore leur équivalent dessiné :
 ## leur dictionnaire reste vide, et tout ce qui le parcourt ne fait rien.
-## ⚠ NON TYPÉ : c'est un `VilleMorcelee` (Pikstown) ou un `MorceauxV2` (la
-## ville v2 du cahier), qui répondent aux mêmes appels — `suivre`,
-## `morceaux_batis`, `par_image`.
-var _ville_dessinee = null
+## (Jusqu'au 19/09, c'était aussi un `VilleMorcelee` pour Pikstown, l'ancienne
+## ville dessinée — partie avec son éditeur.)
+var _ville_dessinee: MorceauxV2 = null
 ## Le pays, quand on le joue : les neuf fenêtres autour du joueur. `null` en ville.
 var _fenetres_du_pays: FenetresPays = null
 var _cachees: Dictionary = {}        ## id dormante -> vrai : déjà effacée de sa nappe
@@ -527,14 +526,15 @@ var _sortie_de_banc := false
 var _rentre_de_banc := false
 var _pulsation := false
 
-## `--pays=1` en ligne de commande, `pays=1` dans les données d'écran : le plan
-## cuit de l'archipel, ou un dictionnaire vide si l'on joue la ville.
+## ⭐ LE PAYS EST LA RÈGLE, PIKSTOWN L'EXCEPTION (19/09 : « la ville ne tourne
+## plus que sur l'Archipel des Aurones »). On joue le plan cuit de l'archipel,
+## sauf si `pays=0` (ou `--pays=0`) demande expressément l'ancienne ville
+## dessinée — gardée comme repli de banc, plus comme carte du jeu.
 func _le_plan_du_pays() -> Dictionary:
-	var veut: bool = String(donnees.get("pays", "")) not in ["", "0"]
-	if not veut:
-		for a in OS.get_cmdline_args():
-			if a.begins_with("--pays=") and a.trim_prefix("--pays=") not in ["", "0"]:
-				veut = true
+	var veut := true
+	if String(donnees.get("pays", "")) == "0": veut = false
+	for a in OS.get_cmdline_args():
+		if a == "--pays=0": veut = false
 	if not veut: return {}
 	var plan: Dictionary = PLAN_PAYS_CUIT.charger()
 	if plan.is_empty():
@@ -557,13 +557,9 @@ func preparer() -> void:
 	# (`duree_forcee`), sinon il ne rendrait jamais la main.
 	sans_limite = Partie.duree_forcee <= 0.0
 	_rng.randomize()
-	# ⚠ LA VILLE EST DESSINÉE, PLUS TIRÉE. `PlanDessine` répond aux mêmes
-	# questions que `PlanVille`, mais depuis le dessin de Pikstown : c'est
-	# elle qu'on joue. La procédurale reste dans le dépôt pour le hub et les
-	# vitrines ; ici, plus personne ne la voit.
-	# ⚠ LA VILLE V2 D'ABORD. Si `cartes/temoin-centre.json` existe (le modèle
-	# du cahier des charges du 12/09), c'est elle qu'on joue : `PlanV2` répond
-	# aux mêmes questions. Pikstown reste le repli tant que la v2 n'a pas tout.
+	# ⚠ LA VILLE EST LA V2 (le témoin du centre) OU LE PAYS — plus jamais
+	# tirée au hasard, et plus jamais Pikstown (le dessin ASCII, parti le
+	# 19/09 avec son éditeur).
 	# ⭐⭐⭐ LE PAYS, SI ON LE DEMANDE. `--pays=1` (ou `pays=1` dans les
 	# données d'écran) joue l'Archipel des Aurones au lieu du témoin :
 	# `PlanJeuPays` répond aux mêmes questions que `PlanV2`, mais depuis les
@@ -574,10 +570,10 @@ func preparer() -> void:
 		_fenetres_du_pays = FenetresPays.new()
 		_fenetres_du_pays.regler(plan_pays)
 		carte = PLAN_JEU_PAYS.new(code, _fenetres_du_pays, plan_pays)
-	elif FileAccess.file_exists(PlanV2.CHEMIN_PAR_DEFAUT):
-		carte = PlanV2.new(code)
 	else:
-		carte = PlanDessine.new(code)
+		# Sans le plan cuit (ou avec `pays=0`) : le témoin du centre, la ville
+		# v2 livrée. Pikstown, l'ancienne ville dessinée, est parti le 19/09.
+		carte = PlanV2.new(code)
 	ville = VilleVivante.new(carte, _rng)
 
 	_planter_decor()
@@ -956,21 +952,16 @@ func _diffuser_la_ville(entiers: int = 0) -> void:
 		_fenetres_du_pays.suivre(_en3d(_position))
 		return
 	if _ville_dessinee == null:
-		if carte is PlanV2:
-			_ville_dessinee = MorceauxV2.new()
-			_ville_dessinee.par_image = 1
-			_ville_dessinee.regler((carte as PlanV2).ville, 2)
-		else:
-			_ville_dessinee = VilleMorcelee.new()
-			_ville_dessinee.par_image = 1
-			_ville_dessinee.regler((carte as PlanDessine).fiche_ville, "pikstown", 2)
+		_ville_dessinee = MorceauxV2.new()
+		_ville_dessinee.par_image = 1
+		_ville_dessinee.regler((carte as PlanV2).ville, 2)
 		monde().add_child(_ville_dessinee)
 		if entiers > 0:
 			# Le départ : les morceaux autour du joueur d'un coup, comme
 			# l'éditeur le fait autour de son pivot. Les suivants viennent à
 			# un par image pendant le décompte.
 			_ville_dessinee.suivre(_en3d(_position))
-			var passes: int = RenduVille2.PASSES.size() if carte is PlanV2 else VilleMorcelee.PASSES.size()
+			var passes: int = RenduVille2.PASSES.size()
 			for k in entiers * passes:
 				_ville_dessinee._process(0.0)
 			return

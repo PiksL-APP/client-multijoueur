@@ -5,7 +5,7 @@ extends PlanVille
 ## Le jeu — circulation, collisions, radar, gangs, planques, missions — pose
 ## ses questions à `PlanVille`. Cette classe y répond depuis un `Ville2` (le
 ## modèle du cahier : terrain, routes, lots, objets, lieux), exactement comme
-## `PlanDessine` le faisait depuis le dessin de Pikstown. Rien du jeu n'est
+## `PlanDessine` le faisait depuis le dessin de Pikstown (parti le 19/09). Rien du jeu n'est
 ## réécrit : `dans_un_batiment`, `degager`, `point_de_rue`, `lieux_autour`…
 ## restent ceux de `PlanVille`, qui ne lisent que `tuile()`.
 ##
@@ -47,6 +47,13 @@ const OBSTACLES := {"lampadaire": 14.0, "lampadaire_double": 14.0, "lampadaire_p
 ## est le seul endroit où l'on traduit. Tout ce qui SORT d'ici — `centre_case`,
 ## `coeur`, `depart`, les lieux, les obstacles — reste absolu ; seul ce qui ENTRE
 ## dans `ville`/`carte` passe par `_l()`.
+## L'ALTITUDE QUE LE JEU DONNE À L'EAU — la hauteur à laquelle le joueur
+## nage. Ce n'est PAS `TerrainV2.NIVEAU_MER` (−2,85, le plan d'eau du décor) :
+## c'était la valeur de l'ancienne ville dessinée (Pikstown, −2,4), et c'est
+## elle que la nage, les bateaux et le radar ont toujours connue. Pikstown est
+## parti (19/09), la valeur reste.
+const NIVEAU_MER_JEU := -2.4
+
 var decalage := Vector2i.ZERO
 
 var ville: Ville2
@@ -133,7 +140,7 @@ func hauteur_en(p: Vector2) -> float:
 	var c := case_de_point(p)          # absolue : `p` vient du jeu
 	var lc := _l(c)                    # locale : c'est elle qui interroge la carte
 	if not carte.terre(lc):
-		return Quartiers.NIVEAU_MER
+		return NIVEAU_MER_JEU
 	var y := carte.hauteur(lc)
 	if not carte.route(lc):
 		return y

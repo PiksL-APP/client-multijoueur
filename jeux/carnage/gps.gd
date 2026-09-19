@@ -100,7 +100,7 @@ static var _chauffe := 0
 static func chauffer(carte: PlanVille, budget_usec: int = 2500) -> bool:
 	# La ville dessinée n'a rien à chauffer : une case de rue est une entrée
 	# de dictionnaire, pas un bras de rivière à tester.
-	if carte is PlanDessine or carte is PlanV2:
+	if carte is PlanV2:
 		return true
 	_preparer(carte)
 	var total := _kx() * _ky()
@@ -209,7 +209,7 @@ static func _tirer(tas: Array) -> Array:
 ## hors de la chaussée : on s'arrête au bord de la rue en face, comme un GPS.
 ## Vide s'il n'existe pas (une île sans pont, un point hors carte).
 static func itineraire(carte: PlanVille, depart: Vector2, arrivee: Vector2) -> PackedVector2Array:
-	if carte is PlanDessine or carte is PlanV2:
+	if carte is PlanV2:
 		return _itineraire_dessine(carte, depart, arrivee)
 	_preparer(carte)
 	var td := troncon_proche(carte, depart)
@@ -340,12 +340,12 @@ static func bout(chemin: PackedVector2Array) -> Vector2:
 ## les a posées. Le graphe est donc celui des cases de rue, quatre voisines
 ## chacune, et le chemin va de centre de case en centre de case — c'est l'axe
 ## de la chaussée, une case de rue faisant exactement la largeur d'une rue.
-## Même A*, même tas, autre graphe : la seule chose que `carte is PlanDessine`
+## Même A*, même tas, autre graphe : la seule chose que `carte is PlanV2`
 ## change, comme pour le fond du radar.
 
 ## La case de rue la plus proche d'un point, en spirale, jusqu'à six cases :
 ## un clic au milieu d'un îlot ou dans l'eau tombe sur la rue d'à côté.
-## `plan` : un `PlanDessine` ou un `PlanV2` — mêmes `carte`, `cases_x`, `centre_case`.
+## `plan` : un `PlanV2` (autrefois aussi un `PlanDessine`) — mêmes `carte`, `cases_x`, `centre_case`.
 static func _case_de_rue_proche(plan, p: Vector2) -> Vector2i:
 	var c0: Vector2i = plan.case_de_point(p)
 	var mieux := Vector2i(-1, -1)
@@ -394,7 +394,7 @@ static func _itineraire_dessine(plan, depart: Vector2, arrivee: Vector2) -> Pack
 			if not plan.route_de_case(v):
 				continue
 			var vid := v.x + v.y * large
-			var nc := c + PlanDessine.CASE_PX
+			var nc := c + PlanV2.CASE_PX
 			if nc < float(cout.get(vid, INF)):
 				cout[vid] = nc
 				venu[vid] = id

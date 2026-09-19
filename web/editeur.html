@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Éditeur de carte · Piks-l</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0e1014">
+<link rel="icon" type="image/png" href="index.icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* LA PAGE DE L'ÉDITEUR. Ce n'est pas la coque du jeu : pas de kit, pas de
+   portails, pas de menu HTML. Le moteur prend tout l'écran dès qu'il est
+   prêt, et la page ne sert qu'à deux choses — dire qu'elle charge, et dire
+   si ça a raté. Les gris et le rose sont ceux de `ui/atelier.gd`, pour que
+   l'écran de chargement et l'éditeur qui le suit soient de la même pièce. */
+html, body { margin: 0; padding: 0; border: 0; background: #0e1014; overflow: hidden; height: 100%; }
+#canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+#ed-voile {
+	position: fixed; inset: 0; z-index: 2; display: flex; flex-direction: column;
+	align-items: center; justify-content: center; gap: 18px;
+	background: #0e1014; color: #e9ebf1;
+	font-family: 'Barlow Condensed', Arial, sans-serif; transition: opacity .4s ease;
+}
+#ed-voile.parti { opacity: 0; pointer-events: none; }
+#ed-logo { font-family: 'Archivo Black', Arial, sans-serif; font-size: 34px; color: #ff2ea6; letter-spacing: 1px; }
+#ed-titre { font-size: 15px; font-weight: 700; letter-spacing: 3px; color: #5f6776; margin-top: -10px; }
+#ed-jauge { width: 260px; height: 4px; background: #1f232b; border-radius: 2px; overflow: hidden; }
+#ed-jauge > div { height: 100%; width: 0; background: #ff2ea6; transition: width .2s ease; }
+#ed-mot { font-size: 14px; color: #9ea5b4; }
+#ed-panne {
+	display: none; max-width: 34rem; padding: 1rem 1.4rem; text-align: center;
+	border: 1px solid #ff2ea6; border-radius: 8px; font-size: 15px; line-height: 1.4;
+	white-space: pre-line;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas">Votre navigateur ne gère pas la balise canvas.</canvas>
+<div id="ed-voile">
+	<div id="ed-logo">PIKS</div>
+	<div id="ed-titre">ÉDITEUR DE CARTE</div>
+	<div id="ed-jauge"><div id="ed-avance"></div></div>
+	<div id="ed-mot">Chargement du moteur…</div>
+	<div id="ed-panne"></div>
+</div>
+<noscript>L'éditeur a besoin de JavaScript.</noscript>
+
+<script src="index.js"></script>
+<script>
+/* LA CONFIGURATION EST CELLE DU JEU, RECOPIÉE PAR LE WORKFLOW D'EXPORT
+   (`.github/workflows/exporter-web.yml`, étape « La page de l'éditeur ») :
+   même paquet, même wasm, mêmes tailles de fichiers. Ce qui change, c'est la
+   ligne de commande : on ouvre l'écran de l'éditeur, sur le pays. Les
+   paramètres de l'URL (`?ou=472,505&large=200`) restent lus par le moteur. */
+const GODOT_CONFIG = $GODOT_CONFIG;
+const GODOT_THREADS_ENABLED = $GODOT_THREADS_ENABLED;
+GODOT_CONFIG.args = (GODOT_CONFIG.args || []).concat(["--ecran=editeur", "--pays=1"]);
+GODOT_CONFIG.focusCanvas = true;
+const engine = new Engine(GODOT_CONFIG);
+
+(function () {
+	const voile = document.getElementById('ed-voile');
+	const avance = document.getElementById('ed-avance');
+	const mot = document.getElementById('ed-mot');
+	const panne = document.getElementById('ed-panne');
+
+	function direLaPanne(err) {
+		console.error(err);
+		panne.textContent = (err instanceof Error) ? err.message
+			: (typeof err === 'string' ? err : 'Une erreur inattendue est survenue.');
+		panne.style.display = 'block';
+		mot.textContent = 'Le moteur n\'a pas démarré.';
+	}
+
+	const manque = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
+	if (manque.length !== 0) {
+		direLaPanne('Ce navigateur ne réunit pas ce qu\'il faut pour lancer l\'éditeur :\n' + manque.join('\n'));
+		return;
+	}
+	engine.startGame({
+		'onProgress': function (current, total) {
+			if (current > 0 && total > 0) {
+				avance.style.width = Math.min(100, Math.round(100 * current / total)) + '%';
+			}
+		},
+	}).then(function () {
+		avance.style.width = '100%';
+		mot.textContent = 'On bâtit la fenêtre du pays…';
+		/* Le moteur a démarré, mais la première fenêtre du pays se bâtit encore :
+		   on laisse le voile une seconde de plus, le temps que la ville
+		   apparaisse, puis on s'efface. */
+		setTimeout(function () { voile.classList.add('parti'); }, 1200);
+	}, direLaPanne);
+}());
+</script>
+</body>
+</html>

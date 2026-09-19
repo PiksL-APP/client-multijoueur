@@ -2738,6 +2738,22 @@ const QUARTIERS := {
 		[Ville2.Q_BIDONVILLE, 74, -54, 20, 17, 4, "Le Haut-Talus"],
 		[Ville2.Q_PARC, -20, -72, 24, 20, 3, "Le Grand Parc"],
 		[Ville2.Q_PARC, 62, 48, 20, 17, 3, "Le Bois de l'Est"],
+		## ⭐⭐ LA SECONDE COURONNE DE POCHES, ET POURQUOI ELLE EXISTE.
+		## Mesuré au banc (`outils/rail_et_rues.gd`, fenêtre 400,400,200,200) :
+		## le pavillonnaire de fond couvrait 23 328 des 38 872 cases de terre,
+		## SOIX ANTE POUR CENT. Les neuf poches ci-dessus sont justes, mais elles
+		## sont serrées au centre : passé quatre-vingts cases, il n'y avait plus
+		## rien à voir qu'un pavillonnaire de quatre kilomètres de côté — « ça
+		## rend moche », et c'est le même reproche que l'uniformité du relief.
+		## Huit poches de plus, semées DANS LES TROUS de la première couronne.
+		[Ville2.Q_CENTRE, 78, 72, 22, 19, 5, "Le Centre de l'Est"],
+		[Ville2.Q_CAMPUS, -74, -56, 24, 21, 6, "Le Campus des Coteaux"],
+		[Ville2.Q_INDUSTRIE, 88, 86, 26, 22, 4, "La Zone du Sud-Est"],
+		[Ville2.Q_PARC, 108, -18, 22, 19, 3, "Le Bois du Levant"],
+		[Ville2.Q_PARC, -96, 74, 20, 17, 3, "Le Parc du Ponant"],
+		[Ville2.Q_VIEILLE_VILLE, 44, -92, 18, 16, 6, "Le Vieux Nord-Est"],
+		[Ville2.Q_CHAUD, -62, -96, 16, 14, 6, "Les Lanternes"],
+		[Ville2.Q_BIDONVILLE, 104, 20, 18, 15, 4, "Les Baraques"],
 		## LES FRONTS DE MER, posés SUR le trait de côte aux quatre orients.
 		[Ville2.Q_PLAGE, -8, 128, 44, 22, 7, "La Grève du Sud"],
 		[Ville2.Q_PLAGE, -126, -20, 22, 40, 7, "La Grève de l'Ouest"],
@@ -2764,6 +2780,12 @@ const QUARTIERS := {
 		[Ville2.Q_PLAGE, 22, 80, 38, 20, 7, "La Grève du Sud"],
 		[Ville2.Q_PLAGE, -118, -18, 20, 34, 7, "La Grève de l'Ouest"],
 		[Ville2.Q_PLAGE, 118, -12, 20, 34, 7, "La Grève de l'Est"],
+		## La seconde couronne, même raison que pour la capitale.
+		[Ville2.Q_CENTRE, 62, 40, 20, 17, 5, "Le Centre de la Baie"],
+		[Ville2.Q_CAMPUS, -58, -70, 20, 17, 6, "Le Campus du Nord"],
+		[Ville2.Q_INDUSTRIE, 78, -30, 22, 19, 4, "La Zone du Levant"],
+		[Ville2.Q_PARC, -30, 62, 20, 17, 3, "Le Parc du Sud"],
+		[Ville2.Q_CHAUD, 30, 66, 15, 13, 6, "Le Quai des Fêtes"],
 	],
 	"Sommet": [[Ville2.Q_PAVILLONS, 0, 0, 21, 18, 4, "Le Belvédère"]],
 	"Gare Maritime": [[Ville2.Q_INDUSTRIE, 0, 0, 27, 22, 8, "La Gare Maritime"]],
@@ -2782,6 +2804,13 @@ const QUARTIERS := {
 		[Ville2.Q_PLAGE, 36, -102, 44, 22, 7, "La Grève du Nord"],
 		[Ville2.Q_PLAGE, 176, 12, 22, 38, 7, "La Grève de l'Est"],
 		[Ville2.Q_PLAGE, -102, 12, 22, 38, 7, "La Grève de l'Ouest"],
+		## La seconde couronne, même raison que pour la capitale.
+		[Ville2.Q_CENTRE, 108, -40, 22, 19, 5, "Le Centre du Levant"],
+		[Ville2.Q_CAMPUS, -46, -40, 22, 19, 6, "Le Campus des Vignes"],
+		[Ville2.Q_INDUSTRIE, -60, -6, 22, 19, 4, "La Zone du Ponant"],
+		[Ville2.Q_PARC, 80, 96, 22, 19, 3, "Le Parc du Midi"],
+		[Ville2.Q_VIEILLE_VILLE, 96, 30, 17, 15, 6, "Le Vieux Levant"],
+		[Ville2.Q_CHAUD, -20, 84, 15, 13, 6, "Les Lampions"],
 	],
 	"Plage-des-Vents": [[Ville2.Q_PLAGE, 0, 0, 27, 17, 7, "Plage-des-Vents"]],
 	"Gare de l'Ouest": [[Ville2.Q_PAVILLONS, 0, 0, 24, 21, 2, "Le Bourg de l'Ouest"]],

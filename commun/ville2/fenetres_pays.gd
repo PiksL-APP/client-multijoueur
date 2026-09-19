@@ -196,16 +196,41 @@ func _commander(c: Vector2i) -> void:
 	var f := Rect2i(coin, taille)
 	var fiche := {"coin": coin, "rect": f, "ville": null}
 	var nom := {"nom": "Aurones %d,%d" % [coin.x, coin.y]}
+	var batir := func() -> Ville2: return _lire_ou_engendrer(c, f, nom)
 	if not _chauffe:
 		# Voir `_chauffe` : la première ne passe PAS par un fil.
 		_chauffe = true
-		fiche["ville"] = PAYS.fenetre(plan, ctx, f, nom)
+		fiche["ville"] = batir.call()
 		_fenetres[c] = fiche
 		return
 	fiche["tache"] = WorkerThreadPool.add_task(func() -> void:
-		fiche["ville"] = PAYS.fenetre(plan, ctx, f, nom),
+		fiche["ville"] = batir.call(),
 		true, "fenêtre du pays %s" % coin)
 	_fenetres[c] = fiche
+
+## ⭐⭐⭐ UNE TUILE RETOUCHÉE GAGNE SUR LA TUILE ENGENDRÉE (19/09).
+##
+## L'éditeur travaille tuile par tuile, sur cette même grille, et enregistre
+## `cartes/pays-<kx>-<ky>.json` — dans `user://` au navigateur (le Ctrl+S), dans
+## le dépôt une fois publiée. Ici on la relit avant d'engendrer : ce que le
+## client a posé dans l'éditeur est ce qu'il joue, sur la même machine tout de
+## suite, partout après l'export. Sans ça, l'éditeur du pays était un outil
+## dont rien ne sortait.
+##
+## ⚠ LA TAILLE DOIT CORRESPONDRE. Un fichier d'un autre nommage, ou d'une
+## tuile de bord tronquée autrement, ne se pose pas à la place d'une tuile
+## pleine : on l'ignore et on engendre.
+## ⚠ `depuis_json` ne touche à aucun nœud : ce chemin passe dans le fil comme
+## l'autre.
+func _lire_ou_engendrer(c: Vector2i, f: Rect2i, nom: Dictionary) -> Ville2:
+	var chemin := "res://cartes/pays-%d-%d.json" % [c.x, c.y]
+	var vrai := Ville2.chemin_utile(chemin)
+	if FileAccess.file_exists(vrai):
+		var v := Ville2.charger(chemin)
+		if v != null and v.taille == f.size and not (v.lots.is_empty() and v.routes.is_empty()):
+			return v
+		push_warning("tuile %s ignorée (taille %s au lieu de %s, ou vide)" % [chemin, v.taille, f.size])
+	return PAYS.fenetre(plan, ctx, f, nom)
 
 func _process(_dt: float) -> void:
 	for c0 in _fenetres.keys():

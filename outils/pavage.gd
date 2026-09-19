@@ -1,4 +1,5 @@
 extends Node3D
+const TEINTE_ROUTE := Color("#8e929c")   ## la teinte des chaussées (celle de l'ancienne ville, gardée)
 ## LA PLANCHE DU KIT DE ROUTES, POSÉE AU-DESSUS DE L'EAU.
 ##
 ## Pourquoi au-dessus de l'eau : plusieurs tuiles du kit ne remplissent pas
@@ -67,9 +68,9 @@ func _ready() -> void:
 			# ses propres couleurs, c'est exactement le bogue qu'on cherche.
 			if kit:
 				if m is ShaderMaterial:
-					(m as ShaderMaterial).set_shader_parameter("teinte", Quartiers.TEINTE_ROUTE)
+					(m as ShaderMaterial).set_shader_parameter("teinte", TEINTE_ROUTE)
 				elif m is BaseMaterial3D:
-					(m as BaseMaterial3D).albedo_color = Quartiers.TEINTE_ROUTE
+					(m as BaseMaterial3D).albedo_color = TEINTE_ROUTE
 			n.material_override = m
 			n.transform = Transform3D(Basis().scaled(Vector3.ONE * (CASE if kit else 1.0)), ou)
 			add_child(n)

@@ -96,7 +96,7 @@ func rail() -> Vector3:
 	return super()
 
 func hauteur_en(p: Vector2) -> float:
-	if not _viser(case_de_point(p)): return Quartiers.NIVEAU_MER
+	if not _viser(case_de_point(p)): return NIVEAU_MER_JEU
 	return super(p)
 
 func terre_de_case(c: Vector2i) -> bool:

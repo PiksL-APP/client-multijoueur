@@ -35,47 +35,11 @@ func _draw() -> void:
 	Charte.cartouche(self, cadre, Color(0, 0, 0, 0), Color(Charte.NUIT, 0.86))
 	var rayon_vue := COTE * 0.5 / ECHELLE     # en pixels de jeu, la moitié du cadre
 
-	if carte is PlanDessine:
-		_fond_dessine(carte as PlanDessine, cadre, centre, rayon_vue)
-	elif carte is PlanV2:
+	if carte is PlanV2:
 		_fond_v2(carte as PlanV2, cadre, centre, rayon_vue)
 	else:
 		_fond_procedural(cadre, centre, rayon_vue)
 	_lieux_et_pions(cadre, centre, rayon_vue)
-
-## ⚠ LA VILLE DESSINÉE N'A PAS DE GRILLE. Le fond procédural dessine des rues
-## tous les cinq pâtés : sur Pikstown, ça peignait un quadrillage qui n'existe
-## pas. Ici on lit la carte case par case — eau, rue, bâtiment, sol — dans les
-## vingt-deux cases que le cadre montre.
-func _fond_dessine(plan: PlanDessine, cadre: Rect2, centre: Vector2, rayon_vue: float) -> void:
-	var taille := PlanDessine.CASE_PX * ECHELLE
-	var c0 := plan.case_de_point(moi - Vector2(rayon_vue, rayon_vue)) - Vector2i.ONE
-	var c1 := plan.case_de_point(moi + Vector2(rayon_vue, rayon_vue)) + Vector2i.ONE
-	var bitume := Color(0.05, 0.05, 0.06, 0.9)
-	for j in range(c0.y, c1.y + 1):
-		for i in range(c0.x, c1.x + 1):
-			var c := Vector2i(i, j)
-			var rect := Rect2(_vers_radar(Vector2(c) * PlanDessine.CASE_PX, centre), Vector2(taille, taille))
-			var visible := rect.intersection(cadre)
-			if visible.size.x <= 0.0 or visible.size.y <= 0.0:
-				continue
-			var couleur: Color
-			if not plan.carte.terre(c):
-				couleur = Color(Palette.SERIE, 0.22)
-			elif plan.carte.route(c):
-				couleur = bitume
-			else:
-				var lettre := plan._car(i, j)
-				if plan.district_de_case(c) == PlanVille.PARC or lettre == "^":
-					couleur = Color(Palette.BON, 0.16)
-				else:
-					var gang := plan.gang_de_case(c)
-					couleur = Color(plan.couleur_du_gang(gang), 0.24) if gang >= 0 else Color(Palette.ENCRE, 0.10)
-				# Un bâtiment se lit plus sombre que le sol : c'est ce qui fait
-				# voir les rues sans les avoir dessinées.
-				if Quartiers._lettre(lettre) != "":
-					couleur = Color(couleur.darkened(0.5), couleur.a + 0.35)
-			draw_rect(visible, couleur, true)
 
 ## La ville v2 : même lecture case par case, mais un bâtiment est un lot et
 ## un parc un quartier — plus de lettres.
