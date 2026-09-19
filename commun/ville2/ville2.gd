@@ -304,6 +304,23 @@ func rasteriser() -> CarteVille:
 				var ici := _genre_de[k]
 				if ici == "" or g == R_VOIE_RAPIDE or (g == R_AVENUE and ici == R_RUE):
 					_genre_de[k] = g
+	# Les pieds de rampe : voir `CarteVille.marquer_pied`. La rampe droite
+	# tient sur sa case ; la courbe (2 × 1) a son origine entre ses deux cases,
+	# on marque les deux, à une demi-case de part et d'autre selon son axe.
+	for o2 in objets:
+		var fo: Dictionary = o2
+		var m := String(fo.get("m", ""))
+		if not m.contains("road-slant"): continue
+		var x := float(fo["x"])
+		var z := float(fo["z"])
+		var r := float(fo.get("r", 0.0))
+		var pas := Vector2(cos(r), -sin(r)) * (CASE * 0.5)
+		var points: Array = [Vector2(x, z)]
+		if m.contains("curve"):
+			points = [Vector2(x, z) + pas, Vector2(x, z) - pas]
+		for pt in points:
+			var cp := Vector2i(floori((pt as Vector2).x / CASE), floori((pt as Vector2).y / CASE))
+			if dedans(cp): carte.marquer_pied(cp)
 	for o in ouvrages:
 		carte.poser_piece(String(o["t"]), Vector2i(int(o["i"]), int(o["j"])),
 			Vector2i(int(o["w"]), int(o.get("h", o["w"]))), int(o["q"]),

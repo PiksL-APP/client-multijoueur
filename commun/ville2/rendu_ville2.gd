@@ -91,6 +91,10 @@ static func _poser_sols(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 			# poser du béton dans l'herbe — et à doubler le nombre de tuiles.
 			if carte.case_prise(c):
 				continue
+			# Le pied d'une rampe : de la chaussée pour le masque des voisines,
+			# pas de tuile — la rampe est dessus (voir `CarteVille.marquer_pied`).
+			if carte.pied(c):
+				continue
 			if carte.route(c):
 				if ronds.has(c):
 					# Le rond-point tient les neuf cases : il se pose seul, à

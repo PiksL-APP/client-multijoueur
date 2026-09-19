@@ -152,7 +152,7 @@ jobs:
           python3 - <<'PY'
           import re
           index = open("sortie/index.html", encoding="utf-8").read()
-          config = re.search(r"const GODOT_CONFIG = (\{.*?\});", index).group(1)
+          config = re.search(r"const GODOT_CONFIG = (\{.*\});", index).group(1)   # gourmand : la config a des accolades imbriquées (fileSizes)
           fils = re.search(r"const GODOT_THREADS_ENABLED = (\w+);", index).group(1)
           page = open("web/editeur.html", encoding="utf-8").read()
           page = page.replace("$GODOT_CONFIG", config).replace("$GODOT_THREADS_ENABLED", fils)

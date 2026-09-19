@@ -201,7 +201,12 @@ func _init() -> void:
 		while not pile.is_empty():
 			var p3: Vector2i = pile.pop_back()
 			combien += 1
-			for d3 in CarteVille.COTES:
+			# ⚠ Une courbe large ne marque que DEUX cases en diagonale : sur
+			# une pièce, les diagonales comptent comme voisines.
+			var autour: Array = CarteVille.COTES.duplicate()
+			if v.carte.case_prise(p3):
+				autour.append_array([Vector2i(1, 1), Vector2i(-1, 1), Vector2i(1, -1), Vector2i(-1, -1)])
+			for d3 in autour:
 				var q3: Vector2i = p3 + d3
 				if rues.has(q3) and int(rues[q3]) < 0:
 					rues[q3] = g3
@@ -217,7 +222,10 @@ func _init() -> void:
 	for cle2 in rues.keys():
 		var c10: Vector2i = cle2
 		var voisines := 0
-		for d4 in CarteVille.COTES:
+		var autour2: Array = CarteVille.COTES.duplicate()
+		if v.carte.case_prise(c10):
+			autour2.append_array([Vector2i(1, 1), Vector2i(-1, 1), Vector2i(1, -1), Vector2i(-1, -1)])
+		for d4 in autour2:
 			if rues.has(c10 + d4): voisines += 1
 		if voisines <= 1: bouts += 1
 	print("7. réseau : %d cases de chaussée en %d morceau(x) ; %d hors du réseau, %d culs-de-sac"
@@ -308,7 +316,9 @@ func _init() -> void:
 			continue
 		if m3.begins_with("routes/road-slant"):
 			if m3.ends_with("-barrier"): continue
-			if v.carte.route(c11): rampe_rue += 1
+			# ⚠ Le pied d'une rampe est marqué chaussée pour le masque de ses
+			# voisines (`CarteVille.marquer_pied`) : ce n'est pas une rue.
+			if v.carte.route(c11) and not v.carte.pied(c11): rampe_rue += 1
 			if v.lot_sur(c11) >= 0: rampe_lot += 1
 			if rails.has(c11): rampe_rail += 1
 			continue

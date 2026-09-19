@@ -53,12 +53,21 @@ const CASE := Ville2.CASE
 const DEMI := Ville2.DEMI
 const PALIER := Ville2.PALIER
 
-enum { OUTIL_SELECTION, OUTIL_ROUTE, OUTIL_LOT, OUTIL_OBJET, OUTIL_TERRAIN, OUTIL_EAU }
-const NOMS_OUTILS := ["Sélection", "Route", "Bâtiment", "Objet", "Terrain", "Eau"]
+enum { OUTIL_SELECTION, OUTIL_ROUTE, OUTIL_LOT, OUTIL_OBJET, OUTIL_TERRAIN, OUTIL_EAU, OUTIL_SOL }
+const NOMS_OUTILS := ["Sélection", "Route", "Bâtiment", "Objet", "Terrain", "Eau", "Sol"]
+## LES MATIÈRES DU SOL, pour l'outil Sol (19/09) : ce que le terrain continu
+## peint sous les pieds — herbe, sable, terre, roche, dalle. Le centre-ville est
+## en dalle et la banlieue en herbe parce que le générateur l'a décidé ; l'outil
+## laisse le client en décider autrement, au pinceau.
+const MATIERES := [
+	["Herbe", Ville2.M_HERBE], ["Sable", Ville2.M_SABLE], ["Terre", Ville2.M_TERRE],
+	["Roche", Ville2.M_ROCHE], ["Dalle", Ville2.M_DALLE],
+]
+var _matiere_choisie := 0
 ## ⚠ DES CHIFFRES, PAS DES LETTRES. Les lettres servent à SE DÉPLACER
 ## (ZQSD, comme dans le jeu et comme dans Godot) : tant que « S » choisissait
 ## l'outil Sélection, avancer la caméra changeait d'outil.
-const RACCOURCIS_OUTILS := ["1", "2", "3", "4", "5", "6"]
+const RACCOURCIS_OUTILS := ["1", "2", "3", "4", "5", "6", "7"]
 const GENRES_ROUTE := [Ville2.R_RUE, Ville2.R_AVENUE, Ville2.R_VOIE_RAPIDE]
 
 ## LES RACCOURCIS DE LA PALETTE : les props que les générateurs posent, avec
@@ -79,6 +88,14 @@ static func raccourcis() -> Array:
 	return l
 const FAMILLE_TOUT := "— tout —"
 const FAMILLE_RACCOURCIS := "★ raccourcis"
+## LES RÉCENTS : les douze derniers modèles posés, en tête du catalogue. On
+## pose rarement un modèle une seule fois ; le retrouver dans sept cents
+## vignettes à chaque fois, c'est ce que le rayon « ↺ récents » évite. Gardés
+## dans le profil du navigateur (`user://`), d'une séance à l'autre.
+const FAMILLE_RECENTS := "↺ récents"
+const RECENTS_MAXI := 12
+const FICHIER_RECENTS := "user://recents_editeur.json"
+var _recents: Array = []
 
 const TEINTE_GRILLE := Color(1, 1, 1, 0.18)
 const TEINTE_OK := Color("#2fe0d0")
@@ -456,6 +473,21 @@ func _essai() -> void:
 	print("[essai] glissé : x %.1f -> %.1f (%s)" % [ox, float(cible["x"]), _etat.text])
 	_annuler()
 	print("[essai] glissé annulé : x %.1f" % float((_ville.objets[_ville.objets.size() / 2] as Dictionary)["x"]))
+	# Dupliquer (Ctrl+D) et la pose en série (Maj + deux clics).
+	_selectionner()
+	if not _selection.is_empty() and String(_selection["genre"]) == "objet":
+		var avant_d := _ville.objets.size()
+		_dupliquer_selection()
+		print("[essai] dupliqué : %d -> %d objets, sélection %s" % [avant_d, _ville.objets.size(), str(_selection)])
+		_annuler()
+	_choisir_outil(OUTIL_OBJET)
+	_objet_choisi = 0
+	var avant_s := _ville.objets.size()
+	_serie_depart = Vector3(2.0 * CASE, 0, 30.0 * CASE)
+	_poser_en_serie(Vector3(2.0 * CASE, 0, 36.0 * CASE))
+	print("[essai] série : %d -> %d objets — %s ; récents = %s" % [avant_s, _ville.objets.size(), _etat.text, str(_recents)])
+	_annuler()
+	_choisir_outil(OUTIL_SELECTION)
 	# La fiche : taper un X, un angle et une hauteur, et voir l'objet suivre.
 	_selectionner()
 	if not _selection.is_empty() and String(_selection["genre"]) == "objet":
@@ -530,6 +562,16 @@ func _essai() -> void:
 	_case = Vector2i(10, 38)
 	_point = Vector3(10.5 * CASE, 0, 38.5 * CASE)
 	_montrer_apercu()
+	# L'outil Sol : du sable sur un rond d'herbe, et la matière doit suivre.
+	_choisir_outil(OUTIL_SOL)
+	_matiere_choisie = 1
+	_palette.select(1)
+	_rayon_terrain = 3
+	_case = Vector2i(20, 20)
+	var avant_m := _ville.matiere_de(_case)
+	_appliquer(true)
+	print("[essai] sol : matière %d -> %d en (20,20) — %s" % [avant_m, _ville.matiere_de(_case), _etat.text])
+	_annuler()
 	# Le contrôle de la boîte Publier : on plante un bâtiment dans l'eau exprès
 	# (Chevauchement coché), et la boîte doit le dire et fermer le bouton.
 	_libre.button_pressed = true
@@ -594,9 +636,10 @@ const CONSEILS_OUTILS := [
 	"Clique un lot, un objet ou une rue. Tire pour déplacer, A / E pour tourner, Suppr pour effacer, flèches pour pousser d'un pas.",
 	"Un clic par sommet ; Entrée ou clic droit termine. G change le genre (rue, avenue, voie rapide).",
 	"Choisis un modèle dans le catalogue, tourne avec A / E, clique pour poser. Refusé sur une rue, un lot ou l'eau.",
-	"Choisis un objet dans le catalogue, clique pour le poser au sol. Page haut / bas le lève.",
+	"Choisis un objet dans le catalogue, clique pour le poser au sol. Page haut / bas le lève. Maj + deux clics : une rangée.",
 	"Clic gauche monte d'un palier, clic droit descend. + / − changent le pinceau.",
 	"Clic gauche met de l'eau, clic droit remet de la terre.",
+	"Choisis une matière dans le catalogue et peins le sol. + / − changent le pinceau.",
 ]
 
 var _rail: PanelContainer
@@ -685,6 +728,11 @@ class Icone extends Control:
 						var x := 3.0 + float(i) * 1.5
 						pts.append(Vector2(x, y + sin(float(i) * 1.0) * 1.8))
 					draw_polyline(pts, t, e)
+			"sol":
+				# Un pinceau large : la matière du sol.
+				draw_rect(Rect2(4, 15, 16, 5), t, true)
+				draw_rect(Rect2(10, 4, 4, 10), t, true)
+				draw_line(Vector2(4, 21), Vector2(20, 21), Color(t, 0.5), 1.5)
 			"sens":
 				# Deux flèches qui se croisent : le sens de circulation.
 				draw_polyline(PackedVector2Array([Vector2(4, 8), Vector2(18, 8)]), t, e)
@@ -823,7 +871,7 @@ func _le_rail() -> PanelContainer:
 	rail.add_child(vb)
 	var groupe := ButtonGroup.new()
 	_boutons_outils.clear()
-	var icones := ["selection", "route", "lot", "objet", "terrain", "eau"]
+	var icones := ["selection", "route", "lot", "objet", "terrain", "eau", "sol"]
 	for k in NOMS_OUTILS.size():
 		var b := _bouton_de_rail(icones[k], "%s   ·   %s" % [NOMS_OUTILS[k], RACCOURCIS_OUTILS[k]], true)
 		b.button_group = groupe
@@ -1102,8 +1150,10 @@ func _le_catalogue() -> PanelContainer:
 	_recherche.text_changed.connect(func(_t: String) -> void: _remplir_palette())
 	db.add_child(_recherche)
 	_familles = OptionButton.new()
+	_familles.add_item(FAMILLE_RECENTS)
 	_familles.add_item(FAMILLE_RACCOURCIS)
 	_familles.add_item(FAMILLE_TOUT)
+	_lire_les_recents()
 	# ⚠ UNE ÉTAGÈRE PAR CATÉGORIE, ET SES RAYONS EN DESSOUS (demande du client,
 	# 12/09 : « range-moi les objets par catégories, tout nature dans un dossier
 	# nature »). « nature » montre les 330 modèles du dossier ; « nature · tree »
@@ -1123,8 +1173,12 @@ func _le_catalogue() -> PanelContainer:
 		if fam != cat:
 			(vues[cat] as Dictionary)[fam] = true
 			combien[fam] = int(combien.get(fam, 0)) + 1
-	_familles.set_item_metadata(0, {"cle": FAMILLE_RACCOURCIS})
-	_familles.set_item_metadata(1, {"cle": FAMILLE_TOUT})
+	_familles.set_item_metadata(0, {"cle": FAMILLE_RECENTS})
+	_familles.set_item_metadata(1, {"cle": FAMILLE_RACCOURCIS})
+	_familles.set_item_metadata(2, {"cle": FAMILLE_TOUT})
+	# On ouvre sur les raccourcis, comme avant — les récents sont vides à la
+	# première séance.
+	_familles.selected = 0 if not _recents.is_empty() else 1
 	var cats: Array = vues.keys()
 	cats.sort()
 	for cat in cats:
@@ -1215,7 +1269,7 @@ func _l_aide() -> Control:
 	grille.add_theme_constant_override("v_separation", 6)
 	vb.add_child(grille)
 	var lignes := [
-		[["1", "…", "6"], "choisir l'outil"], [["Z", "Q", "S", "D"], "déplacer la caméra"],
+		[["1", "…", "7"], "choisir l'outil"], [["Z", "Q", "S", "D"], "déplacer la caméra"],
 		[["clic droit"], "tourner la caméra"], [["molette"], "zoomer"],
 		[["clic milieu"], "faire glisser la vue"], [["Début"], "tout voir"],
 		[["A", "E"], "tourner la pièce"], [["Pg↑", "Pg↓"], "hauteur de pose"],
@@ -1226,6 +1280,8 @@ func _l_aide() -> Control:
 		[["Ctrl", "S"], "enregistrer"], [["P"], "photographier"],
 		[["Tab"], "la ville seule"], [["M"], "le plan du pays"],
 		[["V"], "vue de dessus / oblique"], [["H"], "cette aide"],
+		[["Ctrl", "D"], "dupliquer la sélection"], [["F"], "cadrer la sélection"],
+		[["Maj", "clic"], "pose en série (outil Objet)"], [["Maj", "clic"], "glisser la vue (autres outils)"],
 	]
 	for l in lignes:
 		var touches := HBoxContainer.new()
@@ -1564,6 +1620,138 @@ func _publier() -> void:
 		_bouton_publier.disabled = false
 		_etat_publier("Requête impossible (%d)." % erreur, Atelier.ERREUR)
 
+# ------------------------------------------------------------------ les récents
+
+func _lire_les_recents() -> void:
+	_recents.clear()
+	if not FileAccess.file_exists(FICHIER_RECENTS): return
+	var brut = JSON.parse_string(FileAccess.get_file_as_string(FICHIER_RECENTS))
+	if typeof(brut) != TYPE_ARRAY: return
+	for m in brut:
+		if typeof(m) == TYPE_STRING and (_chemin_de(String(m)) != "" or String(m) == "pelouse"):
+			_recents.append(String(m))
+
+## Un modèle vient d'être posé : il passe en tête des récents, sans doublon.
+func _noter_recent(m: String) -> void:
+	if m == "": return
+	_recents.erase(m)
+	_recents.push_front(m)
+	while _recents.size() > RECENTS_MAXI: _recents.pop_back()
+	var f := FileAccess.open(FICHIER_RECENTS, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(_recents))
+		f.close()
+	# Si le catalogue montre les récents, il se met à jour — en gardant le
+	# modèle courant choisi.
+	if _familles != null and _familles.selected == 0:
+		var courant := _modele_lot() if _outil == OUTIL_LOT else _modele_objet()
+		_remplir_palette()
+		var k := _liste.find(courant)
+		if k >= 0:
+			_palette.select(k)
+			_palette_choisie(k)
+
+# ------------------------------------------------------------------ dupliquer, cadrer, série
+
+## Ctrl+D : une copie de ce qu'on tient, une case plus loin, et c'est elle
+## qu'on tient maintenant — pour poser dix bancs identiques sans repasser par
+## le catalogue.
+func _dupliquer_selection() -> void:
+	if _selection.is_empty(): return
+	_empiler()
+	match String(_selection["genre"]):
+		"objet":
+			var o: Dictionary = (_ville.objets[int(_selection["k"])] as Dictionary).duplicate()
+			o["x"] = float(o["x"]) + CASE
+			_ville.objets.append(o)
+			_selection = {"genre": "objet", "k": _ville.objets.size() - 1}
+			_rebatir([_case_de(float(o["x"]), float(o["z"]))])
+		"lot":
+			var l: Dictionary = (_ville.lots[int(_selection["k"])] as Dictionary).duplicate()
+			l["x"] = int(l["x"]) + int(l["w"])
+			if not _lot_possible(String(l["m"]), Vector2i(int(l["x"]), int(l["y"]))) and not _libre.button_pressed:
+				_pile.pop_back()
+				_dire("Pas de place à côté pour le double — déplace-le, ou coche Chevauchement.")
+				return
+			_ville.lots.append(l)
+			_selection = {"genre": "lot", "k": _ville.lots.size() - 1}
+			_rebatir(Ville2.cases_du_lot(l))
+		_:
+			_pile.pop_back()
+			_dire("Une route ne se duplique pas — trace-la.")
+			return
+	_montrer_cadre()
+	_dire("Dupliqué. Tire-le où tu veux, A / E pour tourner.")
+
+## F : la caméra vient sur ce qu'on tient (ou sur la case visée).
+func _cadrer_selection() -> void:
+	var cible := Vector3.ZERO
+	if _selection.is_empty():
+		if not _ville.dedans(_case): return
+		cible = Vector3((float(_case.x) + 0.5) * CASE, 0, (float(_case.y) + 0.5) * CASE)
+	else:
+		match String(_selection["genre"]):
+			"objet":
+				var o: Dictionary = _ville.objets[int(_selection["k"])]
+				cible = Vector3(float(o["x"]), 0, float(o["z"]))
+			"lot":
+				cible = _ville.centre_du_lot(_ville.lots[int(_selection["k"])])
+			"route":
+				var cases := Ville2.cases_de_route(_ville.routes[int(_selection["k"])])
+				var c: Vector2i = cases[cases.size() / 2]
+				cible = Vector3((float(c.x) + 0.5) * CASE, 0, (float(c.y) + 0.5) * CASE)
+	_pivot = Vector3(cible.x, 0, cible.z)
+	_distance = minf(_distance, 220.0)
+	_placer_camera()
+
+## LA POSE EN SÉRIE : Maj tenue à l'outil Objet, on clique un premier point
+## puis un second, et les objets se posent tous les `PAS_SERIE` entre les deux
+## — une rangée de lampadaires, une haie, une file de voitures. Le pas est
+## celui de l'aimant s'il est d'au moins une demi-case, une demi-case sinon.
+var _serie_depart := Vector3(-1e9, 0, 0)
+
+func _pas_de_serie() -> float:
+	return maxf(pas_d_aimant(), DEMI)
+
+func _poser_en_serie(fin: Vector3) -> void:
+	var m := _modele_objet()
+	if m == "": return
+	var depart := _serie_depart
+	_serie_depart = Vector3(-1e9, 0, 0)
+	var vec := fin - depart
+	vec.y = 0.0
+	var longueur := vec.length()
+	if longueur < _pas_de_serie() * 0.5:
+		_dire("Série : les deux points sont trop proches.")
+		return
+	var pas := _pas_de_serie()
+	var n := int(floor(longueur / pas)) + 1
+	var dir := vec / longueur
+	# Les objets regardent perpendiculairement à la rangée (un banc, un
+	# lampadaire), sauf les voitures qui la suivent.
+	var cap := atan2(-dir.x, -dir.z) + (0.0 if m.begins_with("voitures/") else PI * 0.5)
+	_empiler()
+	var poses := 0
+	var touchees: Array = []
+	for i in n:
+		var p := depart + dir * (pas * float(i))
+		var c := _case_de(p.x, p.z)
+		if not _ville.dedans(c): continue
+		if not _objet_possible(m, c): continue
+		var o := {"m": m, "x": _aimanter(p.x), "z": _aimanter(p.z), "r": cap, "h": 0.0}
+		if absf(_decalage) > 0.01:
+			o["y_abs"] = TerrainV2.hauteur_en(_ville, float(o["x"]), float(o["z"])) + _decalage
+		_ville.objets.append(o)
+		touchees.append(c)
+		poses += 1
+	if poses == 0:
+		_pile.pop_back()
+		_dire("Série : rien ne pouvait se poser sur cette ligne.")
+		return
+	_rebatir(touchees)
+	_noter_recent(m)
+	_dire("Série : %d × %s, tous les %.1f." % [poses, _nom_lisible(m), pas])
+
 # ------------------------------------------------------------------ les vignettes
 
 ## Le viewport des vignettes : son propre monde, un fond transparent, une
@@ -1687,7 +1875,7 @@ func _monter_apercu() -> void:
 func _maj_apercu() -> void:
 	if _apercu_noeud == null: return
 	var m := _modele_lot() if _outil == OUTIL_LOT else _modele_objet()
-	if _outil == OUTIL_ROUTE: m = ""
+	if _outil == OUTIL_ROUTE or _outil == OUTIL_SOL: m = ""
 	if m == "":
 		_apercu_noeud.mesh = null
 		_apercu_nom.text = ""
@@ -1826,6 +2014,20 @@ var _a_prevenir := ""
 func _remplir_palette() -> void:
 	_palette.clear()
 	_liste.clear()
+	if _outil == OUTIL_SOL:
+		# Cinq matières, chacune avec sa couleur en pastille.
+		_palette.icon_mode = ItemList.ICON_MODE_LEFT
+		_palette.max_columns = 1
+		_palette.fixed_column_width = 0
+		_palette.fixed_icon_size = Vector2i(24, 24)
+		for f0 in MATIERES:
+			var nom_m := String(f0[0])
+			_liste.append(nom_m)
+			_palette.add_item(nom_m, _pastille_de_couleur(TerrainV2.COULEURS[int(f0[1])]))
+		_palette.select(clampi(_matiere_choisie, 0, _palette.item_count - 1))
+		_palette.visible = true
+		_maj_apercu()
+		return
 	if _outil == OUTIL_ROUTE:
 		# Trois genres : une liste, pas une grille de vignettes.
 		_palette.icon_mode = ItemList.ICON_MODE_LEFT
@@ -1855,7 +2057,9 @@ func _remplir_palette() -> void:
 		if fiche is Dictionary else FAMILLE_TOUT
 	var cherche := _recherche.text.strip_edges().to_lower()
 	var source: Array = []
-	if f == FAMILLE_RACCOURCIS:
+	if f == FAMILLE_RECENTS:
+		source = _recents.duplicate()
+	elif f == FAMILLE_RACCOURCIS:
 		source = raccourcis()
 	else:
 		source = KitVille2.catalogue().duplicate()
@@ -1900,6 +2104,7 @@ func _palette_choisie(k: int) -> void:
 		OUTIL_LOT: _lot_choisi = k
 		OUTIL_OBJET: _objet_choisi = k
 		OUTIL_ROUTE: _genre_route = k
+		OUTIL_SOL: _matiere_choisie = k
 	_maj_apercu()
 	_montrer_apercu()
 
@@ -1916,7 +2121,7 @@ func _choisir_outil(k: int) -> void:
 		_conseil_outil.text = CONSEILS_OUTILS[k]
 		_bloc_pose.visible = k in [OUTIL_LOT, OUTIL_OBJET, OUTIL_SELECTION]
 		_bloc_route.visible = k == OUTIL_ROUTE
-		_bloc_terrain.visible = k == OUTIL_TERRAIN or k == OUTIL_EAU
+		_bloc_terrain.visible = k == OUTIL_TERRAIN or k == OUTIL_EAU or k == OUTIL_SOL
 	_maj_info()
 	_remplir_palette()
 	_montrer_apercu()
@@ -2075,7 +2280,16 @@ func _unhandled_input(ev: InputEvent) -> void:
 			MOUSE_BUTTON_MIDDLE:
 				_glisse = b.pressed
 			MOUSE_BUTTON_LEFT:
-				if b.shift_pressed:
+				if b.shift_pressed and _outil == OUTIL_OBJET:
+					# La pose en série : premier clic = départ, second = fin.
+					if b.pressed:
+						_viser()
+						if _serie_depart.x < -1e8:
+							_serie_depart = _point
+							_dire("Série : clique le second point (Maj tenue). Échap annule.")
+						else:
+							_poser_en_serie(_point)
+				elif b.shift_pressed:
 					_glisse = b.pressed
 				elif b.pressed:
 					# ⚠ NE PLUS TESTER « EST-CE QUE JE SUIS SUR L'INTERFACE ».
@@ -2105,6 +2319,7 @@ func _touche(k: InputEventKey) -> void:
 			KEY_Z: _annuler()
 			KEY_Y: _refaire_geste()
 			KEY_S: _enregistrer()
+			KEY_D: _dupliquer_selection()
 			# ⚠ AVEC Ctrl, LES FLÈCHES POUSSENT LA SÉLECTION, PAS LA CAMÉRA.
 			# C'est le seul moyen d'être VRAIMENT au pixel près : à cette
 			# distance la souris ne peut pas viser un dixième d'unité, le
@@ -2134,6 +2349,7 @@ func _touche(k: InputEventKey) -> void:
 		KEY_4, KEY_KP_4: _choisir_outil(OUTIL_OBJET)
 		KEY_5, KEY_KP_5: _choisir_outil(OUTIL_TERRAIN)
 		KEY_6, KEY_KP_6: _choisir_outil(OUTIL_EAU)
+		KEY_7, KEY_KP_7: _choisir_outil(OUTIL_SOL)
 		KEY_G:
 			_genre_route = (_genre_route + 1) % GENRES_ROUTE.size()
 			if _outil == OUTIL_ROUTE: _palette.select(_genre_route)
@@ -2164,6 +2380,8 @@ func _touche(k: InputEventKey) -> void:
 			_finir_route(true)
 		KEY_H:
 			_basculer_l_aide()
+		KEY_F:
+			_cadrer_selection()
 		KEY_V:
 			# La vue de dessus, et retour : la seule façon de juger un tracé
 			# de rues comme sur un plan.
@@ -2182,6 +2400,7 @@ func _touche(k: InputEventKey) -> void:
 			if _boite_publier != null and _boite_publier.visible:
 				_boite_publier.visible = false
 				return
+			_serie_depart = Vector3(-1e9, 0, 0)
 			_finir_route(false)
 			_selection = {}
 			_cadre.visible = false
@@ -2243,6 +2462,7 @@ func _appliquer(gauche: bool) -> void:
 		OUTIL_OBJET: _poser_objet()
 		OUTIL_TERRAIN: _sculpter(gauche)
 		OUTIL_EAU: _peindre_eau(gauche)
+		OUTIL_SOL: _peindre_sol()
 		OUTIL_SELECTION: _selectionner()
 
 ## LA ROUTE PAR POINTS. Un sommet par clic ; entre deux sommets qui ne sont
@@ -2349,6 +2569,7 @@ func _poser_lot() -> void:
 		_ville.lots[k]["y_abs"] = TerrainV2.hauteur_en(_ville,
 			(float(c.x) + 0.5) * CASE, (float(c.y) + 0.5) * CASE) + _decalage
 	_rebatir(Ville2.cases_du_lot(_ville.lots[k]))
+	_noter_recent(m)
 	_dire("Posé : %s (%d x %d demi-cases)%s." % [m, e.x, e.y,
 		"" if absf(_decalage) < 0.01 else " à %.2f case de haut" % (_decalage / CASE)])
 
@@ -2383,6 +2604,7 @@ func _poser_objet() -> void:
 		o["y_abs"] = TerrainV2.hauteur_en(_ville, float(o["x"]), float(o["z"])) + _decalage
 	_ville.objets.append(o)
 	_rebatir([_case])
+	_noter_recent(m)
 	_dire("Posé : %s%s." % [_nom_lisible(m), "" if absf(_decalage) < 0.01 else " (+%.1f)" % _decalage])
 
 func _sculpter(monte: bool) -> void:
@@ -2413,6 +2635,32 @@ func _peindre_eau(eau: bool) -> void:
 	if eau:
 		_oter_lots_sur(touchees)
 	_rebatir(touchees)
+
+## L'OUTIL SOL : la matière, au pinceau, avec le rayon du terrain. Le terrain
+## continu se rebâtit sur les cases touchées, comme après un coup de pioche.
+func _peindre_sol() -> void:
+	var m: int = int((MATIERES[clampi(_matiere_choisie, 0, MATIERES.size() - 1)] as Array)[1])
+	_empiler()
+	var touchees: Array = []
+	for dj in range(-_rayon_terrain, _rayon_terrain + 1):
+		for di in range(-_rayon_terrain, _rayon_terrain + 1):
+			if di * di + dj * dj > _rayon_terrain * _rayon_terrain: continue
+			var c := _case + Vector2i(di, dj)
+			if not _ville.dedans(c) or not _ville.terre(c): continue
+			_ville.poser_matiere(c, m)
+			touchees.append(c)
+	_rebatir(touchees)
+	_dire("Sol : %s sur %d cases." % [String((MATIERES[_matiere_choisie] as Array)[0]), touchees.size()])
+
+## Une pastille de couleur pour la liste des matières.
+func _pastille_de_couleur(teinte: Color) -> Texture2D:
+	var img := Image.create(24, 24, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	for y in 24:
+		for x in 24:
+			if (x - 11.5) * (x - 11.5) + (y - 11.5) * (y - 11.5) <= 100.0:
+				img.set_pixel(x, y, teinte)
+	return ImageTexture.create_from_image(img)
 
 # ------------------------------------------------------------------ la sélection
 
@@ -2731,7 +2979,17 @@ func _montrer_apercu() -> void:
 		OUTIL_OBJET:
 			_dalle(Rect2(_point.x - 3.0, _point.z - 3.0, 6.0, 6.0),
 				TEINTE_OK if _objet_possible(_modele_objet(), _case) else TEINTE_NON, y)
-		OUTIL_TERRAIN, OUTIL_EAU:
+			if _serie_depart.x > -1e8:
+				# La rangée à venir : un point tous les pas, du départ au curseur.
+				var vec := _point - _serie_depart
+				vec.y = 0.0
+				var lg := vec.length()
+				if lg > 0.1:
+					var pas := _pas_de_serie()
+					for i in int(floor(lg / pas)) + 1:
+						var pt := _serie_depart + vec / lg * (pas * float(i))
+						_dalle(Rect2(pt.x - 2.0, pt.z - 2.0, 4.0, 4.0), Atelier.ACCENT, y)
+		OUTIL_TERRAIN, OUTIL_EAU, OUTIL_SOL:
 			for dj in range(-_rayon_terrain, _rayon_terrain + 1):
 				for di in range(-_rayon_terrain, _rayon_terrain + 1):
 					if di * di + dj * dj > _rayon_terrain * _rayon_terrain: continue

@@ -81,6 +81,23 @@ func poser_route(c: Vector2i, oui: bool) -> void:
 	if not oui:
 		_oter_pieces_sur(c)
 
+## ⭐ LE PIED D'UNE RAMPE EST DE LA CHAUSSÉE, MAIS SANS TUILE (19/09). La
+## rampe d'autoroute (`road-slant-*`) est un OBJET, pas une case de route :
+## la rue qui vient la rejoindre finissait donc en cul-de-sac aux yeux du
+## masque, et recevait un `road-end-round` — un demi-tour de bout d'impasse
+## posé pile devant la rampe (vu sur la photo de contrôle du centre). Une case
+## marquée « pied » compte comme chaussée pour ses voisines (la rue arrive en
+## ligne droite) mais ne reçoit AUCUNE tuile : c'est la rampe qui la couvre.
+func marquer_pied(c: Vector2i) -> void:
+	if not cases.has(c): return
+	if bool(cases[c]["r"]): return          # une vraie rue passe déjà là
+	cases[c]["r"] = true
+	cases[c]["pied"] = true
+
+func pied(c: Vector2i) -> bool:
+	var f = cases.get(c)
+	return f != null and bool(f.get("pied", false))
+
 # --------------------------------------------------------- grosses pièces
 
 static func taille_de(p: Dictionary) -> Vector2i:

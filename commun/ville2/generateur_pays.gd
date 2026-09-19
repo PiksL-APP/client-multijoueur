@@ -139,6 +139,7 @@ extends RefCounted
 const PLAN := preload("res://commun/ville2/plan_pays.gd")
 const PROPRETE := preload("res://commun/ville2/proprete.gd")
 const REMPLISSEUR := preload("res://commun/ville2/remplisseur.gd")
+const ANGLES := preload("res://commun/ville2/angles.gd")
 
 ## ⚠ `preload` ET JAMAIS `class_name` : le cache de classes n'est pas réécrit
 ## par `godot --headless --import`, donc une classe neuve compile au bureau et
@@ -239,6 +240,24 @@ static func fenetre(plan: Dictionary, ctx: Dictionary, f: Rect2i, curseurs := {}
 		_rien_qui_ne_mene_nulle_part(v)
 		v.rasteriser()
 
+	# 4 bis. LES VIRAGES, avant l'autoroute : ses poteaux consultent `case_prise`
+	# et ne se posent donc jamais sur une courbe — posée après, la courbe
+	# arrivait sous onze poteaux (mesuré).
+	if bool(curseurs.get("temoins", true)):
+		# ⭐ LES VIRAGES S'ARRONDISSENT, comme dans les neuf témoins (19/09).
+		# Une route de campagne du plan qui va en biais est rastérisée en
+		# escalier ; chacune de ses marches était un coude à l'équerre — vu sur
+		# la photo de contrôle de la côte, une route en zigzag dans l'herbe.
+		# `AnglesVille2.arrondir` remplace chaque coude dont le carré de deux
+		# cases est libre par la courbe large du kit, sans trottoir à la
+		# campagne. ⚠ Le tirage dépend de la fenêtre : la couture entre deux
+		# tuiles reste à l'équerre sur son dernier coude, ce qui est le prix de
+		# ne pas dépendre du cadrage ailleurs.
+		var alea_courbes := RandomNumberGenerator.new()
+		alea_courbes.seed = hash(Vector2i(f.position.x, f.position.y)) + 4242
+		ANGLES.arrondir(v, alea_courbes, 0.8)
+		v.rasteriser()
+
 	# 5. LES OUVRAGES, puis L'AUTOROUTE AÉRIENNE.
 	_les_ponts(plan, v, f)
 	# ⚠ APRÈS LES LOTS, ET C'EST TOUT L'INTÉRÊT : une pile ne doit jamais se
@@ -252,6 +271,9 @@ static func fenetre(plan: Dictionary, ctx: Dictionary, f: Rect2i, curseurs := {}
 		var au_sol := _cases_au_sol_de_l_autoroute(v)
 		_relier_les_bouts(v, au_sol)
 		_raser_les_moignons(v, au_sol)
+		# Et ce qui ne touche plus rien depuis qu'on a retiré la rue sous le
+		# tablier s'en va aussi.
+		_rien_qui_ne_mene_nulle_part(v)
 		# ⚠ ET ON RASTÉRISE TOUT DE SUITE : les détails qui suivent (`_semer`)
 		# demandent à `carte.route` où est la chaussée. Sans ça, un abri-bâche
 		# se posait sur une rue recousue que la carte ne connaissait pas encore
@@ -424,8 +446,12 @@ const MARGE_RECOUSUE := 4            ## on ne recoud pas ce qui touche le bord d
 ## Un bout de rue de UNE ou DEUX cases qui ne mène nulle part n'est pas une rue,
 ## c'est un moignon : on le rase (jamais au bord, jamais une voie rapide).
 const MOIGNON_MAXI := 2
+## Un lot ne cède la place qu'à un raccord COURT : à douze cases de portée,
+## soixante pavillons partaient pour des rues qui n'en demandaient pas tant.
+const CEDE_JUSQU_A := 4
 
-static func _relier_les_bouts(v: Ville2, interdites: Dictionary = {}) -> int:
+static func _relier_les_bouts(v: Ville2, interdites: Dictionary = {},
+		portee: int = PORTEE_RECOUSUE, ceder_les_lots: bool = true) -> int:
 	# ⚠⚠ ON RASTÉRISE D'ABORD. `lot_sur` lit un index que SEUL `rasteriser()`
 	# reconstruit ; les lots greffés depuis (`_implanter`, les fermes) n'y sont
 	# pas, et une rue recousue leur passait au travers — un abri-bâche sur la
@@ -451,7 +477,7 @@ static func _relier_les_bouts(v: Ville2, interdites: Dictionary = {}) -> int:
 		var pas: Vector2i = -(voisines[0] as Vector2i)
 		var pont: Array = []
 		var lots_genants: Dictionary = {}
-		for k in range(1, PORTEE_RECOUSUE + 1):
+		for k in range(1, portee + 1):
 			var q: Vector2i = c + pas * k
 			if not v.dedans(q) or not v.terre(q): break
 			if rues.has(q):
@@ -468,7 +494,8 @@ static func _relier_les_bouts(v: Ville2, interdites: Dictionary = {}) -> int:
 			# que le remplisseur vient de poser n'y sont pas encore. `lot_sur`,
 			# lui, est le registre VIVANT — c'est la leçon du 16/09 sur le
 			# mobilier de cour, et elle vaut ici mot pour mot.
-			if v.carte.case_prise(q) or interdites.has(q): break
+			if v.carte.case_prise(q): break
+			if _bloque(interdites, q, pas): break
 			# ⭐ UN LOT SUR LE CHEMIN NE BLOQUE PLUS, S'IL EST PETIT ET SEUL (19/09).
 			# Mesuré : quatre des onze culs-de-sac intérieurs restants butaient
 			# sur un pavillon posé pile dans l'axe, avec la rue juste derrière.
@@ -478,12 +505,40 @@ static func _relier_les_bouts(v: Ville2, interdites: Dictionary = {}) -> int:
 			var kl := v.lot_sur(q)
 			if kl >= 0:
 				if lots_genants.has(kl): pass
-				elif lots_genants.is_empty() and Ville2.cases_du_lot(v.lots[kl]).size() <= 2:
+				elif ceder_les_lots and k <= CEDE_JUSQU_A and lots_genants.is_empty() \
+						and Ville2.cases_du_lot(v.lots[kl]).size() <= 2:
 					lots_genants[kl] = true
 				else:
 					break
 			pont.append(q)
 	return ajoutees
+
+## Vrai si `evite` interdit d'entrer en `c` en marchant selon `pas` : `true`
+## bloque toujours (poteau, rampe) ; un axe ne bloque que si l'on marche LE
+## LONG de lui (on peut traverser un tablier, pas courir dessous).
+static func _bloque(evite: Dictionary, c: Vector2i, pas: Vector2i) -> bool:
+	if not evite.has(c): return false
+	var quoi = evite[c]
+	if quoi is Vector2i:
+		var a: Vector2i = quoi
+		return a.x * pas.x + a.y * pas.y != 0
+	return true
+
+## L'axe du tablier sur chaque case de voie rapide de la fenêtre, en cases
+## LOCALES : (1,0) s'il file selon X, (0,1) selon Z, `true` (infranchissable)
+## à un croisement ou un virage. `_relier_les_bouts` ne traverse qu'en travers.
+static func _axes_du_tablier(f: Rect2i, auto: Dictionary) -> Dictionary:
+	var axes: Dictionary = {}
+	for c0 in auto.keys():
+		var c: Vector2i = c0
+		if not f.has_point(c): continue
+		var x := auto.has(c + Vector2i(1, 0)) or auto.has(c - Vector2i(1, 0))
+		var z := auto.has(c + Vector2i(0, 1)) or auto.has(c - Vector2i(0, 1))
+		var l := c - f.position
+		if x and not z: axes[l] = Vector2i(1, 0)
+		elif z and not x: axes[l] = Vector2i(0, 1)
+		else: axes[l] = true
+	return axes
 
 ## Les cases que l'autoroute occupe AU SOL : ses poteaux et ses rampes. Une rue
 ## recousue après l'autoroute ne doit pas passer dessous un poteau ni dans une
@@ -492,6 +547,27 @@ static func _cases_au_sol_de_l_autoroute(v: Ville2) -> Dictionary:
 	var prises: Dictionary = {}
 	for o in v.objets:
 		var m := String((o as Dictionary).get("m", ""))
+		# Le tablier lui-même aussi, mais EN TRAVERS SEULEMENT : une rue
+		# recousue ne doit pas courir SOUS la voie rapide (c'est la double voie
+		# qu'on vient de retirer), mais elle peut la CROISER — sinon les
+		# perpendiculaires qui débouchaient sur la rue retirée finissent toutes
+		# en cul-de-sac. La valeur est l'axe du tablier : `_relier_les_bouts`
+		# ne laisse passer que ce qui lui est perpendiculaire.
+		# ⚠ Les rampes d'abord : une rampe de descente en étage porte un
+		# `y_abs` comme une tuile de tablier, et passait pour du tablier
+		# traversable en travers — avec un cap qui n'est pas celui d'une tuile.
+		# Mesuré : quatre rampes sur une rue recousue en plein dans leur axe.
+		if (o as Dictionary).has("y_abs") and m.begins_with("routes/road-") \
+				and not m.contains("road-slant"):
+			var cd := Vector2i(floori(float((o as Dictionary)["x"]) / Ville2.CASE),
+				floori(float((o as Dictionary)["z"]) / Ville2.CASE))
+			var r := float((o as Dictionary).get("r", 0.0))
+			# Le cap de la pièce : 0 ou π → selon Z, ±π/2 → selon X (voir la
+			# géométrie mesurée : `road-straight` roule nord-sud sans rotation).
+			var selon_x := absf(fmod(absf(r), PI) - PI * 0.5) < 0.1
+			if not prises.has(cd):
+				prises[cd] = Vector2i(1, 0) if selon_x else Vector2i(0, 1)
+			continue
 		if m.contains("bridge-pillar") or m.contains("road-slant"):
 			var c := Vector2i(floori(float((o as Dictionary)["x"]) / Ville2.CASE),
 				floori(float((o as Dictionary)["z"]) / Ville2.CASE))
@@ -501,6 +577,70 @@ static func _cases_au_sol_de_l_autoroute(v: Ville2) -> Dictionary:
 			if m.contains("road-slant"):
 				for d in CarteVille.COTES: prises[c + d] = true
 	return prises
+
+## Voir l'appel dans `_les_autoroutes`. ⚠ `auto` est en cases du PLAN
+## (`_cases_suivies`), les routes de `v` en cases LOCALES : on décale par `f`.
+const DISTANCE_DOUBLE := 1           ## en cases : jusqu'où une rue est « collée » au tablier
+static func _pas_de_rue_le_long_de_la_voie_rapide(v: Ville2, f: Rect2i, auto: Dictionary) -> int:
+	if auto.is_empty(): return 0
+	var o := f.position
+	var otees: Dictionary = {}
+	for r in v.routes:
+		var d: Dictionary = r
+		if String(d.get("genre", "rue")) != "rue": continue
+		var cases: Array = Ville2.cases_de_route(d)
+		var serie: Array = []
+		for i in cases.size():
+			var c: Vector2i = cases[i]
+			# Doublon : la voie rapide est sur la case ou sur l'une de ses huit
+			# voisines. ⚠ Les huit, pas les deux perpendiculaires : une voie
+			# rapide en biais monte en escalier, et ne touche une rue droite
+			# qu'une case sur deux — en ne regardant que de face, aucune suite
+			# n'atteignait trois cases et 71 cases de rue restaient collées au
+			# tablier (mesuré).
+			# ⚠ À DEUX CASES, PAS UNE. À une case de distance il reste, entre le
+			# tablier et la rue, exactement un trottoir : vu d'en haut, c'est
+			# encore « deux routes collées » (photo du 19/09, après une première
+			# passe à une case).
+			# ⚠⚠ PARALLÈLE, PAS PERPENDICULAIRE. Un simple voisinage coupait aussi
+			# les rues qui CROISENT la voie rapide (trois cases sous et autour
+			# du tablier, c'est une suite de trois) : le réseau partait en dix
+			# morceaux. On ne regarde donc que DE CÔTÉ — les cases décalées
+			# perpendiculairement à la rue, jusqu'à DISTANCE_DOUBLE, à hauteur de
+			# la case ou d'une case devant/derrière (le tablier en escalier) —
+			# et, sous le tablier, si le tablier CONTINUE dans le sens de la rue.
+			var dir: Vector2i = (cases[mini(i + 1, cases.size() - 1)] as Vector2i) \
+				- (cases[maxi(i - 1, 0)] as Vector2i)
+			dir = dir.sign()
+			var perp := Vector2i(dir.y, dir.x)
+			var double := false
+			if dir != Vector2i.ZERO:
+				if auto.has(c + o) and (auto.has(c + o + dir) or auto.has(c + o - dir)):
+					double = true
+				for b in range(-DISTANCE_DOUBLE, DISTANCE_DOUBLE + 1):
+					if b == 0: continue
+					for a in range(-1, 2):
+						if auto.has(c + o + perp * b + dir * a): double = true
+			# ⚠⚠ ET SEULEMENT SOUS LE TABLIER, EN FIN DE COMPTE. Retirer aussi la
+			# rue qui court À CÔTÉ (à une ou deux cases) hachait le réseau : cette
+			# rue-là est le collecteur de toutes les perpendiculaires du pâté, et
+			# sans elle chacune finit en cul-de-sac (mesuré : de 1 morceau et 66
+			# culs-de-sac à 6 morceaux et 146). Un boulevard le long d'une voie
+			# rapide aérienne, c'est une avenue avec un viaduc à côté — ça se
+			# voit dans toutes les villes ; une rue SOUS le tablier, non.
+			if not auto.has(c + o): double = false
+			if double:
+				serie.append(c)
+			else:
+				if serie.size() >= SUITE_DOUBLE:
+					for sc in serie: otees[sc] = true
+				serie = []
+		if serie.size() >= SUITE_DOUBLE:
+			for sc in serie: otees[sc] = true
+	if otees.is_empty(): return 0
+	_sans_les_cases(v, otees)
+	v.rasteriser()
+	return otees.size()
 
 ## ⭐ LES MOIGNONS. Après les coupes (rail, voie double) et les raccords, il
 ## reste des bouts de rue d'une ou deux cases qui partent d'un carrefour et
@@ -1567,6 +1707,29 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 		for c0 in _cases_suivies((r0 as Dictionary)["points"]):
 			auto[c0] = true
 			compte[c0] = int(compte.get(c0, 0)) + 1
+	# ⭐⭐ PAS DE RUE LE LONG DE LA VOIE RAPIDE (19/09). « Sur tes deux screens
+	# tu as une barrière qui bouche et des doubles voies qu'on a dit qu'on
+	# enlèverait » (client). La voie rapide est en l'air, mais la grille du
+	# quartier ne le sait pas : elle pose sa rue SOUS le tablier, ou collée
+	# contre, sur toute sa longueur — deux chaussées côte à côte, et là où la
+	# rampe redescend, la rue du dessous est tranchée et bouchée d'une bordure.
+	# On retire donc de chaque rue ce qui court PARALLÈLEMENT à la voie rapide
+	# (dessous ou à une case) sur au moins SUITE_DOUBLE cases ; un croisement
+	# perpendiculaire, lui, ne fait qu'une case et reste.
+	if _pas_de_rue_le_long_de_la_voie_rapide(v, f, auto) > 0:
+		# ⚠ ET ON RECOUD EN TRAVERS TOUT DE SUITE, AVANT LES POTEAUX. Les rues
+		# perpendiculaires débouchaient sur la rue qu'on vient de retirer ;
+		# leur bout est à une case du tablier, et la rue d'en face à une case
+		# de l'autre côté. Recousues maintenant, elles traversent sous le
+		# tablier ; recousues après, les poteaux auraient déjà pris la place
+		# (mesuré : 18 bouts de rue contre le tablier, une rue en face pour
+		# quinze d'entre eux).
+		# Portée courte (le tablier et la rue d'en face) et aucun lot cédé :
+		# à douze cases avec les lots qui cèdent, on perdait soixante
+		# pavillons pour recoudre des bouts qui n'en demandaient pas tant.
+		_relier_les_bouts(v, _axes_du_tablier(f, auto), 3, false)
+		_raser_les_moignons(v)
+		v.rasteriser()   # les poteaux lisent `carte.route` : il doit connaître les traversées
 	# ⭐⭐⭐ CHAQUE VOIE RAPIDE RETOMBE AU SOL, ELLE NE FINIT PAS EN L'AIR.
 	#
 	# « Fais en sorte que chaque autoroute retombe bien au sol plutôt que de
@@ -1731,8 +1894,12 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 					"r": PI * 0.5 * float(CarteVille.quarts_de_barriere(nb, masque, quarts)),
 					"h": 0.0, "y_abs": niveau, "zone": true})
 			# Le poteau, quand il y a de quoi le planter (voir `ECART_POTEAUX`).
+			# ⚠ NI SUR UNE PIÈCE : une courbe large n'est chaussée que sur sa
+			# diagonale, ses deux coins sont « libres » pour `route` — et un
+			# poteau y sortait du trottoir de la courbe (mesuré : 11).
 			if posmod(c.x + c.y, ECART_POTEAUX) == 0 and v.dedans(l) \
-					and v.terre(l) and not v.carte.route(l) and not rails.has(l):
+					and v.terre(l) and not v.carte.route(l) and not rails.has(l) \
+					and not v.carte.case_prise(l) and v.lot_sur(l) < 0:
 				# ⚠ À SA TAILLE DU KIT, SANS RIEN LUI FAIRE : `bridge-pillar`
 				# mesure 0,50 unité de kit, soit exactement une demi-case. Posé
 				# au sol il touche un tablier à 0,5 ; étiré, il grossirait. Sous
@@ -1788,12 +1955,13 @@ static func _les_autoroutes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rec
 			# devant un mur. `_raccorder_le_pied` travaille en cases LOCALES,
 			# d'où le passage par la position de la fenêtre.
 			_raccorder_le_pied(v, f, Vector2i(fiche["pied"]) + f.position,
-				Vector2i(fiche["pas"]))
+				Vector2i(fiche["pas"]), _cases_au_sol_de_l_autoroute(v))
 
 	# ⭐ LE PIED DE CHAQUE RAMPE REJOINT LA VOIRIE.
+	var au_sol_raccords := _cases_au_sol_de_l_autoroute(v)
 	for pd in pieds:
 		_raccorder_le_pied(v, f, Vector2i((pd as Dictionary)["c"]),
-			Vector2i((pd as Dictionary)["pas"]))
+			Vector2i((pd as Dictionary)["pas"]), au_sol_raccords)
 	# ⭐ ET L'ON POSE LES DESCENTES, une fois tous les tabliers en place.
 	for fd0 in descentes:
 		var fd: Dictionary = fd0
@@ -1867,7 +2035,7 @@ const PORTEE_PIED := 12
 const PORTEE_EQUERRE := 20           ## le dernier recours, en cherchant tout autour
 
 static func _raccorder_le_pied(v: Ville2, f: Rect2i, depart: Vector2i,
-		pas: Vector2i) -> bool:
+		pas: Vector2i, evite: Dictionary = {}) -> bool:
 	if not f.has_point(depart): return false
 	var l0 := depart - f.position
 	if not v.dedans(l0): return false
@@ -1880,6 +2048,11 @@ static func _raccorder_le_pied(v: Ville2, f: Rect2i, depart: Vector2i,
 		var c: Vector2i = l0
 		for k in PORTEE_PIED:
 			if not v.dedans(c) or not v.terre(c): break
+			# ⚠ PAS SOUS LE TABLIER NI À TRAVERS UN POTEAU (19/09). Depuis que
+			# la rue sous la voie rapide est retirée, le raccord « en arrière »
+			# d'un pied la reconstruisait, poteaux compris (mesuré : 6 poteaux
+			# sur une rue de raccord).
+			if k > 0 and _bloque(evite, c, d): break
 			if v.carte.route(c):
 				# Touché. On pose ce qui manque, et l'on dégage ce qui gêne.
 				if pont.is_empty(): return true
@@ -1895,7 +2068,7 @@ static func _raccorder_le_pied(v: Ville2, f: Rect2i, depart: Vector2i,
 	# que le client refuse ; on trace donc un raccord EN ÉQUERRE vers la rue la
 	# plus proche, d'abord en X puis en Y, comme tout ce qui se pose dans ce
 	# générateur (une diagonale ne se pave pas).
-	return _raccord_en_equerre(v, l0)
+	return _raccord_en_equerre(v, l0, evite)
 
 ## ⚠⚠ ON RETIRE LES LOTS EN UNE FOIS, DU DERNIER AU PREMIER. La version
 ## d'avant faisait `lot_sur(cp)` puis `remove_at` case par case : après le
@@ -1928,7 +2101,7 @@ static func _oter_les_lots_sur(v: Ville2, cases: Array) -> void:
 		v.rasteriser()
 
 ## La rue la plus proche du pied, et le chemin en équerre qui y mène.
-static func _raccord_en_equerre(v: Ville2, depart: Vector2i) -> bool:
+static func _raccord_en_equerre(v: Ville2, depart: Vector2i, evite: Dictionary = {}) -> bool:
 	var cible := Vector2i(-1, -1)
 	var mieux := 1 << 30
 	for dj in range(-PORTEE_EQUERRE, PORTEE_EQUERRE + 1):
@@ -1950,6 +2123,7 @@ static func _raccord_en_equerre(v: Ville2, depart: Vector2i) -> bool:
 		while c != but:
 			c += pas
 			if not v.dedans(c) or not v.terre(c): return false
+			if _bloque(evite, c, pas): return false
 			chemin.append(c)
 	if chemin.is_empty(): return true
 	_oter_les_lots_sur(v, chemin)
