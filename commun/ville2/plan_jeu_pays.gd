@@ -243,6 +243,11 @@ func _case_de_depart() -> Vector2i:
 ##    `cabines` — c'est là qu'on décroche un contrat.
 const GENRES_SANS_GANG := ["parc", "plage", "campagne", ""]
 
+## Le pavé des lieux garantis, en cases — le même que `Remplisseur.PAVE_REPERES`.
+## Quarante cases, c'est huit cents mètres : la portée où le jeu cherche ce qui
+## l'entoure, et la distance qu'on accepte de faire pour un bar.
+const PAVE_LIEUX := 40
+
 func _ranger_les_lieux() -> void:
 	# 0. ⚠ L'ARÈNE DU STADE D'ABORD, ET C'EST UNE QUESTION D'ORDRE. Elle vient
 	#    du plan, pas de la fenêtre (`_preparer_lieux`) ; posée APRÈS le
@@ -267,16 +272,32 @@ func _ranger_les_lieux() -> void:
 		q2["gang"] = CONSORTIUM if graine % 5 == 0 else int(trio[graine % 2])
 	super()
 	# 2. et 3. Les repaires et les cabines, dans les mêmes casiers que le reste.
+	#
+	# ⭐⭐ UN REPAIRE PAR PAVÉ DE QUARANTE CASES, PAS PAR QUARTIER (21/09).
+	# C'est la même mesure que pour les repères, les garages et les cabines :
+	# un quartier du pays fait jusqu'à trois cents cases de côté, et le jeu ne
+	# cherche les lieux qu'à un secteur et demi. Un seul repaire par quartier,
+	# c'est un gang qu'on ne croise jamais — mesuré au campus de la capitale :
+	# `rep=0` à quarante-cinq cases. Le territoire d'un gang doit avoir une
+	# porte quelque part près de soi, sinon le respect ne se joue nulle part.
+	#
+	# ⚠ Le pavé se calcule en cases du MONDE : deux tuiles voisines rangent la
+	# même case dans le même pavé, et la couture ne pose pas deux repaires
+	# côte à côte.
 	var repaire_pose: Dictionary = {}
 	for l in ville.lieux:
 		var d2: Dictionary = l
 		if String(d2.get("genre", "")) != "bar": continue
 		var p := Vector2(float(d2["x"]), float(d2["z"])) / Decor.ECHELLE + _px()
-		var q3 := ville.quartier_en(_l(case_de_point(p)))
-		if q3 < 0 or repaire_pose.has(q3): continue
+		var c3 := case_de_point(p)
+		var q3 := ville.quartier_en(_l(c3))
+		if q3 < 0: continue
+		var cle3 := "%d/%d,%d" % [q3, floori(float(c3.x) / float(PAVE_LIEUX)),
+			floori(float(c3.y) / float(PAVE_LIEUX))]
+		if repaire_pose.has(cle3): continue
 		var gang := int(ville.quartiers[q3].get("gang", -1))
 		if gang < 0: continue
-		repaire_pose[q3] = true
+		repaire_pose[cle3] = true
 		_ajouter_lieu_du_jeu("repaires", p, {"gang": gang})
 	for o in ville.objets:
 		var od: Dictionary = o
