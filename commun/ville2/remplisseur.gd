@@ -67,6 +67,21 @@ static func remplir(plan: Dictionary, ctx: Dictionary, v: Ville2, origine: Vecto
 	#    moins d'une case de l'une d'elles — sauf voie rapide, qui a le droit
 	#    d'avoir sa contre-allée.
 	var prises := _les_chaussees(plan, f)
+	# ⭐⭐⭐ LE TERRAIN DU STADE SE RÉSERVE AVANT LES RUES, ET C'EST LA SEULE
+	# FAÇON QUE ÇA MARCHE. `Proprete.rien_sur_les_routes` retire tout objet
+	# dont la case porte de la chaussée : une rue de quartier qui traverse
+	# l'enceinte emporte EN SILENCE les tribunes et les mâts qu'elle touche
+	# (compté au premier essai : 23 pièces au lieu de 30). Et le campus est
+	# quadrillé — aucune emprise de huit cases sur six n'y est libre de rue.
+	# On inscrit donc l'emprise dans le registre des chaussées AVANT de tracer
+	# les rues : `_ecarter` les coupe autour, exactement comme elles se
+	# coupent le long de la voie ferrée.
+	var choix := _le_choix_du_stade(plan, ctx)
+	var coin_stade: Vector2i = choix["coin"]
+	if coin_stade.x > -9000:
+		for j in range(-1, STADE_CASES.y + 1):
+			for i in range(-1, STADE_CASES.x + 1):
+				prises[coin_stade + Vector2i(i, j)] = true
 	var voies: Array = []
 	#    ⭐⭐ ET ON JETTE LES MIETTES. C'est `_ecarter` lui-même qui fabrique les
 	#    moignons : quand une rue longe un axe existant, elle est COUPÉE, et il
@@ -84,13 +99,20 @@ static func remplir(plan: Dictionary, ctx: Dictionary, v: Ville2, origine: Vecto
 	#    ⚠ ON LES JETTE, MAIS ON GARDE LEUR TRACE DANS `prises`. Sans ça le
 	#    morceau suivant de la même rue reviendrait se poser à côté d'elles, et
 	#    on retomberait sur la double voie que tout ce registre sert à éviter.
+	var rect_stade := Rect2i(coin_stade - Vector2i(1, 1), STADE_CASES + Vector2i(2, 2)) \
+		if coin_stade.x > -9000 else Rect2i(-9999, -9999, 1, 1)
 	for k in vus:
 		for pts in _les_voies(plan, ctx, k):
 			for bout0 in _ecarter(pts, prises):
-				var bout: Array = _prolonger(bout0, prises)
-				for c in bout: prises[c] = true
-				if bout.size() < MIN_RUE: continue
-				voies.append({"k": k, "cases": bout})
+				# ⚠ ET ON COUPE CE QUI TRAVERSE LE STADE. `_ecarter` ne coupe
+				# qu'une rue qui LONGE une emprise prise : une rue qui la
+				# traverse à l'équerre est un croisement, et un croisement est
+				# légitime partout — sauf au milieu d'une pelouse.
+				for bout1 in _hors_de(_prolonger(bout0, prises), rect_stade):
+					var bout: Array = bout1
+					for c in bout: prises[c] = true
+					if bout.size() < MIN_RUE: continue
+					voies.append({"k": k, "cases": bout})
 	for e in voies:
 		var d: Dictionary = e
 		_tracer(v, f, d["cases"], REGLES.charte(_genre(plan, int(d["k"]))))
@@ -106,6 +128,8 @@ static func remplir(plan: Dictionary, ctx: Dictionary, v: Ville2, origine: Vecto
 	#        travers. On réserve donc les deux emprises dans `demi_prises`, et
 	#        on le fait AVANT les lots — après, il est trop tard.
 	_reserver(plan, v, f)
+	# 2 ter. ⭐⭐⭐ LE STADE — et l'unique ARÈNE du jeu, à son rond central.
+	_le_stade(plan, v, f, coin_stade)
 	# 3. ⭐ LES REPÈRES ET LES GARES AVANT LES LOTS, ET C'EST UN ORDRE QU'ON NE
 	#    DEVINE PAS : posés en dernier, ils ne trouvaient PLUS UNE SEULE PLACE
 	#    LIBRE — la rue était déjà bordée sur toute sa longueur, et l'hôpital,
@@ -125,6 +149,9 @@ static func remplir(plan: Dictionary, ctx: Dictionary, v: Ville2, origine: Vecto
 	for e3 in voies:
 		var d3: Dictionary = e3
 		_mobilier(plan, ctx, v, f, int(d3["k"]), d3["cases"])
+	# 5 bis. LES CABINES, à la densité du QUARTIER et pas de la rue. Voir
+	#        `_les_cabines` : c'est par elles qu'on décroche un contrat.
+	_les_cabines(v, f, voies)
 	# 6. ⭐ LES TEINTES, ET C'EST LA MOITIÉ DE L'IMAGE. Toutes les toitures du
 	#    kit pointent la même bande verte de l'atlas : tant qu'elle n'est pas
 	#    repeinte, changer les murs ne change presque rien. Un quartier se juge
@@ -151,6 +178,202 @@ static func remplir(plan: Dictionary, ctx: Dictionary, v: Ville2, origine: Vecto
 	#    le mobilier le plus RÉPANDU de la carte, et jusqu'ici aucune n'avait
 	#    autre chose qu'un point dans un fichier.
 	_les_stations(plan, ctx, v, f)
+
+# ══════════════════════════════════════════════════════════ LE STADE ET L'ARÈNE
+
+## ⭐⭐⭐ LE STADE DU PAYS, ET IL N'Y EN A QU'UN.
+##
+## « Il ne faut qu'une arène dans le jeu, elle sera au milieu du stade »
+## (client, 21/09).
+##
+## L'arène est ce qui autorise le tir ami : `Carnage` ne laisse un joueur en
+## blesser un autre que si le coup part d'une arène et arrive dans la même, et
+## ne compte un frag qu'au même prix. Le pays n'en avait aucune — donc pas de
+## mode Carnage du tout. Une par secteur aurait rendu le tir ami possible
+## partout, c'est-à-dire nulle part : le client veut UN LIEU, un rendez-vous,
+## un stade où l'on monte se battre.
+##
+## Le témoin `campus` sait dessiner un stade depuis le 13/09 (pelouse à la
+## cote réelle, tracé, couronne de tribunes, buts, mâts) — mais les témoins ne
+## sont plus greffés sur le pays : les quartiers s'y bâtissent par charte. Le
+## stade est donc REDESSINÉ ici, à la même cote et avec les mêmes pièces, une
+## seule fois, dans un seul quartier.
+##
+## ⚠ SON EMPLACEMENT NE DÉPEND QUE DU PLAN, jamais de la fenêtre : le quartier
+## de genre `campus` le plus vaste (à surface égale, le premier du plan), puis
+## la première emprise libre en spirale autour de son centre — deux critères
+## que toutes les fenêtres lisent pareil. Une fenêtre qui n'en voit qu'un
+## morceau dessine ce morceau ; la fenêtre qui contient le ROND CENTRAL est la
+## seule à poser le lieu `arene`, et c'est ce qui garantit qu'il n'y en a
+## qu'une dans tout le pays.
+const STADE_CASES := Vector2i(8, 6)       ## l'enceinte de terre battue, en cases (160 × 120 unités)
+const STADE_MURET := Rect2(10.0, 10.0, 140.0, 100.0)   ## le rectangle des tribunes, en unités depuis le coin
+const STADE_PELOUSE := Rect2(20.0, 20.0, 120.0, 80.0)  ## l'aire de jeu, 120 × 80 m, à la cote réelle
+const STADE_RECUL := 4.0                  ## du muret au centre d'une tribune
+const STADE_VERT := "#4e9b36"
+const STADE_BLANC := "#e8efe4"
+
+## ⭐⭐ LE CHOIX DE L'EMPLACEMENT SE FAIT UNE FOIS POUR TOUT LE PAYS, et il ne
+## regarde QUE le plan : ni la fenêtre, ni ce qui a déjà été bâti. Deux tuiles
+## voisines doivent trouver le même stade au même endroit, sans quoi la
+## couture le couperait en deux ou le poserait deux fois.
+##
+## Les candidats, dans cet ordre : les quartiers de genre `campus` du plus
+## vaste au plus petit, puis les `parc`. Un stade est d'abord un équipement de
+## campus ; mais le campus du pays est quadrillé d'axes tous les dix cases, et
+## un parc, lui, est vide — si aucun campus n'a douze cases sur dix sans
+## bitume, le stade municipal va au parc plutôt que de se faire traverser par
+## une avenue.
+##
+## ⚠ LE RÉSULTAT EST MIS EN CACHE : la spirale coûte quelques dizaines de
+## milliers d'interrogations du plan, et vingt-cinq tuiles la paieraient
+## vingt-cinq fois. Le cache est une décision du PLAN, pas de la fenêtre.
+static var _stade_choisi: Dictionary = {}
+
+static func _le_choix_du_stade(plan: Dictionary, ctx: Dictionary) -> Dictionary:
+	if not _stade_choisi.is_empty(): return _stade_choisi
+	var candidats: Array = []
+	for genre in ["campus", "parc"]:
+		var lot: Array = []
+		for k in (plan.get("quartiers", []) as Array).size():
+			var z: Dictionary = plan["quartiers"][k]
+			if String(z.get("g", "")) != genre: continue
+			var r := PLAN.case_de(z.get("r", [0, 0]))
+			lot.append([r.x * r.y, k])
+		lot.sort_custom(func(a, b): return int(a[0]) > int(b[0]))
+		for e in lot: candidats.append(int((e as Array)[1]))
+	# Deux cases de vide autour de l'enceinte d'abord, une seule ensuite, et
+	# en dernier recours une emprise qu'un axe traverse : sans stade il n'y a
+	# pas d'arène, donc pas de tir ami de toute la partie.
+	for marge in [2, 1, 0]:
+		for k2 in candidats:
+			var c := _coin_dans_le_quartier(plan, ctx, int(k2), marge)
+			if c.x > -9000:
+				_stade_choisi = {"coin": c, "k": int(k2)}
+				return _stade_choisi
+	_stade_choisi = {"coin": Vector2i(-9999, -9999), "k": -1}
+	return _stade_choisi
+
+## La première emprise tenable d'un quartier, en spirale à pas de deux cases
+## depuis son centre. `(-9999, -9999)` s'il n'y en a pas.
+static func _coin_dans_le_quartier(plan: Dictionary, ctx: Dictionary, k: int,
+		marge: int) -> Vector2i:
+	var z: Dictionary = plan["quartiers"][k]
+	var centre := PLAN.case_de(z["c"])
+	var r := PLAN.case_de(z.get("r", [0, 0]))
+	# ⚠⚠ LE REGISTRE DES CHAUSSÉES SE FAIT SUR LE QUARTIER, PAS SUR UNE
+	# FENÊTRE. Celui d'une fenêtre s'arrête à seize cases de son bord : une
+	# candidate plus loin y paraissait libre de route, et le stade changeait
+	# de place selon le cadrage — la faute que tout ce fichier s'interdit.
+	var prises := _les_chaussees(plan, Rect2i(centre - r, r * 2))
+	var vise := centre - Vector2i(STADE_CASES.x / 2, STADE_CASES.y / 2)
+	var portee: int = clampi(maxi(r.x, r.y) / 2, 4, 16)
+	for anneau in portee:
+		for dj in range(-anneau, anneau + 1):
+			for di in range(-anneau, anneau + 1):
+				if maxi(absi(di), absi(dj)) != anneau: continue
+				var c := vise + Vector2i(di, dj) * 2
+				if _emprise_de_stade(plan, ctx, k, c, prises, marge): return c
+	return Vector2i(-9999, -9999)
+
+static func _emprise_de_stade(plan: Dictionary, ctx: Dictionary, k: int, c: Vector2i,
+		prises: Dictionary, marge: int) -> bool:
+	# Une case de marge : les mâts d'éclairage débordent de l'enceinte.
+	for j in range(-1, STADE_CASES.y + 1):
+		for i in range(-1, STADE_CASES.x + 1):
+			var d := c + Vector2i(i, j)
+			if not PLAN.terre_en(plan, ctx, d): return false
+			if PLAN.quartier_en(plan, ctx, d) != k: return false
+	# ⚠ ET LA MARGE DE CHAUSSÉE VAUT DEUX CASES, LA SECONDE EST PAYÉE : le
+	# registre ne tient que l'AXE d'une route du plan, et `rasteriser` pose
+	# une avenue plus large que son axe. Une emprise qui frôlait l'axe se
+	# retrouvait avec une colonne de bitume au travers de la pelouse — donc
+	# une file de tribunes effacée par `Proprete.rien_sur_les_routes`, en
+	# silence.
+	if marge <= 0: return true
+	for j2 in range(-marge, STADE_CASES.y + marge):
+		for i2 in range(-marge, STADE_CASES.x + marge):
+			if prises.has(c + Vector2i(i2, j2)): return false
+	return true
+
+static func _le_stade(plan: Dictionary, v: Ville2, f: Rect2i, coin: Vector2i) -> void:
+	if coin.x < -9000: return
+	var k := int(_stade_choisi.get("k", -1))
+	if k < 0: return
+	var z: Dictionary = plan["quartiers"][k]
+	var l0 := coin - f.position                      # le coin, en cases de la fenêtre
+	var o := Vector2(l0) * CASE                      # le même, en unités
+	# 1. L'ENCEINTE en terre battue, réservée : ni lot, ni mobilier, ni repère,
+	#    ni rue recousue — `interdire` le dit à tout le monde d'un coup
+	#    (`Proprete.rien_sur_les_routes` pour les objets semés,
+	#    `GenerateurPays._relier_les_bouts` pour la voirie). Les pièces du
+	#    stade lui-même portent le drapeau `zone`, comme celles de
+	#    l'aérodrome sur sa piste : elles sont chez elles.
+	v.interdire(Rect2(o, Vector2(STADE_CASES) * CASE))
+	for j in range(-1, STADE_CASES.y + 1):
+		for i in range(-1, STADE_CASES.x + 1):
+			var c := l0 + Vector2i(i, j)
+			if not v.dedans(c): continue
+			if v.carte != null and v.carte.route(c): continue
+			if i >= 0 and j >= 0 and i < STADE_CASES.x and j < STADE_CASES.y:
+				v.poser_matiere(c, Ville2.M_TERRE)
+			_reserver_la_case(v, c)
+	# 2. LA PELOUSE, son tracé, et l'ARÈNE au rond central.
+	var p := Rect2(o + STADE_PELOUSE.position, STADE_PELOUSE.size)
+	var cx := p.position.x + p.size.x * 0.5
+	var cz := p.position.y + p.size.y * 0.5
+	_bande(v, f, cx, cz, p.size.x, p.size.y, STADE_VERT)
+	for s2 in [-1.0, 1.0]:
+		_bande(v, f, cx, cz + s2 * (p.size.y * 0.5 - 4.0), p.size.x - 8.0, 0.6, STADE_BLANC)
+		_bande(v, f, cx + s2 * (p.size.x * 0.5 - 4.0), cz, 0.6, p.size.y - 8.0, STADE_BLANC)
+		var zs: float = cz + s2 * (p.size.y * 0.5 - 20.0)
+		_bande(v, f, cx, zs, 40.0, 0.6, STADE_BLANC)
+		for s3 in [-1.0, 1.0]:
+			_bande(v, f, cx + s3 * 20.0, cz + s2 * (p.size.y * 0.5 - 14.0), 0.6, 12.0, STADE_BLANC)
+	_bande(v, f, cx, cz, p.size.x - 8.0, 0.6, STADE_BLANC)
+	_bande(v, f, cx, cz, 18.0, 18.0, "#7fb35f")
+	# 3. LA COURONNE DE TRIBUNES — la tribune d'honneur couverte à l'ouest.
+	var m := Rect2(o + STADE_MURET.position, STADE_MURET.size)
+	for k2 in int(m.size.x / 20.0):
+		var lx := m.position.x + 10.0 + float(k2) * 20.0
+		_objet(v, f, "pxl/tribune-droite", lx, m.position.y - STADE_RECUL, PI)
+		_objet(v, f, "pxl/tribune-droite", lx, m.end.y + STADE_RECUL, 0.0)
+	for k3 in int(m.size.y / 20.0):
+		var lz := m.position.y + 10.0 + float(k3) * 20.0
+		_objet(v, f, "pxl/tribune-couverte", m.position.x - STADE_RECUL, lz, -PI * 0.5)
+		_objet(v, f, "pxl/tribune-droite", m.end.x + STADE_RECUL, lz, PI * 0.5)
+	# Les quatre angles : le modèle ouvre son coin vers −X et −Z, donc au repos
+	# il ferme le coin sud-est, et chaque quart de tour le fait tourner.
+	_objet(v, f, "pxl/tribune-angle", m.end.x + STADE_RECUL, m.end.y + STADE_RECUL, 0.0)
+	_objet(v, f, "pxl/tribune-angle", m.end.x + STADE_RECUL, m.position.y - STADE_RECUL, PI * 0.5)
+	_objet(v, f, "pxl/tribune-angle", m.position.x - STADE_RECUL, m.position.y - STADE_RECUL, PI)
+	_objet(v, f, "pxl/tribune-angle", m.position.x - STADE_RECUL, m.end.y + STADE_RECUL, PI * 1.5)
+	# 4. LES BUTS et LES MÂTS — c'est le mât qu'on voit de loin, et c'est lui
+	#    qui dit « stade » avant qu'on distingue les gradins.
+	_objet(v, f, "pxl/but-football", cx, p.position.y + 5.0, PI)
+	_objet(v, f, "pxl/but-football", cx, p.end.y - 5.0, 0.0)
+	for mx in [m.position.x - 12.0, m.end.x + 12.0]:
+		for mz in [m.position.y - 12.0, m.end.y + 12.0]:
+			_objet(v, f, "pxl/mat-eclairage", mx, mz,
+				Vector2(cx - mx, cz - mz).angle() + PI * 0.5)
+	# 5. ⭐ L'ARÈNE, au rond central — et seulement si le rond central est DANS
+	#    cette fenêtre. C'est la ligne qui fait qu'il n'y en a qu'une.
+	var c_centre := Vector2i(floori(cx / CASE), floori(cz / CASE))
+	if v.dedans(c_centre):
+		v.ajouter_lieu("arene", cx, cz, {"nom": "Stade " + String(z.get("nom", ""))})
+
+## Une bande de pelouse peinte (la brique `pelouse` du rendu), posée seulement
+## si son centre est dans la fenêtre : une pièce dont le centre est chez la
+## voisine est dessinée par la voisine.
+static func _bande(v: Ville2, f: Rect2i, x: float, z: float, w: float, d: float,
+		teinte: String) -> void:
+	if not v.dedans(Vector2i(floori(x / CASE), floori(z / CASE))): return
+	v.objets.append({"m": "pelouse", "x": x, "z": z, "r": 0.0, "h": 0.0,
+		"w": w, "d": d, "c": teinte, "zone": true})
+
+static func _objet(v: Ville2, f: Rect2i, modele: String, x: float, z: float, r: float) -> void:
+	if not v.dedans(Vector2i(floori(x / CASE), floori(z / CASE))): return
+	v.objets.append({"m": modele, "x": x, "z": z, "r": r, "h": 0.0, "zone": true})
 
 ## ⭐⭐ LE GENRE D'UN QUARTIER, avec une exception qui ne coûte pas un recuit.
 ##
@@ -463,9 +686,6 @@ static func _mobilier(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
 			var m := String(KitVille2.VOITURES[alea.randi() % KitVille2.VOITURES.size()])
 			v.ajouter_objet(m, (float(l.x) + 0.78) * CASE, (float(l.y) + 0.5) * CASE,
 				0.0)
-		if i % 34 == 7 and alea.randf() < 0.5:
-			v.ajouter_objet(CABINE, (float(l.x) + 0.86) * CASE,
-				(float(l.y) + 0.14) * CASE, PI * 0.5)
 		# ⚠ UN ARBRE NE POUSSE PAS SUR LE TROTTOIR DE LA RUE QU'IL BORDE.
 		# Il se plantait sur la case de RUE, à quatre-vingt-six centièmes — donc
 		# pile sur la bordure, et deux troncs sortaient du béton juste devant un
@@ -542,15 +762,46 @@ const COMMISSARIAT := "batiments/building-n"
 const REPERES_PAR_GENRE := {
 	"centre": [["hopital", -7, -5], ["caserne", 9, 6], ["supermarche", -10, 8],
 		["commissariat", 4, -9], ["eglise", -13, -11]],
-	"vieille_ville": [["eglise", 2, -3], ["commissariat", -6, 6]],
-	"pavillons": [["eglise", 6, -8], ["supermarche", -12, 9], ["caserne", 14, 11]],
-	"chaud": [["caserne", 7, 7], ["commissariat", -7, -6]],
+	# ⭐⭐ UN HÔPITAL PAR QUARTIER HABITÉ (21/09). C'est là qu'on rouvre les
+	# yeux en tombant (`Carnage._relever` → `Plan.hopital_le_plus_proche`,
+	# rayon d'un secteur et demi) : sans hôpital dans le coin, on se réveille
+	# trois rues plus loin, au hasard, sans repère. Le pays n'en posait que
+	# dans les quartiers « centre » et « campus » — donc aucun dans les
+	# villages des îles, là même où l'on commence la partie, dans un taudis.
+	# L'industrie et le port n'en ont toujours pas : on ne loge personne dans
+	# une zone de hangars.
+	"vieille_ville": [["eglise", 2, -3], ["commissariat", -6, 6], ["hopital", 8, 7]],
+	"pavillons": [["eglise", 6, -8], ["supermarche", -12, 9], ["caserne", 14, 11],
+		["hopital", -9, -10]],
+	"chaud": [["caserne", 7, 7], ["commissariat", -7, -6], ["hopital", -9, 8]],
 	"industrie": [["caserne", -8, 5], ["garage", 9, -6], ["compacteur", 12, 8]],
 	"port": [["caserne", -8, 5], ["garage", 9, -6]],
-	"plage": [["supermarche", 5, -7], ["caserne", -9, 6]],
+	"plage": [["supermarche", 5, -7], ["caserne", -9, 6], ["hopital", 10, 8]],
 	"campus": [["supermarche", 8, 9], ["hopital", -9, -7]],
-	"bidonville": [["supermarche", 6, 5]],
+	"bidonville": [["supermarche", 6, 5], ["hopital", -7, -6]],
 }
+
+## ⭐⭐⭐ UN REPÈRE TOUS LES QUARANTE CASES, PAS UN PAR QUARTIER.
+##
+## Un quartier du pays n'est pas un quartier de la ville dessinée : « Les
+## Faubourgs » mesure 300 × 290 cases — six kilomètres de pavillonnaire — et
+## recevait UN hôpital, UNE supérette, UNE église. Le jeu, lui, cherche ce
+## dont il a besoin dans un rayon d'un secteur et demi (`Plan.RAYON_*`,
+## `hopital_le_plus_proche` : 6 400 px, soit 32 cases) : au milieu d'un tel
+## quartier, il ne trouvait rien, et on rouvrait les yeux au hasard, trois
+## rues plus loin, sans repère.
+##
+## La liste du genre se REPÈTE donc sur un damier de `PAVE_REPERES` cases,
+## calé sur le CENTRE DU QUARTIER (donc absolu : deux fenêtres voisines
+## trouvent les mêmes ancres, et un repère à cheval sur la couture se pose au
+## même endroit des deux côtés). Un petit quartier n'a qu'une ancre et ne
+## change pas. Chaque ancre garde le décalage propre au repère : l'hôpital et
+## la caserne ne se marchent pas dessus d'un pavé à l'autre.
+##
+## ⚠ ON NE PARCOURT QUE LES ANCRES DE LA FENÊTRE (plus douze cases de marge) :
+## balayer les trois cents cases du quartier pour chaque tuile coûterait
+## quatre-vingts recherches en spirale pour rien.
+const PAVE_REPERES := 40
 
 static func _les_reperes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
 		k: int, prises: Dictionary) -> void:
@@ -558,6 +809,19 @@ static func _les_reperes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i
 	var liste: Array = REPERES_PAR_GENRE.get(String(z["g"]), [])
 	if liste.is_empty(): return
 	var c := PLAN.case_de(z["c"])
+	var r := PLAN.case_de(z.get("r", [0, 0]))
+	var proche := f.grow(12)
+	var ancres: Array = []
+	var na := Vector2i(maxi(0, r.x / PAVE_REPERES), maxi(0, r.y / PAVE_REPERES))
+	for aj in range(-na.y, na.y + 1):
+		for ai in range(-na.x, na.x + 1):
+			var ancre := c + Vector2i(ai, aj) * PAVE_REPERES
+			if proche.has_point(ancre): ancres.append(ancre)
+	for a0 in ancres:
+		_les_reperes_autour(plan, ctx, v, f, k, prises, z, liste, a0)
+
+static func _les_reperes_autour(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
+		k: int, prises: Dictionary, z: Dictionary, liste: Array, c: Vector2i) -> void:
 	for e in liste:
 		var d: Array = e
 		var genre := String(d[0])
@@ -576,8 +840,19 @@ static func _les_reperes(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i
 			continue
 		if not Lotisseur.terrain_libre(v, hx, hy, emp): continue
 		v.ajouter_lot(modele, hx, hy, emp.x, emp.y, q, genre)
-		v.ajouter_lieu(genre, (float(ou.x) + 0.5) * CASE, (float(ou.y) + 0.5) * CASE,
-			{"nom": String(z["nom"])})
+		# ⚠⚠ LE LIEU SE RANGE EN CASES DE LA FENÊTRE, PAS EN CASES DU PAYS.
+		# `ou` vient du PLAN, donc en absolu (c'est ce qu'il faut pour que deux
+		# fenêtres voisines posent le repère au même endroit) — mais le lot,
+		# lui, est déjà converti (`hx`, `hy`), et le lieu ne l'était pas. Sur
+		# une tuile dont le coin est en (600,200), l'hôpital se VOYAIT à sa
+		# place et le jeu le cherchait trois mille cases plus loin, en pleine
+		# mer : sur le pays, AUCUNE supérette, AUCUN hôpital, AUCUNE caserne,
+		# AUCUN commissariat n'était trouvable (`lieux_autour`), donc ni F, ni
+		# GPS, ni pastille au radar. Mesuré sur l'Île de la Baie : la supérette
+		# « la plus proche » à 624 cases, au large. Un témoin (fenêtre unique,
+		# coin à zéro) ne montrait rien de tout ça.
+		v.ajouter_lieu(genre, (float(ou.x - f.position.x) + 0.5) * CASE,
+			(float(ou.y - f.position.y) + 0.5) * CASE, {"nom": String(z["nom"])})
 
 ## La place d'un repère : la première case, en spirale carrée depuis la visée,
 ## qui soit à terre ET dans le bon quartier. Deux critères du PLAN — donc la même
@@ -811,6 +1086,19 @@ const MIN_RUE := 5
 
 const LONGE := 3
 
+## Les morceaux d'une rue qui restent hors d'un rectangle interdit.
+static func _hors_de(cases: Array, interdit: Rect2i) -> Array:
+	var sortie: Array = []
+	var courant: Array = []
+	for c in cases:
+		if interdit.has_point(c):
+			if not courant.is_empty(): sortie.append(courant)
+			courant = []
+		else:
+			courant.append(c)
+	if not courant.is_empty(): sortie.append(courant)
+	return sortie
+
 static func _ecarter(cases: Array, prises: Dictionary) -> Array:
 	var sortie: Array = []
 	var courant: Array = []
@@ -862,7 +1150,12 @@ static func _les_gares(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
 	for e in plan.get("stations", []):
 		var st: Dictionary = e
 		var reseau := String(st.get("reseau", "bus"))
-		if reseau != "train" and reseau != "train2": continue
+		# ⭐ LE TRAIN EST SOUS TERRE (client, 21/09) — mais sa GARE reste en
+		# surface : c'est par elle qu'on descend, et un bâtiment de huit cases
+		# est un repère de quartier. Le métro, lui, roule maintenant à ciel
+		# ouvert et prend les quais.
+		if reseau not in PLAN.RESEAUX_DE_SURFACE and reseau != "train" \
+			and reseau != "train2": continue
 		if not bool(st.get("principale", false)): continue
 		var c := PLAN.case_de(st["c"])
 		if not f.grow(12).has_point(c): continue
@@ -978,7 +1271,7 @@ static func _les_coeurs(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2i,
 			alea.seed = _graine(c.x, c.y, 4211)
 			if not enclavee and alea.randf() < COUR_OUVERTE_VIDE: continue
 			var essence: Array = REGLES.charte(_genre(plan, k))["essence"] if k >= 0 \
-				else ["nature/tree-default"]
+				else ["nature/tree_default"]
 			var x := (float(l.x) + 0.5) * CASE
 			var z := (float(l.y) + 0.5) * CASE
 			var t := alea.randf()
@@ -1031,6 +1324,13 @@ static func _les_stations(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2
 			continue
 		var l := c - f.position
 		if not v.dedans(l): continue
+		# ⭐ « IL FAUT UNE GARE DEVANT CHAQUE QUAI » (client, 21/09). Un arrêt de
+		# train n'est pas un arrêt de bus : à la place de l'abribus contre la
+		# rue, la petite gare du client (`pxl/quai-gare`, un quai couvert de
+		# deux cases) se pose LE LONG DE LA VOIE, du côté libre. Le jeu arrête
+		# ses rames pile là (`VilleVivante.gares`).
+		if reseau in PLAN.RESEAUX_DE_SURFACE:
+			if _la_petite_gare(v, l): continue
 		# ⭐⭐ « LES ARRÊTS DE BUS DOIVENT ÊTRE COLLÉS À LA ROUTE » (client, 16/09).
 		#
 		# L'abribus se posait à un coin FIXE de sa case — toujours le même, en
@@ -1083,6 +1383,68 @@ static func _les_stations(plan: Dictionary, ctx: Dictionary, v: Ville2, f: Rect2
 			if _case_de_mobilier(v, Vector2i(floori(pb.x / CASE), floori(pb.y / CASE))):
 				v.ajouter_objet("poubelle", pb.x, pb.y, cap, 0.0, "")
 
+const PETITE_GARE := "pxl/quai-gare"     ## le quai couvert du client : 0,4 × 0,26 × 1,78 cases, long en Z
+
+## La petite gare d'un arrêt : on lit l'axe de la voie sous la station (la
+## polyligne du rail qui passe par sa case), on la pose parallèle, décalée
+## d'une case du côté où les deux cases qu'elle couvre sont libres. Rend
+## `false` si aucun côté n'est libre — l'appelant garde alors l'abribus.
+static func _la_petite_gare(v: Ville2, l0: Vector2i) -> bool:
+	var axe := _axe_du_rail_en(v, l0)
+	if axe == Vector2i.ZERO: return false
+	var perp := Vector2i(-axe.y, axe.x)
+	# La station est souvent posée sur un carrefour (une rue coupe la voie
+	# juste là) : on glisse le long de la voie, d'une case puis deux, jusqu'à
+	# trouver un bord libre — le train s'arrête à la station, le quai fait
+	# deux cases, ça se touche encore.
+	for decal in [0, 1, -1, 2, -2, 3, -3]:
+		var l: Vector2i = l0 + axe * decal
+		if not v.dedans(l) or _axe_du_rail_en(v, l) != axe: continue
+		if _le_quai_ici(v, l, axe, perp): return true
+	return false
+
+static func _le_quai_ici(v: Ville2, l: Vector2i, axe: Vector2i, perp: Vector2i) -> bool:
+	for cote in [1, -1]:
+		var d: Vector2i = perp * int(cote)
+		var a: Vector2i = l + d
+		var b: Vector2i = l + d + axe
+		var b2: Vector2i = l + d - axe
+		# ⚠ Pas `_case_de_mobilier` : le couloir du rail est RÉSERVÉ (rien ne
+		# s'y bâtit), et c'est précisément là qu'un quai se pose. On regarde
+		# la terre, la chaussée, les lots et les pièces — pas la réserve.
+		if not (_case_de_quai(v, a) and (_case_de_quai(v, b) or _case_de_quai(v, b2))):
+			continue
+		# Collée à la voie : son bord à un quart de case de l'axe du rail (le
+		# quai fait 0,4 case de large), allongée vers la case libre voisine.
+		# Centrée sur la case d'à côté, elle laissait un pré entre elle et le
+		# train.
+		var vers: Vector2i = axe if _case_de_quai(v, b) else -axe
+		var centre := (Vector2(l) + Vector2(0.5, 0.5) + Vector2(d) * 0.45 + Vector2(vers) * 0.4) * CASE
+		# Le modèle est long en Z : sur une voie est-ouest, un quart de tour.
+		var cap := PI * 0.5 if axe.x != 0 else 0.0
+		v.ajouter_objet(PETITE_GARE, centre.x, centre.y, cap, 0.0, "")
+		return true
+	return false
+
+static func _case_de_quai(v: Ville2, c: Vector2i) -> bool:
+	if not v.dedans(c) or not v.terre(c): return false
+	if v.carte.route(c) or v.carte.case_prise(c): return false
+	return v.lot_sur(c) < 0
+
+## L'axe de la voie ferrée sous une case de la fenêtre, ou zéro si aucune
+## polyligne du rail n'y passe.
+static func _axe_du_rail_en(v: Ville2, l: Vector2i) -> Vector2i:
+	for r in v.rail:
+		var pts: Array = (r as Dictionary)["points"]
+		for k in range(1, pts.size()):
+			var a: Vector2i = pts[k - 1]
+			var b: Vector2i = pts[k]
+			if a.x == b.x and l.x == a.x and l.y >= mini(a.y, b.y) and l.y <= maxi(a.y, b.y):
+				return Vector2i(0, 1)
+			if a.y == b.y and l.y == a.y and l.x >= mini(a.x, b.x) and l.x <= maxi(a.x, b.x):
+				return Vector2i(1, 0)
+	return Vector2i.ZERO
+
 ## LA GARE, POSÉE À CÔTÉ DE SA STATION ET PAS DESSUS. Huit cases de long : posée
 ## sur le point de la station, elle enjamberait la voie qu'elle est censée
 ## desservir. On la décale d'une demi-longueur, du côté où il y a de la terre.
@@ -1118,6 +1480,16 @@ static func _axe_du_rail(v: Ville2, lc: Vector2i) -> Vector2i:
 static func _la_gare(v: Ville2, f: Rect2i, c: Vector2i, nom: String) -> void:
 	var modele := String(KitVille2.REPERES["gare"])
 	var lc := c - f.position
+	# ⭐ UNE HALTE EST UNE PETITE GARE (21/09). Le grand bâtiment du client fait
+	# huit cases : sur l'Île de la Baie — le bourg où l'on commence — il ne
+	# rentrait nulle part, et la halte n'avait RIEN, pas même un quai. Une
+	# halte (le nom le dit) reçoit le quai couvert ; et une grande gare qui
+	# ne trouve pas sa place le reçoit aussi, plutôt que rien.
+	if not v.dedans(lc): return
+	if nom.begins_with("Halte"):
+		if _la_petite_gare(v, lc):
+			v.ajouter_lieu("gare", (float(lc.x) + 0.5) * CASE, (float(lc.y) + 0.5) * CASE, {"nom": nom})
+		return
 	var axe := _axe_du_rail(v, lc)
 	var essais: Array = []
 	if axe != Vector2i.ZERO:
@@ -1151,6 +1523,9 @@ static func _la_gare(v: Ville2, f: Rect2i, c: Vector2i, nom: String) -> void:
 		v.ajouter_lieu("gare", (float(a.x - f.position.x) + 0.5) * CASE,
 			(float(a.y - f.position.y) + 0.5) * CASE, {"nom": nom})
 		return
+	# Pas de place pour la grande : la petite, plutôt que rien.
+	if _la_petite_gare(v, lc):
+		v.ajouter_lieu("gare", (float(lc.x) + 0.5) * CASE, (float(lc.y) + 0.5) * CASE, {"nom": nom})
 
 # ─────────────────────────────────────────────── LES REPÈRES HABITABLES
 
@@ -1172,7 +1547,49 @@ const HABITABLES := [
 	["atelier", 210, "Atelier"],
 ]
 
+## ⭐⭐ CE QU'IL FAUT AU MOINS UNE FOIS PAR QUARTIER (21/09).
+##
+## « Un lot sur 130 » donne un garage tous les deux kilomètres et demi dans une
+## capitale, et ZÉRO dans un bourg de soixante maisons : sur l'Île de la Baie —
+## celle où l'on commence — le garage le plus proche était à 139 cases, à
+## l'autre bout de l'île, alors que le premier contrat qu'un gang propose est
+## « repeins cette voiture, et vite ». Le jeu demandait donc, dès la première
+## minute, une chose qu'on ne pouvait pas faire.
+##
+## Un quartier BÂTI (au moins `LOTS_POUR_MINIMUM` lots ordinaires) reçoit donc
+## d'office ce qui fait qu'on peut y jouer : un garage pour repeindre, une
+## supérette pour manger. Les lots choisis sont ceux de plus petite graine —
+## un choix qui ne dépend ni de l'ordre des lots ni du cadrage. Ce qui existe
+## déjà dans le quartier compte : un supermarché posé en repère (`_les_reperes`)
+## dispense d'en re-qualifier un.
+const MINIMUM_PAR_QUARTIER := ["garage", "supermarche"]
+const LOTS_POUR_MINIMUM := 10
+
+## ⭐⭐ LE MINIMUM SE COMPTE PAR PAVÉ, PAS PAR QUARTIER (21/09).
+##
+## C'est la même mesure que pour les repères : « Les Faubourgs » fait 300 × 290
+## cases et recevait UN garage, UNE supérette, UNE cabine. Le jeu, lui, cherche
+## ce dont il a besoin dans un rayon d'un secteur et demi. Le banc des lieux le
+## disait sans détour au point de départ : `cab=0` à vingt cases — donc aucun
+## contrat possible, donc aucun premier billet, dans le village où l'on
+## commence la partie.
+##
+## Le casier est donc `quartier / pavé de 40 cases`, calé sur l'origine du
+## MONDE (jamais sur la fenêtre : deux tuiles voisines doivent ranger la même
+## case dans le même casier, sinon la couture aurait deux garages côte à côte
+## et le pavé suivant aucun).
+static func _casier(q: int, c: Vector2i) -> String:
+	return "%d/%d,%d" % [q, floori(float(c.x) / float(PAVE_REPERES)),
+		floori(float(c.y) / float(PAVE_REPERES))]
+
 static func _les_habitables(plan: Dictionary, v: Ville2, f: Rect2i) -> void:
+	# Ce que le quartier a déjà : les repères posés avant nous en font partie.
+	var deja: Dictionary = {}
+	for li in v.lieux:
+		var d0: Dictionary = li
+		var cl := Vector2i(int(float(d0["x"]) / CASE), int(float(d0["z"]) / CASE))
+		deja[_casier(v.quartier_en(cl), cl + f.position) + "/" + String(d0["genre"])] = true
+	var libres: Dictionary = {}          # casier -> [[graine, lot], …]
 	for l in v.lots:
 		var lot: Dictionary = l
 		var genre := String(lot.get("genre", ""))
@@ -1183,31 +1600,130 @@ static func _les_habitables(plan: Dictionary, v: Ville2, f: Rect2i) -> void:
 		var hx := int(lot.get("x", 0)) + f.position.x * 2
 		var hy := int(lot.get("y", 0)) + f.position.y * 2
 		var h := _graine(hx, hy, 6607)
+		var cl2 := Vector2i(int(lot["x"]) / 2, int(lot["y"]) / 2)
+		var q := _casier(v.quartier_en(cl2), cl2 + f.position)
+		var pose := ""
 		for e in HABITABLES:
 			var d: Array = e
 			if h % int(d[1]) != 0: continue
-			lot["genre"] = String(d[0])
-			v.ajouter_lieu(String(d[0]),
-				(float(int(lot["x"])) * 0.5 + 0.5) * CASE,
-				(float(int(lot["y"])) * 0.5 + 0.5) * CASE,
-				{"nom": String(d[2])})
+			pose = String(d[0])
+			lot["genre"] = pose
+			_le_lieu_du_lot(v, lot, pose, String(d[2]))
 			break
+		if pose != "":
+			deja[q + "/" + pose] = true
+			continue
+		if not libres.has(q): libres[q] = []
+		(libres[q] as Array).append([h, lot])
+	for q2 in libres:
+		var candidats: Array = libres[q2]
+		if candidats.size() < LOTS_POUR_MINIMUM: continue
+		candidats.sort_custom(func(a, b): return int(a[0]) < int(b[0]))
+		var i := 0
+		for genre_min in MINIMUM_PAR_QUARTIER:
+			if deja.has(String(q2) + "/" + String(genre_min)): continue
+			if i >= candidats.size(): break
+			var lot2: Dictionary = candidats[i][1]
+			i += 1
+			lot2["genre"] = String(genre_min)
+			_le_lieu_du_lot(v, lot2, String(genre_min), _nom_habitable(String(genre_min)))
+			deja[String(q2) + "/" + String(genre_min)] = true
+
+static func _le_lieu_du_lot(v: Ville2, lot: Dictionary, genre: String, nom: String) -> void:
+	v.ajouter_lieu(genre, (float(int(lot["x"])) * 0.5 + 0.5) * CASE,
+		(float(int(lot["y"])) * 0.5 + 0.5) * CASE, {"nom": nom})
+
+static func _nom_habitable(genre: String) -> String:
+	for e in HABITABLES:
+		if String((e as Array)[0]) == genre: return String((e as Array)[2])
+	return genre
 
 ## ⚠ LA CABINE EST UN OBJET, PAS UN LOT. Elle se pose sur le trottoir, à
 ## l'écart de la chaussée pour ne pas être balayée par la passe de propreté.
 const CABINE := "cabine"
 
-static func _les_cabines(v: Ville2, f: Rect2i, cases: Array, tous_les: int,
-		alea: RandomNumberGenerator) -> void:
-	if tous_les <= 0: return
-	for i in cases.size():
-		if i % tous_les != 0: continue
-		var c: Vector2i = cases[i]
-		var l := c - f.position
-		if not v.dedans(l): continue
-		if alea.randf() > 0.5: continue
-		v.ajouter_objet(CABINE, (float(l.x) + 0.86) * CASE, (float(l.y) + 0.14) * CASE,
-			PI * 0.5)
+## ⭐⭐⭐ LA CABINE EST LA PORTE D'ENTRÉE DU JEU, et il n'y en avait PAS.
+##
+## C'est à une cabine qu'un gang décroche et propose un contrat : sans elle, un
+## joueur qui débarque à zéro dollar n'a rien à faire que voler une voiture.
+## Elle se posait dans `_mobilier`, sur la case numéro 7 de chaque voie, une
+## fois sur deux — or une « voie » est UNE RUE, et une rue de quartier fait
+## trois à six cases : la condition n'était presque jamais atteinte. Mesuré sur
+## les tuiles cuites : **quatre cabines pour 11 812 cases de rue** au centre du
+## pays (une tous les six kilomètres), **zéro** sur l'Île de la Baie — celle où
+## l'on commence — et zéro sur l'Île Nord.
+##
+## Maintenant la densité est celle d'un quartier, pas celle d'une rue : une
+## cabine toutes les `CABINE_TOUS_LES` cases de rue environ, tirée sur la
+## POSITION ABSOLUE de la case (deux fenêtres voisines posent la même cabine au
+## même endroit), et **au moins une par quartier** — un bourg de cent cases de
+## rue doit avoir son téléphone, c'est le seul moyen d'y gagner son premier
+## billet.
+const CABINE_TOUS_LES := 241         ## premier : `_graine` se répartit mal modulo une puissance de deux
+
+static func _les_cabines(v: Ville2, f: Rect2i, voies: Array) -> void:
+	var par_quartier: Dictionary = {}
+	for e in voies:
+		var d: Dictionary = e
+		var k := int(d["k"])
+		for c1 in (d["cases"] as Array):
+			# Une garantie par PAVÉ de quarante cases, pas par quartier : voir
+			# `_casier`. Un quartier du pays fait trois cents cases.
+			var cle := _casier(k, c1)
+			if not par_quartier.has(cle): par_quartier[cle] = []
+			(par_quartier[cle] as Array).append(c1)
+	var poses := 0
+	var couverts: Dictionary = {}
+	for k2 in par_quartier:
+		var mises := 0
+		var repli := Vector2i(-999, -999)
+		var repli_g := 0
+		for c0 in (par_quartier[k2] as Array):
+			var c: Vector2i = c0
+			var l: Vector2i = c - f.position
+			# Le trottoir d'une case de rue : la case ne doit pas être bâtie.
+			if not v.dedans(l) or not v.demi_libre(l.x * 2, l.y * 2, 2, 2): continue
+			var g := _graine(c.x, c.y, 8831)
+			# Le repli : la case de plus petite graine du quartier — un choix
+			# qui ne dépend ni de l'ordre des rues ni du cadrage.
+			if repli.x == -999 or g < repli_g:
+				repli = l
+				repli_g = g
+			if g % CABINE_TOUS_LES != 0: continue
+			_poser_la_cabine(v, l)
+			mises += 1
+		if mises == 0 and repli.x != -999:
+			_poser_la_cabine(v, repli)
+			mises += 1
+		poses += mises
+		if mises > 0: couverts[int(String(k2).split("/")[0])] = true
+	# ⭐⭐ ET UN DERNIER FILET POUR LES BOURGS. Le casier ci-dessus part des
+	# RUES TRACÉES (`voies`) : un village d'île dont les rues sont trop courtes
+	# pour être retenues (`MIN_RUE`) n'a aucun casier, donc aucune cabine —
+	# mesuré à l'Île de la Baie, là même où l'on commence la partie : zéro
+	# téléphone à vingt cases, donc aucun contrat, donc aucun premier billet.
+	# On balaie alors la fenêtre pour les quartiers restés sans rien, et on
+	# prend leur case de chaussée de plus petite graine : un choix qui ne
+	# dépend ni de l'ordre des rues ni du cadrage.
+	var repechage: Dictionary = {}
+	for j in v.taille.y:
+		for i in v.taille.x:
+			var l := Vector2i(i, j)
+			var q := v.quartier_en(l)
+			if q < 0 or couverts.has(q): continue
+			if v.carte == null or not v.carte.route(l): continue
+			if not v.demi_libre(l.x * 2, l.y * 2, 2, 2): continue
+			var g2 := _graine(l.x + f.position.x, l.y + f.position.y, 8831)
+			if not repechage.has(q) or g2 < int((repechage[q] as Array)[0]):
+				repechage[q] = [g2, l]
+	for q2 in repechage:
+		_poser_la_cabine(v, (repechage[q2] as Array)[1])
+		poses += 1
+	if poses > 0: print("[cabines] %d posée(s)" % poses)
+
+static func _poser_la_cabine(v: Ville2, l: Vector2i) -> void:
+	v.ajouter_objet(CABINE, (float(l.x) + 0.86) * CASE, (float(l.y) + 0.14) * CASE,
+		PI * 0.5)
 
 # ──────────────────────────────────────────── CE QU'ON NE BÂTIT PAS DESSUS
 
@@ -1279,9 +1795,13 @@ static func _l_emprise_du_rail(v: Ville2, f: Rect2i, cases: Array) -> void:
 				if vues.has(d) or not v.dedans(d) or not v.terre(d): continue
 				vues[d] = true
 				if v.carte.route(d): continue
-				v.poser_matiere(d, Ville2.M_TERRE)
+				# La terre sur trois cases (la voie et ses deux bords) : sur les
+				# cinq du couloir, une gare de bout de ligne devenait un aplat
+				# brun aussi large que son bourg.
+				var anneau := maxi(absi(di), absi(dj))
+				if anneau <= 1: v.poser_matiere(d, Ville2.M_TERRE)
 				# La lisière : l'anneau extérieur seulement.
-				if maxi(absi(di), absi(dj)) < LARGE_RESERVE_RAIL: continue
+				if anneau < LARGE_RESERVE_RAIL: continue
 				var alea := RandomNumberGenerator.new()
 				alea.seed = _graine(f.position.x + d.x, f.position.y + d.y, 4217)
 				if alea.randf() >= RAIL_BUISSONS: continue

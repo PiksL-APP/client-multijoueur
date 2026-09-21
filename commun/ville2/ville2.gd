@@ -426,8 +426,22 @@ static func chemin_utile(chemin: String) -> String:
 static func charger(chemin: String) -> Ville2:
 	var vrai := chemin_utile(chemin)
 	if not FileAccess.file_exists(vrai):
-		push_warning("ville introuvable : " + vrai)
-		return Ville2.new()
+		# ⚠ LA TUILE CUITE, GZIPPÉE (`outils/engendrer_tuiles.gd`) : le même
+		# nom avec `.gz`, quand le `.json` en clair (une tuile publiée) n'est
+		# pas là.
+		if FileAccess.file_exists(vrai + ".gz"):
+			vrai += ".gz"
+		else:
+			push_warning("ville introuvable : " + vrai)
+			return Ville2.new()
+	if vrai.ends_with(".gz"):
+		var g := FileAccess.open_compressed(vrai, FileAccess.READ, FileAccess.COMPRESSION_GZIP)
+		if g == null:
+			push_warning("ville illisible : " + vrai)
+			return Ville2.new()
+		var texte := g.get_as_text()
+		g.close()
+		return depuis_json(texte)
 	return depuis_json(FileAccess.get_file_as_string(vrai))
 
 ## Là où l'éditeur doit écrire : sur place au bureau, dans `user://` au
@@ -439,7 +453,8 @@ static func chemin_d_ecriture(chemin: String) -> String:
 
 func enregistrer(chemin: String) -> bool:
 	DirAccess.make_dir_recursive_absolute(chemin.get_base_dir())
-	var f := FileAccess.open(chemin, FileAccess.WRITE)
+	var f := FileAccess.open_compressed(chemin, FileAccess.WRITE, FileAccess.COMPRESSION_GZIP) \
+		if chemin.ends_with(".gz") else FileAccess.open(chemin, FileAccess.WRITE)
 	if f == null: return false
 	f.store_string(vers_json())
 	# ⚠ ON FERME. Sans `close()`, l'écriture n'atteint le disque qu'à la

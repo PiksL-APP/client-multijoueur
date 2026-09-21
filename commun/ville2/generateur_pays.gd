@@ -496,6 +496,15 @@ static func _relier_les_bouts(v: Ville2, interdites: Dictionary = {},
 			# mobilier de cour, et elle vaut ici mot pour mot.
 			if v.carte.case_prise(q): break
 			if _bloque(interdites, q, pas): break
+			# ⚠⚠ ET UNE ZONE INTERDITE L'EST AUSSI POUR LA COUTURE. `interdire`
+			# servait jusqu'ici à tenir les OBJETS hors d'une piste
+			# d'atterrissage ou d'une voie ferrée (`Proprete`) ; la rue
+			# recousue, elle, y passait. Le stade l'a montré : la rue de
+			# quartier coupée devant l'enceinte laissait deux culs-de-sac face
+			# à face, et cette passe les reliait EN LIGNE DROITE À TRAVERS LA
+			# PELOUSE — puis `rien_sur_les_routes` effaçait les tribunes
+			# posées sur le bitume neuf. Une zone interdite est interdite.
+			if v.est_interdit((float(q.x) + 0.5) * CASE, (float(q.y) + 0.5) * CASE): break
 			# ⭐ UN LOT SUR LE CHEMIN NE BLOQUE PLUS, S'IL EST PETIT ET SEUL (19/09).
 			# Mesuré : quatre des onze culs-de-sac intérieurs restants butaient
 			# sur un pavillon posé pile dans l'axe, avec la rue juste derrière.
@@ -983,21 +992,22 @@ static func _sommets(cases: Array) -> Array:
 	return bruts
 
 ## ⚠⚠ DES SIX RÉSEAUX DU PLAN, DEUX SEULEMENT DESCENDENT EN 3D AUJOURD'HUI :
-## LA VOIRIE ET LE TRAIN. Ce n'est pas un oubli, c'est une décision, et elle est
-## écrite en long dans `plan_pays.gd` :
+## LA VOIRIE ET LE MÉTRO. Ce n'est pas un oubli, c'est une décision :
 ##
-## * le MÉTRO est SOUTERRAIN, y compris sous la mer. `Ville2` n'a pas de niveau
-##   négatif utilisable : posé dans `rail`, il apparaîtrait cinq mètres sous le
-##   sol, donc flottant dans une tranchée invisible, et au milieu de la mer sur
-##   les tronçons sous-marins. Un défaut visible, pour rien ;
+## * le TRAIN est SOUTERRAIN depuis le 21/09 (« on va faire en sorte que les
+##   trains passent sous terre pour ne pas avoir de soucis avec les rails,
+##   seul le métro passera au-dessus du terrain », client). Il traversait la
+##   campagne, les collines et les bras de mer en coupant une route tous les
+##   deux cents mètres ; il passe en tranchée, et ses stations restent en
+##   surface. Voir `PlanPays.RESEAUX_DE_SURFACE` ;
 ## * le TRAM et le BUS n'ont pas de pièce dans le kit — ni rail de tramway, ni
 ##   abribus. Une ligne de tram posée comme du rail de train serait un train.
 ##
-## Les trois descendent donc par leurs STATIONS seulement, en `lieux` : le jeu
+## Ceux-là descendent donc par leurs STATIONS seulement, en `lieux` : le jeu
 ## sait déjà ce qu'est un lieu, la mini-carte les affichera, et le jour où les
 ## pièces existeront il n'y aura qu'à lire `plan["lignes"]` ici même.
 ## On ne dessine pas ce qu'on ne sait pas dessiner.
-const EN_SURFACE := ["train", "train2"]
+const EN_SURFACE := PLAN.RESEAUX_DE_SURFACE
 
 static func _les_voies(plan: Dictionary, v: Ville2, f: Rect2i) -> void:
 	for l in plan["lignes"]:
@@ -2282,7 +2292,7 @@ static func _cases_de_rail(plan: Dictionary) -> Dictionary:
 	var sortie := {}
 	for l in plan.get("lignes", []):
 		var d: Dictionary = l
-		if String(d.get("reseau", "")) not in ["train", "train2"]: continue
+		if String(d.get("reseau", "")) not in EN_SURFACE: continue
 		if bool(d.get("souterrain", false)): continue
 		for c in _cases_suivies(d["points"]):
 			# Une case de part et d'autre : la voie est large, et lissée.

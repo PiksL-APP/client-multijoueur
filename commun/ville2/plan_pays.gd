@@ -540,6 +540,27 @@ const R_TRAM := "tram"
 const R_BUS := "bus"
 ## ⚠ ET LE SIXIÈME RÉSEAU, QU'ON AVAIT OUBLIÉ : LA MER. Voir plus bas.
 const R_FERRY := "ferry"
+
+## ⭐⭐⭐ QUI ROULE À CIEL OUVERT, ET QUI PASSE DESSOUS (client, 21/09).
+##
+## « On va faire en sorte que les trains passent sous terre pour ne pas avoir
+## de soucis avec les rails, seul le métro passera au-dessus du terrain. »
+##
+## C'était le bon arbitrage, et il se voit sur n'importe quelle capture : le
+## train du pays est une ligne INTERURBAINE. Elle traverse la campagne, les
+## collines et les bras de mer, elle coupe les routes tous les deux cents
+## mètres, et il fallait la soulever (`_profil_du_rail`), soulever les
+## tabliers d'autoroute au-dessus d'elle (`HAUT_RAIL_MAX + CAISSE_TRAIN`),
+## écarter les rues qui la longent (`_ecarter_du_rail`) et réserver son
+## emprise au lotisseur (`_l_emprise_du_rail`). Quatre rustines pour une voie
+## qui, dans la vraie vie comme dans GTA, passe en tranchée.
+##
+## Le MÉTRO, lui, est urbain : stations tous les trente-quatre cases, tracé
+## dans la rue, et c'est exactement ce qu'on veut voir depuis la voiture.
+##
+## Cette liste est LA source : `GenerateurPays.EN_SURFACE` en découle, et
+## tout ce qui pose du rail, une gare, un quai ou une rame la lit.
+const RESEAUX_DE_SURFACE := [R_METRO]
 ## Et la voirie, qui a sa propre hiérarchie.
 const V_PRIMAIRE := "primaire"
 const V_SECONDAIRE := "secondaire"
@@ -1798,8 +1819,10 @@ static func _poser_route(plan: Dictionary, classe: String, genre: String, nom: S
 static func _les_reseaux(plan: Dictionary, ctx: Dictionary,
 		alea: RandomNumberGenerator, donnees: Dictionary) -> void:
 	var trajets := _lire(FICHIER_TRAJETS)
-	var groupes := [["train", R_TRAIN, false, "train_lines"],
-		["metro", R_METRO, true, "metro_lines"],
+	# ⚠ LE TROISIÈME CHAMP EST « SOUTERRAIN », ET IL A CHANGÉ DE CAMP le
+	# 21/09 : le train descend, le métro monte. Voir `RESEAUX_DE_SURFACE`.
+	var groupes := [["train", R_TRAIN, true, "train_lines"],
+		["metro", R_METRO, false, "metro_lines"],
 		["tram", R_TRAM, false, "tram_lines"]]
 	var posees := 0
 	for g in groupes:

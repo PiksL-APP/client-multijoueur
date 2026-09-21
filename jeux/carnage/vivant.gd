@@ -2345,13 +2345,23 @@ const ECART_WAGON := 12.0
 const LARGEUR_TRAIN := 30.0       ## px de part et d'autre de l'axe : ce qu'il balaie
 const QUAI := 150.0               ## px : d'où l'on peut monter, une fois à l'arrêt
 const DEGAT_TRAIN := 400.0        ## on ne survit pas à un train, ce n'est pas un réglage
-var trains: Array = []            ## {id, s, sens, v, arret}
+var trains: Array = []            ## {id, l, s, sens, v, arret}
 var _voie: Dictionary = {}
+var _lignes: Array = []           ## [{"pts": PackedVector2Array, "cum": PackedFloat32Array, "L": float, "gares": Array}]
 
-## La voie ferrée sous forme PARAMÉTRÉE. `plan.rail()` la donne comme une
-## équation `n·p = c` en unités 3D — parfait pour un nuanceur qui teste « suis-je
-## sur le ballast ? », inutilisable pour un train, qui se repère par son
-## abscisse le long de la voie et pas par sa distance à un axe.
+## ⭐⭐ LA VOIE EST UNE POLYLIGNE, ET IL PEUT Y EN AVOIR PLUSIEURS (19/09).
+##
+## Jusque-là la voie était UNE DROITE — `plan.rail()` la donnait comme une
+## équation `n·p = c`, celle de la ville dessinée. Sur le pays, `rail()` ne
+## rendait que le premier point du rail de la fenêtre courante : les rames
+## roulaient sur une droite qui n'existait pas, à des distances astronomiques
+## (« trains=2/2906345044967424px » dans le journal du banc). Le pays a
+## quatre lignes de train (`plan["lignes"]`, réseaux `train` et `train2`),
+## chacune avec ses arrêts : quand le plan sait les donner
+## (`PlanJeuPays.lignes_de_train`), chaque ligne devient une polyligne en
+## pixels de jeu, ses gares des abscisses le long d'elle, et chaque ligne
+## reçoit ses rames. La droite de la ville dessinée devient une polyligne à
+## deux points — le même code roule partout.
 ##
 ## ⚠ Le passage en pixels de jeu ne s'oublie pas : `rail()` travaille en unités
 ## 3D (une tuile = 10), la simulation en pixels (une tuile = 100). Sans la
@@ -2384,34 +2394,132 @@ func voie() -> Dictionary:
 	_voie = {"o": origine, "d": d, "n": n, "t0": t0 + 200.0, "t1": t1 - 200.0}
 	return _voie
 
+## Les lignes, bâties une fois. Celles du plan du pays si le plan les donne ;
+## sinon la droite de la ville, en polyligne à deux points, avec un quai tous
+## les `ECART_GARES` px.
+func lignes() -> Array:
+	if not _lignes.is_empty():
+		return _lignes
+	if plan.has_method("lignes_de_train"):
+		for l in plan.call("lignes_de_train"):
+			var d: Dictionary = l
+			var pts := PackedVector2Array(d["points"])
+			if pts.size() < 2: continue
+			var ligne := _polyligne(pts)
+			var gares_l: Array = []
+			for g in d.get("gares", []):
+				gares_l.append(abscisse_sur(ligne, Vector2(g)))
+			gares_l.sort()
+			ligne["gares"] = gares_l
+			ligne["nom"] = String(d.get("nom", ""))
+			_lignes.append(ligne)
+	if _lignes.is_empty():
+		var v := voie()
+		var o: Vector2 = v["o"]
+		var dd: Vector2 = v["d"]
+		var ligne2 := _polyligne(PackedVector2Array([o + dd * float(v["t0"]), o + dd * float(v["t1"])]))
+		var gares2: Array = []
+		var s := ECART_GARES * 0.5
+		while s < float(ligne2["L"]):
+			gares2.append(s)
+			s += ECART_GARES
+		ligne2["gares"] = gares2
+		ligne2["nom"] = ""
+		_lignes.append(ligne2)
+	return _lignes
+
+static func _polyligne(pts: PackedVector2Array) -> Dictionary:
+	var cum := PackedFloat32Array()
+	cum.resize(pts.size())
+	cum[0] = 0.0
+	for i in range(1, pts.size()):
+		cum[i] = cum[i - 1] + pts[i].distance_to(pts[i - 1])
+	return {"pts": pts, "cum": cum, "L": cum[pts.size() - 1]}
+
+## Le segment qui porte l'abscisse `s` : son indice, et la fraction parcourue.
+static func _segment(ligne: Dictionary, s: float) -> Array:
+	var cum: PackedFloat32Array = ligne["cum"]
+	var n := cum.size()
+	var sc := clampf(s, 0.0, float(ligne["L"]))
+	var lo := 0
+	var hi := n - 2
+	while lo < hi:
+		var mid := (lo + hi + 1) / 2
+		if cum[mid] <= sc: lo = mid
+		else: hi = mid - 1
+	var longueur := cum[lo + 1] - cum[lo]
+	var f := 0.0 if longueur <= 0.0001 else (sc - cum[lo]) / longueur
+	return [lo, f]
+
+## L'abscisse du point de la ligne le plus proche de `p`.
+static func abscisse_sur(ligne: Dictionary, p: Vector2) -> float:
+	var pts: PackedVector2Array = ligne["pts"]
+	var cum: PackedFloat32Array = ligne["cum"]
+	var mieux := 0.0
+	var dist := INF
+	for i in range(1, pts.size()):
+		var a := pts[i - 1]
+		var b := pts[i]
+		var ab := b - a
+		var l2 := ab.length_squared()
+		var t := 0.0 if l2 <= 0.0001 else clampf((p - a).dot(ab) / l2, 0.0, 1.0)
+		var q := a + ab * t
+		var dq := q.distance_squared_to(p)
+		if dq < dist:
+			dist = dq
+			mieux = cum[i - 1] + sqrt(l2) * t
+	return mieux
+
+func nombre_de_lignes() -> int:
+	return lignes().size()
+
+func longueur_de_voie(l: int = 0) -> float:
+	return float(lignes()[clampi(l, 0, lignes().size() - 1)]["L"])
+
 ## Le point de la voie à cette abscisse. C'est la seule fonction dont le client
 ## a besoin pour poser une rame : l'hôte ne diffuse qu'un nombre.
-func point_de_voie(s: float) -> Vector2:
-	var v := voie()
-	return Vector2(v["o"]) + Vector2(v["d"]) * s
+func point_de_voie(s: float, l: int = 0) -> Vector2:
+	var ligne: Dictionary = lignes()[clampi(l, 0, lignes().size() - 1)]
+	var seg := _segment(ligne, s)
+	var pts: PackedVector2Array = ligne["pts"]
+	return pts[seg[0]].lerp(pts[seg[0] + 1], float(seg[1]))
 
-func cap_de_voie() -> float:
-	return Vector2(voie()["d"]).angle()
+## Le cap de la voie à cette abscisse (sur une droite, partout le même).
+func cap_de_voie(s: float = 0.0, l: int = 0) -> float:
+	var ligne: Dictionary = lignes()[clampi(l, 0, lignes().size() - 1)]
+	var seg := _segment(ligne, s)
+	var pts: PackedVector2Array = ligne["pts"]
+	return (pts[seg[0] + 1] - pts[seg[0]]).angle()
 
-## Les quais, régulièrement espacés depuis le terminus sud. Ils ne sont pas
-## posés à la main : la voie change avec le code de la manche, une liste écrite
+func normale_de_voie(s: float = 0.0, l: int = 0) -> Vector2:
+	return Vector2.RIGHT.rotated(cap_de_voie(s, l) + PI * 0.5)
+
+func abscisse_de_voie(p: Vector2, l: int = 0) -> float:
+	return abscisse_sur(lignes()[clampi(l, 0, lignes().size() - 1)], p)
+
+## La ligne la plus proche d'un point, et l'abscisse dessus : [l, s, distance].
+func voie_la_plus_proche(p: Vector2) -> Array:
+	var mieux := [0, 0.0, INF]
+	for l in lignes().size():
+		var s := abscisse_de_voie(p, l)
+		var d := point_de_voie(s, l).distance_to(p)
+		if d < float(mieux[2]):
+			mieux = [l, s, d]
+	return mieux
+
+## Les quais d'une ligne : des abscisses. Sur le pays, ce sont les arrêts du
+## plan ; sur la ville dessinée, un tous les `ECART_GARES` px depuis le
+## terminus sud — la voie change avec le code de la manche, une liste écrite
 ## en dur planterait des gares dans la rivière une manche sur deux.
-func gares() -> Array:
-	var v := voie()
-	var liste: Array = []
-	var s: float = float(v["t0"]) + ECART_GARES * 0.5
-	while s < float(v["t1"]):
-		liste.append(s)
-		s += ECART_GARES
-	return liste
+func gares(l: int = 0) -> Array:
+	return lignes()[clampi(l, 0, lignes().size() - 1)]["gares"]
 
 ## La prochaine gare DEVANT soi, ou le terminus s'il n'y en a plus. La marge de
 ## dix pixels est ce qui empêche un train qui vient de repartir de considérer
 ## le quai qu'il quitte comme son prochain arrêt et de rester planté là.
-func _prochaine_gare(s: float, sens: float) -> float:
-	var v := voie()
-	var mieux: float = float(v["t1"]) if sens > 0.0 else float(v["t0"])
-	for g in gares():
+func _prochaine_gare(s: float, sens: float, l: int = 0) -> float:
+	var mieux: float = longueur_de_voie(l) if sens > 0.0 else 0.0
+	for g in gares(l):
 		var g_f := float(g)
 		if sens > 0.0 and g_f > s + 10.0:
 			mieux = minf(mieux, g_f)
@@ -2420,13 +2528,13 @@ func _prochaine_gare(s: float, sens: float) -> float:
 	return mieux
 
 func _mettre_les_rames_en_ligne() -> void:
-	var v := voie()
-	var longueur: float = float(v["t1"]) - float(v["t0"])
-	for k in TRAINS:
-		# Réparties sur la ligne et lancées en sens contraires : deux rames qui
-		# partent du même bout dans le même sens, c'est une seule rame.
-		trains.append({"id": _id(), "sens": 1.0 if k % 2 == 0 else -1.0, "v": 0.0,
-			"arret": 0.0, "freine": false, "s": float(v["t0"]) + longueur * (float(k) + 0.5) / float(TRAINS)})
+	for l in lignes().size():
+		var longueur := longueur_de_voie(l)
+		for k in TRAINS:
+			# Réparties sur la ligne et lancées en sens contraires : deux rames
+			# qui partent du même bout dans le même sens, c'est une seule rame.
+			trains.append({"id": _id(), "l": l, "sens": 1.0 if k % 2 == 0 else -1.0, "v": 0.0,
+				"arret": 0.0, "freine": false, "s": longueur * (float(k) + 0.5) / float(TRAINS)})
 
 static func longueur_de_rame() -> float:
 	return float(WAGONS) * LONG_WAGON + float(WAGONS - 1) * ECART_WAGON
@@ -2434,7 +2542,6 @@ static func longueur_de_rame() -> float:
 func _animer_les_trains(delta: float, joueurs: Dictionary) -> void:
 	if trains.is_empty():
 		_mettre_les_rames_en_ligne()
-	var v := voie()
 	for t in trains:
 		if float(t["arret"]) > 0.0:
 			t["v"] = 0.0
@@ -2442,9 +2549,10 @@ func _animer_les_trains(delta: float, joueurs: Dictionary) -> void:
 			if float(t["arret"]) <= 0.0:
 				emettre("train", {"i": int(t["id"]), "e": "part"})
 			continue
+		var l := int(t.get("l", 0))
 		var sens := float(t["sens"])
 		var s := float(t["s"])
-		var but := _prochaine_gare(s, sens)
+		var but := _prochaine_gare(s, sens, l)
 		var reste: float = absf(but - s)
 		var vitesse := float(t["v"])
 		# La distance qu'il faut pour s'arrêter à cette vitesse-là. Sans elle,
@@ -2470,14 +2578,14 @@ func _animer_les_trains(delta: float, joueurs: Dictionary) -> void:
 			t["freine"] = false
 			t["arret"] = ARRET_EN_GARE
 			emettre("train", {"i": int(t["id"]), "e": "quai",
-				"x": int(point_de_voie(s).x), "y": int(point_de_voie(s).y)})
+				"x": int(point_de_voie(s, l).x), "y": int(point_de_voie(s, l).y)})
 			# ⚠ LE DEMI-TOUR SE FAIT ICI, À L'ARRÊT, et nulle part ailleurs.
 			# Testé à chaque image sur « suis-je au bout de la ligne ? », il
 			# s'appliquait AUSSI à la première image du départ — la rame était
 			# encore à un dixième de pixel du terminus, elle repartait, et se
 			# retournait aussitôt. Elle passait sa vie à faire des demi-tours
 			# sur place au bout du quai : cinquante-cinq en cinq minutes.
-			if s <= float(v["t0"]) + 1.0 or s >= float(v["t1"]) - 1.0:
+			if s <= 1.0 or s >= longueur_de_voie(l) - 1.0:
 				t["sens"] = -sens
 		else:
 			s += sens * vitesse * delta
@@ -2495,20 +2603,14 @@ func _animer_les_trains(delta: float, joueurs: Dictionary) -> void:
 func _faucher(t: Dictionary, joueurs: Dictionary) -> void:
 	if float(t["v"]) < 60.0:
 		return
-	var v := voie()
-	var o: Vector2 = v["o"]
-	var d: Vector2 = v["d"]
-	var n: Vector2 = v["n"]
-	var tete := float(t["s"])
-	var queue := tete - float(t["sens"]) * longueur_de_rame()
-	var bas: float = minf(tete, queue)
-	var haut: float = maxf(tete, queue)
+	# La rame, de sa tête à sa queue, prise comme un segment : trois cases de
+	# long, la corde d'une courbe du kit s'en écarte de moins d'une largeur.
+	var l := int(t.get("l", 0))
+	var tete := point_de_voie(float(t["s"]), l)
+	var queue := point_de_voie(float(t["s"]) - float(t["sens"]) * longueur_de_rame(), l)
 	var sous_la_rame := func(p: Vector2) -> bool:
-		var relatif := p - o
-		if absf(relatif.dot(n)) > LARGEUR_TRAIN:
-			return false
-		var le_long := relatif.dot(d)
-		return le_long >= bas and le_long <= haut
+		return Geometry2D.get_closest_point_to_segment(p, tete, queue).distance_squared_to(p) \
+			<= LARGEUR_TRAIN * LARGEUR_TRAIN
 	for personne in gens.duplicate():
 		if sous_la_rame.call(Vector2(personne["p"])):
 			# Personne ne marque ce point : le train n'appartient à aucun
@@ -2531,20 +2633,16 @@ func _faucher(t: Dictionary, joueurs: Dictionary) -> void:
 ## la règle de montée soit la même que celle du fauchage — un quai où l'on peut
 ## monter et se faire écraser en même temps serait une farce.
 func rame_a_quai(point: Vector2) -> Dictionary:
-	var v := voie()
-	var o: Vector2 = v["o"]
-	var d: Vector2 = v["d"]
 	for t in trains:
 		if float(t["arret"]) <= 0.0:
 			continue
-		var tete := float(t["s"])
-		var queue := tete - float(t["sens"]) * longueur_de_rame()
-		var le_long := (point - o).dot(d)
-		if le_long < minf(tete, queue) - QUAI or le_long > maxf(tete, queue) + QUAI:
-			continue
-		if absf((point - o).dot(Vector2(v["n"]))) > QUAI:
-			continue
-		return t
+		var l := int(t.get("l", 0))
+		var tete := point_de_voie(float(t["s"]), l)
+		var queue := point_de_voie(float(t["s"]) - float(t["sens"]) * longueur_de_rame(), l)
+		# À portée de quai de n'importe quel point de la rame : la portière la
+		# plus proche, pas seulement la motrice.
+		if Geometry2D.get_closest_point_to_segment(point, tete, queue).distance_to(point) <= QUAI:
+			return t
 	return {}
 
 func train_par_id(id: int) -> Dictionary:
@@ -2733,14 +2831,13 @@ func casses() -> Array:
 		return _casses
 	var liste: Array = []
 	var quais := gares()
-	var v := voie()
 	for k in range(quais.size() - 1):
 		var s := (float(quais[k]) + float(quais[k + 1])) * 0.5
 		# Alternées d'un côté et de l'autre de la voie : toutes du même bord,
 		# elles ne se distinguaient plus des quais en un coup d'œil sur la carte.
 		var cote := 1.0 if k % 2 == 0 else -1.0
 		liste.append({"i": k, "s": s, "cote": cote,
-			"p": point_de_voie(s) + Vector2(v["n"]) * cote * ECART_CASSE})
+			"p": point_de_voie(s) + normale_de_voie(s) * cote * ECART_CASSE})
 	_casses = liste
 	return _casses
 
@@ -3342,7 +3439,7 @@ func instantane(joueurs: Dictionary) -> Dictionary:
 	var vus_trains: Array = []
 	for t in trains:
 		vus_trains.append([int(t["id"]), int(t["s"]), int(t["sens"]), int(t["v"]),
-			int(float(t["arret"]) * 10.0)])
+			int(float(t["arret"]) * 10.0), int(t.get("l", 0))])
 
 	# LES REPAIRES PRIS : deux entiers par repaire, et il n'y en a qu'une
 	# poignée par manche. Ils voyagent parce que la VILLE change — le tag, les
@@ -3449,9 +3546,10 @@ func appliquer_instantane(charge: Dictionary) -> void:
 	# dans un dixième de seconde. Sans cette extrapolation, un train à neuf
 	# cents pixels par seconde avançait par bonds de cent vingt pixels.
 	trains = _fusionner(trains, charge.get("tr", []), func(entree: Array) -> Dictionary:
-		return {"id": int(entree[0]), "s": float(entree[1]), "sens": float(entree[2]),
+		var l_t := int(entree[5]) if entree.size() > 5 else 0
+		return {"id": int(entree[0]), "l": l_t, "s": float(entree[1]), "sens": float(entree[2]),
 			"v": float(entree[3]), "arret": float(entree[4]) / 10.0, "age": 0.0,
-			"p": point_de_voie(float(entree[1]))})
+			"p": point_de_voie(float(entree[1]), l_t)})
 
 	feux = _fusionner(feux, charge.get("f", []), func(entree: Array) -> Dictionary:
 		return {"id": int(entree[0]), "p": Vector2(float(entree[1]), float(entree[2])),

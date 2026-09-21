@@ -40,3 +40,7 @@ Claude outputs/
 # le gros objet est dans l'HISTORIQUE — l'effacer de l'arbre ne suffit pas.
 *.zip
 *.tpz
+
+# Les tuiles du pays cuites par `outils/engendrer_tuiles.gd` : elles naissent
+# a l export et partent dans le paquet, jamais dans le depot.
+cartes/pays-*.json.gz

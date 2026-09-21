@@ -70,7 +70,9 @@ func _ready() -> void:
 		Reseau.solo = true
 	var jeu := _argument(arguments, "--banc-jeu")
 	if jeu != "":
-		_banc_partie(jeu, float(_argument(arguments, "--manche", "25")))
+		_banc_partie(jeu, float(_argument(arguments, "--manche", "25")),
+			_argument(arguments, "--cliche"), float(_argument(arguments, "--cliche-a", "10")),
+			_argument(arguments, "--cliche-quand"))
 		return
 	# DANS LE NAVIGATEUR, C'EST LA PAGE QUI TIENT LES MENUS : le kit de la
 	# maquette y tourne tel quel, en HTML, au-dessus de la toile du moteur.
@@ -218,7 +220,15 @@ func _photographier(dossier: String) -> void:
 ## la manche au pilote automatique et déposer un score. C'est la seule
 ## vérification qui traverse TOUTE la chaîne — appariement, élection de
 ## l'hôte, simulation, diffusion, dépôt en base — sans ouvrir un navigateur.
-func _banc_partie(jeu: String, manche: float) -> void:
+## ⭐ `--cliche=/tmp/jeu.png --cliche-a=12` : une photo DE LA PARTIE, prise
+## `cliche_a` secondes après le lancement de la manche (sous xvfb, pas en
+## headless). C'est la seule façon de juger la ville TELLE QUE LE JOUEUR LA
+## VOIT — caméra du jeu, HUD, heure — et non telle que l'éditeur ou
+## `photo_v2.sh` la cadrent. Le banc continue après la photo.
+## `--cliche-quand=train` : la photo attend qu'une rame soit à quai près du
+## pilote (au plus tard à `cliche_a` + 240 s), pour photographier le train sans
+## viser une seconde précise.
+func _banc_partie(jeu: String, manche: float, cliche := "", cliche_a := 10.0, cliche_quand := "") -> void:
 	Session.definir_pseudo("Banc-" + Session.id.substr(0, 4))
 	Partie.duree_forcee = manche
 	Commandes.pilote_automatique = true
@@ -226,9 +236,22 @@ func _banc_partie(jeu: String, manche: float) -> void:
 
 	var lance := false
 	var ecoule := 0.0
+	var depuis_le_lancement := 0.0
 	while ecoule < manche + 45.0:
 		await get_tree().create_timer(0.4).timeout
 		ecoule += 0.4
+		if lance:
+			depuis_le_lancement += 0.4
+			var pret := depuis_le_lancement >= cliche_a
+			if pret and cliche_quand == "train" and depuis_le_lancement < cliche_a + 240.0:
+				pret = _ecran != null and _ecran.has_method("train_a_quai_pres") and _ecran.call("train_a_quai_pres", 500.0)
+			if cliche != "" and pret:
+				await RenderingServer.frame_post_draw
+				var image := get_viewport().get_texture().get_image()
+				if image != null:
+					image.save_png(cliche)
+					print("[banc] cliché : " + cliche)
+				cliche = ""
 		# Pilote automatique : on avance en tournant au hasard. Il ne s'agit
 		# pas de bien jouer, mais de produire des collisions et des messages.
 		Commandes.direction_simulee = Vector2(randf_range(-1.0, 1.0), 1.0)
@@ -237,6 +260,12 @@ func _banc_partie(jeu: String, manche: float) -> void:
 			if _ecran.lancer_pour_banc():
 				lance = true
 				print("[banc] manche lancée")
+		# ⚠ LE SALON LANCE SOUVENT TOUT SEUL (son pilote part à six secondes,
+		# avant qu'on lui demande) : on est alors déjà en partie sans être
+		# passé par la ligne du dessus, et la photo — comptée depuis le
+		# lancement — n'arrivait jamais. Être en partie suffit.
+		if not lance and _nom_ecran != "salon" and _nom_ecran != ACCUEIL:
+			lance = true
 		# ⚠ La fin d'une manche ramène AU SALON depuis qu'il n'y a plus d'écran
 		# de résultats : le banc guettait « resultats » et ne voyait donc plus
 		# jamais la fin — il abandonnait au bout de son chrono, en annonçant

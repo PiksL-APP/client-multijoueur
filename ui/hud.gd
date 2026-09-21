@@ -74,31 +74,57 @@ func _peindre_le_viseur(taille: Vector2) -> void:
 		for d in [Vector2.RIGHT, Vector2.LEFT, Vector2.UP, Vector2.DOWN]:
 			draw_line(c + d * 5.0, c + d * 13.0, couleur, e)
 
-## Chrono et fortunes : un cartouche, le chrono en Archivo Black, les joueurs
-## dans l'ordre de la table, chacun souligné d'une barre à la longueur de sa
-## fortune — la course se lit sans comparer des chiffres.
+## ⭐ EN HAUT À GAUCHE : L'AVATAR, PUIS LES FORTUNES. Plus de chrono — « il ne
+## doit plus y avoir de temps restant » (client, 19/09) : Carnage est une
+## ville où l'on reste, pas une manche qu'on chronomètre. À sa place, le
+## carton du joueur, VIVANT : il trottine quand on court, se penche dans les
+## virages au volant, encaisse les coups en rougissant, tombe quand on est à
+## terre, dit « miam » et fait monter les dollars qu'on ramasse. C'est le
+## visage qu'on a choisi, et il réagit à l'image près à ce qu'on fait.
+const AVATAR := 64.0
+const PLANCHE := preload("res://modeles/cartons/planche.png")
+const TUILE := 128.0                      ## la planche : 8 × 8 tuiles de 128 px
+
 func _peindre_les_scores() -> void:
 	var lignes := scores.size()
-	var hauteur := 16.0 + 34.0 + lignes * 24.0 + 4.0
+	var avatar: Dictionary = fiche.get("avatar", {})
+	# Un jeu sans avatar (ÉNIGME, le banc d'essai) garde son chrono en tête.
+	var haut_avatar := AVATAR + 8.0 if not avatar.is_empty() else 34.0
+	var hauteur := 14.0 + haut_avatar + lignes * 24.0 + 10.0
+	var critique := not avatar.is_empty() and float(avatar.get("vie", 1.0)) < 0.3 \
+		and not bool(avatar.get("a_terre", false))
 	var rect := Rect2(Vector2(MARGE, MARGE), Vector2(LARGEUR_SCORES, hauteur))
-	Charte.cartouche(self, rect, Charte.ROSE if chrono_critique else Color(0, 0, 0, 0))
+	Charte.cartouche(self, rect, Charte.ROSE if critique and fmod(temps, 0.8) < 0.45 else Color(0, 0, 0, 0))
 	var x := rect.position.x + RETRAIT
 	var y := rect.position.y + 14.0
-	var minutes := int(chrono) / 60
-	var secondes := int(chrono) % 60
-	var texte_chrono := "%d:%02d" % [minutes, secondes]
-	var couleur_chrono := Charte.ROSE if chrono_critique and fmod(temps, 0.6) < 0.35 else Color.WHITE
-	Charte.titre_dessine(self, Vector2(x, y + 26.0), texte_chrono, 28, couleur_chrono, 0)
-	var libelle_chrono := "en ville" if sans_limite else "restant"
-	var ll := Charte.largeur_capitales(libelle_chrono, 11)
-	Charte.capitales_dessinees(self, Vector2(rect.end.x - RETRAIT - ll, y + 24.0), libelle_chrono, 11, Charte.ENCRE_FAIBLE)
-	y += 42.0
+	if avatar.is_empty():
+		var minutes := int(chrono) / 60
+		var secondes := int(chrono) % 60
+		var couleur_chrono := Charte.ROSE if chrono_critique and fmod(temps, 0.6) < 0.35 else Color.WHITE
+		Charte.titre_dessine(self, Vector2(x, y + 26.0), "%d:%02d" % [minutes, secondes], 28, couleur_chrono, 0)
+		var libelle_chrono := "en ville" if sans_limite else "restant"
+		var ll := Charte.largeur_capitales(libelle_chrono, 11)
+		Charte.capitales_dessinees(self, Vector2(rect.end.x - RETRAIT - ll, y + 24.0), libelle_chrono, 11, Charte.ENCRE_FAIBLE)
+		y += haut_avatar + 8.0
+	else:
+		_peindre_l_avatar(Vector2(x, y), avatar)
+		# À droite du carton : mon nom et ma fortune, en grand.
+		for s in scores:
+			if not bool(s.get("moi", false)): continue
+			var xg := x + AVATAR + 14.0
+			Charte.capitales_dessinees(self, Vector2(xg, y + 18.0), String(s.get("pseudo", "?")).left(14), 12,
+				Color.WHITE, 0.16)
+			Charte.titre_dessine(self, Vector2(xg, y + 48.0), "$" + str(int(s.get("score", 0))), 24, Color.WHITE, 0)
+			break
+		y += haut_avatar
 	var maximum := 1
 	for s in scores:
 		maximum = max(maximum, int(s.get("score", 0)))
 	for s in scores:
-		var couleur: Color = s.get("couleur", Color.WHITE)
 		var moi: bool = s.get("moi", false)
+		# Moi, je suis déjà à côté du carton : la liste ne montre que les autres.
+		if moi and not avatar.is_empty(): continue
+		var couleur: Color = s.get("couleur", Color.WHITE)
 		draw_rect(Rect2(Vector2(x, y + 3.0), Vector2(8, 8)), couleur, true)
 		var pseudo := String(s.get("pseudo", "?")).left(14)
 		Charte.capitales_dessinees(self, Vector2(x + 16.0, y + 11.0), pseudo, 12,
@@ -116,13 +142,90 @@ func _peindre_les_scores() -> void:
 			draw_rect(Rect2(Vector2(x + 16.0, y + 17.0), Vector2(largeur_barre * part, 2.0)), couleur, true)
 		y += 24.0
 
+## LE CARTON QUI VIT. Tout est dans la transformation : une translation qui
+## trottine, une rotation qui se penche, une échelle qui encaisse. Par-dessus,
+## les petits signes : le voile rouge du coup, la goutte de sueur quand la vie
+## baisse, les traits de vitesse, le « +$ » qui monte, le mot d'humeur.
+func _peindre_l_avatar(coin: Vector2, a: Dictionary) -> void:
+	var centre := coin + Vector2(AVATAR, AVATAR) * 0.5
+	var pied: bool = a.get("pied", true)
+	var allure: float = a.get("allure", 0.0)
+	var volant: float = a.get("volant", 0.0)
+	var coup: float = a.get("coup", 99.0)
+	var a_terre: bool = a.get("a_terre", false)
+	var vie: float = a.get("vie", 1.0)
+	var tir: bool = a.get("tir", false)
+	var decalage := Vector2.ZERO
+	var angle := 0.0
+	var echelle := Vector2.ONE
+	if a_terre:
+		# À terre : couché sur le côté, gris, et il ne bouge plus.
+		angle = PI * 0.5
+		decalage = Vector2(0.0, 6.0)
+	elif pied:
+		# La respiration à l'arrêt, le trot en marche : plus on court, plus
+		# ça saute et plus ça se penche.
+		echelle = Vector2.ONE * (1.0 + sin(temps * 2.4) * 0.015)
+		decalage.y = -absf(sin(temps * 13.0)) * 5.0 * allure
+		angle = sin(temps * 13.0) * 0.10 * allure
+	else:
+		# Au volant : penché dans le virage, et le petit tremblement du moteur.
+		angle = -volant * 0.28
+		decalage.y = sin(temps * 40.0) * 0.8 * allure
+	if coup < 0.35:
+		# Le coup : une secousse qui s'éteint en un tiers de seconde.
+		var force := (0.35 - coup) / 0.35
+		decalage += Vector2(sin(temps * 90.0), cos(temps * 70.0)) * 4.0 * force
+	if tir and not a_terre:
+		# Le recul : il se tasse et recule un peu.
+		echelle *= Vector2(1.06, 0.94)
+		decalage.x -= 2.0
+	# Le carton lui-même : sa tuile sur la planche.
+	var indice: int = a.get("carton", 0)
+	var region := Rect2(Vector2(float(indice % 8), float(indice / 8)) * TUILE, Vector2(TUILE, TUILE))
+	var teinte := Color.WHITE
+	if a_terre: teinte = Color(0.55, 0.55, 0.6)
+	elif bool(a.get("sonne", false)): teinte = Color(1.0, 0.9, 0.6)
+	draw_set_transform(centre + decalage, angle, echelle)
+	draw_texture_rect_region(PLANCHE, Rect2(-AVATAR * 0.5, -AVATAR * 0.5, AVATAR, AVATAR), region, teinte)
+	# Le voile rouge du coup, sur le carton et avec lui.
+	if coup < 0.5:
+		draw_rect(Rect2(-AVATAR * 0.5, -AVATAR * 0.5, AVATAR, AVATAR), Color(1.0, 0.1, 0.2, (0.5 - coup) * 0.9), true)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# Les traits de vitesse, derrière : à pied dès qu'on court, au volant dès
+	# qu'on roule.
+	var vitesse := allure if not pied else maxf(0.0, allure - 0.5) * 2.0
+	if vitesse > 0.05 and not a_terre:
+		for k in 3:
+			var yy := centre.y - 14.0 + float(k) * 14.0
+			var l := (10.0 + float((k * 7) % 9)) * vitesse
+			var phase := fmod(temps * 6.0 + float(k) * 0.7, 1.0)
+			draw_line(Vector2(coin.x - 4.0 - phase * 6.0, yy), Vector2(coin.x - 4.0 - phase * 6.0 - l, yy),
+				Color(1, 1, 1, 0.35 * (1.0 - phase)), 2.0)
+	# La goutte de sueur quand la vie est basse.
+	if vie < 0.3 and not a_terre:
+		var g := coin + Vector2(AVATAR - 6.0, 6.0 + fmod(temps * 1.5, 1.0) * 10.0)
+		draw_circle(g, 3.0, Color(0.45, 0.75, 1.0, 0.9))
+		draw_line(g + Vector2(0, -3.0), g + Vector2(0, -7.0), Color(0.45, 0.75, 1.0, 0.9), 2.0)
+	# Le gain qui monte, puis le mot d'humeur — au-dessus du carton.
+	var gain_t: float = a.get("gain_t", 9.0)
+	if gain_t < 1.2:
+		var montant: int = a.get("gain", 0)
+		var texte := ("+$%d" if montant > 0 else "−$%d") % absi(montant)
+		var alpha := 1.0 - gain_t / 1.2
+		Charte.titre_dessine(self, Vector2(coin.x + 2.0, coin.y + AVATAR - 4.0 - gain_t * 30.0), texte, 14,
+			Color(Charte.CYAN if montant > 0 else Charte.ROSE, alpha), 0)
+	var mot_t: float = a.get("mot_t", 9.0)
+	if mot_t < 1.4:
+		var alpha2 := 1.0 - mot_t / 1.4
+		Charte.capitales_dessinees(self, Vector2(coin.x + AVATAR - 10.0, coin.y + AVATAR - 2.0 - mot_t * 10.0),
+			String(a.get("mot", "")), 11, Color(Charte.ORANGE, alpha2), 0.16)
+
 ## En haut à droite : l'état du réseau et du son, en petites capitales. Le
 ## radar de Carnage se pose juste en dessous.
 func _peindre_le_reseau(taille: Vector2) -> void:
 	var y := MARGE + 12.0
-	# Au doigt, pas de touche : le son se coupe dans le menu ≡ du pavé.
-	var son := ("son coupé" if not son_actif else "son") if Tactile.actif() \
-		else ("son coupé  [M]" if not son_actif else "[M] son")
+	var son := "son coupé  [M]" if not son_actif else "[M] son"
 	var largeur_son := Charte.largeur_capitales(son, 10, 0.16)
 	var x := taille.x - MARGE - largeur_son
 	Charte.capitales_dessinees(self, Vector2(x, y), son, 10,

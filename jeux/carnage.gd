@@ -229,6 +229,17 @@ var _chantier: MorceauVille = null   ## le morceau en cours de construction, une
 var _ville_dessinee: MorceauxV2 = null
 ## Le pays, quand on le joue : les neuf fenêtres autour du joueur. `null` en ville.
 var _fenetres_du_pays: FenetresPays = null
+## ⭐ LES MARQUES DES LIEUX SUR LA VILLE V2 (21/09). Sur Pikstown, chaque
+## `MorceauVille` posait le tag du repaire, la dalle du garage, la croix de
+## l'hôpital, la porte de la planque, la devanture de la supérette, le cercle
+## de l'arène (`_poser_les_lieux`). La ville v2 et le pays bâtissent leurs
+## morceaux dans `MorceauxV2`, qui ne sait rien du jeu : aucune marque, donc
+## aucun moyen de voir où F répond — un garage était un bâtiment comme un
+## autre. Ici, les marques suivent le joueur : tout lieu à portée reçoit la
+## sienne, celle qui s'éloigne est retirée. Indépendant des morceaux.
+const RAYON_MARQUES := 3200.0          ## px autour du joueur
+var _marques: Dictionary = {}          ## id du lieu -> {"n", "genre", "gang", "id", "p", "repeint"}
+var _depuis_marques := 9.0
 var _cachees: Dictionary = {}        ## id dormante -> vrai : déjà effacée de sa nappe
 
 # ------------------------------------------------------- le joueur local
@@ -374,6 +385,14 @@ var _vie := VIE_MAX
 var _sonne := 0.0
 var _hors_service := 0.0
 var _depuis_coup := 99.0
+## L'AVATAR DU HUD (en haut à gauche) lit ces quatre lignes : ce que le joueur
+## fait, à l'image près. Voir `Hud._peindre_l_avatar`.
+var _allure := 0.0                  ## à pied : 0 à l'arrêt, 1 en pleine course
+var _volant := 0.0                  ## au volant : −1 à gauche, 1 à droite
+var _avatar_gain := 0               ## le dernier gain d'argent, pour le « +$ » qui monte
+var _avatar_gain_t := 9.0           ## secondes depuis ce gain
+var _avatar_mot := ""               ## un mot d'humeur (« miam », « glou »…)
+var _avatar_mot_t := 9.0
 var _depuis_portiere := 0.0
 var _arme := "pistolet"
 var _munitions := -1
@@ -780,6 +799,10 @@ func preparer() -> void:
 	_carte_vue.z_index = 10
 	_carte_vue.texture = _plan_texture
 	_carte_vue.etendue = carte.etendue()
+	# Le titre de la carte : le pays quand on y joue, la ville sinon.
+	var plan_carte = carte.get("plan_du_pays")
+	_carte_vue.titre = String(plan_carte.get("nom", "Archipel des Aurones")) \
+		if plan_carte is Dictionary and not (plan_carte as Dictionary).is_empty() else "Pikstown"
 	_carte_vue.tuiles = Vector2i(carte.colonnes(), carte.lignes())
 	_carte_vue.legende = [["garage", Palette.SERIE], ["cabine", Charte.ORANGE], ["arène", Palette.CRITIQUE],
 		["planque", Color("#b070d0")], ["hôpital", Color("#f0f4f8")], ["repaire — couleur du gang", Color.WHITE],
@@ -854,6 +877,19 @@ func preparer() -> void:
 		_planque = 0
 		_pied = true
 		_entrer_chez_soi(0)
+
+	# ⭐⭐ ON COMMENCE DANS UN TAUDIS, À ZÉRO DOLLAR — « j'aimerais qu'on
+	# commence le jeu dans un taudis à 0 € et qu'ensuite on sorte dehors »
+	# (client, 19/09). Pas de fortune de départ, pas de voiture : une pièce
+	# miteuse, une porte, et la ville derrière. Le joueur part à pied de sa
+	# porte (`_position` est déjà le point de rue du départ : c'est là qu'il
+	# ressort). Le banc au pilote automatique, lui, reste dehors — il ne sait
+	# pas appuyer sur F — sauf `--banc-taudis`, pour la photo.
+	if not Commandes.pilote_automatique or "--banc-taudis" in OS.get_cmdline_args():
+		_argent = 0
+		_pied = true
+		_entrer_chez_soi(-1, "taudis")
+		_dire_affaire("votre taudis — F sur la porte pour sortir")
 
 	# `--banc-etoiles=N` : partir déjà recherché. Attendre qu'un pilote au hasard
 	# gagne cinq étoiles pour voir l'hélicoptère, c'est attendre une manche sur
@@ -1278,6 +1314,8 @@ func _effacer_la_dormante(id: int) -> void:
 # ------------------------------------------------------- simulation locale
 
 func simuler_local(delta: float) -> void:
+	_avatar_gain_t += delta
+	_avatar_mot_t += delta
 	if Commandes.pilote_automatique:
 		_piloter_pour_le_banc()
 
@@ -1413,9 +1451,21 @@ func _piloter_pour_le_banc() -> void:
 		# absente rendent exactement la même photo.
 		var train_le_plus_proche := -1
 		for t in ville.trains:
-			var d := int(ville.point_de_voie(float(t["s"])).distance_to(_position))
+			var d := int(ville.point_de_voie(float(t["s"]), int(t.get("l", 0))).distance_to(_position))
 			if train_le_plus_proche < 0 or d < train_le_plus_proche:
 				train_le_plus_proche = d
+		var par_genre := {}
+		for id_m in _marques:
+			var g_m := String(_marques[id_m]["genre"])
+			par_genre[g_m] = int(par_genre.get(g_m, 0)) + 1
+		print("[banc] marques de lieux à portée : %s" % str(par_genre))
+		# Ce qui fait qu'un endroit se JOUE : sans cabine on ne décroche aucun
+		# contrat, sans supérette on ne mange pas. Le pays a longtemps eu zéro
+		# des deux sans que rien ne le dise.
+		var autour := carte.lieux_autour(_position, PlanVille.SECTEUR * PlanVille.PAS * 3.0)
+		print("[banc] autour : %d cabine(s), %d repaire(s), %d supérette(s), %d garage(s), %d planque(s) ; territoire %d" % [
+			autour["cabines"].size(), autour["repaires"].size(), autour["superettes"].size(),
+			autour["garages"].size(), autour["planques"].size(), carte.territoire(_position)])
 		print("[banc] faim %d · soif %d · %d provision(s) en poche, %d au frigo"
 			% [int(_faim), int(_soif), Provisions.compte(_provisions), Provisions.compte(_frigo)])
 		print("[banc] t=%ds fps=%d gens=%d autos=%d feux=%d secours=%d morceaux=%d cubes=%d quads=%d maillage_max=%.1fms fiches=%d noeuds=%d trains=%d/%dpx %s meteo=%s(pluie %.2f nuages %.2f brume %.2f)" % [int(temps),
@@ -1441,6 +1491,11 @@ func _piloter_pour_le_banc() -> void:
 		_rentre_de_banc = true
 		print("[banc] quitte la ville par le menu de pause")
 		_quitter_la_ville()
+		return
+	# `--banc-immobile` : le pilote reste planté là où il est né — pour
+	# photographier ce qui vient à lui (un train à quai) sans le poursuivre.
+	if "--banc-immobile" in OS.get_cmdline_args():
+		Commandes.direction_simulee = Vector2.ZERO
 		return
 	if not _sortie_de_banc and not _pied and temps > duree_reelle() * 0.4:
 		_sortie_de_banc = true
@@ -1626,7 +1681,7 @@ func _broyer_ma_voiture() -> void:
 	if not _course.is_empty():
 		_course = {}
 		_cible_contrat = {}
-	_position = carte.degager(ou + Vector2.RIGHT.rotated(ville.cap_de_voie()) \
+	_position = carte.degager(ou + Vector2.RIGHT.rotated(ville.cap_de_voie(ville.abscisse_de_voie(ou))) \
 		* (VilleVivante.RAYON_CASSE + 30.0), RAYON_A_PIED)[0]
 
 func _prendre_le_volant(id: int, genre: int, position: Vector2, angle: float, pv: float,
@@ -1684,6 +1739,8 @@ func _marcher(delta: float) -> void:
 		return
 
 	var commande := Commandes.direction()
+	_allure = clampf(commande.length(), 0.0, 1.0)
+	_volant = 0.0
 	if commande.length() > 0.1:
 		# À pied, la direction du regard suit la marche : on tire là où on va,
 		# ce qui évite un second axe de visée sur un jeu qui se joue à quatre
@@ -1762,6 +1819,8 @@ func _conduire(delta: float) -> void:
 		_vitesse = move_toward(_vitesse, 0.0, FREIN * delta * 0.5)
 	else:
 		var commande := Commandes.conduite()
+		_volant = clampf(commande.x, -1.0, 1.0)
+		_allure = clampf(absf(_vitesse) / VITESSE_MAX, 0.0, 1.0)
 		var fiche: Dictionary = CARACTERES.get(_modele_vehicule, CARACTERES[-1])
 		if commande.y > 0.1:
 			_vitesse = min(_vitesse + ACCELERATION * float(fiche["a"]) * delta, VITESSE_MAX * float(fiche["v"]))
@@ -2373,8 +2432,8 @@ func _larguer(quoi: String) -> void:
 ## Ouvrir sa porte. L'appartement se déduit du QUARTIER de la planque
 ## (`Interieurs.pour_quartier`) : même planque, même appartement chez tout le
 ## monde, sans qu'un octet passe par le réseau.
-func _entrer_chez_soi(planque: int) -> void:
-	_dedans = _logement_ici()
+func _entrer_chez_soi(planque: int, logement := "") -> void:
+	_dedans = logement if logement != "" else _logement_ici()
 	_dedans_p = Interieurs.entree(_dedans)
 	# Un pas vers l'intérieur : posé pile sur le seuil, on ressort au premier
 	# appui sur F, et la porte devient une porte à tambour.
@@ -2395,7 +2454,8 @@ func _entrer_chez_soi(planque: int) -> void:
 	_pied = true
 	_vitesse = 0.0
 	_dire_affaire("chez vous — %s" % String(Interieurs.CATALOGUE[_dedans]["nom"]))
-	Sons.jouer("portail", 1.0, -8.0)
+	if planque >= 0:
+		Sons.jouer("portail", 1.0, -8.0)
 	print("[carnage] entré chez soi : %s (planque %d)" % [_dedans, planque])
 
 ## REPEINDRE LE TAG D'UN REPAIRE PRIS, dans tous les morceaux chargés. Le
@@ -2406,29 +2466,84 @@ func _entrer_chez_soi(planque: int) -> void:
 ## moment-là. On s'éloigne, on revient, et le repaire est redevenu à eux —
 ## alors que la ville, elle, sait qu'il est pris. Une passe par image, sur une
 ## poignée d'entrées, remet les tags d'accord avec la simulation.
+func _marquer_les_lieux(delta: float) -> void:
+	# Pikstown pose ses marques dans ses morceaux ; ici, seulement la ville v2
+	# et le pays.
+	if _ville_dessinee == null and _fenetres_du_pays == null:
+		return
+	_depuis_marques += delta
+	if _depuis_marques < 0.7:
+		return
+	_depuis_marques = 0.0
+	var lieux := carte.lieux_autour(_position, RAYON_MARQUES)
+	var vus: Dictionary = {}
+	for genre in ["repaires", "garages", "hopitaux", "planques", "superettes", "arenes"]:
+		for l in lieux[genre]:
+			var d: Dictionary = l
+			var id := int(d["id"])
+			vus[id] = true
+			if _marques.has(id):
+				continue
+			var n := _marque_de_lieu(genre, d)
+			if n == null:
+				continue
+			n.position = _en3d(Vector2(d["p"]), 0.0)
+			monde().add_child(n)
+			_marques[id] = {"n": n, "genre": genre, "gang": int(d.get("gang", -1)), "id": id,
+				"p": Vector2(d["p"]), "repeint": false}
+	for id in _marques.keys():
+		if not vus.has(id):
+			(_marques[id]["n"] as Node).queue_free()
+			_marques.erase(id)
+
+func _marque_de_lieu(genre: String, l: Dictionary) -> Node3D:
+	match genre:
+		"repaires":
+			var gang := int(l.get("gang", -1))
+			if gang < 0: return null
+			return FormesCarnage.tag_de_gang(carte.couleur_du_gang(gang), carte.nom_du_gang(gang))
+		"garages":
+			return FormesCarnage.dalle_atelier() if FormesCarnage.est_atelier(int(l["id"])) \
+				else FormesCarnage.dalle_garage()
+		"hopitaux": return FormesCarnage.dalle_hopital()
+		"planques": return FormesCarnage.porte_planque(int(l.get("prix", 0)))
+		"superettes": return FormesCarnage.devanture_de_superette()
+		"arenes": return FormesCarnage.cercle_arene(int(l["id"]))
+	return null
+
+## Les tags de repaire qu'on peut repeindre : ceux des morceaux de Pikstown,
+## et ceux des marques de la ville v2.
+func _tags_de_repaire() -> Array:
+	var liste: Array = []
+	for cle in _morceaux:
+		liste.append_array((_morceaux[cle] as MorceauVille).repaires)
+	for id in _marques:
+		var m: Dictionary = _marques[id]
+		if String(m["genre"]) == "repaires":
+			liste.append(m)
+	return liste
+
 func _rafraichir_les_repaires() -> void:
 	if ville.repaires_pris.is_empty():
 		return
-	for cle in _morceaux:
-		for entree in (_morceaux[cle] as MorceauVille).repaires:
-			var id := int(entree["id"])
-			if not ville.repaires_pris.has(id) or bool(entree.get("repeint", false)):
-				continue
-			entree["repeint"] = true
-			var qui := String(ville.repaires_pris[id]["j"])
-			var place := int(joueurs.get(qui, {}).get("place", 0))
-			FormesCarnage.repeindre_le_tag(entree["n"] as Node3D, Palette.couleur_joueur(place),
-				String(joueurs.get(qui, {}).get("pseudo", "?")))
+	for entree in _tags_de_repaire():
+		var id := int(entree["id"])
+		if not ville.repaires_pris.has(id) or bool(entree.get("repeint", false)):
+			continue
+		entree["repeint"] = true
+		var qui := String(ville.repaires_pris[id]["j"])
+		var place := int(joueurs.get(qui, {}).get("place", 0))
+		FormesCarnage.repeindre_le_tag(entree["n"] as Node3D, Palette.couleur_joueur(place),
+			String(joueurs.get(qui, {}).get("pseudo", "?")))
 
 func _reprendre_le_tag(id: int, qui: String) -> void:
 	var place := int(joueurs.get(qui, {}).get("place", 0))
 	var couleur := Palette.couleur_joueur(place)
 	var nom := String(joueurs.get(qui, {}).get("pseudo", "?"))
-	for cle in _morceaux:
-		for entree in (_morceaux[cle] as MorceauVille).repaires:
-			if int(entree["id"]) == id:
-				entree["repeint"] = true
-				FormesCarnage.repeindre_le_tag(entree["n"] as Node3D, couleur, nom)
+	for entree in _tags_de_repaire():
+		if int(entree["id"]) == id:
+			entree["repeint"] = true
+			FormesCarnage.repeindre_le_tag(entree["n"] as Node3D, couleur, nom)
 
 ## TENIR LE TERRAIN. Le client dit « je suis sur ce tag » ; c'est l'hôte qui
 ## décide si ça ouvre un raid (il est le seul à connaître le respect de tout le
@@ -2843,6 +2958,9 @@ func _dire_affaire(texte: String) -> void:
 ## l'argent frais est SUR SOI — donc perdable.
 func _encaisser_argent(montant: int) -> void:
 	_argent = max(0, _argent + montant)
+	if montant != 0:
+		_avatar_gain = montant
+		_avatar_gain_t = 0.0
 
 # ------------------------------------------------------- armes
 
@@ -3314,13 +3432,12 @@ func _activer_le_code(indice: int) -> void:
 				var court := 1.0e12
 				var rame := {}
 				for t in ville.trains:
-					var d: float = ville.point_de_voie(float(t["s"])).distance_to(_position)
+					var d: float = ville.point_de_voie(float(t["s"]), int(t.get("l", 0))).distance_to(_position)
 					if d < court:
 						court = d
 						rame = t
 				if not rame.is_empty():
-					var v := ville.voie()
-					rame["s"] = (_position - Vector2(v["o"])).dot(Vector2(v["d"]))
+					rame["s"] = ville.abscisse_de_voie(_position, int(rame.get("l", 0)))
 					rame["v"] = 0.0
 					rame["arret"] = VilleVivante.ARRET_EN_GARE * 3.0
 					_vider_les_evenements()
@@ -4439,6 +4556,7 @@ func rafraichir_scene(delta: float) -> void:
 	_placer_la_foule()
 	_placer_les_autos()
 	_placer_les_objets()
+	_marquer_les_lieux(delta)
 	_placer_les_helicos(delta)
 	_placer_les_trains(delta)
 	_animer_effets(delta)
@@ -4726,6 +4844,9 @@ func _placer_le_joueur(delta: float) -> void:
 		else:
 			_corps_pied.scale = Vector3.ONE
 			_corps_pied.position = _en3d(_position, 0.0)
+			for n in ["Vie", "Nom"]:
+				var e := _corps_pied.get_node_or_null(n) as Node3D
+				if e != null and not e.visible: e.visible = true
 		_corps_pied.rotation.y = -_angle
 		_demarche(_corps_pied, "walk" if abs(_vitesse) > 1.0 else "idle")
 		_regler_jauge(_corps_pied, _vie / VIE_MAX)
@@ -5114,6 +5235,8 @@ func _consommer(envie: String = "") -> void:
 	_soif = clampf(_soif + float(a["soif"]), 0.0, FAIM_MAX)
 	_vie = clampf(_vie + float(a["vie"]), 1.0, VIE_MAX)
 	_dire_affaire("%s — %s" % [String(a["nom"]).to_lower(), Provisions.effet(cle)])
+	_avatar_mot = "glou" if float(a["soif"]) > float(a["faim"]) else "miam"
+	_avatar_mot_t = 0.0
 	Sons.jouer("dalle", _rng.randf_range(0.9, 1.1), -14.0)
 
 ## L'article qui répond le mieux à UNE envie — « boire » : celui qui rend le
@@ -5433,11 +5556,16 @@ func _acheter_a_la_superette(cle: String) -> void:
 func _placer_les_trains(delta: float) -> void:
 	if not _quais_poses:
 		_quais_poses = true
-		for abscisse in ville.gares():
-			var quai := FormesCarnage.quai()
-			quai.position = _en3d(ville.point_de_voie(float(abscisse)))
-			quai.rotation.y = -ville.cap_de_voie()
-			monde().add_child(quai)
+		# ⚠ Sur le pays, le quai est un modèle du client posé par le
+		# générateur à chaque arrêt (`pxl/quai-gare`, « une gare devant chaque
+		# quai ») : la dalle dessinée n'y a plus sa place.
+		if not carte.has_method("lignes_de_train"):
+			for l in ville.nombre_de_lignes():
+				for abscisse in ville.gares(l):
+					var quai := FormesCarnage.quai()
+					quai.position = _en3d(ville.point_de_voie(float(abscisse), l))
+					quai.rotation.y = -ville.cap_de_voie(float(abscisse), l)
+					monde().add_child(quai)
 		# LES CASSES vivent au bord de la même voie : c'est la seule bande de
 		# la ville que personne n'habite, et c'est là qu'on entasse des
 		# carcasses. Elles se posent avec les quais parce qu'elles se calculent
@@ -5445,10 +5573,9 @@ func _placer_les_trains(delta: float) -> void:
 		for c in ville.casses():
 			var machine := FormesCarnage.compacteur()
 			machine.position = _en3d(Vector2(c["p"]))
-			machine.rotation.y = -ville.cap_de_voie()
+			machine.rotation.y = -ville.cap_de_voie(float(c["s"]))
 			monde().add_child(machine)
 			_compacteurs.append(machine)
-	var cap := ville.cap_de_voie()
 	for t in ville.trains:
 		var noeud = t.get("noeud")
 		if noeud == null:
@@ -5457,7 +5584,11 @@ func _placer_les_trains(delta: float) -> void:
 			t["noeud"] = noeud
 		t["age"] = float(t.get("age", 0.0)) + delta
 		var s_vue := float(t["s"]) + float(t["sens"]) * float(t["v"]) * float(t["age"])
-		var tete := ville.point_de_voie(s_vue)
+		var l_t := int(t.get("l", 0))
+		var tete := ville.point_de_voie(s_vue, l_t)
+		# Le cap se prend au MILIEU de la rame : en sortie de virage, la tête
+		# est déjà sur le segment suivant et la queue encore sur l'ancien.
+		var cap := ville.cap_de_voie(s_vue - float(t["sens"]) * VilleVivante.longueur_de_rame() * 0.5, l_t)
 		var rame: Node3D = noeud
 		rame.position = _en3d(tete)
 		# La rame est bâtie vers -X depuis sa tête : tournée du cap de la voie
@@ -5475,7 +5606,7 @@ func _sentir_le_train(delta: float) -> void:
 	if _train >= 0:
 		return
 	for t in ville.trains:
-		var ou: Vector2 = ville.point_de_voie(float(t["s"]))
+		var ou: Vector2 = ville.point_de_voie(float(t["s"]), int(t.get("l", 0)))
 		var d := ou.distance_to(_position)
 		if float(t["v"]) > 300.0 and d < 900.0:
 			_depuis_roulement -= delta
@@ -5500,7 +5631,7 @@ func _sentir_le_train(delta: float) -> void:
 	if not _pied or _quai_dit > 0.0:
 		return
 	var quai := ville.rame_a_quai(_position)
-	if not quai.is_empty() and ville.point_de_voie(float(quai["s"])).distance_to(_position) \
+	if not quai.is_empty() and ville.point_de_voie(float(quai["s"]), int(quai.get("l", 0))).distance_to(_position) \
 			< PORTEE_TRAIN + VilleVivante.longueur_de_rame():
 		_quai_dit = 4.0
 		_annoncer("train à quai — E pour monter", Palette.AVERTISSEMENT, 2.6)
@@ -5518,8 +5649,10 @@ func _voyager(delta: float) -> void:
 		_train = -1
 		return
 	var s_vue := float(t["s"]) + float(t["sens"]) * float(t["v"]) * float(t.get("age", 0.0))
-	_position = ville.point_de_voie(s_vue - float(t["sens"]) * _place_train)
-	_angle = ville.cap_de_voie() if float(t["sens"]) > 0.0 else ville.cap_de_voie() + PI
+	var l_v := int(t.get("l", 0))
+	var s_moi := s_vue - float(t["sens"]) * _place_train
+	_position = ville.point_de_voie(s_moi, l_v)
+	_angle = ville.cap_de_voie(s_moi, l_v) if float(t["sens"]) > 0.0 else ville.cap_de_voie(s_moi, l_v) + PI
 	_vitesse = float(t["v"])
 	_regenerer(delta)
 	if float(t["arret"]) > 0.0:
@@ -5528,11 +5661,18 @@ func _voyager(delta: float) -> void:
 			_quai_dit = 3.0
 			_annoncer("à quai — E pour descendre", Palette.AVERTISSEMENT, 2.4)
 
+## Pour le banc de photo : une rame à l'arrêt à moins de `d` px du joueur ?
+func train_a_quai_pres(d: float) -> bool:
+	for t in ville.trains:
+		if float(t["arret"]) > 0.0 and ville.point_de_voie(float(t["s"]), int(t.get("l", 0))).distance_to(_position) < d:
+			return true
+	return false
+
 func _monter_dans_le_train() -> bool:
 	var t := ville.rame_a_quai(_position)
 	if t.is_empty():
 		return false
-	if ville.point_de_voie(float(t["s"])).distance_to(_position) \
+	if ville.point_de_voie(float(t["s"]), int(t.get("l", 0))).distance_to(_position) \
 			> PORTEE_TRAIN + VilleVivante.longueur_de_rame():
 		return false
 	_train = int(t["id"])
@@ -5555,7 +5695,7 @@ func _descendre_du_train() -> void:
 	# On descend DU CÔTÉ DU QUAI. La dalle est posée à +Z du repère de la voie
 	# (voir `FormesCarnage.quai`) : descendre de l'autre côté, c'est atterrir
 	# sur le ballast, hors de portée de tout.
-	var cote := Vector2.RIGHT.rotated(ville.cap_de_voie() + PI * 0.5) * 34.0
+	var cote := Vector2.RIGHT.rotated(ville.cap_de_voie(ville.abscisse_de_voie(_position, ville.voie_la_plus_proche(_position)[0]), ville.voie_la_plus_proche(_position)[0]) + PI * 0.5) * 34.0
 	_position = carte.degager(_position + cote, RAYON_A_PIED)[0]
 	Sons.jouer("porte_glissante", 0.9, -8.0)
 
@@ -5643,6 +5783,15 @@ func _basculer_la_vue() -> void:
 	_subjectif = not _subjectif
 	if _camera != null:
 		_camera.fov = FOV_SUBJECTIF if _subjectif else 54.0
+		# ⚠⚠ LA VUE DE DESSUS REPREND SON INCLINAISON. En vue subjective la
+		# caméra a été tournée par `look_at` (et secouée sur Z par les coups) ;
+		# la vue de dessus, elle, ne règle QUE la position — elle comptait sur
+		# l'inclinaison posée à la création. Au retour, la caméra restait donc
+		# orientée comme l'œil du personnage, posée quarante unités en l'air :
+		# on regardait l'horizon depuis le ciel, la ville avait disparu
+		# (« quand je change de vue, la vue bug », client, 19/09).
+		if not _subjectif:
+			_camera.rotation_degrees = Vector3(-INCLINAISON, 0, 0)
 	# La caméra saute d'un coup : interpolée depuis quarante unités de haut,
 	# elle traverse les immeubles pendant une seconde et demie.
 	_placer_camera(1000.0)
@@ -5682,6 +5831,12 @@ func _placer_camera(delta: float) -> void:
 		var recul: float = c["recul"]
 		var vu: Vector3 = (c["centre"] as Vector3) + Vector3(0.0,
 			sin(deg_to_rad(INCLINAISON)) * recul, cos(deg_to_rad(INCLINAISON)) * recul)
+		# ⚠ LA FICHE DU HUD COUVRE LE QUART GAUCHE DE L'ÉCRAN — et la porte du
+		# taudis est en bas à gauche : on commençait la partie sous les jauges.
+		# On décale la pièce vers la droite d'un dixième de l'écran, ce que la
+		# caméra voit de large à cette distance.
+		var largeur_vue := 2.0 * recul * tan(deg_to_rad(_camera.fov * 0.5)) * (ecran.x / maxf(ecran.y, 1.0))
+		vu.x -= largeur_vue * 0.11
 		_camera.position = _camera.position.lerp(vu, clamp(delta * 7.0, 0, 1))
 		return
 	var distance: float = DISTANCE_PIED if _pied else DISTANCE_AUTO + RECUL_VITESSE * clamp(abs(_vitesse) / VITESSE_MAX, 0.0, 1.0)
@@ -5730,6 +5885,17 @@ func fiche_joueur() -> Dictionary:
 		"valeur": "%d" % int(_soif)})
 	fiche["jauges"] = jauges
 	fiche["arme"] = {"nom": String(ARMES[_arme]["nom"]), "munitions": "" if _munitions < 0 else "%d" % _munitions}
+	# L'AVATAR : le carton du joueur, et ce qu'il est en train de faire. Le
+	# HUD n'a pas accès à la manche ; il lit ce dictionnaire à chaque image.
+	fiche["avatar"] = {
+		"carton": Session.carton_affiche(),
+		"pied": _pied, "allure": _allure, "volant": _volant,
+		"coup": _depuis_coup, "tir": _recharge > 0.0,
+		"a_terre": _hors_service > 0.0, "sonne": _sonne > 0.0,
+		"vie": _vie / VIE_MAX, "subjectif": _subjectif,
+		"gain": _avatar_gain, "gain_t": _avatar_gain_t,
+		"mot": _avatar_mot, "mot_t": _avatar_mot_t,
+	}
 	fiche["argent"] = {"sur_soi": _argent, "banque": _banque, "planque": _planque >= 0}
 
 	var puces: Array = []

@@ -356,7 +356,12 @@ static func poste(id: String, genre: String) -> Dictionary:
 ##
 ## On ne corrige donc pas « à vue » : on MESURE le pantin et on le ramène à sa
 ## taille en mètres. Le jour où le casting change de modèle, rien à reprendre.
-const TAILLE_JOUEUR := 1.75
+## ⚠ 1,45 et non 1,75 (client, 19/09 : « le personnage est encore trop gros
+## dans les appartements ») : avec le carton sur la tête et la caméra qui
+## cadre huit mètres, un mètre soixante-quinze faisait un colosse devant un
+## canapé de deux mètres. La taille de l'homme est celle du personnage VU,
+## pas celle de sa fiche.
+const TAILLE_JOUEUR := 1.45
 
 ## ⚠ LA BOÎTE D'UN MAILLAGE ANIMÉ EST PLUS GRANDE QUE LE PERSONNAGE. Godot la
 ## gonfle pour couvrir toutes les poses du squelette : mesurée sur le pantin de
@@ -410,6 +415,11 @@ static func poser_pantin(pantin: Node3D, p: Vector2, cle: String = "",
 	var jauge := pantin.get_node_or_null("Vie") as Node3D
 	if jauge != null:
 		jauge.visible = false
+	# Et le nom : la même étiquette qu'en ville, mais cadrée à huit mètres, elle
+	# faisait la largeur de la cuisine. Chez soi, on sait qui on est.
+	var nom := pantin.get_node_or_null("Nom") as Node3D
+	if nom != null:
+		nom.visible = false
 
 # ------------------------------------------------------------ les collisions
 

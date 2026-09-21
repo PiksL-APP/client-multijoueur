@@ -807,6 +807,7 @@ static func poser_objet(parent: Node3D, modele: String, ou: Vector3, tourne := 0
 ## 4. Là où elle est en l'air, elle prend son TABLIER et ses PILES. Sans ça la
 ##    voie volerait, ce qui est le même défaut d'un cran plus haut.
 const HAUT_FRANCHIT := 9.0           ## le gabarit libre au-dessus d'une chaussée
+const ECARTEMENT := 1.15             ## demi-écartement des files : la caisse d'un wagon fait 2,6 de large
 const LISSAGE_RAIL := 5              ## demi-fenêtre de la rampe, en cases
 const AU_SOL := 1.2                  ## en dessous, la voie est réputée au sol
 ## ⭐⭐⭐ LA VOIE EN L'AIR N'A PAS DE DALLE — ELLE A DES POTEAUX.
@@ -1072,7 +1073,12 @@ static func _poser_rail(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 			var milieu := (pa + pb) * 0.5
 			var a := Vector2i(int(floor(milieu.x / CASE)), int(floor(milieu.z / CASE)))
 			if not zone.has_point(a): continue
-			var ecart := 3.2
+			# ⚠ L'ÉCARTEMENT EST CELUI DU TRAIN (client, 21/09 : « les rails sont
+			# trop gros, le train doit rouler sur les rails de chaque côté »). À
+			# 3,2 de l'axe, la voie faisait 6,4 unités entre les files pour une
+			# rame de 2,6 de large : le train roulait AU MILIEU d'un chemin de
+			# fer deux fois trop large. Les files passent sous les roues.
+			var ecart := ECARTEMENT
 			# ⚠⚠ « TES CHEMINS DE FER SE CASSENT DES FOIS » (client, 16/09), et
 			# la faute était à moi, d'un cran en amont : les rails et les
 			# traverses étaient des boîtes ALIGNÉES SUR LES AXES, posées à
@@ -1103,10 +1109,10 @@ static func _poser_rail(racine: Node3D, ville: Ville2, zone: Rect2i) -> void:
 				_boite(racine, Vector3(2.2, creux, 2.2),
 					Vector3(milieu.x, sol + creux * 0.5 - 0.5, milieu.z), TEINTE_PILE_RAIL)
 			for s in [-1.0, 1.0]:
-				_boite_tournee(racine, base, Vector3(longueur + RECOUVRE_RAIL, 0.5, 0.6),
+				_boite_tournee(racine, base, Vector3(longueur + RECOUVRE_RAIL, 0.5, 0.4),
 					milieu + cote * (ecart * s) + dessus * 0.25, TEINTE_RAIL)
 			# Une traverse par tronçon : le pas est déjà celui des traverses.
-			_boite_tournee(racine, base, Vector3(1.2, 0.3, 9.0),
+			_boite_tournee(racine, base, Vector3(1.0, 0.3, ECARTEMENT * 2.0 + 1.2),
 				milieu + dessus * 0.15, TEINTE_TRAVERSE)
 
 # ------------------------------------------------------------------ les panneaux pub

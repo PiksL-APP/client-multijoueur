@@ -125,6 +125,22 @@ jobs:
           echo "$sortie" | grep -q "TUILES PROPRES" \
             || { echo "::error::une tuile publiée a des fautes — export annulé." >&2; exit 1; }
 
+      # ⭐⭐⭐ TOUTES LES TUILES DU PAYS, CUITES ICI. Le paquet web est
+      # single-threaded : une tuile engendrée dans le navigateur, c'est la page
+      # gelée (neuf tuiles au démarrage, 98 s, « la page plante » — client,
+      # 19/09). On les fabrique donc à l'export, gzippées, dans `cartes/` : le
+      # jeu les relit au lieu de les engendrer. Une tuile publiée depuis
+      # l'éditeur (le `.json` en clair, vérifié juste au-dessus) est gardée
+      # telle quelle. Voir `outils/engendrer_tuiles.gd`.
+      - name: Engendrer les tuiles
+        run: |
+          set -o pipefail
+          export PATH="$HOME/godot:$PATH"
+          godot --headless --path . --script res://outils/engendrer_tuiles.gd 2>&1 \
+            | grep "^tuile \|TUILES CUITES\|SCRIPT ERROR\|impossible" \
+            || { echo "::error::la cuisson des tuiles a échoué — export annulé." >&2; exit 1; }
+          echo "$(ls cartes/pays-*.json.gz | wc -l) tuile(s) gzippée(s) dans cartes/"
+
       - name: Exporter
         run: |
           set -euo pipefail
@@ -139,6 +155,37 @@ jobs:
           touch sortie/.gdignore
           rm -f sortie/*.import
           ls -la sortie/
+
+      # ⭐ LA PAGE DE PRÉSENTATION : multijoueur.piks-l.com/le-jeu.
+      # Une page statique, sans moteur — elle doit s'ouvrir sur un téléphone en
+      # 3G et donner envie de cliquer sur « Jouer ». Elle vit dans
+      # `web/le-jeu.html` (c'est là qu'on la met à jour : le journal de bord
+      # s'écrit à la main, entrée par entrée) et le runner ne fait que deux
+      # choses ici : graver la version en pied de page, et recopier les images
+      # de presse (`web/presse/` : le lettrage, l'affiche, la jaquette et les
+      # visuels d'univers fournis par le client), qui ne sont pas dans le
+      # paquet exporté. `cleanUrls` de Vercel sert `sortie/le-jeu.html` sous
+      # `/le-jeu`.
+      #
+      # ⚠ LES IMAGES SONT DÉJÀ AU FORMAT WEB : JPEG progressif, 1500 px de
+      # large, cinq mégaoctets pour les quatorze. On ne recopie pas les PNG
+      # d'origine — une page de présentation qui pèse quarante mégaoctets ne
+      # se charge pas sur un téléphone, et c'est la première chose qu'un
+      # visiteur voit du jeu.
+      - name: La page de présentation
+        run: |
+          set -euo pipefail
+          rm -rf sortie/presse
+          cp -r web/presse sortie/presse
+          python3 - <<'PY2'
+          import subprocess
+          commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+          date = subprocess.check_output(["date", "+%d/%m/%Y"], text=True).strip()
+          page = open("web/le-jeu.html", encoding="utf-8").read()
+          page = page.replace("$VERSION", "Version %s · %s" % (commit, date))
+          open("sortie/le-jeu.html", "w", encoding="utf-8").write(page)
+          print("sortie/le-jeu.html écrit,", len(page), "octets")
+          PY2
 
       # LA PAGE DE L'ÉDITEUR : multijoueur.piks-l.com/editeur. Même moteur,
       # même paquet, mais sa propre coque (`web/editeur.html`), sans le kit ni

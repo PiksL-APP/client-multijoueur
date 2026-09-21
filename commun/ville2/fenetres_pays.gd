@@ -50,12 +50,18 @@ const RAYON := 1
 ## anneau de plus que ce qu'on bâtit.
 const GARDE := RAYON + 1
 
+## À moins de tant de cases d'un bord, on commande la fenêtre d'à côté. Soixante
+## cases, c'est plus loin que la caméra ne voit et qu'une voiture ne parcourt
+## en dix secondes : la voisine est là avant qu'on la regarde.
+const MARGE_VOISINE := 60.0
+
 var plan: Dictionary = {}
 var ctx: Dictionary = {}
 
-## Par fenêtre : {"ville": Ville2, "morceaux": MorceauxV2, "tache": int}
+## Par fenêtre : {"ville": Ville2, "morceaux": MorceauxV2, "batir": Callable}
 var _fenetres: Dictionary = {}
 var _centre := Vector2i(999999, 999999)
+var _cotes := Vector2i(0, 0)            ## de quels côtés de sa fenêtre le joueur est proche
 
 ## ⚠⚠⚠ LA TOUTE PREMIÈRE FENÊTRE SE BÂTIT SUR LE FIL PRINCIPAL, ET C'EST
 ## OBLIGATOIRE.
@@ -127,10 +133,63 @@ func exiger(c: Vector2i) -> Ville2:
 		if not _dans_le_pays(cle): return null
 		_commander(cle)
 	var f: Dictionary = _fenetres[cle]
-	if f.has("tache"):
-		WorkerThreadPool.wait_for_task_completion(int(f["tache"]))
-		f.erase("tache")
+	_attendre(f)
 	return f.get("ville", null)
+
+## ⚠⚠ UN SEUL FIL DE FABRICATION, À NOUS, ET JAMAIS LE POOL DU MOTEUR (19/09).
+##
+## Les fenêtres partaient dans `WorkerThreadPool`, huit d'un coup en haute
+## priorité. Sur une machine à deux cœurs, le pool n'a que deux fils : le
+## moteur lui-même s'en sert pour charger les ressources (`load` d'un GLB
+## depuis un morceau), et le fil principal restait bloqué des minutes à
+## attendre qu'un fil se libère — pendant que huit générateurs de deux
+## minutes chacun se disputaient les deux mêmes fils, ET les mêmes caches
+## statiques du kit (des dictionnaires, que rien ne protège). Mesuré au
+## départ sur l'Île de la Baie : trois tuiles voisines finissent, la
+## quatrième jamais, et la partie ne démarre pas.
+##
+## Ici : les fenêtres à bâtir font la queue, UN SEUL `Thread` à nous les
+## prend l'une après l'autre (la plus proche du joueur d'abord, c'est l'ordre
+## de `_revoir`), et le pool du moteur reste au moteur. Une fenêtre qu'on
+## exige avant son tour se bâtit sur le fil principal, comme la première.
+var _fil: Thread = null
+var _en_cours: Dictionary = {}          ## la fiche que le fil bâtit
+var _queue: Array = []                  ## les fiches qui attendent leur tour
+
+func _attendre(f: Dictionary) -> void:
+	if f.has("ville") and f["ville"] != null: return
+	if _est_en_cours(f):
+		f["ville"] = _fil.wait_to_finish()
+		_fil = null
+		_en_cours = {}
+		return
+	var rang := _rang_dans_la_queue(f)
+	if rang >= 0:
+		_queue.remove_at(rang)
+		f["ville"] = (f["batir"] as Callable).call()
+
+func _est_en_cours(f: Dictionary) -> bool:
+	return _fil != null and not _en_cours.is_empty() and _en_cours.get("cle") == f.get("cle")
+
+func _rang_dans_la_queue(f: Dictionary) -> int:
+	for i in _queue.size():
+		if (_queue[i] as Dictionary).get("cle") == f.get("cle"): return i
+	return -1
+
+## ⚠ On ne quitte pas la scène en laissant un fil bâtir dans le vide : le
+## moteur le détruit en pleine course et plante à la sortie de la manche.
+func _exit_tree() -> void:
+	_queue.clear()
+	if _fil != null:
+		_fil.wait_to_finish()
+		_fil = null
+		_en_cours = {}
+
+func _lancer_le_suivant() -> void:
+	if _fil != null or _queue.is_empty(): return
+	_en_cours = _queue.pop_front()
+	_fil = Thread.new()
+	_fil.start(_en_cours["batir"] as Callable)
 
 func suivre(point: Vector3) -> void:
 	var cle := _fenetre_de(point)
@@ -139,8 +198,23 @@ func suivre(point: Vector3) -> void:
 	for f0 in _fenetres.values():
 		var f: Dictionary = f0
 		if f.has("morceaux"): (f["morceaux"] as MorceauxV2).suivre(point)
-	if cle == _centre: return
+	# ⭐ LES VOISINES NE SE DEMANDENT QU'EN APPROCHANT DU BORD. Neuf fenêtres
+	# d'un coup au départ, c'est huit tuiles à relire (au navigateur : huit
+	# JSON de trois mégaoctets à décoder sur le fil principal) pour un joueur
+	# qui se tient au milieu de la sienne et n'en verra aucune avant deux
+	# kilomètres. On ne commande une voisine que quand on est à moins de
+	# `MARGE_VOISINE` cases de son côté — et la fenêtre de coin seulement
+	# quand on est près des DEUX côtés.
+	var local := global_transform.affine_inverse() * point
+	var dans := Vector2(local.x / Ville2.CASE - float(cle.x * COTE), local.z / Ville2.CASE - float(cle.y * COTE))
+	var cotes := Vector2i(0, 0)
+	if dans.x < MARGE_VOISINE: cotes.x = -1
+	elif dans.x > float(COTE) - MARGE_VOISINE: cotes.x = 1
+	if dans.y < MARGE_VOISINE: cotes.y = -1
+	elif dans.y > float(COTE) - MARGE_VOISINE: cotes.y = 1
+	if cle == _centre and cotes == _cotes: return
 	_centre = cle
+	_cotes = cotes
 	_revoir()
 
 ## Combien de morceaux de décor sont bâtis, toutes fenêtres confondues — la
@@ -166,10 +240,10 @@ func _revoir() -> void:
 		_fenetres.erase(c)
 	# ⚠ LA PLUS PROCHE D'ABORD. Le joueur voit d'abord ce qui l'entoure ; une
 	# fenêtre de coin qu'il ne regardera peut-être jamais peut attendre.
-	var voulues: Array = []
-	for dj in range(-RAYON, RAYON + 1):
-		for di in range(-RAYON, RAYON + 1):
-			voulues.append(_centre + Vector2i(di, dj))
+	var voulues: Array = [_centre]
+	if _cotes.x != 0: voulues.append(_centre + Vector2i(_cotes.x, 0))
+	if _cotes.y != 0: voulues.append(_centre + Vector2i(0, _cotes.y))
+	if _cotes.x != 0 and _cotes.y != 0: voulues.append(_centre + _cotes)
 	voulues.sort_custom(func(a, b):
 		var da: Vector2i = (a as Vector2i) - _centre
 		var db: Vector2i = (b as Vector2i) - _centre
@@ -194,7 +268,7 @@ func _commander(c: Vector2i) -> void:
 		mini(COTE, PLAN.TAILLE.y - coin.y))
 	if taille.x <= 0 or taille.y <= 0: return
 	var f := Rect2i(coin, taille)
-	var fiche := {"coin": coin, "rect": f, "ville": null}
+	var fiche := {"coin": coin, "rect": f, "ville": null, "cle": c}
 	var nom := {"nom": "Aurones %d,%d" % [coin.x, coin.y]}
 	var batir := func() -> Ville2: return _lire_ou_engendrer(c, f, nom)
 	if not _chauffe:
@@ -203,10 +277,10 @@ func _commander(c: Vector2i) -> void:
 		fiche["ville"] = batir.call()
 		_fenetres[c] = fiche
 		return
-	fiche["tache"] = WorkerThreadPool.add_task(func() -> void:
-		fiche["ville"] = batir.call(),
-		true, "fenêtre du pays %s" % coin)
+	fiche["batir"] = batir
+	_queue.append(fiche)
 	_fenetres[c] = fiche
+	_lancer_le_suivant()
 
 ## ⭐⭐⭐ UNE TUILE RETOUCHÉE GAGNE SUR LA TUILE ENGENDRÉE (19/09).
 ##
@@ -225,11 +299,28 @@ func _commander(c: Vector2i) -> void:
 func _lire_ou_engendrer(c: Vector2i, f: Rect2i, nom: Dictionary) -> Ville2:
 	var chemin := "res://cartes/pays-%d-%d.json" % [c.x, c.y]
 	var vrai := Ville2.chemin_utile(chemin)
-	if FileAccess.file_exists(vrai):
+	if FileAccess.file_exists(vrai) or FileAccess.file_exists(vrai + ".gz"):
 		var v := Ville2.charger(chemin)
-		if v != null and v.taille == f.size and not (v.lots.is_empty() and v.routes.is_empty()):
+		# ⚠ UNE TUILE VIDE EST UNE TUILE : la pleine mer, cuite par
+		# `outils/engendrer_tuiles.gd`. On ne la rejette plus — l'engendrer
+		# « pour vérifier » coûtait des secondes pour rendre… la mer.
+		if v != null and v.taille == f.size:
+			print("[pays] tuile %d,%d relue (%d lots, %d objets)" % [c.x, c.y, v.lots.size(), v.objets.size()])
 			return v
-		push_warning("tuile %s ignorée (taille %s au lieu de %s, ou vide)" % [chemin, v.taille, f.size])
+		push_warning("tuile %s ignorée (taille %s au lieu de %s)" % [chemin, v.taille if v != null else Vector2i.ZERO, f.size])
+	# ⚠⚠ AU NAVIGATEUR, ON N'ENGENDRE PAS. Le paquet web est single-threaded :
+	# ce « fil » est le fil principal, et une tuile engendrée là, c'est la page
+	# gelée trente secondes à deux minutes (mesuré : neuf tuiles, 98 s, « la
+	# page plante »). Toutes les tuiles sont cuites à l'export ; si l'une manque
+	# quand même, on rend la mer plutôt que de geler.
+	if OS.has_feature("web"):
+		push_warning("tuile %s absente du paquet : la mer à sa place" % chemin)
+		var mer := Ville2.new(f.size)
+		mer.nom = String(nom.get("nom", "mer"))
+		mer.eau.fill(1)
+		mer.altitude.fill(TerrainV2.NIVEAU_MER - 2.0)
+		mer.rasteriser()
+		return mer
 	return PAYS.fenetre(plan, ctx, f, nom)
 
 func _process(_dt: float) -> void:
@@ -238,10 +329,16 @@ func _process(_dt: float) -> void:
 		if f.has("morceaux"): continue
 		# ⚠ Une fenêtre sans tâche est déjà faite (la première, ou une qu'on a
 		# attendue) : elle n'a plus qu'à monter.
-		if f.has("tache"):
-			if not WorkerThreadPool.is_task_completed(int(f["tache"])): continue
-			WorkerThreadPool.wait_for_task_completion(int(f["tache"]))
-			f.erase("tache")
+		if f.get("ville", null) == null:
+			# Celle que le fil bâtit : on la ramasse dès qu'il a fini, et on
+			# lance la suivante de la queue.
+			if _est_en_cours(f) and not _fil.is_alive():
+				f["ville"] = _fil.wait_to_finish()
+				_fil = null
+				_en_cours = {}
+				_lancer_le_suivant()
+			else:
+				continue
 		var v: Ville2 = f.get("ville", null)
 		if v == null: continue
 		_monter(f, v)
@@ -264,9 +361,15 @@ func _monter(f: Dictionary, v: Ville2) -> void:
 	f["morceaux"] = m
 
 func _defaire(f: Dictionary) -> void:
-	if f.has("tache"):
-		WorkerThreadPool.wait_for_task_completion(int(f["tache"]))
-		f.erase("tache")
+	var rang := _rang_dans_la_queue(f)
+	if rang >= 0:
+		_queue.remove_at(rang)
+	elif _est_en_cours(f):
+		# On ne tue pas un fil : on l'attend, et on jette ce qu'il rend.
+		_fil.wait_to_finish()
+		_fil = null
+		_en_cours = {}
+		_lancer_le_suivant()
 	if f.has("morceaux"):
 		(f["morceaux"] as Node3D).queue_free()
 		f.erase("morceaux")

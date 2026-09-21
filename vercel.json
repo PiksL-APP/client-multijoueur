@@ -27,6 +27,10 @@
     {
       "source": "/editeur",
       "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+    },
+    {
+      "source": "/le-jeu",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
     }
   ]
 }

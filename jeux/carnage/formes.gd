@@ -1182,15 +1182,10 @@ static func pieton(couleur: Color, fanion: bool = false, pseudo: String = "",
 	corps.name = "Silhouette"
 	racine.add_child(corps)
 
-	# La casquette : seuls ceux qui portent une couleur en ont une. Un passant
-	# reste tête nue — c'est ce qui rend les autres repérables.
-	if fanion or halo:
-		var calotte := MeshInstance3D.new()
-		calotte.mesh = maillage_casquette()
-		calotte.material_override = MatieresCarnage.voxel_teinte(couleur)
-		calotte.position = Vector3(0, HAUT_TETE, 0)
-		calotte.name = "Casquette"
-		racine.add_child(calotte)
+	# ⚠ PLUS DE CASQUETTE (client, 19/09 : « les personnages ne doivent plus
+	# avoir de casquette »). Elle disait la couleur d'un homme de gang ou d'un
+	# joueur ; le carton sur la tête, le halo et le fanion le disent déjà, et
+	# une calotte posée sur une boîte en kraft n'avait plus de sens.
 
 	if halo:
 		var anneau := racine_anneau(1.5, couleur, 0.16)

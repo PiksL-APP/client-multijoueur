@@ -190,8 +190,12 @@ func coeur() -> Vector2:
 
 ## Le point d'ancrage du pays : la gare centrale si le plan en a une, sinon le
 ## centre de la première île, sinon le milieu de la carte.
+## ⭐ ON COMMENCE PETIT : la halte d'une petite île — un bourg de pavillons,
+## une gare de bout de ligne, la mer autour — avant la grande ville. « Peut-
+## être commencer dans une petite ville sur une île » (client, 19/09). La gare
+## centrale reste le second choix si le plan n'a pas cette halte.
 func _case_de_depart() -> Vector2i:
-	for id in ["gare_centrale", "centre_ville"]:
+	for id in ["halte_baie", "gare_centrale", "centre_ville"]:
 		for s in plan_du_pays.get("stations", []):
 			var f: Dictionary = s
 			if String(f.get("id", "")) == id:
@@ -200,15 +204,210 @@ func _case_de_depart() -> Vector2i:
 		return PLAN.centre_ile(plan_du_pays, 0)
 	return Vector2i(cases_x / 2, cases_y / 2)
 
+# ------------------------------------------------------------ les gangs et les lieux du jeu
+
+## ⭐⭐ LE PAYS ENTRE DANS LE JEU DES GANGS (21/09). Les tuiles sortent du
+## générateur avec `gang = -1` sur chaque quartier : partout « terrain
+## neutre », aucun repaire, aucune cabine enregistrée — tout ce qui fait
+## l'économie de Carnage (contrats, respect, raids) était éteint sur
+## l'Archipel. Ici, quand une fenêtre entre en scène :
+##
+## 1. chaque quartier bâti reçoit un gang de SON SECTEUR (deux locaux et le
+##    Consortium, un cinquième des quartiers pour lui — la règle de la ville),
+##    tiré du nom du quartier : le même chez les quatre joueurs, et le même
+##    d'une fenêtre à l'autre pour un quartier à cheval sur la couture ;
+## 2. le premier BAR du quartier devient son repaire (`repaires`, avec `gang`) ;
+## 3. les cabines téléphoniques (des objets, pas des lieux) deviennent des
+##    `cabines` — c'est là qu'on décroche un contrat.
+const GENRES_SANS_GANG := ["parc", "plage", "campagne", ""]
+
+func _ranger_les_lieux() -> void:
+	# 1. Les gangs des quartiers, avant tout : `super` lit `gang` pour les
+	#    repaires, et `gang_de_case` pour tout le reste.
+	var centres: Dictionary = {}
+	for q in plan_du_pays.get("quartiers", []):
+		var d: Dictionary = q
+		centres[String(d.get("nom", ""))] = centre_case(PLAN.case_de(d["c"]))
+	for k in ville.quartiers.size():
+		var q2: Dictionary = ville.quartiers[k]
+		if int(q2.get("gang", -1)) >= 0: continue
+		if String(q2.get("genre", "")) in GENRES_SANS_GANG: continue
+		var nom := String(q2.get("nom", ""))
+		if not centres.has(nom): continue
+		var graine := absi(nom.hash())
+		var sect := _secteur_angulaire(centres[nom])
+		var trio: Array = TRIOS[posmod(sect, TRIOS.size())]
+		q2["gang"] = CONSORTIUM if graine % 5 == 0 else int(trio[graine % 2])
+	super()
+	# 2. et 3. Les repaires et les cabines, dans les mêmes casiers que le reste.
+	var repaire_pose: Dictionary = {}
+	for l in ville.lieux:
+		var d2: Dictionary = l
+		if String(d2.get("genre", "")) != "bar": continue
+		var p := Vector2(float(d2["x"]), float(d2["z"])) / Decor.ECHELLE + _px()
+		var q3 := ville.quartier_en(_l(case_de_point(p)))
+		if q3 < 0 or repaire_pose.has(q3): continue
+		var gang := int(ville.quartiers[q3].get("gang", -1))
+		if gang < 0: continue
+		repaire_pose[q3] = true
+		_ajouter_lieu_du_jeu("repaires", p, {"gang": gang})
+	for o in ville.objets:
+		var od: Dictionary = o
+		if String(od.get("m", "")) != "cabine": continue
+		var pc := Vector2(float(od["x"]), float(od["z"])) / Decor.ECHELLE + _px()
+		_ajouter_lieu_du_jeu("cabines", pc, {})
+	# 4. ⭐⭐⭐ ET PAS D'ARÈNE SEMÉE. « Il ne faut qu'une arène dans le jeu,
+	#    elle sera au milieu du stade » (client, 21/09). J'en avais posé une
+	#    par secteur de lieux — une centaine sur le pays — parce que la ville
+	#    dessinée fait comme ça et que sans arène personne ne peut toucher
+	#    personne. Le client tranche autrement, et il a raison : une arène
+	#    unique est un LIEU, un rendez-vous, quelque chose qu'on rejoint.
+	#    Cent arènes, c'est du tir ami partout, c'est-à-dire nulle part.
+	#
+	#    Elle est donc posée par `Remplisseur._le_stade`, au rond central, en
+	#    même temps que la pelouse et les gradins — et comme le rond central
+	#    n'est que dans UNE fenêtre, il n'y en a qu'une dans tout le pays.
+
+func _ajouter_lieu_du_jeu(pluriel: String, p: Vector2, extra: Dictionary) -> void:
+	var lieu := {"p": p, "id": _id_lieu, "pate": case_de_point(p)}
+	_id_lieu += 1
+	lieu.merge(extra)
+	var s := _secteur_de(p)
+	if not _lieux_par_secteur.has(s):
+		_lieux_par_secteur[s] = _lieux_vides()
+	(_lieux_par_secteur[s][pluriel] as Array).append(lieu)
+
+## Le secteur angulaire d'un point autour du milieu du pays — la même règle
+## que `secteur_du_pate` pour un pâté sans gang.
+func _secteur_angulaire(p: Vector2) -> int:
+	var milieu := Vector2(float(cases_x), float(cases_y)) * 0.5 * CASE_PX
+	if p.distance_squared_to(milieu) < 1.0: return 0
+	return posmod(int(floor(((p - milieu).angle() + PI * 0.5) / (TAU / 3.0))), 3)
+
+# ------------------------------------------------------------ le train
+
+## ⭐ LES LIGNES DE RAME DU PAYS, pour `VilleVivante.lignes()` : les lignes
+## de surface du plan — le MÉTRO depuis le 21/09, le train étant passé
+## sous terre (`PlanPays.RESEAUX_DE_SURFACE`) — en pixels de jeu, avec leurs
+## arrêts — les stations du plan qui portent son nom (`ligne`), plus les
+## gares nommées (`types` contient un réseau de surface) sur son tracé, à moins
+## de deux cases. Sans ça le train du pays roulait sur la droite de Pikstown.
+const PRES_DE_LA_VOIE := 2.5
+
+func lignes_de_train() -> Array:
+	var sortie: Array = []
+	var noms: Dictionary = {}
+	for l in plan_du_pays.get("lignes", []):
+		var d: Dictionary = l
+		if bool(d.get("souterrain", false)): continue
+		if String(d.get("reseau", "")) not in PLAN.RESEAUX_DE_SURFACE: continue
+		var pts: Array = []
+		for p in d["points"]:
+			pts.append(centre_case(PLAN.case_de(p)))
+		if pts.size() < 2: continue
+		var nom := String(d.get("nom", ""))
+		noms[nom] = sortie.size()
+		sortie.append({"nom": nom, "points": pts, "gares": []})
+	for st in plan_du_pays.get("stations", []):
+		var f: Dictionary = st
+		var p := centre_case(PLAN.case_de(f["c"]))
+		var ligne := String(f.get("ligne", ""))
+		if ligne != "" and noms.has(ligne):
+			(sortie[noms[ligne]]["gares"] as Array).append(p)
+		elif Array(f.get("types", [])).any(func(t): return String(t) in PLAN.RESEAUX_DE_SURFACE):
+			# Une gare nommée : sur toute ligne qui passe à côté.
+			for e in sortie:
+				if _distance_a_la_polyligne(p, e["points"]) <= PRES_DE_LA_VOIE * CASE_PX:
+					(e["gares"] as Array).append(p)
+	return sortie
+
+static func _distance_a_la_polyligne(p: Vector2, pts: Array) -> float:
+	var mieux := INF
+	for i in range(1, pts.size()):
+		mieux = minf(mieux, Geometry2D.get_closest_point_to_segment(p, pts[i - 1], pts[i]).distance_to(p))
+	return mieux
+
 # ------------------------------------------------------------ la carte du radar
 
-## ⚠ MILLE CASES DE CÔTÉ, C'EST UN MILLION DE PÂTÉS : la carte peinte d'avance
-## de `PlanVille` n'a plus de sens ici (elle mettrait deux minutes à se
-## remplir, pour une image que personne ne regarde en entier). Le radar du pays
-## se dessine en direct, case par case, autour du joueur — `ui/radar.gd` sait
-## déjà le faire, par `terre_de_case` / `route_de_case` / `lot_de_case`.
-func nombre_de_pates() -> int:
-	return 0
+## ⭐ LA GRANDE CARTE (TAB) DU PAYS SE PEINT DEPUIS LE PLAN, PAS DEPUIS LES
+## TUILES. Mille cases de côté, c'est un million de cases : peintes une à une
+## depuis les fenêtres chargées, la carte restait BLEUE — le joueur ouvrait
+## TAB sur l'Archipel et ne voyait que la mer (19/09). Le plan, lui, sait tout
+## du pays sans qu'aucune tuile soit bâtie : la terre (`terre_en`), le
+## quartier (`quartier_en`), les routes et les lignes de train (des
+## polylignes). On peint donc par BLOCS de `BLOC` cases — un échantillon par
+## bloc, 62 500 au lieu d'un million — dans le budget par image de
+## `Carnage._peindre_le_plan`, puis les routes et le rail d'un trait, au
+## premier « secteur ». Le radar, lui, reste dessiné case par case autour du
+## joueur, depuis les tuiles.
+const BLOC := 4
+const DISTRICT_DU_GENRE := {
+	"centre": PlanVille.CENTRE, "plage": PlanVille.PORT, "port": PlanVille.PORT,
+	"pavillons": PlanVille.BANLIEUE, "industrie": PlanVille.INDUSTRIE,
+	"vieille_ville": PlanVille.VIEUX, "chaud": PlanVille.COMMERCE,
+	"campus": PlanVille.RESIDENCES, "bidonville": PlanVille.INDUSTRIE,
+	"parc": PlanVille.PARC,
+}
+const CARTE_CAMPAGNE := Color("#7aa860")
+const CARTE_PLAGE := Color("#e0cb9a")
+var _plan_ctx: Dictionary = {}
+var _traits_peints := false
 
-func peindre_pate(_image: Image, _indice: int) -> void:
-	pass
+func nombre_de_pates() -> int:
+	return (cases_x / BLOC) * (cases_y / BLOC)
+
+func peindre_pate(image: Image, indice: int) -> void:
+	var par_ligne := cases_x / BLOC
+	var bi := posmod(indice, par_ligne)
+	var bj := indice / par_ligne
+	if bj >= cases_y / BLOC: return
+	if _plan_ctx.is_empty(): _plan_ctx = fenetres.ctx if not fenetres.ctx.is_empty() else PLAN.contexte(plan_du_pays)
+	var c := Vector2i(bi * BLOC + BLOC / 2, bj * BLOC + BLOC / 2)
+	var couleur: Color
+	if not PLAN.terre_en(plan_du_pays, _plan_ctx, c):
+		couleur = PlanVille.CARTE_EAU
+	else:
+		var q := PLAN.quartier_en(plan_du_pays, _plan_ctx, c)
+		if q < 0:
+			couleur = CARTE_CAMPAGNE
+		else:
+			var genre := String((plan_du_pays["quartiers"][q] as Dictionary).get("g", ""))
+			couleur = PlanVille.COULEURS_CARTE.get(int(DISTRICT_DU_GENRE.get(genre, PlanVille.PARC)), CARTE_CAMPAGNE)
+			if genre == "plage": couleur = CARTE_PLAGE
+	var cote := BLOC * TUILES_PAR_CASE
+	var x0 := bi * cote
+	var y0 := bj * cote
+	image.fill_rect(Rect2i(x0, y0, mini(cote, image.get_width() - x0), mini(cote, image.get_height() - y0)), couleur)
+
+## Les routes et le rail du plan, tracés une fois — au premier secteur — puis
+## les lieux des fenêtres chargées, comme en ville.
+func peindre_secteur(image: Image, secteur: Vector2i) -> void:
+	if not _traits_peints:
+		_traits_peints = true
+		for r in plan_du_pays.get("routes", []):
+			var d: Dictionary = r
+			var classe := String(d.get("classe", ""))
+			var couleur := PlanVille.CARTE_AVENUE.lightened(0.25) if classe == PLAN.V_PRIMAIRE \
+				else (PlanVille.CARTE_AVENUE if classe == PLAN.V_SECONDAIRE else PlanVille.CARTE_RUE)
+			var large := 3 if classe == PLAN.V_PRIMAIRE else (2 if classe == PLAN.V_SECONDAIRE else 1)
+			_tracer(image, d["points"], couleur, large)
+		for l in plan_du_pays.get("lignes", []):
+			var d2: Dictionary = l
+			if bool(d2.get("souterrain", false)): continue
+			if String(d2.get("reseau", "")) not in PLAN.RESEAUX_DE_SURFACE: continue
+			_tracer(image, d2["points"], PlanVille.CARTE_RAIL, 2)
+	super(image, secteur)
+
+func _tracer(image: Image, points: Array, couleur: Color, large: int) -> void:
+	for k in range(1, points.size()):
+		var a := PLAN.case_de(points[k - 1]) * TUILES_PAR_CASE
+		var b := PLAN.case_de(points[k]) * TUILES_PAR_CASE
+		var n := maxi(1, maxi(absi(b.x - a.x), absi(b.y - a.y)))
+		for i in n + 1:
+			var p := Vector2i((Vector2(a) + (Vector2(b - a)) * (float(i) / float(n))).round())
+			for dy in large:
+				for dx in large:
+					var x := p.x + dx - large / 2
+					var y := p.y + dy - large / 2
+					if x >= 0 and y >= 0 and x < image.get_width() and y < image.get_height():
+						image.set_pixel(x, y, couleur)

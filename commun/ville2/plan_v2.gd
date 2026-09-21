@@ -456,8 +456,11 @@ func depart(place: int, rng: RandomNumberGenerator) -> Dictionary:
 # ------------------------------------------------------------ les lieux
 
 const GENRES_LIEUX := ["garages", "cabines", "arenes", "repaires", "hopitaux", "planques", "superettes"]
+## ⚠ `supermarche` est le nom du générateur (le repère du client), `superette`
+## celui du jeu : sans cette ligne, le pays n'avait AUCUNE supérette — on y
+## mourait de faim avec vingt-et-un supermarchés par tuile (19/09).
 const PLURIELS := {"garage": "garages", "cabine": "cabines", "arene": "arenes", "repaire": "repaires",
-	"hopital": "hopitaux", "planque": "planques", "superette": "superettes"}
+	"hopital": "hopitaux", "planque": "planques", "superette": "superettes", "supermarche": "superettes"}
 
 ## Les lieux viennent du modèle (`ville.lieux`, posés par le générateur ou
 ## l'éditeur), rangés par secteur pour que `lieux_autour` reste local.

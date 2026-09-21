@@ -29,8 +29,16 @@ const SUR_ROUTE := "voirie"
 ## teste le nom plutôt qu'un drapeau posé à la main : un drapeau oublié est un
 ## rocher sur le quai, et il n'y a aucun moyen de s'en apercevoir avant la
 ## capture.
+## ⚠ « cabine » EST DU MOBILIER DE VOIRIE, ET L'OUBLI COÛTAIT LE JEU ENTIER
+## (21/09). La cabine téléphonique se pose au bord de la chaussée, comme un
+## lampadaire — mais sa CASE est une case de rue, et cette passe balayait donc
+## la plupart des cabines posées, en silence. Mesuré à l'Île de la Baie, là où
+## commence la partie : douze cabines posées sur la tuile, AUCUNE à quarante-
+## cinq cases du départ. Sans cabine, pas de contrat ; sans contrat, pas de
+## premier billet.
 const VOIRIE := ["lampadaire", "lampadaire_double", "lampadaire_parc", "feu", "stop",
-	"plaque", "borne", "cone", "poubelle", "benne", "pub", "plateforme", "pelouse"]
+	"plaque", "borne", "cone", "poubelle", "benne", "pub", "plateforme", "pelouse",
+	"cabine"]
 
 ## Rien ne reste sur la chaussée sauf le mobilier de voirie. Rend le nombre
 ## d'objets retirés.
