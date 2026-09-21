@@ -230,6 +230,16 @@ const STADE_BLANC := "#e8efe4"
 ## vingt-cinq fois. Le cache est une décision du PLAN, pas de la fenêtre.
 static var _stade_choisi: Dictionary = {}
 
+## Le centre du terrain (le rond central, donc l'arène), en cases depuis le
+## coin de l'enceinte. `PlanJeuPays` en a besoin pour poser l'arène avant
+## qu'aucune tuile n'existe.
+const CENTRE_DU_TERRAIN := Vector2(4.0, 3.0)
+
+## L'ENTRÉE PUBLIQUE : où est le stade du pays, sans rien construire.
+## Rend `{"coin": Vector2i, "k": int}` — `coin.x < -9000` s'il n'y en a pas.
+static func le_stade_du_pays(plan: Dictionary, ctx: Dictionary) -> Dictionary:
+	return _le_choix_du_stade(plan, ctx)
+
 static func _le_choix_du_stade(plan: Dictionary, ctx: Dictionary) -> Dictionary:
 	if not _stade_choisi.is_empty(): return _stade_choisi
 	var candidats: Array = []

@@ -76,10 +76,32 @@ func _viser(c: Vector2i, exiger := false) -> bool:
 		_ranger_les_lieux()
 	return true
 
-## Le pays n'a pas de « lieux prêts » une fois pour toutes : ils arrivent
-## fenêtre par fenêtre, dans `_viser`.
+## ⭐⭐ LE PAYS N'A PAS DE « LIEUX PRÊTS » UNE FOIS POUR TOUTES : ils arrivent
+## fenêtre par fenêtre, dans `_viser`. UNE EXCEPTION, ET ELLE COMPTE :
+## L'ARÈNE DU STADE.
+##
+## Il n'y en a qu'une dans tout le pays (client, 21/09), elle est le seul
+## endroit où les joueurs peuvent se blesser — et elle était invisible tant
+## qu'on n'était pas déjà dessus : la grande carte (TAB) ne dessine que les
+## lieux des fenêtres CHARGÉES, c'est-à-dire les neuf autour du joueur. Une
+## arène unique qu'on ne peut pas trouver ne sert à personne.
+##
+## Son emplacement, lui, ne dépend que du plan (`Remplisseur` le choisit sans
+## rien construire) : on peut donc la poser dès le départ, avant qu'une seule
+## tuile n'existe. La carte la montre alors partout, et un clic dessus met le
+## GPS au stade.
+const REMPLISSEUR := preload("res://commun/ville2/remplisseur.gd")
+
+var _arene_du_stade := Vector2.ZERO
+
 func _preparer_lieux() -> void:
-	pass
+	if _arene_du_stade != Vector2.ZERO: return
+	var choix: Dictionary = REMPLISSEUR.le_stade_du_pays(plan_du_pays, fenetres.ctx)
+	var coin: Vector2i = choix.get("coin", Vector2i(-9999, -9999))
+	if coin.x < -9000: return
+	# Le rond central : le coin de l'enceinte plus la moitié de la pelouse.
+	_arene_du_stade = (Vector2(coin) + REMPLISSEUR.CENTRE_DU_TERRAIN) * CASE_PX
+	_ajouter_lieu_du_jeu("arenes", _arene_du_stade, {})
 
 # ------------------------------------------------------------ l'eau, le relief
 
@@ -222,6 +244,11 @@ func _case_de_depart() -> Vector2i:
 const GENRES_SANS_GANG := ["parc", "plage", "campagne", ""]
 
 func _ranger_les_lieux() -> void:
+	# 0. ⚠ L'ARÈNE DU STADE D'ABORD, ET C'EST UNE QUESTION D'ORDRE. Elle vient
+	#    du plan, pas de la fenêtre (`_preparer_lieux`) ; posée APRÈS le
+	#    rangement de la fenêtre du stade, elle faisait doublon avec celle que
+	#    la tuile porte — deux pastilles au même endroit sur la carte.
+	_preparer_lieux()
 	# 1. Les gangs des quartiers, avant tout : `super` lit `gang` pour les
 	#    repaires, et `gang_de_case` pour tout le reste.
 	var centres: Dictionary = {}
@@ -256,7 +283,24 @@ func _ranger_les_lieux() -> void:
 		if String(od.get("m", "")) != "cabine": continue
 		var pc := Vector2(float(od["x"]), float(od["z"])) / Decor.ECHELLE + _px()
 		_ajouter_lieu_du_jeu("cabines", pc, {})
-	# 4. ⭐⭐⭐ ET PAS D'ARÈNE SEMÉE. « Il ne faut qu'une arène dans le jeu,
+	# 4. ⚠ ET ON NE COMPTE PAS L'ARÈNE DEUX FOIS. `super()` vient de ranger
+	#    les lieux de la fenêtre, arène du stade comprise — mais elle est
+	#    déjà posée depuis le plan (voir `_preparer_lieux`). Deux arènes au
+	#    même endroit, ce sont deux pastilles sur la carte et deux cercles
+	#    dans le décor.
+	if _arene_du_stade != Vector2.ZERO:
+		var s2 := _secteur_de(_arene_du_stade)
+		if _lieux_par_secteur.has(s2):
+			var gardees: Array = []
+			var vue := false
+			for a in (_lieux_par_secteur[s2]["arenes"] as Array):
+				var d: Dictionary = a
+				if Vector2(d["p"]).distance_to(_arene_du_stade) < CASE_PX:
+					if vue: continue
+					vue = true
+				gardees.append(d)
+			_lieux_par_secteur[s2]["arenes"] = gardees
+	# 5. ⭐⭐⭐ ET PAS D'ARÈNE SEMÉE. « Il ne faut qu'une arène dans le jeu,
 	#    elle sera au milieu du stade » (client, 21/09). J'en avais posé une
 	#    par secteur de lieux — une centaine sur le pays — parce que la ville
 	#    dessinée fait comme ça et que sans arène personne ne peut toucher
