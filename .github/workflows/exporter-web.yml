@@ -156,37 +156,6 @@ jobs:
           rm -f sortie/*.import
           ls -la sortie/
 
-      # ⭐ LA PAGE DE PRÉSENTATION : multijoueur.piks-l.com/le-jeu.
-      # Une page statique, sans moteur — elle doit s'ouvrir sur un téléphone en
-      # 3G et donner envie de cliquer sur « Jouer ». Elle vit dans
-      # `web/le-jeu.html` (c'est là qu'on la met à jour : le journal de bord
-      # s'écrit à la main, entrée par entrée) et le runner ne fait que deux
-      # choses ici : graver la version en pied de page, et recopier les images
-      # de presse (`web/presse/` : le lettrage, l'affiche, la jaquette et les
-      # visuels d'univers fournis par le client), qui ne sont pas dans le
-      # paquet exporté. `cleanUrls` de Vercel sert `sortie/le-jeu.html` sous
-      # `/le-jeu`.
-      #
-      # ⚠ LES IMAGES SONT DÉJÀ AU FORMAT WEB : JPEG progressif, 1500 px de
-      # large, cinq mégaoctets pour les quatorze. On ne recopie pas les PNG
-      # d'origine — une page de présentation qui pèse quarante mégaoctets ne
-      # se charge pas sur un téléphone, et c'est la première chose qu'un
-      # visiteur voit du jeu.
-      - name: La page de présentation
-        run: |
-          set -euo pipefail
-          rm -rf sortie/presse
-          cp -r web/presse sortie/presse
-          python3 - <<'PY2'
-          import subprocess
-          commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
-          date = subprocess.check_output(["date", "+%d/%m/%Y"], text=True).strip()
-          page = open("web/le-jeu.html", encoding="utf-8").read()
-          page = page.replace("$VERSION", "Version %s · %s" % (commit, date))
-          open("sortie/le-jeu.html", "w", encoding="utf-8").write(page)
-          print("sortie/le-jeu.html écrit,", len(page), "octets")
-          PY2
-
       # LA PAGE DE L'ÉDITEUR : multijoueur.piks-l.com/editeur. Même moteur,
       # même paquet, mais sa propre coque (`web/editeur.html`), sans le kit ni
       # les portails, qui ouvre directement l'écran de l'éditeur sur le pays.
@@ -206,6 +175,43 @@ jobs:
           open("sortie/editeur.html", "w", encoding="utf-8").write(page)
           print("sortie/editeur.html écrit,", len(page), "octets")
           PY
+
+      # ⭐ LE SITE À LA RACINE, LE JEU SUR /jouer.
+      # Depuis le 21/09, `/` n'est plus le moteur : c'est la page de
+      # présentation (`web/site.html`), et le jeu se lance depuis `/jouer`.
+      # L'export du moteur écrit toujours `sortie/index.html` — on ne touche
+      # pas à ça, car les noms du paquet (index.pck, index.wasm, index.js) en
+      # dépendent : on RENOMME la page exportée en `sortie/jouer.html` et on
+      # écrit le site à sa place. L'étape passe APRÈS celle de l'éditeur, qui
+      # lit encore `sortie/index.html` pour y prendre la GODOT_CONFIG.
+      #
+      # La page du site est statique, sans moteur : elle doit s'ouvrir sur un
+      # téléphone en 3G et donner envie de cliquer sur « Jouer ». Le runner ne
+      # fait que deux choses ici : graver la version en pied de page et
+      # recopier les images de presse (`web/presse/`), qui ne sont pas dans le
+      # paquet exporté.
+      #
+      # ⚠ LES IMAGES SONT DÉJÀ AU FORMAT WEB : JPEG progressif, 1500 px de
+      # large, cinq mégaoctets pour les quatorze. On ne recopie pas les PNG
+      # d'origine — une page d'accueil qui pèse quarante mégaoctets ne se
+      # charge pas sur un téléphone, et c'est la première chose qu'un visiteur
+      # voit du jeu.
+      - name: Le site à la racine, le jeu sur /jouer
+        run: |
+          set -euo pipefail
+          mv sortie/index.html sortie/jouer.html
+          rm -rf sortie/presse
+          cp -r web/presse sortie/presse
+          python3 - <<'PY2'
+          import subprocess
+          commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+          date = subprocess.check_output(["date", "+%d/%m/%Y"], text=True).strip()
+          page = open("web/site.html", encoding="utf-8").read()
+          page = page.replace("$VERSION", "Version %s · %s" % (commit, date))
+          open("sortie/index.html", "w", encoding="utf-8").write(page)
+          print("sortie/index.html (le site) écrit,", len(page), "octets")
+          PY2
+          test -s sortie/jouer.html || { echo "::error::sortie/jouer.html manque — le jeu ne se lancerait plus." >&2; exit 1; }
 
       - name: Recommitter sortie/
         run: |
